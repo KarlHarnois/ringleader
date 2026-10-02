@@ -10,7 +10,7 @@
 - One primary type per file, file named after it in snake case. The tree in section 3 is the file contract: every listed file exists and holds its one type. Types absent from the tree are support types (error enums, builders, request structs, iterators, parser results, dialog state) and fold into their owner's file. Unit tests live inline in `#[cfg(test)] mod tests`. `mod.rs` declares and re-exports only. Source files target under 200 lines excluding tests.
 - Commit after every milestone item. Capital first letter, title under 72 chars, imperative body.
 - No `cargo`, `rustc`, or `tmux` on the host PATH. Build and test inside `nix develop`.
-- Do not create a GitHub repository, do not run `gh repo create`, do not add a git remote, and do not push. Work and commit locally only. The project owner creates the GitHub repo manually after reviewing the final codebase.
+- The private GitHub repository exists and is configured as `origin`. Do not create another repository or add another remote. Push only when the project owner asks.
 - Keep the repo consumer-agnostic. Never reference or assume any specific downstream setup, local directory layout, or personal configuration. Examples and fixtures use generic names such as `example-project`.
 - Human-facing prose uses "Ringleader". Identifiers stay lowercase: binary, crate, repo, flake input, config paths, tmux and branch prefixes, JSON fields.
 - This file is the source of truth. If something here conflicts with an instruction received later, stop and ask.
@@ -20,7 +20,7 @@
 | Item | Value |
 |---|---|
 | Repo / directory | the repository root |
-| Remote | `github:KarlHarnois/ringleader` (identity only, no remote configured until the owner creates it) |
+| Remote | `github:KarlHarnois/ringleader`, private, configured as `origin` |
 | Binary | `ringleader` |
 | Config | `$XDG_CONFIG_HOME/ringleader/config.toml`, override `$RINGLEADER_CONFIG` |
 | State | `$XDG_STATE_HOME/ringleader/` for `sessions.json`, `bindings.json`, `app.log`, `lock` |
@@ -175,7 +175,7 @@ Rules for `AGENTS.md`:
 - No code below `main` calls `std::env::current_exe`, reads `$TMUX`, `$TMUX_PANE`, or the process cwd, or resolves XDG paths. `main` reads them once and injects them.
 - Comments: the repository is comment-hostile. Every comment is presumed unnecessary until proven otherwise. The fix for "this needs explaining" is better code: rename, extract, type, restructure. When a comment seems to survive, stop and justify it to the project owner before committing; never announce comments in the commit body. Doc-comments are comments and follow the same rule; do not document what a well-named item already says.
 - Human-facing prose uses "Ringleader". Identifiers stay lowercase.
-- Do not create a remote or push.
+- Do not create another repository or remote. Push only when the project owner asks.
 
 ## 4. Domain
 
@@ -500,7 +500,7 @@ prompt_args = ["--prompt", "{prompt}"]
 - `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`, all through `nix develop` so local and CI use the same rustc 1.95.
 - In a binary crate, anything `main` cannot reach yet is dead code, and most of milestones 2 to 28 build ahead of their wiring. Until then, `main.rs` carries `#![cfg_attr(not(test), allow(dead_code, unused_imports))]`. Milestone 29 removes it, and `cargo clippy --all-targets -- -D warnings` must pass without it.
 - `.github/workflows/ci.yml` on Ubuntu: DeterminateSystems nix installer, then `nix develop -c cargo fmt --check`, `nix develop -c cargo clippy ...`, `nix develop -c cargo test`, and `nix build .#` plus `nix flake check`. No separate toolchain action, the dev shell is the single source of truth.
-- The workflow file is authored and committed, but it stays dormant until the owner creates the GitHub repository and pushes. Do not add CI badges to the README until then.
+- The GitHub repository exists, so the workflow runs on GitHub as soon as it is pushed.
 
 ## 12. Flake for this repo
 
@@ -516,8 +516,8 @@ Out of scope for this repo. The flake's `packages.default` and `devShells.defaul
 
 ## 14. Documentation split
 
-- `README.md`: for humans. Terse and minimal. What it is, install (`nix run`, `nix profile install`, add as a flake input), first run, key bindings table, CLI synopsis. Generic examples only. No architecture, no agent instructions, no CI badge until the repo exists.
-- `AGENTS.md`: the agent repo documentation and the living reference. It must embed a copy of section 3's tree, because it has to be self-contained; `docs/plans/v1-bootstrap.md` is the historical plan and is not a substitute. Layout, the one-primary-type-per-file rule and the fact that the tree is the file contract, port rules, OOP conventions (private fields, `impl` blocks, constructor injection, no free functions), the strict comment policy (comments are failures, fix the code, justify any survivor to the owner before committing, never in the commit body), naming rules, CLI and TUI wiring boundaries, prose capitalization, exact commands (`nix develop`, cargo test/clippy/fmt), test strategy and fixtures, commit conventions, the local-only no-remote rule, the plan storage convention below, and the rule that README stays terse and human-facing.
+- `README.md`: for humans. Terse and minimal. What it is, install (`nix run`, `nix profile install`, add as a flake input), first run, key bindings table, CLI synopsis. Generic examples only. No architecture, no agent instructions.
+- `AGENTS.md`: the agent repo documentation and the living reference. It must embed a copy of section 3's tree, because it has to be self-contained; `docs/plans/v1-bootstrap.md` is the historical plan and is not a substitute. Layout, the one-primary-type-per-file rule and the fact that the tree is the file contract, port rules, OOP conventions (private fields, `impl` blocks, constructor injection, no free functions), the strict comment policy (comments are failures, fix the code, justify any survivor to the owner before committing, never in the commit body), naming rules, CLI and TUI wiring boundaries, prose capitalization, exact commands (`nix develop`, cargo test/clippy/fmt), test strategy and fixtures, commit conventions, the push-on-request rule, the plan storage convention below, and the rule that README stays terse and human-facing.
 - Plan storage convention for future work: one file per effort at `docs/plans/YYYY-MM-DD-slug.md`, with a `> Status:` header (`active`, `completed`, or `abandoned`). `docs/plans/v1-bootstrap.md` is the v1 history.
 
 ## 15. Milestones, one commit each
