@@ -14,7 +14,7 @@ use super::repo_overrides::{AddRepoRequest, RepoAddition};
 use super::service_context::{LoadedConfig, ServiceContext};
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
-use super::session_access::{AttachOutcome, ReturnMode, SessionAccess};
+use super::session_access::{AttachOutcome, ReturnMode, SessionAccess, ShellOutcome};
 use super::session_lifecycle::SessionLifecycle;
 use super::session_monitor::SessionMonitor;
 use crate::domain::{Config, DiffStat, Session, SessionSummary};
@@ -37,7 +37,7 @@ impl SessionService {
         Self {
             monitor: SessionMonitor::new(&ports),
             lifecycle: SessionLifecycle::new(&ports),
-            access: SessionAccess::new(ports.tmux(), context.shell()),
+            access: SessionAccess::new(&ports, context.shell()),
             catalog: RepoCatalog::new(&ports, &context),
             doctor: Doctor::new(&ports, context.diagnostics().clone()),
             inside_tmux: context.is_inside_tmux(),
@@ -196,6 +196,15 @@ impl SessionService {
     pub fn attach(&mut self, name: &str, mode: ReturnMode) -> Result<AttachOutcome, ServiceError> {
         let reconciliation = self.reconcile()?;
         self.access.attach(reconciliation.row(name)?, mode)
+    }
+
+    pub fn open_shell(
+        &mut self,
+        name: &str,
+        mode: ReturnMode,
+    ) -> Result<ShellOutcome, ServiceError> {
+        let reconciliation = self.reconcile()?;
+        self.access.open_shell(reconciliation.row(name)?, mode)
     }
 
     pub fn ring_bell(&self) -> Result<(), ServiceError> {

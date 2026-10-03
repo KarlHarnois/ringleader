@@ -55,3 +55,10 @@ Section 0 also says never to touch the owner's config. Without a shell command, 
 ### Clearing the screen at startup
 
 After `script` dies by SIGKILL, it cannot restore the outer terminal, which stays on the alternate screen. The next TUI then drew its first frame over leftover text, because ratatui assumes a blank screen. The TUI now clears the terminal once before its first frame. The milestone 9 checks passed after the change: attach, `C-b C-z`, `fg`, `C-b d`, and `q` on the outside-tmux path, `kill-pane` ending the TUI in 0.16 seconds, and SIGKILL to `script` ending it in 0.16 seconds, each followed by a run that took the lock.
+
+## Milestone 19
+
+### Environment of the TUI in manual runs
+
+Section 0 gives the prefix for manual runs, which sets `TMUX_TMPDIR` and the XDG directories and leaves `HOME` and `SHELL` as the owner's. The `t` check runs `$SHELL` in a tmux window and as an ephemeral shell, so the owner's shell would have read the owner's startup files, and `ringleader new` would have run git with the owner's global git config. Section 0 also says never to touch the owner's config. Choice: manual runs from milestone 19 on add `HOME=<tempdir>/home`, `SHELL=sh`, `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_NOSYSTEM=1`, and a fake git author and committer to the section 0 prefix. The milestone 19 check passed under it: `t` on a live session opened a window tagged `@ringleader_shell` in the worktree, a second `t` reused that window, `t` on a stopped session ran `sh` in the worktree and returned to the TUI on `exit`, `s` restarted the stopped session, `s` on a live session was refused, and `r` reported a reload and a broken config.
+

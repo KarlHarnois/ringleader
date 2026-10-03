@@ -1,3 +1,4 @@
+use super::app::{AppRequest, BlockingOperation};
 use crate::application::ports::ConfigError;
 use crate::domain::{SessionState, SessionSummary};
 
@@ -19,16 +20,29 @@ impl<'a> ActionGate<'a> {
         }
     }
 
-    pub fn attach(&self) -> Result<String, String> {
-        Ok(self.selected()?.name().to_string())
+    pub fn attach(&self) -> Result<AppRequest, String> {
+        Ok(AppRequest::Attach(self.selected()?.name().to_string()))
     }
 
-    pub fn restart(&self) -> Result<String, String> {
+    pub fn shell(&self) -> Result<AppRequest, String> {
+        let row = self.selected()?;
+        let name = row.name();
+        match row.state() {
+            SessionState::Unmanaged => Err(format!(
+                "{name} is unmanaged, so t cannot open a shell in it."
+            )),
+            _ => Ok(AppRequest::Shell(name.to_string())),
+        }
+    }
+
+    pub fn restart(&self) -> Result<AppRequest, String> {
         self.writable()?;
         let row = self.selected()?;
         let name = row.name();
         match row.state() {
-            SessionState::Exited | SessionState::Stopped => Ok(name.to_string()),
+            SessionState::Exited | SessionState::Stopped => Ok(AppRequest::Block(
+                BlockingOperation::Restart(name.to_string()),
+            )),
             SessionState::Unmanaged => {
                 Err(format!("{name} is unmanaged, so it cannot be restarted."))
             }
@@ -81,7 +95,9 @@ mod tests {
 
             assert_eq!(
                 ActionGate::new(Some(&row), None).restart(),
-                Ok("fix-auth".to_string())
+                Ok(AppRequest::Block(BlockingOperation::Restart(
+                    "fix-auth".to_string()
+                )))
             );
         }
     }
@@ -139,10 +155,37 @@ mod tests {
     }
 
     #[test]
+    fn a_managed_session_opens_a_shell_even_when_read_only() {
+        let row = GateFixture::row(SessionState::Stopped);
+        let error = GateFixture::config_error();
+
+        assert_eq!(
+            ActionGate::new(Some(&row), Some(&error)).shell(),
+            Ok(AppRequest::Shell("fix-auth".to_string()))
+        );
+    }
+
+    #[test]
+    fn an_unmanaged_session_opens_no_shell() {
+        let stranger = ServiceFixture::session("mystery");
+        let row = SessionSummary::unmanaged(UnmanagedSession::new(
+            "mystery",
+            ServiceFixture::waiting(&stranger).without_metadata(),
+        ));
+
+        assert_eq!(
+            ActionGate::new(Some(&row), None).shell(),
+            Err("mystery is unmanaged, so t cannot open a shell in it.".to_string())
+        );
+    }
+
+    #[test]
     fn nothing_selected_refuses_every_action() {
         let gate = ActionGate::new(None, None);
+        let refusal = Err("No session is selected.".to_string());
 
-        assert_eq!(gate.attach(), Err("No session is selected.".to_string()));
-        assert_eq!(gate.restart(), Err("No session is selected.".to_string()));
+        assert_eq!(gate.attach(), refusal);
+        assert_eq!(gate.shell(), refusal);
+        assert_eq!(gate.restart(), refusal);
     }
 }

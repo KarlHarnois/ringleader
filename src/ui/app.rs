@@ -1,3 +1,4 @@
+use std::io;
 use std::time::Instant;
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind};
@@ -7,14 +8,14 @@ use super::action_gate::ActionGate;
 use super::home_state::HomeState;
 use super::home_view::{HomeView, LayoutTier};
 use super::preview_panel::PreviewPanel;
-use super::status_bar::{StatusBar, StatusMessage, StatusNote};
+use super::status_bar::{StatusBar, StatusMessage, StatusNote, StatusReport};
 use super::theme::Theme;
-use crate::application::{ReturnMode, ServiceError, SessionService};
+use crate::application::{EphemeralShell, ReturnMode, SessionService, ShellOutcome};
 
 pub struct App {
     service: SessionService,
     home: HomeState,
-    message: Option<StatusMessage>,
+    status: StatusReport,
     tick: u64,
     theme: Theme,
 }
@@ -27,17 +28,15 @@ impl App {
         Self {
             service,
             home: HomeState::new(now),
-            message: None,
+            status: StatusReport::default(),
             tick: 0,
             theme: Theme,
         }
     }
 
-    pub fn with_message(self, message: Option<String>) -> Self {
-        Self {
-            message: message.map(StatusMessage::Error),
-            ..self
-        }
+    pub fn with_message(mut self, message: Option<String>) -> Self {
+        self.status.show(message.map(StatusMessage::Error));
+        self
     }
 
     pub fn is_inside_tmux(&self) -> bool {
@@ -63,16 +62,33 @@ impl App {
     pub fn on_tick(&mut self, now: Instant) {
         self.tick = self.tick.wrapping_add(1);
         let outcome = self.home.tick(now, &mut self.service);
-        self.report_failure(outcome);
+        self.status.failure(outcome);
     }
 
     pub fn attach(&mut self, name: &str) {
-        self.message = match self.service.attach(name, ReturnMode::None) {
-            Ok(outcome) => outcome
-                .binding_warning()
-                .map(|warning| StatusMessage::Warning(warning.to_string())),
-            Err(error) => Some(StatusMessage::Error(error.to_string())),
-        };
+        let outcome = self.service.attach(name, ReturnMode::None);
+        self.observe();
+        match outcome {
+            Ok(attached) => self.status.attached(&attached),
+            Err(error) => self.status.error(error.to_string()),
+        }
+    }
+
+    pub fn open_shell(&mut self, name: &str) -> Option<EphemeralShell> {
+        let outcome = self.service.open_shell(name, ReturnMode::None);
+        self.observe();
+        match outcome {
+            Ok(ShellOutcome::Ephemeral(shell)) => return Some(shell),
+            Ok(ShellOutcome::Attached(attached)) => self.status.attached(&attached),
+            Err(error) => self.status.error(error.to_string()),
+        }
+        None
+    }
+
+    pub fn shell_finished(&mut self, outcome: io::Result<()>) {
+        if let Err(error) = outcome {
+            self.status.error(format!("the shell failed: {error}"));
+        }
         self.observe();
     }
 
@@ -87,7 +103,7 @@ impl App {
         let selected = sessions.selected();
         let prefix = self.service.config().naming().tmux_prefix();
         let status = StatusBar::new(self.theme)
-            .with_message(self.message.as_ref())
+            .with_message(self.status.message())
             .with_note(selected.and_then(|row| StatusNote::new(row, prefix).text()));
         HomeView::new(
             sessions.table(self.tick, self.theme),
@@ -98,13 +114,14 @@ impl App {
     }
 
     fn handle_key(&mut self, key: &KeyEvent) -> AppRequest {
-        self.message = None;
+        self.status.show(None);
         match key.code {
             KeyCode::Char('q') => AppRequest::Quit,
             KeyCode::Down | KeyCode::Right | KeyCode::Char('j' | 'l') => self.move_selection(1),
             KeyCode::Up | KeyCode::Left | KeyCode::Char('k' | 'h') => self.move_selection(-1),
-            KeyCode::Enter => self.request_attach(),
-            KeyCode::Char('s') => self.request_restart(),
+            KeyCode::Enter => self.request(self.gate().attach()),
+            KeyCode::Char('t') => self.request(self.gate().shell()),
+            KeyCode::Char('s') => self.request(self.gate().restart()),
             KeyCode::Char('r') => self.reload(),
             _ => AppRequest::Continue,
         }
@@ -115,23 +132,6 @@ impl App {
         AppRequest::Continue
     }
 
-    fn request_attach(&mut self) -> AppRequest {
-        match self.gate().attach() {
-            Ok(name) => AppRequest::Attach(name),
-            Err(refusal) => self.refuse(refusal),
-        }
-    }
-
-    fn request_restart(&mut self) -> AppRequest {
-        match self.gate().restart() {
-            Ok(name) => self.block(
-                format!("Restarting {name}…"),
-                BlockingOperation::Restart(name),
-            ),
-            Err(refusal) => self.refuse(refusal),
-        }
-    }
-
     fn gate(&self) -> ActionGate<'_> {
         ActionGate::new(
             self.home.sessions().selected(),
@@ -139,47 +139,37 @@ impl App {
         )
     }
 
-    fn block(&mut self, busy: String, operation: BlockingOperation) -> AppRequest {
-        self.message = Some(StatusMessage::Info(busy));
-        AppRequest::Block(operation)
-    }
-
-    fn refuse(&mut self, reason: String) -> AppRequest {
-        self.message = Some(StatusMessage::Error(reason));
-        AppRequest::Continue
+    fn request(&mut self, request: Result<AppRequest, String>) -> AppRequest {
+        match request {
+            Ok(request) => {
+                self.status
+                    .show(request.busy_message().map(StatusMessage::Info));
+                request
+            }
+            Err(refusal) => {
+                self.status.error(refusal);
+                AppRequest::Continue
+            }
+        }
     }
 
     fn restart(&mut self, name: &str) {
         let outcome = self.service.restart_session(name);
         self.observe();
-        self.message = Some(StatusMessage::reporting(
-            outcome,
-            format!("Restarted {name}."),
-        ));
+        self.status.outcome(outcome, format!("Restarted {name}."));
     }
 
     fn reload(&mut self) -> AppRequest {
-        let outcome = self
-            .service
-            .reload()
-            .map_err(|error| format!("{}: {error}", Self::RELOAD_FAILED));
+        let outcome = self.service.reload();
         self.observe();
-        self.message = Some(StatusMessage::reporting(
-            outcome,
-            Self::RELOADED.to_string(),
-        ));
+        let outcome = outcome.map_err(|error| format!("{}: {error}", Self::RELOAD_FAILED));
+        self.status.outcome(outcome, Self::RELOADED.to_string());
         AppRequest::Continue
     }
 
     fn observe(&mut self) {
         let outcome = self.home.observe(&mut self.service);
-        self.report_failure(outcome);
-    }
-
-    fn report_failure(&mut self, outcome: Result<(), ServiceError>) {
-        if let Err(error) = outcome {
-            self.message = Some(StatusMessage::Error(error.to_string()));
-        }
+        self.status.failure(outcome);
     }
 }
 
@@ -189,7 +179,17 @@ pub enum AppRequest {
     Redraw,
     Quit,
     Attach(String),
+    Shell(String),
     Block(BlockingOperation),
+}
+
+impl AppRequest {
+    fn busy_message(&self) -> Option<String> {
+        match self {
+            Self::Block(BlockingOperation::Restart(name)) => Some(format!("Restarting {name}…")),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -502,6 +502,16 @@ mod tests {
         let request = app.handle_event(&UiHarness::character('s'));
 
         assert!(matches!(request, AppRequest::Block(_)));
+    }
+
+    #[test]
+    fn t_asks_for_a_shell_in_the_selected_session() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        let request = app.handle_event(&UiHarness::character('t'));
+
+        assert_eq!(request, AppRequest::Shell("dark-mode".to_string()));
     }
 
     #[test]

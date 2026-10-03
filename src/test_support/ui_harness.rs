@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use std::io;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
@@ -11,8 +11,10 @@ use ratatui::layout::{Position, Size};
 
 use super::{FakeMultiplexer, RecordingScreenMode, ServiceFixture};
 use crate::adapters::signal_flags::SignalFlags;
+use crate::application::EphemeralShell;
 use crate::ui::App;
 use crate::ui::event_loop::{EventLoop, InputSource};
+use crate::ui::shell_runner::ShellRunner;
 use crate::ui::terminal_guard::{TerminalGuard, TerminalState};
 
 pub struct UiHarness {
@@ -79,6 +81,35 @@ impl UiHarness {
 
     pub fn character(character: char) -> Event {
         Self::key(KeyCode::Char(character))
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct RecordingShells {
+    runs: Arc<Mutex<Vec<EphemeralShell>>>,
+    failing: bool,
+}
+
+impl RecordingShells {
+    pub fn failing() -> Self {
+        Self {
+            failing: true,
+            ..Self::default()
+        }
+    }
+
+    pub fn runs(&self) -> Vec<EphemeralShell> {
+        self.runs.lock().unwrap().clone()
+    }
+}
+
+impl ShellRunner for RecordingShells {
+    fn run(&mut self, shell: &EphemeralShell) -> io::Result<()> {
+        self.runs.lock().unwrap().push(shell.clone());
+        if self.failing {
+            return Err(io::Error::from(io::ErrorKind::NotFound));
+        }
+        Ok(())
     }
 }
 

@@ -7,8 +7,10 @@ use ratatui::Terminal;
 use ratatui::backend::Backend;
 
 use super::app::{App, AppRequest, BlockingOperation};
+use super::shell_runner::{ChildShell, ShellRunner};
 use super::terminal_guard::TerminalState;
 use crate::adapters::signal_flags::SignalFlags;
+use crate::application::EphemeralShell;
 
 pub trait InputSource {
     fn next_event(&mut self, timeout: Duration) -> io::Result<Option<Event>>;
@@ -30,6 +32,7 @@ pub struct EventLoop<B: Backend, I: InputSource> {
     input: I,
     signals: SignalFlags,
     screen: Arc<TerminalState>,
+    shells: Box<dyn ShellRunner>,
 }
 
 impl<B, I> EventLoop<B, I>
@@ -51,7 +54,12 @@ where
             input,
             signals,
             screen,
+            shells: Box::new(ChildShell),
         }
+    }
+
+    pub fn with_shells(self, shells: Box<dyn ShellRunner>) -> Self {
+        Self { shells, ..self }
     }
 
     pub fn run(&mut self, app: &mut App) -> io::Result<()> {
@@ -93,6 +101,7 @@ where
             AppRequest::Quit => return Ok(Flow::Stop),
             AppRequest::Redraw => self.clear()?,
             AppRequest::Attach(name) => self.attach(app, &name)?,
+            AppRequest::Shell(name) => self.open_shell(app, &name)?,
             AppRequest::Block(operation) => self.perform(app, operation)?,
             AppRequest::Continue => {}
         }
@@ -132,6 +141,30 @@ where
         }
         self.screen.restore();
         app.attach(name);
+        self.resume()
+    }
+
+    fn open_shell(&mut self, app: &mut App, name: &str) -> io::Result<()> {
+        if app.is_inside_tmux() {
+            return match app.open_shell(name) {
+                Some(shell) => self.run_shell(app, &shell),
+                None => Ok(()),
+            };
+        }
+        self.screen.restore();
+        if let Some(shell) = app.open_shell(name) {
+            app.shell_finished(self.shells.run(&shell));
+        }
+        self.resume()
+    }
+
+    fn run_shell(&mut self, app: &mut App, shell: &EphemeralShell) -> io::Result<()> {
+        self.screen.restore();
+        app.shell_finished(self.shells.run(shell));
+        self.resume()
+    }
+
+    fn resume(&mut self) -> io::Result<()> {
         self.screen.enter()?;
         self.clear()
     }
@@ -160,9 +193,28 @@ mod tests {
     use signal_hook::consts::SIGHUP;
 
     use super::*;
+    use crate::application::ports::AttachTarget;
     use crate::test_support::{
-        FakeMultiplexer, FixtureBackend, ScriptedInput, ServiceFixture, UiHarness,
+        FakeMultiplexer, FixtureBackend, RecordingShells, ScriptedInput, ServiceFixture, UiHarness,
     };
+
+    struct ShellLoopFixture;
+
+    impl ShellLoopFixture {
+        fn stopped() -> ServiceFixture {
+            let session = ServiceFixture::session("fix-auth");
+            ServiceFixture::new()
+                .with_sessions(std::slice::from_ref(&session))
+                .with_host(ServiceFixture::host_for(&[&session]))
+        }
+
+        fn live() -> ServiceFixture {
+            let session = ServiceFixture::session("fix-auth");
+            Self::stopped().with_multiplexer(
+                FakeMultiplexer::new().with_live(ServiceFixture::waiting(&session)),
+            )
+        }
+    }
 
     #[test]
     fn q_ends_the_loop_normally() {
@@ -304,6 +356,91 @@ mod tests {
         event_loop.run(&mut app).unwrap();
 
         assert_eq!(event_loop.backend().clears(), 1);
+    }
+
+    #[test]
+    fn t_outside_tmux_attaches_to_the_shell_window_behind_a_suspended_screen() {
+        let fixture = ShellLoopFixture::live();
+        let harness = UiHarness::new();
+        let mut app = UiHarness::app(&fixture);
+        let mut event_loop =
+            harness.event_loop(ScriptedInput::events(vec![UiHarness::character('t')]));
+
+        event_loop.run(&mut app).unwrap();
+
+        assert_eq!(harness.screen_switches(), ["enter", "leave", "enter"]);
+        assert_eq!(
+            fixture.multiplexer().attached(),
+            [AttachTarget::Shell("@9".to_string())]
+        );
+    }
+
+    #[test]
+    fn t_inside_tmux_switches_to_the_shell_window_without_suspending_the_screen() {
+        let fixture = ShellLoopFixture::live().inside_tmux();
+        let harness = UiHarness::new();
+        let mut app = UiHarness::app(&fixture);
+        let mut event_loop =
+            harness.event_loop(ScriptedInput::events(vec![UiHarness::character('t')]));
+
+        event_loop.run(&mut app).unwrap();
+
+        assert_eq!(harness.screen_switches(), ["enter"]);
+        assert_eq!(fixture.multiplexer().attached().len(), 1);
+    }
+
+    #[test]
+    fn t_on_a_stopped_session_runs_an_ephemeral_shell_in_its_worktree() {
+        let fixture = ShellLoopFixture::stopped();
+        let harness = UiHarness::new();
+        let shells = RecordingShells::default();
+        let mut app = UiHarness::app(&fixture);
+        let mut event_loop = harness
+            .event_loop(ScriptedInput::events(vec![UiHarness::character('t')]))
+            .with_shells(Box::new(shells.clone()));
+
+        event_loop.run(&mut app).unwrap();
+
+        assert_eq!(
+            shells.runs(),
+            [EphemeralShell::new(
+                ServiceFixture::SHELL,
+                &ServiceFixture::worktree_path("fix-auth")
+            )]
+        );
+        assert_eq!(harness.screen_switches(), ["enter", "leave", "enter"]);
+        assert_eq!(event_loop.backend().clears(), 1);
+    }
+
+    #[test]
+    fn t_on_a_stopped_session_inside_tmux_suspends_the_screen_for_the_shell() {
+        let fixture = ShellLoopFixture::stopped().inside_tmux();
+        let harness = UiHarness::new();
+        let shells = RecordingShells::default();
+        let mut app = UiHarness::app(&fixture);
+        let mut event_loop = harness
+            .event_loop(ScriptedInput::events(vec![UiHarness::character('t')]))
+            .with_shells(Box::new(shells.clone()));
+
+        event_loop.run(&mut app).unwrap();
+
+        assert_eq!(shells.runs().len(), 1);
+        assert_eq!(harness.screen_switches(), ["enter", "leave", "enter"]);
+    }
+
+    #[test]
+    fn a_shell_that_cannot_start_is_reported() {
+        let fixture = ShellLoopFixture::stopped();
+        let harness = UiHarness::new();
+        let mut app = UiHarness::app(&fixture);
+        let mut event_loop = harness
+            .event_loop(ScriptedInput::events(vec![UiHarness::character('t')]))
+            .with_shells(Box::new(RecordingShells::failing()));
+
+        event_loop.run(&mut app).unwrap();
+
+        let last_frame = event_loop.backend().frames().last().unwrap().clone();
+        assert!(last_frame.contains("the shell failed:"));
     }
 
     #[test]

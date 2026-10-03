@@ -1,21 +1,24 @@
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use super::ports::{AttachTarget, Multiplexer, ReturnBinding};
+use super::ports::{AttachTarget, HostProbe, Multiplexer, ReturnBinding};
 use super::service_error::ServiceError;
-use super::service_ports::TmuxPorts;
-use crate::domain::{SessionState, SessionSummary};
+use super::service_ports::ServicePorts;
+use crate::domain::{Session, SessionState, SessionSummary};
 
 pub struct SessionAccess {
     multiplexer: Arc<dyn Multiplexer>,
     binding: Arc<dyn ReturnBinding>,
+    host: Arc<dyn HostProbe>,
     shell: String,
 }
 
 impl SessionAccess {
-    pub fn new(tmux: &TmuxPorts, shell: &str) -> Self {
+    pub fn new(ports: &ServicePorts, shell: &str) -> Self {
         Self {
-            multiplexer: tmux.multiplexer(),
-            binding: tmux.binding(),
+            multiplexer: ports.tmux().multiplexer(),
+            binding: ports.tmux().binding(),
+            host: ports.repos().host(),
             shell: shell.to_string(),
         }
     }
@@ -35,6 +38,42 @@ impl SessionAccess {
         self.multiplexer
             .attach(&AttachTarget::Agent(row.tmux_name().to_string()))?;
         Ok(outcome)
+    }
+
+    pub fn open_shell(
+        &self,
+        row: &SessionSummary,
+        mode: ReturnMode,
+    ) -> Result<ShellOutcome, ServiceError> {
+        let session = row.session().ok_or_else(|| {
+            ServiceError::Invalid(format!(
+                "session {} is unmanaged and has no trusted worktree for a shell",
+                row.name()
+            ))
+        })?;
+        self.check_worktree(session)?;
+        if row.state() == SessionState::Stopped {
+            let shell = EphemeralShell::new(&self.shell, session.worktree_path());
+            return Ok(ShellOutcome::Ephemeral(shell));
+        }
+        let outcome = self.prepare_return(mode)?;
+        let window = self.multiplexer.ensure_shell_window(
+            session.tmux_name(),
+            session.worktree_path(),
+            &self.shell,
+        )?;
+        self.multiplexer.attach(&AttachTarget::Shell(window))?;
+        Ok(ShellOutcome::Attached(outcome))
+    }
+
+    fn check_worktree(&self, session: &Session) -> Result<(), ServiceError> {
+        if self.host.path_exists(session.worktree_path()) {
+            return Ok(());
+        }
+        Err(ServiceError::Invalid(format!(
+            "worktree {} is missing, run ringleader doctor",
+            session.worktree_path().display()
+        )))
     }
 
     fn prepare_return(&self, mode: ReturnMode) -> Result<AttachOutcome, ServiceError> {
@@ -70,6 +109,35 @@ impl AttachOutcome {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ShellOutcome {
+    Attached(AttachOutcome),
+    Ephemeral(EphemeralShell),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EphemeralShell {
+    program: String,
+    worktree: PathBuf,
+}
+
+impl EphemeralShell {
+    pub fn new(program: &str, worktree: &Path) -> Self {
+        Self {
+            program: program.to_string(),
+            worktree: worktree.to_path_buf(),
+        }
+    }
+
+    pub fn program(&self) -> &str {
+        &self.program
+    }
+
+    pub fn worktree(&self) -> &Path {
+        &self.worktree
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -77,6 +145,20 @@ mod tests {
     use crate::test_support::{FakeMultiplexer, FakeReturnBinding, ServiceFixture};
 
     struct AttachFixture;
+
+    struct ShellFixture;
+
+    impl ShellFixture {
+        fn live() -> ServiceFixture {
+            let session = ServiceFixture::session("fix-auth");
+            ServiceFixture::new()
+                .with_sessions(std::slice::from_ref(&session))
+                .with_host(ServiceFixture::host_for(&[&session]))
+                .with_multiplexer(
+                    FakeMultiplexer::new().with_live(ServiceFixture::waiting(&session)),
+                )
+        }
+    }
 
     impl AttachFixture {
         fn live() -> ServiceFixture {
@@ -173,6 +255,109 @@ mod tests {
             .unwrap_err();
 
         assert!(error.to_string().contains("stopped"));
+    }
+
+    #[test]
+    fn a_shell_in_a_live_session_attaches_to_its_shell_window() {
+        let fixture = ShellFixture::live();
+
+        let outcome = fixture
+            .service()
+            .open_shell("fix-auth", ReturnMode::None)
+            .unwrap();
+
+        assert_eq!(outcome, ShellOutcome::Attached(AttachOutcome::default()));
+        assert_eq!(
+            fixture.multiplexer().attached(),
+            [AttachTarget::Shell("@9".to_string())]
+        );
+    }
+
+    #[test]
+    fn a_shell_in_a_live_session_runs_the_configured_shell() {
+        let fixture = ShellFixture::live();
+
+        fixture
+            .service()
+            .open_shell("fix-auth", ReturnMode::None)
+            .unwrap();
+
+        assert!(
+            fixture.multiplexer().calls().contains(
+                &"ensure_shell_window ringleader-fix-auth /bin/example-shell".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn a_shell_from_the_tui_installs_the_return_binding_first() {
+        let fixture = ShellFixture::live();
+
+        fixture
+            .service()
+            .open_shell("fix-auth", ReturnMode::InstallReturnBinding)
+            .unwrap();
+
+        assert_eq!(fixture.binding().calls(), ["install"]);
+    }
+
+    #[test]
+    fn a_shell_in_a_stopped_session_is_an_ephemeral_shell_in_its_worktree() {
+        let session = ServiceFixture::session("fix-auth");
+        let fixture = ServiceFixture::new()
+            .with_sessions(std::slice::from_ref(&session))
+            .with_host(ServiceFixture::host_for(&[&session]));
+
+        let outcome = fixture
+            .service()
+            .open_shell("fix-auth", ReturnMode::None)
+            .unwrap();
+
+        assert_eq!(
+            outcome,
+            ShellOutcome::Ephemeral(EphemeralShell::new(
+                "/bin/example-shell",
+                session.worktree_path()
+            ))
+        );
+        assert!(fixture.multiplexer().state_changing_calls().is_empty());
+    }
+
+    #[test]
+    fn a_missing_worktree_fails_before_tmux_runs() {
+        let session = ServiceFixture::session("fix-auth");
+        let fixture = ServiceFixture::new()
+            .with_sessions(std::slice::from_ref(&session))
+            .with_multiplexer(FakeMultiplexer::new().with_live(ServiceFixture::waiting(&session)));
+
+        let error = fixture
+            .service()
+            .open_shell("fix-auth", ReturnMode::None)
+            .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("is missing, run ringleader doctor")
+        );
+        assert!(fixture.multiplexer().state_changing_calls().is_empty());
+        assert!(fixture.multiplexer().attached().is_empty());
+    }
+
+    #[test]
+    fn an_unmanaged_session_gets_no_shell() {
+        let stranger = ServiceFixture::session("mystery");
+        let fixture = ServiceFixture::new().with_multiplexer(
+            FakeMultiplexer::new().with_live(ServiceFixture::waiting(&stranger).without_metadata()),
+        );
+
+        let error = fixture
+            .service()
+            .open_shell("mystery", ReturnMode::None)
+            .unwrap_err();
+
+        assert!(error.to_string().contains("unmanaged"));
+        assert!(fixture.multiplexer().attached().is_empty());
     }
 
     #[test]

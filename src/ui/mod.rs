@@ -7,6 +7,7 @@ pub mod preview_feed;
 pub mod preview_panel;
 pub mod session_list;
 pub mod session_table;
+pub mod shell_runner;
 pub mod status_bar;
 pub mod table_columns;
 pub mod terminal_guard;

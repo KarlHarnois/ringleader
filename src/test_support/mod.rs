@@ -28,4 +28,4 @@ pub use git_test_repo::GitTestRepo;
 pub use recording_screen_mode::RecordingScreenMode;
 pub use service_fixture::ServiceFixture;
 pub use tmux_test_server::{ControlClient, TmuxTestServer};
-pub use ui_harness::{FixtureBackend, ScriptedInput, UiHarness};
+pub use ui_harness::{FixtureBackend, RecordingShells, ScriptedInput, UiHarness};

@@ -26,6 +26,7 @@ pub struct ServiceFixture {
     clock: Arc<FakeClock>,
     config_error: Option<ConfigError>,
     inside_tmux: bool,
+    shell: String,
 }
 
 impl ServiceFixture {
@@ -37,6 +38,7 @@ impl ServiceFixture {
     pub const WORKTREE_ROOT: &'static str = "/data/ringleader/worktrees";
     pub const TIP: &'static str = "feedfacefeedfacefeedfacefeedfacefeedface";
     pub const IDLE_SECONDS: u64 = 3;
+    pub const SHELL: &'static str = "/bin/example-shell";
 
     pub fn new() -> Self {
         Self {
@@ -50,6 +52,7 @@ impl ServiceFixture {
             clock: Arc::new(FakeClock::at(Self::NOW)),
             config_error: None,
             inside_tmux: false,
+            shell: Self::SHELL.to_string(),
         }
     }
 
@@ -294,5 +297,6 @@ impl ServiceFixture {
         ServiceContext::new(loaded, Path::new(Self::REPO))
             .with_inside_tmux(self.inside_tmux)
             .with_home(Some(Path::new(Self::HOME)))
+            .with_shell(&self.shell)
     }
 }
