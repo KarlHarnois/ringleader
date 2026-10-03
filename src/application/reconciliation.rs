@@ -31,6 +31,11 @@ impl Reconciliation {
         self.changed = true;
     }
 
+    pub fn rekey(&mut self, index: usize, session: Session) {
+        self.entries[index] = session;
+        self.changed = true;
+    }
+
     pub fn record_observations(&mut self, observations: Vec<SessionObservation>) {
         self.observations = observations;
     }
@@ -136,21 +141,6 @@ impl ManagedRow<'_> {
 }
 
 impl Reconciliation {
-    pub fn is_registered_tmux_name(&self, tmux_name: &str) -> bool {
-        self.entries
-            .iter()
-            .any(|entry| entry.tmux_name() == tmux_name)
-    }
-
-    pub fn conflicts_with_adoption(&self, name: &SessionName, metadata: &SessionMetadata) -> bool {
-        self.entries.iter().any(|entry| {
-            entry.name() == name
-                || entry.worktree_path() == metadata.worktree_path()
-                || (entry.repo_path() == metadata.repo_path()
-                    && entry.branch() == metadata.branch())
-        })
-    }
-
     fn claims_worktree(metadata: &SessionMetadata, naming: &NamingScheme, entry: &Session) -> bool {
         metadata.has_absolute_paths()
             && naming.owns_branch(metadata.branch())
