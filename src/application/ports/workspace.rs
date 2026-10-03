@@ -1,0 +1,239 @@
+use std::path::{Path, PathBuf};
+
+use thiserror::Error;
+
+use crate::domain::{BaseBranch, DiffStat};
+
+pub trait Workspace: Send + Sync {
+    fn create_worktree(
+        &self,
+        repo: &Path,
+        worktree: &Path,
+        branch: &str,
+        start: &StartPoint,
+    ) -> Result<(), WorkspaceError>;
+    fn remove_worktree(&self, repo: &Path, worktree: &Path) -> Result<(), WorkspaceError>;
+    fn unlock_worktree(&self, repo: &Path, worktree: &Path) -> Result<(), WorkspaceError>;
+    fn list_worktrees(&self, repo: &Path) -> Result<Vec<WorktreeEntry>, WorkspaceError>;
+    fn list_worktree_dirs(&self, root: &Path) -> Result<Vec<PathBuf>, WorkspaceError>;
+    fn delete_branch(
+        &self,
+        repo: &Path,
+        branch: &str,
+        expected_tip: Option<&str>,
+    ) -> Result<(), WorkspaceError>;
+    fn rename_branch(&self, location: &Path, old: &str, new: &str) -> Result<(), WorkspaceError>;
+    fn branch_exists(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError>;
+    fn list_branches(&self, repo: &Path, prefix: &str) -> Result<Vec<String>, WorkspaceError>;
+    fn resolve_start_point(
+        &self,
+        repo: &Path,
+        base_branch: Option<&BaseBranch>,
+    ) -> Result<StartPoint, WorkspaceError>;
+    fn dirty_state(&self, worktree: &Path) -> Result<DirtyState, WorkspaceError>;
+    fn unmerged_commits(
+        &self,
+        repo: &Path,
+        branch: &str,
+        worktree: &Path,
+    ) -> Result<UnmergedCommits, WorkspaceError>;
+    fn diff_stat(&self, worktree: &Path, base_commit: &str) -> Result<DiffStat, WorkspaceError>;
+    fn validate_repo(&self, path: &Path) -> Result<PathBuf, WorkspaceError>;
+    fn version(&self) -> Result<String, WorkspaceError>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StartPoint {
+    Commit(String),
+    Orphan,
+}
+
+impl StartPoint {
+    pub fn base_commit(&self) -> &str {
+        match self {
+            StartPoint::Commit(sha) => sha,
+            StartPoint::Orphan => "",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorktreeEntry {
+    path: PathBuf,
+    head: Option<String>,
+    branch: Option<String>,
+    locked: bool,
+    main: bool,
+}
+
+impl WorktreeEntry {
+    pub fn new(path: &Path) -> Self {
+        Self {
+            path: path.to_path_buf(),
+            head: None,
+            branch: None,
+            locked: false,
+            main: false,
+        }
+    }
+
+    pub fn at_head(self, sha: &str) -> Self {
+        Self {
+            head: Some(sha.to_string()),
+            ..self
+        }
+    }
+
+    pub fn on_branch(self, branch: &str) -> Self {
+        Self {
+            branch: Some(branch.to_string()),
+            ..self
+        }
+    }
+
+    pub fn locked(self) -> Self {
+        Self {
+            locked: true,
+            ..self
+        }
+    }
+
+    #[cfg(test)]
+    pub fn unlocked(self) -> Self {
+        Self {
+            locked: false,
+            ..self
+        }
+    }
+
+    pub fn main(self) -> Self {
+        Self { main: true, ..self }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn head(&self) -> Option<&str> {
+        self.head.as_deref()
+    }
+
+    pub fn branch(&self) -> Option<&str> {
+        self.branch.as_deref()
+    }
+
+    pub fn is_locked(&self) -> bool {
+        self.locked
+    }
+
+    pub fn is_main(&self) -> bool {
+        self.main
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DirtyState {
+    missing: bool,
+    dirty_files: u64,
+    nested_repos: Vec<PathBuf>,
+}
+
+impl DirtyState {
+    pub fn missing() -> Self {
+        Self {
+            missing: true,
+            ..Self::default()
+        }
+    }
+
+    pub fn present(dirty_files: u64, nested_repos: Vec<PathBuf>) -> Self {
+        Self {
+            missing: false,
+            dirty_files,
+            nested_repos,
+        }
+    }
+
+    pub fn is_missing(&self) -> bool {
+        self.missing
+    }
+
+    pub fn dirty_files(&self) -> u64 {
+        self.dirty_files
+    }
+
+    pub fn nested_repos(&self) -> &[PathBuf] {
+        &self.nested_repos
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct UnmergedCommits {
+    count: u64,
+    tip: Option<String>,
+    head: Option<String>,
+}
+
+impl UnmergedCommits {
+    pub fn new(count: u64, tip: Option<&str>, head: Option<&str>) -> Self {
+        Self {
+            count,
+            tip: tip.map(str::to_string),
+            head: head.map(str::to_string),
+        }
+    }
+
+    pub fn count(&self) -> u64 {
+        self.count
+    }
+
+    pub fn tip(&self) -> Option<&str> {
+        self.tip.as_deref()
+    }
+
+    pub fn head(&self) -> Option<&str> {
+        self.head.as_deref()
+    }
+
+    pub fn same_commits_as(&self, other: &UnmergedCommits) -> bool {
+        self.tip == other.tip && self.head == other.head
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum WorkspaceError {
+    #[error("git {subcommand} failed ({status}): {stderr}")]
+    Failed {
+        subcommand: String,
+        status: String,
+        stderr: String,
+    },
+    #[error("git {subcommand} timed out after {seconds} seconds")]
+    TimedOut { subcommand: String, seconds: u64 },
+    #[error("{path} is not a git repository: {detail}")]
+    NotARepository { path: PathBuf, detail: String },
+    #[error("{path} is a linked worktree, add its main repository instead")]
+    LinkedWorktree { path: PathBuf },
+    #[error("{path} is a submodule, add its superproject instead")]
+    Submodule { path: PathBuf },
+    #[error("{repo} has no origin/HEAD, main, or master branch, set base_branch for it")]
+    NoBaseBranch { repo: PathBuf },
+    #[error(
+        "base branch {base} matches neither {local_ref} nor {remote_ref}{}",
+        .suggestion.as_ref().map(|name| format!(", did you mean {name}?")).unwrap_or_default()
+    )]
+    BaseBranchNotFound {
+        base: String,
+        local_ref: String,
+        remote_ref: String,
+        suggestion: Option<String>,
+    },
+    #[error("cannot read {path}: {detail}")]
+    Io { path: PathBuf, detail: String },
+}
+
+impl WorkspaceError {
+    pub fn is_timeout(&self) -> bool {
+        matches!(self, WorkspaceError::TimedOut { .. })
+    }
+}

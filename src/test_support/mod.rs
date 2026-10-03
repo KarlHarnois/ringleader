@@ -1,0 +1,19 @@
+pub mod fake_clock;
+pub mod fake_config_source;
+pub mod fake_host_probe;
+pub mod fake_lock;
+pub mod fake_multiplexer;
+pub mod fake_repo_scanner;
+pub mod fake_return_binding;
+pub mod fake_session_registry;
+pub mod fake_workspace;
+
+pub use fake_clock::FakeClock;
+pub use fake_config_source::FakeConfigSource;
+pub use fake_host_probe::FakeHostProbe;
+pub use fake_lock::FakeLock;
+pub use fake_multiplexer::FakeMultiplexer;
+pub use fake_repo_scanner::FakeRepoScanner;
+pub use fake_return_binding::FakeReturnBinding;
+pub use fake_session_registry::FakeSessionRegistry;
+pub use fake_workspace::FakeWorkspace;
