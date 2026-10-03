@@ -8,6 +8,7 @@ description = "A tmux session manager for Claude and opencode"
 repository = "https://github.com/KarlHarnois/ringleader"
 
 [dependencies]
+libc = "0.2.190"
 log = "0.4.34"
 thiserror = "2.0.21"
 

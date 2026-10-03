@@ -157,7 +157,15 @@ Examples: branch `ringleader/fix-auth`, tmux session `ringleader-fix-auth`, work
     │   ├── json_session_registry.rs # JsonSessionRegistry
     │   ├── file_lock.rs          # FileLock
     │   ├── bounded_command.rs    # BoundedCommand, runs git and tmux children in a new session with a deadline
+    │   ├── command_output.rs     # CommandOutput, a finished child's status and output
+    │   ├── host_path.rs          # HostPath, lenient canonicalization and directory listing
     │   ├── git_workspace.rs      # GitWorkspace
+    │   ├── git_runner.rs         # GitRunner, runs a GitInvocation through BoundedCommand
+    │   ├── git_invocation.rs     # GitInvocation, one git call with the section 5 child environment
+    │   ├── git_porcelain.rs      # GitPorcelain, parses git's machine-readable output
+    │   ├── git_branches.rs       # GitBranches: compare-and-swap delete, rename, listing
+    │   ├── start_point_resolver.rs # StartPointResolver, the base branch ladder
+    │   ├── submodule_commits.rs  # SubmoduleCommits, the submodule walk of unmerged_commits
     │   ├── system_clock.rs       # SystemClock, reads `SystemTime`
     │   ├── system_host_probe.rs  # SystemHostProbe
     │   ├── tmux_command.rs       # TmuxCommand, socket and config args, `-u` and `-N`, child environment, labeled output, exact targets, `#` and `;` escaping, CallerProcess
