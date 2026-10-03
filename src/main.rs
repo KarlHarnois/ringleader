@@ -99,8 +99,12 @@ impl CompositionRoot {
             return Self::lock_failure(&error);
         }
         let config_source = self.config_source(cli);
+        let template_warning = Self::write_template_if_missing(&config_source);
         let loaded = Self::load(&config_source);
-        let startup_message = loaded.error().map(ToString::to_string);
+        let startup_message = loaded
+            .error()
+            .map(|error| format!("config error, running read-only: {error}"))
+            .or(template_warning);
         let inside_tmux = self.tmux(&[]).is_inside_client(&CallerProcess::read());
         let mut service = self.service(config_source, loaded, inside_tmux);
         let registry_warning = match service.load_registry(CorruptRegistry::MoveAside) {
@@ -130,7 +134,17 @@ impl CompositionRoot {
             .map(Path::to_path_buf)
             .or_else(|| self.environment.get("RINGLEADER_CONFIG").map(PathBuf::from))
             .unwrap_or_else(|| self.paths.config_file());
-        TomlConfigSource::new(&path, &self.paths.worktree_root())
+        TomlConfigSource::new(&path, &self.paths.worktree_root(), self.paths.home())
+    }
+
+    fn write_template_if_missing(source: &TomlConfigSource) -> Option<String> {
+        if source.exists() {
+            return None;
+        }
+        let error = source.write_first_run_template().err()?;
+        Some(format!(
+            "could not write the first-run config, using the defaults: {error}"
+        ))
     }
 
     fn load(source: &TomlConfigSource) -> LoadedConfig {

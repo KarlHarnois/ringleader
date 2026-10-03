@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use super::process_environment::ProcessEnvironment;
 use crate::application::ports::AgentLaunch;
+use crate::domain::Agent;
 
 static HANDOFF_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -23,55 +24,11 @@ impl AgentHandoff {
     pub const STALE_AFTER: Duration = Duration::from_secs(60);
     const DIRECTORY_MODE: u32 = 0o700;
     const FILE_MODE: u32 = 0o600;
-    const BASELINE: [&'static str; 33] = [
-        "PATH",
-        "HOME",
-        "USER",
-        "LOGNAME",
-        "SHELL",
-        "LANG",
-        "TZ",
-        "TMPDIR",
-        "SSH_AUTH_SOCK",
-        "KRB5CCNAME",
-        "TERMINFO",
-        "TERMINFO_DIRS",
-        "LOCALE_ARCHIVE",
-        "DISPLAY",
-        "XAUTHORITY",
-        "WAYLAND_DISPLAY",
-        "DBUS_SESSION_BUS_ADDRESS",
-        "BROWSER",
-        "EDITOR",
-        "VISUAL",
-        "HTTP_PROXY",
-        "HTTPS_PROXY",
-        "ALL_PROXY",
-        "NO_PROXY",
-        "http_proxy",
-        "https_proxy",
-        "all_proxy",
-        "no_proxy",
-        "SSL_CERT_FILE",
-        "SSL_CERT_DIR",
-        "NIX_SSL_CERT_FILE",
-        "NODE_EXTRA_CA_CERTS",
-        "GNUPGHOME",
-    ];
-    const BASELINE_PREFIXES: [&'static str; 2] = ["LC_", "XDG_"];
-
     pub fn new(directory: &Path, environment: &ProcessEnvironment) -> Self {
         Self {
             directory: directory.to_path_buf(),
             environment: environment.clone(),
         }
-    }
-
-    pub fn is_baseline(name: &str) -> bool {
-        Self::BASELINE.contains(&name)
-            || Self::BASELINE_PREFIXES
-                .iter()
-                .any(|prefix| name.starts_with(prefix))
     }
 
     pub fn write(&self, launch: &AgentLaunch) -> io::Result<PathBuf> {
@@ -133,7 +90,7 @@ impl AgentHandoff {
             .environment
             .variables()
             .iter()
-            .filter(|(name, _)| Self::is_baseline(&name.to_string_lossy()))
+            .filter(|(name, _)| Agent::is_baseline_variable(&name.to_string_lossy()))
             .cloned()
             .collect();
         for name in launch.env_names() {
@@ -339,12 +296,5 @@ mod tests {
         fixture.handoff(&[]).delete_stale();
 
         assert!(!fixture.handoff_directory().exists());
-    }
-
-    #[test]
-    fn locale_and_xdg_variables_belong_to_the_baseline() {
-        assert!(AgentHandoff::is_baseline("LC_PAPER"));
-        assert!(AgentHandoff::is_baseline("XDG_RUNTIME_DIR"));
-        assert!(!AgentHandoff::is_baseline("GPG_TTY"));
     }
 }

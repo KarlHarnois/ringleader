@@ -9,6 +9,49 @@ pub struct Agent {
 
 impl Agent {
     pub const PROMPT_PLACEHOLDER: &'static str = "{prompt}";
+    const BASELINE_VARIABLES: [&'static str; 33] = [
+        "PATH",
+        "HOME",
+        "USER",
+        "LOGNAME",
+        "SHELL",
+        "LANG",
+        "TZ",
+        "TMPDIR",
+        "SSH_AUTH_SOCK",
+        "KRB5CCNAME",
+        "TERMINFO",
+        "TERMINFO_DIRS",
+        "LOCALE_ARCHIVE",
+        "DISPLAY",
+        "XAUTHORITY",
+        "WAYLAND_DISPLAY",
+        "DBUS_SESSION_BUS_ADDRESS",
+        "BROWSER",
+        "EDITOR",
+        "VISUAL",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "no_proxy",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "NIX_SSL_CERT_FILE",
+        "NODE_EXTRA_CA_CERTS",
+        "GNUPGHOME",
+    ];
+    const BASELINE_PREFIXES: [&'static str; 2] = ["LC_", "XDG_"];
+
+    pub fn is_baseline_variable(name: &str) -> bool {
+        Self::BASELINE_VARIABLES.contains(&name)
+            || Self::BASELINE_PREFIXES
+                .iter()
+                .any(|prefix| name.starts_with(prefix))
+    }
 
     pub fn new(name: &str, command: &str) -> Self {
         Self {
@@ -180,6 +223,13 @@ mod tests {
         let agent = AgentFixture::with_template(&[]);
 
         assert!(!agent.accepts_prompt());
+    }
+
+    #[test]
+    fn locale_and_xdg_variables_belong_to_the_baseline() {
+        assert!(Agent::is_baseline_variable("LC_PAPER"));
+        assert!(Agent::is_baseline_variable("XDG_RUNTIME_DIR"));
+        assert!(!Agent::is_baseline_variable("GPG_TTY"));
     }
 
     #[test]

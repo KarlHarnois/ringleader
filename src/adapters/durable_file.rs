@@ -1,6 +1,6 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 pub struct DurableFile {
@@ -21,8 +21,14 @@ impl DurableFile {
     }
 
     pub fn write(&self, contents: &[u8]) -> io::Result<()> {
+        self.write_with_mode(contents, Self::PRIVATE_MODE)
+    }
+
+    pub fn write_with_mode(&self, contents: &[u8], mode: u32) -> io::Result<()> {
         let temporary = self.temporary_path();
-        let written = self.write_temporary(&temporary, contents);
+        let written = self
+            .write_temporary(&temporary, contents)
+            .and_then(|()| fs::set_permissions(&temporary, fs::Permissions::from_mode(mode)));
         if let Err(error) = written.and_then(|()| fs::rename(&temporary, &self.path)) {
             let _ = fs::remove_file(&temporary);
             return Err(error);

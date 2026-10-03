@@ -116,6 +116,7 @@ Examples: branch `ringleader/fix-auth`, tmux session `ringleader-fix-auth`, work
     │   ├── base_branch.rs        # BaseBranch
     │   ├── config.rs             # Config, the parsed config.toml
     │   ├── config_draft.rs       # ConfigDraft, the raw config values the Config constructor checks
+    │   ├── config_checks.rs      # ConfigChecks, the section 8 load checks
     │   └── naming_scheme.rs      # NamingScheme, the worktree root and prefixes a session records
     ├── application/
     │   ├── mod.rs
@@ -160,6 +161,7 @@ Examples: branch `ringleader/fix-auth`, tmux session `ringleader-fix-auth`, work
     │   ├── directory_repo_scanner.rs # DirectoryRepoScanner
     │   ├── mount_table.rs        # MountTable, the network and FUSE mount points the scan skips
     │   ├── toml_config_source.rs # TomlConfigSource
+    │   ├── config_file_writer.rs # ConfigFileWriter, the read-only checks and mode-keeping config write
     │   ├── json_session_registry.rs # JsonSessionRegistry
     │   ├── file_lock.rs          # FileLock
     │   ├── bounded_command.rs    # BoundedCommand, runs git and tmux children in a new session with a deadline

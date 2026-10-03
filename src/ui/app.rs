@@ -122,3 +122,44 @@ pub enum AppRequest {
     Quit,
     Attach(String),
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+    use std::time::Instant;
+
+    use super::*;
+    use crate::application::ports::ConfigError;
+    use crate::test_support::{FakeMultiplexer, ServiceFixture, UiHarness};
+
+    #[test]
+    fn a_tui_on_a_broken_config_observes_without_persisting() {
+        let adoptable = ServiceFixture::session("fix-auth");
+        let fixture = ServiceFixture::new()
+            .with_broken_config(ConfigError::Parse {
+                path: PathBuf::from("/config/ringleader/config.toml"),
+                detail: "expected `=`".to_string(),
+            })
+            .with_multiplexer(
+                FakeMultiplexer::new().with_live(ServiceFixture::waiting(&adoptable)),
+            );
+        let mut app = UiHarness::app(&fixture);
+
+        app.on_tick(Instant::now());
+
+        assert_eq!(fixture.registry().save_count(), 0);
+    }
+
+    #[test]
+    fn a_tui_on_a_valid_config_persists_an_adoption() {
+        let adoptable = ServiceFixture::session("fix-auth");
+        let fixture = ServiceFixture::new().with_multiplexer(
+            FakeMultiplexer::new().with_live(ServiceFixture::waiting(&adoptable)),
+        );
+        let mut app = UiHarness::app(&fixture);
+
+        app.on_tick(Instant::now());
+
+        assert_eq!(fixture.registry().save_count(), 1);
+    }
+}

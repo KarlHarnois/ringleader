@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod base_branch;
 pub mod config;
+pub mod config_checks;
 pub mod config_draft;
 pub mod diff_stat;
 pub mod naming_scheme;

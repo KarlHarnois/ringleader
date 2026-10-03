@@ -4,6 +4,7 @@ pub mod binding_records;
 pub mod bounded_command;
 pub mod caller_process;
 pub mod command_output;
+pub mod config_file_writer;
 pub mod directory_repo_scanner;
 pub mod durable_file;
 pub mod file_lock;

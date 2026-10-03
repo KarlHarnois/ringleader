@@ -240,8 +240,9 @@ mod tests {
 
     impl PaneFixture {
         const SELF_PID: u32 = 4_000_001;
-        const NESTED_TERMINAL: u64 = 34_820;
-        const OTHER_TERMINAL: u64 = 34_821;
+        const UNUSED_TERMINAL_MAJOR: u64 = 250 << 8;
+        const NESTED_TERMINAL: u64 = Self::UNUSED_TERMINAL_MAJOR | 1;
+        const OTHER_TERMINAL: u64 = Self::UNUSED_TERMINAL_MAJOR | 2;
 
         fn live() -> Self {
             let server = TmuxTestServer::with_session("holder");

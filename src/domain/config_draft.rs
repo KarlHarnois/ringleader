@@ -4,6 +4,7 @@ use std::time::Duration;
 use super::agent::Agent;
 use super::base_branch::BaseBranch;
 use super::config::{RefreshIntervals, SessionSize};
+use super::config_checks::ConfigChecks;
 use super::naming_scheme::NamingScheme;
 use super::repo::Repo;
 use super::repo_name::RepoName;
@@ -120,19 +121,39 @@ impl ConfigDraft {
     }
 
     pub fn failures(&self) -> Vec<String> {
-        let mut failures = Vec::new();
-        if SizeText::new(&self.session_size).parsed().is_none() {
-            failures.push(format!(
-                "session_size: `{}` is not <width>x<height>",
-                self.session_size
-            ));
-        }
-        for repo in &self.repos {
-            if let Some(failure) = repo.name_failure() {
-                failures.push(failure);
-            }
-        }
-        failures
+        ConfigChecks::new(self).failures()
+    }
+
+    pub(super) fn raw_worktree_root(&self) -> &Path {
+        &self.worktree_root
+    }
+
+    pub(super) fn raw_branch_prefix(&self) -> &str {
+        &self.branch_prefix
+    }
+
+    pub(super) fn raw_tmux_prefix(&self) -> &str {
+        &self.tmux_prefix
+    }
+
+    pub(super) fn raw_activity_idle_seconds(&self) -> i64 {
+        self.activity_idle_seconds
+    }
+
+    pub(super) fn raw_session_size(&self) -> &str {
+        &self.session_size
+    }
+
+    pub(super) fn parsed_session_size(&self) -> Option<SessionSize> {
+        SizeText::new(&self.session_size).parsed()
+    }
+
+    pub(super) fn raw_scan_depth(&self) -> i64 {
+        self.scan_depth
+    }
+
+    pub(super) fn repo_drafts(&self) -> &[RepoDraft] {
+        &self.repos
     }
 
     pub(super) fn naming(&self) -> NamingScheme {
@@ -211,15 +232,22 @@ impl RepoDraft {
         }
     }
 
-    fn name_failure(&self) -> Option<String> {
-        if self.repo_name().is_some() {
-            return None;
-        }
-        let shown = self
-            .name
+    pub(super) fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub(super) fn shown_name(&self) -> String {
+        self.name
             .clone()
-            .unwrap_or_else(|| self.path.display().to_string());
-        Some(format!("repos.name: `{shown}` is not a valid repo name"))
+            .unwrap_or_else(|| self.path.display().to_string())
+    }
+
+    pub(super) fn has_valid_name(&self) -> bool {
+        self.repo_name().is_some()
+    }
+
+    pub(super) fn resolved_name(&self) -> Option<RepoName> {
+        self.repo_name()
     }
 
     fn repo(&self) -> Option<Repo> {
