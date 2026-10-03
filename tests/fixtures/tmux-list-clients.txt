@@ -1,0 +1,5 @@
+ringleader-client	0	/dev/pts/3
+ringleader-client	1	
+ringleader-client	1	/dev/pts/6
+an after-list-clients hook printed this
+ringleader-client	0	/dev/pts/9

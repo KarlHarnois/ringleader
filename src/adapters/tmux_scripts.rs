@@ -1,0 +1,192 @@
+use std::ffi::OsString;
+use std::path::Path;
+
+use super::tmux_launch::TmuxLaunch;
+use super::tmux_listing::{MetadataJson, TmuxListing};
+use super::tmux_sequence::TmuxSequence;
+use crate::application::ports::{AgentLaunch, SessionSpec};
+use crate::domain::SessionMetadata;
+
+pub struct TmuxScripts {
+    launcher: Vec<OsString>,
+}
+
+impl TmuxScripts {
+    const SESSION_CREATED: &'static str = "ringleader-created #{session_id} #{pane_id}";
+    const WINDOW_CREATED: &'static str = "ringleader-created #{window_id} #{pane_id}";
+
+    pub fn new(launcher: Vec<OsString>) -> Self {
+        Self { launcher }
+    }
+
+    pub fn exact(tmux_name: &str) -> String {
+        format!("={tmux_name}:")
+    }
+
+    pub fn create_session(&self, spec: &SessionSpec) -> TmuxSequence {
+        let target = Self::exact(spec.tmux_name());
+        let size = spec.size();
+        let mut new_session = Self::words(&[
+            "new-session",
+            "-d",
+            "-s",
+            spec.tmux_name(),
+            "-x",
+            &size.width().to_string(),
+            "-y",
+            &size.height().to_string(),
+        ]);
+        new_session.extend(Self::start_in(spec.worktree()));
+        new_session.extend(Self::words(&["-P", "-F", Self::SESSION_CREATED]));
+        new_session.extend(self.launcher.iter().cloned());
+        TmuxSequence::new()
+            .command(new_session)
+            .command(["set-option", "-p", "-t", &target, "@ringleader_agent", "1"])
+            .command(["set-option", "-p", "-t", &target, "remain-on-exit", "on"])
+            .command(["set-option", "-t", &target, "destroy-unattached", "off"])
+            .command(Self::metadata_option(&target, spec.metadata()))
+            .command([
+                "display-message",
+                "-p",
+                "-t",
+                &target,
+                "ringleader-done #{pane_id} #{exit-unattached} #{socket_path}",
+            ])
+    }
+
+    pub fn agent_window(&self, tmux_name: &str, launch: &AgentLaunch) -> TmuxSequence {
+        let target = Self::exact(tmux_name);
+        let mut new_window = Self::words(&["new-window", "-t", &target]);
+        new_window.extend(Self::start_in(launch.worktree()));
+        new_window.extend(Self::words(&["-P", "-F", Self::WINDOW_CREATED]));
+        new_window.extend(self.launcher.iter().cloned());
+        TmuxSequence::new()
+            .command(new_window)
+            .command(["set-option", "-p", "-t", &target, "@ringleader_agent", "1"])
+            .command(["set-option", "-p", "-t", &target, "remain-on-exit", "on"])
+            .command([
+                "display-message",
+                "-p",
+                "-t",
+                &target,
+                "ringleader-done #{pane_id}",
+            ])
+    }
+
+    pub fn respawn(&self, pane: &str, launch: &AgentLaunch) -> TmuxSequence {
+        let mut respawn = Self::words(&["respawn-pane", "-t", pane]);
+        respawn.extend(Self::start_in(launch.worktree()));
+        respawn.extend(self.launcher.iter().cloned());
+        TmuxSequence::new().command(respawn).command([
+            "display-message",
+            "-p",
+            "-t",
+            pane,
+            TmuxLaunch::DONE_LABEL,
+        ])
+    }
+
+    pub fn shell_window(tmux_name: &str, worktree: &Path, shell: &str) -> TmuxSequence {
+        let target = Self::exact(tmux_name);
+        let mut new_window = Self::words(&["new-window", "-t", &target]);
+        new_window.extend(Self::start_in(worktree));
+        new_window.extend(Self::words(&["-P", "-F", Self::WINDOW_CREATED, shell]));
+        TmuxSequence::new()
+            .command(new_window)
+            .command(["set-option", "-w", "-t", &target, "@ringleader_shell", "1"])
+            .command([
+                "display-message",
+                "-p",
+                "-t",
+                &target,
+                "ringleader-done #{window_id}",
+            ])
+    }
+
+    pub fn shell_windows(tmux_name: &str) -> TmuxSequence {
+        TmuxSequence::new().command([
+            "list-windows",
+            "-t",
+            &Self::exact(tmux_name),
+            "-F",
+            TmuxListing::WINDOW_FORMAT,
+        ])
+    }
+
+    pub fn rename(old: &str, new: &str, metadata: &SessionMetadata) -> TmuxSequence {
+        let renamed = Self::exact(new);
+        TmuxSequence::new()
+            .command(["rename-session", "-t", &Self::exact(old), new])
+            .command(Self::metadata_option(&renamed, metadata))
+            .command([
+                "display-message",
+                "-p",
+                "-t",
+                &renamed,
+                TmuxLaunch::DONE_LABEL,
+            ])
+    }
+
+    pub fn kill(tmux_name: &str) -> TmuxSequence {
+        TmuxSequence::new()
+            .command(["kill-session", "-t", &Self::exact(tmux_name)])
+            .command(["display-message", "-p", TmuxLaunch::DONE_LABEL])
+    }
+
+    pub fn session_panes(tmux_name: &str, format: &str) -> TmuxSequence {
+        TmuxSequence::new().command([
+            "list-panes",
+            "-s",
+            "-t",
+            &Self::exact(tmux_name),
+            "-F",
+            format,
+        ])
+    }
+
+    pub fn all_panes(format: &str) -> TmuxSequence {
+        TmuxSequence::new().command(["list-panes", "-a", "-F", format])
+    }
+
+    pub fn pane_value(pane: &str, format: &str) -> TmuxSequence {
+        TmuxSequence::new().command(["display-message", "-p", "-t", pane, format])
+    }
+
+    pub fn server_value(format: &str) -> TmuxSequence {
+        TmuxSequence::new().command(["display-message", "-p", format])
+    }
+
+    pub fn capture(pane: &str) -> TmuxSequence {
+        TmuxSequence::new().command(["capture-pane", "-e", "-p", "-t", pane])
+    }
+
+    pub fn switch_client(target: &str) -> TmuxSequence {
+        TmuxSequence::new()
+            .command(["switch-client", "-t", target])
+            .command(["display-message", "-p", TmuxLaunch::DONE_LABEL])
+    }
+
+    pub fn attach_session(target: &str) -> TmuxSequence {
+        TmuxSequence::new().command(["attach-session", "-t", target])
+    }
+
+    pub fn clients() -> TmuxSequence {
+        TmuxSequence::new().command(["list-clients", "-F", TmuxListing::CLIENT_FORMAT])
+    }
+
+    fn metadata_option(target: &str, metadata: &SessionMetadata) -> Vec<OsString> {
+        let encoded = MetadataJson::encode(metadata);
+        Self::words(&["set-option", "-t", target, "@ringleader_meta", &encoded])
+    }
+
+    fn start_in(directory: &Path) -> Vec<OsString> {
+        vec![
+            OsString::from("-c"),
+            TmuxSequence::start_directory(directory),
+        ]
+    }
+
+    fn words(words: &[&str]) -> Vec<OsString> {
+        words.iter().map(OsString::from).collect()
+    }
+}

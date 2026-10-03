@@ -9,6 +9,7 @@ pub mod fake_session_registry;
 pub mod fake_workspace;
 pub mod git_test_repo;
 pub mod service_fixture;
+pub mod tmux_test_server;
 
 pub use fake_clock::FakeClock;
 pub use fake_config_source::FakeConfigSource;
@@ -21,3 +22,4 @@ pub use fake_session_registry::FakeSessionRegistry;
 pub use fake_workspace::FakeWorkspace;
 pub use git_test_repo::GitTestRepo;
 pub use service_fixture::ServiceFixture;
+pub use tmux_test_server::{ControlClient, TmuxTestServer};

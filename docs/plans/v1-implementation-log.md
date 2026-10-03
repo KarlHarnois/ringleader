@@ -19,3 +19,21 @@ Choice: treat these as standing instructions that apply to every milestone commi
 ### Size target for test doubles
 
 Section 0 says source files target under 200 lines "excluding tests". The hand-written fakes under `src/test_support/` are `#[cfg(test)]` code, so they are treated as tests and not split for size. `fake_workspace.rs` is about 400 lines.
+
+## Milestone 6
+
+### Unsafe block of the outside attach
+
+Section 6 says:
+
+> `TmuxMultiplexer::attach` owns this wait, so CLI `attach` behaves the same, and its `waitpid` and `kill` calls form that method's one `unsafe` block.
+
+Choice: the `waitpid` and `kill` calls form one `unsafe` block in `TmuxMultiplexer::attach_in_foreground`, a private method that `attach` calls only in outside mode. The block stays confined to one method of `TmuxMultiplexer`, which is the intent.
+
+### Restore checks that the key is still Ringleader's
+
+Section 6 describes the startup repair as restoring only "when the pid matches and the root C-q is still recognizably Ringleader's", and describes the exit restore without that condition. Choice: the exit restore applies the same two checks through the same code. A user who rebinds C-q while the TUI runs keeps that binding, and a record whose server restarted is discarded without touching the new server, which the section 10 test "a restore after a server restart leaving the new server untouched" asks for.
+
+### tmux 3.7 release used
+
+Section 6 names 3.7b as the 3.7 release the binding forms were checked on. `nixpkgs/nixos-unstable#tmux` now provides tmux 3.7c. The milestone 6 run accepted it, since the milestone asks for "a 3.7 release". All 88 `adapters::tmux` tests passed on it with none skipped.

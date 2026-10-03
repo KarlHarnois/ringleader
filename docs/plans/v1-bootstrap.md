@@ -168,9 +168,18 @@ Examples: branch `ringleader/fix-auth`, tmux session `ringleader-fix-auth`, work
     │   ├── submodule_commits.rs  # SubmoduleCommits, the submodule walk of unmerged_commits
     │   ├── system_clock.rs       # SystemClock, reads `SystemTime`
     │   ├── system_host_probe.rs  # SystemHostProbe
+    │   ├── durable_file.rs       # DurableFile, synced temp file renamed over the target
     │   ├── tmux_command.rs       # TmuxCommand, socket and config args, `-u` and `-N`, child environment, labeled output, exact targets, `#` and `;` escaping, CallerProcess
+    │   ├── caller_process.rs     # CallerProcess, the parent chain is_inside_client reads from /proc
+    │   ├── tmux_sequence.rs      # TmuxSequence, `;`-separated commands with `#` and `;` escaping
+    │   ├── tmux_output.rs        # TmuxOutput, labeled lines and the zero-session errors
+    │   ├── tmux_scripts.rs       # TmuxScripts, every tmux command sequence the multiplexer sends
+    │   ├── tmux_launch.rs        # TmuxLaunch, ringleader-created and ringleader-done handling, rollback, tag move
+    │   ├── tmux_listing.rs       # TmuxListing, parses list-panes, list-windows, and list-clients rows and @ringleader_meta
     │   ├── tmux_multiplexer.rs   # TmuxMultiplexer
-    │   └── tmux_return_binding.rs # TmuxReturnBinding, owns bindings.json
+    │   ├── tmux_return_binding.rs # TmuxReturnBinding, owns bindings.json
+    │   ├── binding_records.rs    # BindingRecords, the bindings.json records
+    │   └── key_binding.rs        # KeyBinding, parses and compares list-keys lines
     ├── ui/
     │   ├── mod.rs
     │   ├── app.rs                  # App
