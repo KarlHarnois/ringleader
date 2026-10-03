@@ -28,6 +28,9 @@ struct MultiplexerState {
     attached: Vec<AttachTarget>,
     bells: usize,
     calls: Vec<String>,
+    client_version: String,
+    server_version: Option<String>,
+    exit_unattached: bool,
 }
 
 impl FakeMultiplexer {
@@ -57,6 +60,9 @@ impl FakeMultiplexer {
                 attached: Vec::new(),
                 bells: 0,
                 calls: Vec::new(),
+                client_version: "3.6a".to_string(),
+                server_version: Some("3.6a".to_string()),
+                exit_unattached: false,
             }),
         }
     }
@@ -102,6 +108,19 @@ impl FakeMultiplexer {
 
     pub fn on_call(self, operation: &'static str, hook: impl Fn() + Send + Sync + 'static) -> Self {
         self.hooks.lock().unwrap().insert(operation, Arc::new(hook));
+        self
+    }
+
+    pub fn with_versions(self, client: &str, server: Option<&str>) -> Self {
+        self.edit(|state| {
+            state.client_version = client.to_string();
+            state.server_version = server.map(str::to_string);
+        });
+        self
+    }
+
+    pub fn with_exit_unattached(self) -> Self {
+        self.edit(|state| state.exit_unattached = true);
         self
     }
 
@@ -296,16 +315,16 @@ impl Multiplexer for FakeMultiplexer {
 
     fn server_version(&self) -> Result<Option<String>, MultiplexerError> {
         self.call("server_version", "")?;
-        Ok(Some("3.6a".to_string()))
+        Ok(self.edit(|state| state.server_version.clone()))
     }
 
     fn server_exit_unattached(&self) -> Result<Option<bool>, MultiplexerError> {
         self.call("server_exit_unattached", "")?;
-        Ok(Some(false))
+        Ok(Some(self.edit(|state| state.exit_unattached)))
     }
 
     fn version(&self) -> Result<String, MultiplexerError> {
         self.call("version", "")?;
-        Ok("3.6a".to_string())
+        Ok(self.edit(|state| state.client_version.clone()))
     }
 }

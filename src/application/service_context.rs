@@ -1,10 +1,12 @@
 use std::path::{Path, PathBuf};
 
+use super::doctor::DiagnosticPaths;
 use super::ports::ConfigError;
 use crate::domain::Config;
 
 pub struct ServiceContext {
     config: LoadedConfig,
+    diagnostics: DiagnosticPaths,
     inside_tmux: bool,
     launch_directory: PathBuf,
     home: Option<PathBuf>,
@@ -15,6 +17,7 @@ impl ServiceContext {
     pub fn new(config: LoadedConfig, launch_directory: &Path) -> Self {
         Self {
             config,
+            diagnostics: DiagnosticPaths::default(),
             inside_tmux: false,
             launch_directory: launch_directory.to_path_buf(),
             home: None,
@@ -34,6 +37,17 @@ impl ServiceContext {
             shell: shell.to_string(),
             ..self
         }
+    }
+
+    pub fn with_diagnostics(self, diagnostics: DiagnosticPaths) -> Self {
+        Self {
+            diagnostics,
+            ..self
+        }
+    }
+
+    pub fn diagnostics(&self) -> &DiagnosticPaths {
+        &self.diagnostics
     }
 
     pub fn with_home(self, home: Option<&Path>) -> Self {

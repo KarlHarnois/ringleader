@@ -2,6 +2,7 @@ mod cli_output;
 mod delete_report;
 mod list_report;
 mod repo_argument;
+mod repo_commands;
 mod session_commands;
 
 use std::ffi::OsString;
@@ -11,6 +12,7 @@ use std::process::ExitCode;
 use clap::{Args, Parser, Subcommand};
 
 pub use cli_output::CliOutput;
+use repo_commands::RepoCommands;
 use session_commands::SessionCommands;
 
 use crate::adapters::signal_flags::SignalFlags;
@@ -46,6 +48,13 @@ enum CliCommand {
     Rename(RenameArgs),
     #[command(about = "Restart an exited or stopped session")]
     Restart(NameArgs),
+    #[command(about = "Add, remove, or list repos")]
+    Repo {
+        #[command(subcommand)]
+        action: RepoAction,
+    },
+    #[command(about = "Check tmux, git, the config, and every session")]
+    Doctor(JsonArgs),
     #[command(name = "__exec-agent", hide = true)]
     ExecAgent {
         #[arg(long, value_name = "PATH")]
@@ -53,11 +62,32 @@ enum CliCommand {
     },
 }
 
+#[derive(Debug, Subcommand)]
+enum RepoAction {
+    #[command(about = "Pin a repo as a [[repos]] entry")]
+    Add(RepoAddArgs),
+    #[command(about = "Remove a [[repos]] entry")]
+    Remove(NameArgs),
+    #[command(about = "List the repos the picker shows")]
+    List,
+}
+
 #[derive(Debug, Args)]
-struct ListArgs {
+struct RepoAddArgs {
+    path: String,
+    #[arg(long)]
+    name: Option<String>,
+    #[arg(long)]
+    base_branch: Option<String>,
+}
+
+#[derive(Debug, Args)]
+struct JsonArgs {
     #[arg(long)]
     json: bool,
 }
+
+type ListArgs = JsonArgs;
 
 #[derive(Debug, Args)]
 struct NewArgs {
@@ -137,6 +167,9 @@ impl Cli {
                     | CliCommand::Delete(_)
                     | CliCommand::Rename(_)
                     | CliCommand::Restart(_)
+                    | CliCommand::Repo {
+                        action: RepoAction::Add(_) | RepoAction::Remove(_)
+                    }
             )
         )
     }
@@ -159,6 +192,9 @@ impl Cli {
     }
 
     pub fn execute(&self, service: &mut SessionService, session: &mut CliSession) -> CliExit {
+        if let Some(CliCommand::Doctor(args)) = &self.command {
+            return CliExit::Code(Self::doctor(service, session, args));
+        }
         if let Some(error) = service.read_only_reason() {
             session.output.error(&error.to_string());
             return CliExit::Code(Self::FAILURE_EXIT);
@@ -180,6 +216,18 @@ impl Cli {
         session.finish(result)
     }
 
+    fn doctor(service: &SessionService, session: &mut CliSession, args: &JsonArgs) -> u8 {
+        let report = service.doctor();
+        if args.json {
+            session.output.line(&report.json());
+        } else {
+            for line in report.lines() {
+                session.output.line(&line);
+            }
+        }
+        u8::from(report.has_problems())
+    }
+
     fn dispatch(
         &self,
         service: &mut SessionService,
@@ -193,7 +241,15 @@ impl Cli {
             Some(CliCommand::Attach(args)) => commands.attach(&args.name),
             Some(CliCommand::Rename(args)) => commands.rename(args),
             Some(CliCommand::Restart(args)) => commands.restart(&args.name),
-            Some(CliCommand::ExecAgent { .. }) | None => Ok(0),
+            Some(CliCommand::Repo { action }) => {
+                let mut repos = RepoCommands::new(service, session);
+                match action {
+                    RepoAction::Add(args) => repos.add(args),
+                    RepoAction::Remove(args) => repos.remove(&args.name),
+                    RepoAction::List => repos.list(),
+                }
+            }
+            Some(CliCommand::Doctor(_) | CliCommand::ExecAgent { .. }) | None => Ok(0),
         }
     }
 

@@ -37,8 +37,8 @@ use adapters::toml_config_source::TomlConfigSource;
 use adapters::{BoundedCommand, Deadlines, GitWorkspace};
 use application::ports::{ConfigSource, Lock, LockError};
 use application::{
-    CorruptRegistry, LoadedConfig, RepoPorts, ServiceContext, ServicePorts, SessionService,
-    StatePorts, TmuxPorts,
+    CorruptRegistry, DiagnosticPaths, LoadedConfig, RepoPorts, ServiceContext, ServicePorts,
+    SessionService, StatePorts, TmuxPorts,
 };
 use cli::{Cli, CliExit, CliOutput, CliSession};
 use ui::{App, CrosstermInput, CrosstermScreenMode, EventLoop, TerminalGuard};
@@ -240,6 +240,11 @@ impl CompositionRoot {
         let context = ServiceContext::new(loaded, &self.launch_directory)
             .with_inside_tmux(inside_tmux)
             .with_home(self.paths.home())
+            .with_diagnostics(DiagnosticPaths::new(
+                &self.programs.tmux().to_string_lossy(),
+                &self.programs.git().to_string_lossy(),
+                &self.paths.state_directory(),
+            ))
             .with_shell(&self.shell());
         SessionService::new(ServicePorts::new(state, repos, tmux_ports), context)
     }

@@ -105,6 +105,7 @@ Examples: branch `ringleader/fix-auth`, tmux session `ringleader-fix-auth`, work
     │   ├── session_commands.rs   # SessionCommands: list, new, delete, attach, rename, restart
     │   ├── list_report.rs        # ListReport, the list text and JSON
     │   ├── repo_argument.rs      # RepoArgument, the --repo name or path resolution
+    │   ├── repo_commands.rs      # RepoCommands: repo add, remove, list
     │   └── delete_report.rs      # DeleteReport, the delete warnings and results
     ├── domain/
     │   ├── mod.rs
@@ -147,7 +148,11 @@ Examples: branch `ringleader/fix-auth`, tmux session `ringleader-fix-auth`, work
     │   ├── reconciliation.rs     # Reconciliation, the reconciled entries and rows
     │   ├── session_access.rs     # SessionAccess: attach, open_shell, return binding
     │   ├── repo_catalog.rs       # RepoCatalog: discover, add, and remove repos, read typed paths
+    │   ├── repo_overrides.rs     # RepoOverrides: the add_repo and remove_repo workers
+    │   ├── pending.rs            # Pending, a worker result the TUI polls and the CLI waits on
     │   ├── doctor.rs             # Doctor
+    │   ├── doctor_report.rs      # DoctorReport, the doctor's info, warning, and problem lines
+    │   ├── registry_audit.rs     # RegistryAudit, the doctor's checks of each registry entry
     │   └── ports/
     │       ├── mod.rs
     │       ├── session_registry.rs   # SessionRegistry trait

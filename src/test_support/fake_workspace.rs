@@ -25,6 +25,8 @@ struct WorkspaceState {
     failed_create_leftover: Option<FailedCreateLeftover>,
     partial_removal: bool,
     calls: Vec<String>,
+    top_levels: HashMap<PathBuf, PathBuf>,
+    version: Option<String>,
 }
 
 #[derive(Clone)]
@@ -99,6 +101,20 @@ impl FakeWorkspace {
         self.edit(|state| {
             state.failed_create_leftover = Some(FailedCreateLeftover::LockedWorktree)
         });
+        self
+    }
+
+    pub fn with_top_level(self, path: &Path, top_level: &Path) -> Self {
+        self.edit(|state| {
+            state
+                .top_levels
+                .insert(path.to_path_buf(), top_level.to_path_buf())
+        });
+        self
+    }
+
+    pub fn with_version(self, version: &str) -> Self {
+        self.edit(|state| state.version = Some(version.to_string()));
         self
     }
 
@@ -402,11 +418,22 @@ impl Workspace for FakeWorkspace {
                 detail: "fatal: not a git repository".to_string(),
             });
         }
-        Ok(path.to_path_buf())
+        Ok(self.edit(|state| {
+            state
+                .top_levels
+                .get(path)
+                .cloned()
+                .unwrap_or_else(|| path.to_path_buf())
+        }))
     }
 
     fn version(&self) -> Result<String, WorkspaceError> {
         self.call("version", String::new())?;
-        Ok("2.54.0".to_string())
+        Ok(self.edit(|state| {
+            state
+                .version
+                .clone()
+                .unwrap_or_else(|| "2.54.0".to_string())
+        }))
     }
 }

@@ -4,9 +4,13 @@ use std::sync::Arc;
 use super::creation_plan::CreateRequest;
 use super::delete_impact::{DeleteConfirmation, DeleteImpact};
 use super::delete_outcome::DeleteOutcome;
+use super::doctor::Doctor;
+use super::doctor_report::DoctorReport;
+use super::pending::Pending;
 use super::ports::{ConfigError, ConfigSource, RegistryError, SessionRegistry};
 use super::reconciliation::Reconciliation;
-use super::repo_catalog::{Pending, RepoCatalog, RepoDiscovery};
+use super::repo_catalog::{RepoCatalog, RepoDiscovery};
+use super::repo_overrides::{AddRepoRequest, RepoAddition};
 use super::service_context::{LoadedConfig, ServiceContext};
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
@@ -24,6 +28,7 @@ pub struct SessionService {
     lifecycle: SessionLifecycle,
     access: SessionAccess,
     catalog: RepoCatalog,
+    doctor: Doctor,
     inside_tmux: bool,
 }
 
@@ -34,6 +39,7 @@ impl SessionService {
             lifecycle: SessionLifecycle::new(&ports),
             access: SessionAccess::new(ports.tmux(), context.shell()),
             catalog: RepoCatalog::new(&ports, &context),
+            doctor: Doctor::new(&ports, context.diagnostics().clone()),
             inside_tmux: context.is_inside_tmux(),
             config: context.into_config(),
             entries: Vec::new(),
@@ -86,6 +92,14 @@ impl SessionService {
 
     pub fn read_typed_path(&self, input: &str) -> Pending<PathBuf> {
         self.catalog.read_typed_path(input)
+    }
+
+    pub fn add_repo(&self, request: AddRepoRequest) -> Pending<RepoAddition> {
+        self.catalog.add_repo(request, self.config())
+    }
+
+    pub fn remove_repo(&self, name: &str) -> Pending<String> {
+        self.catalog.remove_repo(name, self.config(), &self.entries)
     }
 
     pub fn validated_top_level(&self, path: &Path) -> Pending<PathBuf> {
@@ -161,6 +175,11 @@ impl SessionService {
             .rename(&reconciliation, old, new, keep_branch)?;
         self.entries = reconciliation.entries_with(old, renamed.clone());
         Ok(renamed)
+    }
+
+    pub fn doctor(&self) -> DoctorReport {
+        self.doctor
+            .examine(self.config(), self.read_only_reason(), &self.config_path())
     }
 
     pub fn restart_session(&mut self, name: &str) -> Result<(), ServiceError> {

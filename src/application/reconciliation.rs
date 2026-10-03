@@ -48,6 +48,24 @@ impl Reconciliation {
         self.changed
     }
 
+    pub fn rows(&self) -> &[SessionSummary] {
+        &self.rows
+    }
+
+    pub fn managed_entries(&self) -> Vec<(&Session, SessionState)> {
+        self.entries
+            .iter()
+            .map(|entry| {
+                let state = self
+                    .rows
+                    .iter()
+                    .find(|row| row.name() == entry.name().as_str())
+                    .map_or(SessionState::Stopped, SessionSummary::state);
+                (entry, state)
+            })
+            .collect()
+    }
+
     pub fn into_summaries(self) -> Vec<SessionSummary> {
         self.rows
     }
