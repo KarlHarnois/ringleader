@@ -36,6 +36,12 @@ impl SessionList {
         }
     }
 
+    pub fn select(&mut self, name: &str) {
+        if self.rows.iter().any(|row| row.name() == name) {
+            self.selection = Some(name.to_string());
+        }
+    }
+
     pub fn move_selection(&mut self, offset: isize) {
         let current = self.selected_index().unwrap_or(0);
         let last = self.rows.len().saturating_sub(1);

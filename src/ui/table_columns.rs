@@ -1,3 +1,5 @@
+use super::text_fit::TextFit;
+
 pub struct TableColumns {
     inner_width: usize,
     name: usize,
@@ -9,7 +11,6 @@ impl TableColumns {
     pub const MINIMUM_NAME_WIDTH: usize = 12;
     const INDICATOR_WIDTH: usize = 1;
     const GAP: usize = 1;
-    const ELLIPSIS: char = '…';
     const NAME_TITLE: &'static str = "Name";
     const BRANCH_TITLE: &'static str = "Branch";
     const DIFF_TITLE: &'static str = "Diff";
@@ -53,12 +54,12 @@ impl TableColumns {
     }
 
     pub fn row(&self, name: &str, branch: &str, diff: &str) -> String {
-        let mut text = format!(" {}", Self::fit(name, self.name));
+        let mut text = format!(" {}", Self::fit_text(name, self.name));
         if let Some(width) = self.branch {
-            text.push_str(&format!(" {}", Self::fit(branch, width)));
+            text.push_str(&format!(" {}", Self::fit_text(branch, width)));
         }
         if let Some(width) = self.diff {
-            text.push_str(&format!(" {}", Self::fit(diff, width)));
+            text.push_str(&format!(" {}", Self::fit_text(diff, width)));
         }
         let width = self.inner_width.saturating_sub(Self::INDICATOR_WIDTH);
         format!("{text:<width$}")
@@ -69,20 +70,16 @@ impl TableColumns {
         Self::INDICATOR_WIDTH + Self::GAP + self.name + optional(self.branch) + optional(self.diff)
     }
 
+    fn fit_text(text: &str, width: usize) -> String {
+        TextFit::new(text).padded(width)
+    }
+
     fn widest(texts: impl Iterator<Item = String>, title: &str) -> usize {
         texts
             .map(|text| text.chars().count())
             .max()
             .unwrap_or(0)
             .max(title.len())
-    }
-
-    fn fit(text: &str, width: usize) -> String {
-        if text.chars().count() <= width {
-            return format!("{text:<width$}");
-        }
-        let kept: String = text.chars().take(width.saturating_sub(1)).collect();
-        format!("{kept}{}", Self::ELLIPSIS)
     }
 }
 

@@ -1,4 +1,7 @@
-use super::app::{AppRequest, BlockingOperation};
+use crossterm::event::{KeyCode, KeyEvent};
+
+use super::app::AppRequest;
+use super::blocking_operation::BlockingOperation;
 use crate::application::ports::ConfigError;
 use crate::domain::{SessionState, SessionSummary};
 
@@ -17,6 +20,20 @@ impl<'a> ActionGate<'a> {
         Self {
             selected,
             config_error,
+        }
+    }
+
+    pub fn action_for(&self, key: &KeyEvent) -> KeyAction {
+        match key.code {
+            KeyCode::Char('q') => KeyAction::Request(AppRequest::Quit),
+            KeyCode::Char('r') => KeyAction::Reload,
+            KeyCode::Down | KeyCode::Right | KeyCode::Char('j' | 'l') => KeyAction::Move(1),
+            KeyCode::Up | KeyCode::Left | KeyCode::Char('k' | 'h') => KeyAction::Move(-1),
+            KeyCode::Char('n') => KeyAction::from(self.writable().map(|()| KeyAction::NewSession)),
+            KeyCode::Enter => KeyAction::from(self.attach().map(KeyAction::Request)),
+            KeyCode::Char('t') => KeyAction::from(self.shell().map(KeyAction::Request)),
+            KeyCode::Char('s') => KeyAction::from(self.restart().map(KeyAction::Request)),
+            _ => KeyAction::Ignore,
         }
     }
 
@@ -62,6 +79,22 @@ impl<'a> ActionGate<'a> {
 
     fn selected(&self) -> Result<&'a SessionSummary, String> {
         self.selected.ok_or_else(|| Self::NO_SELECTION.to_string())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KeyAction {
+    Request(AppRequest),
+    Move(isize),
+    NewSession,
+    Reload,
+    Refuse(String),
+    Ignore,
+}
+
+impl From<Result<KeyAction, String>> for KeyAction {
+    fn from(action: Result<KeyAction, String>) -> Self {
+        action.unwrap_or_else(KeyAction::Refuse)
     }
 }
 
@@ -177,6 +210,39 @@ mod tests {
             ActionGate::new(Some(&row), None).shell(),
             Err("mystery is unmanaged, so t cannot open a shell in it.".to_string())
         );
+    }
+
+    #[test]
+    fn n_in_a_read_only_tui_is_refused_with_the_config_error() {
+        let error = GateFixture::config_error();
+        let key = KeyEvent::from(KeyCode::Char('n'));
+
+        let action = ActionGate::new(None, Some(&error)).action_for(&key);
+
+        assert!(
+            matches!(action, KeyAction::Refuse(refusal) if refusal.starts_with("config error"))
+        );
+    }
+
+    #[test]
+    fn n_opens_the_new_session_dialog_without_a_selection() {
+        let key = KeyEvent::from(KeyCode::Char('n'));
+
+        assert_eq!(
+            ActionGate::new(None, None).action_for(&key),
+            KeyAction::NewSession
+        );
+    }
+
+    #[test]
+    fn vim_keys_and_arrows_move_the_selection() {
+        let gate = ActionGate::new(None, None);
+        let action = |code| gate.action_for(&KeyEvent::from(code));
+
+        assert_eq!(action(KeyCode::Char('l')), KeyAction::Move(1));
+        assert_eq!(action(KeyCode::Right), KeyAction::Move(1));
+        assert_eq!(action(KeyCode::Char('h')), KeyAction::Move(-1));
+        assert_eq!(action(KeyCode::Left), KeyAction::Move(-1));
     }
 
     #[test]

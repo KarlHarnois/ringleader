@@ -6,7 +6,8 @@ use crossterm::event::{self, Event};
 use ratatui::Terminal;
 use ratatui::backend::Backend;
 
-use super::app::{App, AppRequest, BlockingOperation};
+use super::app::{App, AppRequest};
+use super::blocking_operation::BlockingOperation;
 use super::shell_runner::{ChildShell, ShellRunner};
 use super::terminal_guard::TerminalState;
 use crate::adapters::signal_flags::SignalFlags;

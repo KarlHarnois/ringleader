@@ -4,6 +4,7 @@ use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Padding, Paragraph};
 
 use super::home_view::CenteredText;
+use super::text_fit::TextFit;
 use super::theme::Theme;
 use crate::domain::SessionSummary;
 
@@ -15,7 +16,6 @@ pub struct PreviewPanel<'a> {
 
 impl<'a> PreviewPanel<'a> {
     const SEPARATOR: char = '─';
-    const ELLIPSIS: char = '…';
     const UNKNOWN_AGENT: &'static str = "unknown agent";
 
     pub fn new(
@@ -48,7 +48,7 @@ impl<'a> PreviewPanel<'a> {
         let mut lines = vec![
             Line::styled(Self::title(row), self.theme.emphasis()),
             Line::styled(
-                Self::left_truncated(&Self::worktree(row), width),
+                TextFit::new(&Self::worktree(row)).left_truncated(width),
                 self.theme.dim(),
             ),
             Line::styled(Self::SEPARATOR.to_string().repeat(width), self.theme.dim()),
@@ -87,15 +87,6 @@ impl<'a> PreviewPanel<'a> {
         row.metadata()
             .map(|metadata| metadata.worktree_path().display().to_string())
             .unwrap_or_default()
-    }
-
-    fn left_truncated(text: &str, width: usize) -> String {
-        let length = text.chars().count();
-        if length <= width {
-            return text.to_string();
-        }
-        let kept: String = text.chars().skip(length + 1 - width).collect();
-        format!("{}{kept}", Self::ELLIPSIS)
     }
 }
 

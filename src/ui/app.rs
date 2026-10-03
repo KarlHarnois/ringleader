@@ -1,20 +1,23 @@
 use std::io;
 use std::time::Instant;
 
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind};
+use crossterm::event::{Event, KeyEvent, KeyEventKind};
 use ratatui::Frame;
 
-use super::action_gate::ActionGate;
+use super::action_gate::{ActionGate, KeyAction};
+use super::blocking_operation::BlockingOperation;
+use super::dialogs::{Dialog, DialogStep};
 use super::home_state::HomeState;
 use super::home_view::{HomeView, LayoutTier};
-use super::preview_panel::PreviewPanel;
-use super::status_bar::{StatusBar, StatusMessage, StatusNote, StatusReport};
+use super::status_bar::{StatusBar, StatusMessage};
+use super::status_report::StatusReport;
 use super::theme::Theme;
 use crate::application::{EphemeralShell, ReturnMode, SessionService, ShellOutcome};
 
 pub struct App {
     service: SessionService,
     home: HomeState,
+    dialog: Option<Dialog>,
     status: StatusReport,
     tick: u64,
     theme: Theme,
@@ -28,6 +31,7 @@ impl App {
         Self {
             service,
             home: HomeState::new(now),
+            dialog: None,
             status: StatusReport::default(),
             tick: 0,
             theme: Theme,
@@ -44,12 +48,20 @@ impl App {
     }
 
     pub fn handle_event(&mut self, event: &Event) -> AppRequest {
-        match event {
-            Event::Key(key) if key.kind != KeyEventKind::Release => self.handle_key(key),
-            Event::Resize(width, height) => {
+        match (event, &mut self.dialog) {
+            (Event::Resize(width, height), _) => {
                 self.resize(*width, *height);
                 AppRequest::Redraw
             }
+            (_, Some(dialog)) => match dialog.handle_event(event, &self.service) {
+                DialogStep::Stay => AppRequest::Continue,
+                DialogStep::Close => {
+                    self.dialog = None;
+                    AppRequest::Continue
+                }
+                DialogStep::Request(request) => self.request(request),
+            },
+            (Event::Key(key), None) if key.kind != KeyEventKind::Release => self.handle_key(key),
             _ => AppRequest::Continue,
         }
     }
@@ -63,6 +75,9 @@ impl App {
         self.tick = self.tick.wrapping_add(1);
         let outcome = self.home.tick(now, &mut self.service);
         self.status.failure(outcome);
+        if let Some(dialog) = &mut self.dialog {
+            dialog.poll(&self.service);
+        }
     }
 
     pub fn attach(&mut self, name: &str) {
@@ -93,78 +108,60 @@ impl App {
     }
 
     pub fn perform(&mut self, operation: BlockingOperation) {
-        match operation {
-            BlockingOperation::Restart(name) => self.restart(&name),
+        let outcome = operation.run(&mut self.service);
+        self.observe();
+        match (outcome, &mut self.dialog) {
+            (Ok(done), _) => {
+                self.dialog = None;
+                self.home.select(done.session(), &self.service);
+                self.status.info(done.message().to_string());
+            }
+            (Err(error), Some(dialog)) => {
+                dialog.fail(error);
+                self.status.show(None);
+            }
+            (Err(error), None) => self.status.error(error),
         }
     }
 
     pub fn render(&self, frame: &mut Frame) {
-        let sessions = self.home.sessions();
-        let selected = sessions.selected();
         let prefix = self.service.config().naming().tmux_prefix();
         let status = StatusBar::new(self.theme)
             .with_message(self.status.message())
-            .with_note(selected.and_then(|row| StatusNote::new(row, prefix).text()));
-        HomeView::new(
-            sessions.table(self.tick, self.theme),
-            PreviewPanel::new(selected, self.home.preview(), self.theme),
-            status,
-        )
-        .render(frame);
+            .with_note(self.home.note(prefix));
+        let table = self.home.table(self.tick, self.theme);
+        HomeView::new(table, self.home.preview_panel(self.theme), status).render(frame);
+        if let Some(dialog) = &self.dialog {
+            dialog.render(frame, &self.theme);
+        }
     }
 
     fn handle_key(&mut self, key: &KeyEvent) -> AppRequest {
         self.status.show(None);
-        match key.code {
-            KeyCode::Char('q') => AppRequest::Quit,
-            KeyCode::Down | KeyCode::Right | KeyCode::Char('j' | 'l') => self.move_selection(1),
-            KeyCode::Up | KeyCode::Left | KeyCode::Char('k' | 'h') => self.move_selection(-1),
-            KeyCode::Enter => self.request(self.gate().attach()),
-            KeyCode::Char('t') => self.request(self.gate().shell()),
-            KeyCode::Char('s') => self.request(self.gate().restart()),
-            KeyCode::Char('r') => self.reload(),
-            _ => AppRequest::Continue,
+        let selected = self.home.sessions().selected();
+        match ActionGate::new(selected, self.service.read_only_reason()).action_for(key) {
+            KeyAction::Request(request) => return self.request(request),
+            KeyAction::Move(offset) => self.home.move_selection(offset, &self.service),
+            KeyAction::NewSession => self.dialog = Some(Dialog::new_session(&self.service)),
+            KeyAction::Reload => self.reload(),
+            KeyAction::Refuse(refusal) => self.status.error(refusal),
+            KeyAction::Ignore => {}
         }
-    }
-
-    fn move_selection(&mut self, offset: isize) -> AppRequest {
-        self.home.move_selection(offset, &self.service);
         AppRequest::Continue
     }
 
-    fn gate(&self) -> ActionGate<'_> {
-        ActionGate::new(
-            self.home.sessions().selected(),
-            self.service.read_only_reason(),
-        )
-    }
-
-    fn request(&mut self, request: Result<AppRequest, String>) -> AppRequest {
-        match request {
-            Ok(request) => {
-                self.status
-                    .show(request.busy_message().map(StatusMessage::Info));
-                request
-            }
-            Err(refusal) => {
-                self.status.error(refusal);
-                AppRequest::Continue
-            }
+    fn request(&mut self, request: AppRequest) -> AppRequest {
+        if let AppRequest::Block(operation) = &request {
+            self.status.info(operation.busy_message());
         }
+        request
     }
 
-    fn restart(&mut self, name: &str) {
-        let outcome = self.service.restart_session(name);
-        self.observe();
-        self.status.outcome(outcome, format!("Restarted {name}."));
-    }
-
-    fn reload(&mut self) -> AppRequest {
+    fn reload(&mut self) {
         let outcome = self.service.reload();
         self.observe();
         let outcome = outcome.map_err(|error| format!("{}: {error}", Self::RELOAD_FAILED));
         self.status.outcome(outcome, Self::RELOADED.to_string());
-        AppRequest::Continue
     }
 
     fn observe(&mut self) {
@@ -183,25 +180,12 @@ pub enum AppRequest {
     Block(BlockingOperation),
 }
 
-impl AppRequest {
-    fn busy_message(&self) -> Option<String> {
-        match self {
-            Self::Block(BlockingOperation::Restart(name)) => Some(format!("Restarting {name}…")),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum BlockingOperation {
-    Restart(String),
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};
     use std::time::{Duration, Instant};
 
+    use crossterm::event::KeyCode;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
@@ -262,6 +246,14 @@ mod tests {
 
         fn press(app: &mut App, character: char) {
             app.handle_event(&UiHarness::character(character));
+        }
+
+        fn settle_dialog(app: &mut App) {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while Instant::now() < deadline && Self::screen(app, 100, 28).contains("Scanning") {
+                app.on_tick(Instant::now());
+                std::thread::sleep(Duration::from_millis(5));
+            }
         }
 
         fn selected(app: &App) -> Option<String> {
@@ -512,6 +504,87 @@ mod tests {
         let request = app.handle_event(&UiHarness::character('t'));
 
         assert_eq!(request, AppRequest::Shell("dark-mode".to_string()));
+    }
+
+    #[test]
+    fn n_then_enter_creates_the_session_selects_it_and_closes_the_dialog() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, 'n');
+        AppFixture::settle_dialog(&mut app);
+        for character in "new-idea".chars() {
+            AppFixture::press(&mut app, character);
+        }
+
+        let request = app.handle_event(&UiHarness::key(KeyCode::Enter));
+        let busy = AppFixture::status_line(&app, 100);
+        let AppRequest::Block(operation) = request else {
+            panic!("expected a blocking create, got {request:?}");
+        };
+        app.perform(operation);
+
+        assert_eq!(busy, " Creating new-idea…");
+        assert!(app.dialog.is_none());
+        assert_eq!(AppFixture::selected(&app).as_deref(), Some("new-idea"));
+        assert_eq!(
+            AppFixture::status_line(&app, 100),
+            " Created new-idea on branch ringleader/new-idea."
+        );
+    }
+
+    #[test]
+    fn a_failed_create_keeps_the_dialog_open_with_the_error() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, 'n');
+        AppFixture::settle_dialog(&mut app);
+        for character in "fix-auth".chars() {
+            AppFixture::press(&mut app, character);
+        }
+
+        let AppRequest::Block(operation) = app.handle_event(&UiHarness::key(KeyCode::Enter)) else {
+            panic!("expected a blocking create");
+        };
+        app.perform(operation);
+
+        assert!(app.dialog.is_some());
+        assert!(AppFixture::screen(&app, 100, 28).contains("fix-auth"));
+        assert!(!AppFixture::status_line(&app, 100).contains("Created"));
+    }
+
+    #[test]
+    fn n_in_a_read_only_tui_opens_no_dialog() {
+        let fixture =
+            AppFixture::two_waiting_sessions().with_broken_config(AppFixture::config_error());
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press(&mut app, 'n');
+
+        assert!(app.dialog.is_none());
+        assert!(
+            AppFixture::status_line(&app, 200).starts_with(" config error, running read-only:")
+        );
+    }
+
+    #[test]
+    fn a_paste_goes_to_the_open_dialog() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, 'n');
+
+        app.handle_event(&Event::Paste("pasted\nname".to_string()));
+
+        assert!(AppFixture::screen(&app, 100, 28).contains("pasted name"));
+    }
+
+    #[test]
+    fn a_paste_on_the_home_screen_is_ignored() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        let request = app.handle_event(&Event::Paste("q".to_string()));
+
+        assert_eq!(request, AppRequest::Continue);
     }
 
     #[test]

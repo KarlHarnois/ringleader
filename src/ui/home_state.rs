@@ -2,8 +2,11 @@ use std::time::Instant;
 
 use super::home_view::LayoutTier;
 use super::preview_feed::PreviewFeed;
-use super::preview_panel::PreviewCapture;
+use super::preview_panel::PreviewPanel;
 use super::session_list::SessionList;
+use super::session_table::SessionTable;
+use super::status_bar::StatusNote;
+use super::theme::Theme;
 use crate::application::{ServiceError, SessionService};
 
 pub struct HomeState {
@@ -25,8 +28,17 @@ impl HomeState {
         &self.sessions
     }
 
-    pub fn preview(&self) -> Option<&PreviewCapture> {
-        self.preview.capture()
+    pub fn table(&self, tick: u64, theme: Theme) -> SessionTable<'_> {
+        self.sessions.table(tick, theme)
+    }
+
+    pub fn preview_panel(&self, theme: Theme) -> PreviewPanel<'_> {
+        PreviewPanel::new(self.sessions.selected(), self.preview.capture(), theme)
+    }
+
+    pub fn note(&self, tmux_prefix: &str) -> Option<String> {
+        let row = self.sessions.selected()?;
+        StatusNote::new(row, tmux_prefix).text()
     }
 
     pub fn resize(&mut self, tier: LayoutTier, service: &SessionService) {
@@ -50,6 +62,10 @@ impl HomeState {
         let rows = service.observe(persist)?;
         self.change_selection(service, |sessions| sessions.show(rows));
         Ok(())
+    }
+
+    pub fn select(&mut self, name: &str, service: &SessionService) {
+        self.change_selection(service, |sessions| sessions.select(name));
     }
 
     pub fn move_selection(&mut self, offset: isize, service: &SessionService) {

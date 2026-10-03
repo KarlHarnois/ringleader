@@ -27,14 +27,10 @@ impl<'a> UseChecks<'a> {
         let agent = self.requested_agent(requested)?;
         self.check_command(agent)?;
         self.check_worktree_root()?;
-        if !prompt.is_empty() && !agent.accepts_prompt() {
-            return Err(ServiceError::Invalid(format!(
-                "agent {} cannot take a prompt, its prompt_args has no {}",
-                agent.name(),
-                Agent::PROMPT_PLACEHOLDER
-            )));
+        match agent.prompt_refusal(prompt) {
+            Some(refusal) => Err(ServiceError::Invalid(refusal)),
+            None => Ok(agent),
         }
-        Ok(agent)
     }
 
     pub fn agent_for_restart(&self, name: &str) -> Result<&'a Agent, ServiceError> {

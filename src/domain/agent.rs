@@ -113,6 +113,17 @@ impl Agent {
             .any(|element| element.contains(Self::PROMPT_PLACEHOLDER))
     }
 
+    pub fn prompt_refusal(&self, prompt: &str) -> Option<String> {
+        if prompt.is_empty() || self.accepts_prompt() {
+            return None;
+        }
+        Some(format!(
+            "agent {} cannot take a prompt, its prompt_args has no {}",
+            self.name,
+            Self::PROMPT_PLACEHOLDER
+        ))
+    }
+
     pub fn launch_argv(&self, prompt: &str) -> Vec<String> {
         let mut argv = self.restart_argv();
         if !prompt.is_empty() {
@@ -223,6 +234,23 @@ mod tests {
         let agent = AgentFixture::with_template(&[]);
 
         assert!(!agent.accepts_prompt());
+    }
+
+    #[test]
+    fn a_prompt_for_an_agent_without_the_placeholder_is_refused() {
+        let agent = AgentFixture::with_template(&["--yes"]);
+
+        assert_eq!(
+            agent.prompt_refusal("fix the tests").as_deref(),
+            Some("agent example-agent cannot take a prompt, its prompt_args has no {prompt}")
+        );
+    }
+
+    #[test]
+    fn an_empty_prompt_is_never_refused() {
+        let agent = AgentFixture::with_template(&[]);
+
+        assert_eq!(agent.prompt_refusal(""), None);
     }
 
     #[test]

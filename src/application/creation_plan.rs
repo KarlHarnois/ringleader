@@ -6,6 +6,7 @@ use crate::domain::{
     SessionMetadata, SessionName, SessionRepo, SessionSize, SessionWorktree, TmuxAddress,
 };
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CreateRequest {
     name: String,
     repo: Repo,
@@ -44,6 +45,10 @@ impl CreateRequest {
             prompt: prompt.to_string(),
             ..self
         }
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
     }
 
     pub fn agent(&self) -> Option<&str> {

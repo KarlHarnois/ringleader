@@ -1,5 +1,3 @@
-use std::fmt::Display;
-
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
@@ -7,7 +5,6 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use super::theme::Theme;
-use crate::application::AttachOutcome;
 use crate::domain::{SessionState, SessionSummary};
 
 pub struct StatusBar<'a> {
@@ -68,44 +65,6 @@ impl StatusMessage {
             Self::Warning(_) => theme.warning(),
             Self::Error(_) => theme.error(),
         }
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct StatusReport {
-    message: Option<StatusMessage>,
-}
-
-impl StatusReport {
-    pub fn message(&self) -> Option<&StatusMessage> {
-        self.message.as_ref()
-    }
-
-    pub fn show(&mut self, message: Option<StatusMessage>) {
-        self.message = message;
-    }
-
-    pub fn error(&mut self, text: String) {
-        self.message = Some(StatusMessage::Error(text));
-    }
-
-    pub fn failure(&mut self, outcome: Result<(), impl Display>) {
-        if let Err(error) = outcome {
-            self.error(error.to_string());
-        }
-    }
-
-    pub fn outcome(&mut self, outcome: Result<(), impl Display>, success: String) {
-        self.message = Some(match outcome {
-            Ok(()) => StatusMessage::Info(success),
-            Err(error) => StatusMessage::Error(error.to_string()),
-        });
-    }
-
-    pub fn attached(&mut self, outcome: &AttachOutcome) {
-        self.message = outcome
-            .binding_warning()
-            .map(|warning| StatusMessage::Warning(warning.to_string()));
     }
 }
 

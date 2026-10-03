@@ -1,5 +1,7 @@
 pub mod action_gate;
 pub mod app;
+pub mod blocking_operation;
+pub mod dialogs;
 pub mod event_loop;
 pub mod home_state;
 pub mod home_view;
@@ -9,8 +11,10 @@ pub mod session_list;
 pub mod session_table;
 pub mod shell_runner;
 pub mod status_bar;
+pub mod status_report;
 pub mod table_columns;
 pub mod terminal_guard;
+pub mod text_fit;
 pub mod theme;
 
 pub use app::App;

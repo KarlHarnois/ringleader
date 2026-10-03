@@ -208,6 +208,9 @@ Examples: branch `ringleader/fix-auth`, tmux session `ringleader-fix-auth`, work
     │   ├── session_list.rs         # SessionList, sorted rows and name-based selection
     │   ├── preview_feed.rs         # PreviewFeed, the preview capture and its timer
     │   ├── shell_runner.rs         # ShellRunner, runs the ephemeral t shell
+    │   ├── blocking_operation.rs   # BlockingOperation, a create, delete, rename, or restart run behind a busy message
+    │   ├── status_report.rs        # StatusReport, the status bar message and how outcomes become one
+    │   ├── text_fit.rs             # TextFit, padding and ellipsis truncation
     │   ├── event_loop.rs           # EventLoop
     │   ├── terminal_guard.rs       # TerminalGuard
     │   ├── home_view.rs            # HomeView
@@ -219,7 +222,13 @@ Examples: branch `ringleader/fix-auth`, tmux session `ringleader-fix-auth`, work
     │   ├── theme.rs                # Theme
     │   └── dialogs/
     │       ├── mod.rs
+    │       ├── dialog.rs                # Dialog, the open dialog, its key routing and placement
+    │       ├── text_field.rs            # TextField, typing and paste rules for name, prompt, and path fields
     │       ├── new_session_dialog.rs    # NewSessionDialog
+    │       ├── repo_picker.rs           # RepoPicker, the n dialog's repo list and its actions
+    │       ├── repo_scan.rs             # RepoScan, one discover_repos run and its result
+    │       ├── scope_input.rs           # ScopeInput, the typed path that changes the scope
+    │       ├── agent_picker.rs          # AgentPicker, the n dialog's agent list
     │       ├── delete_session_dialog.rs # DeleteSessionDialog
     │       ├── rename_session_dialog.rs # RenameSessionDialog
     │       └── add_repo_dialog.rs       # AddRepoDialog
