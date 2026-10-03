@@ -1,0 +1,64 @@
+use std::fmt;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct BaseBranch(String);
+
+impl BaseBranch {
+    pub fn new(name: &str) -> Option<Self> {
+        let is_blank = name.trim().is_empty();
+        (!is_blank).then(|| Self(name.to_string()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn local_ref(&self) -> String {
+        format!("refs/heads/{}", self.0)
+    }
+
+    pub fn remote_tracking_ref(&self) -> String {
+        format!("refs/remotes/{}", self.0)
+    }
+
+    pub fn origin_suggestion(&self) -> String {
+        format!("origin/{}", self.0)
+    }
+}
+
+impl fmt::Display for BaseBranch {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_blank_name_is_no_base_branch() {
+        assert_eq!(BaseBranch::new("  "), None);
+    }
+
+    #[test]
+    fn names_a_local_branch_ref_rather_than_the_bare_name() {
+        let base = BaseBranch::new("main").unwrap();
+
+        assert_eq!(base.local_ref(), "refs/heads/main");
+    }
+
+    #[test]
+    fn names_a_remote_tracking_ref() {
+        let base = BaseBranch::new("origin/main").unwrap();
+
+        assert_eq!(base.remote_tracking_ref(), "refs/remotes/origin/main");
+    }
+
+    #[test]
+    fn suggests_the_origin_copy() {
+        let base = BaseBranch::new("develop").unwrap();
+
+        assert_eq!(base.origin_suggestion(), "origin/develop");
+    }
+}
