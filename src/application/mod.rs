@@ -15,9 +15,11 @@ pub mod session_lifecycle;
 pub mod session_monitor;
 pub mod session_reconciler;
 pub mod session_renaming;
+pub mod session_restart;
 pub mod session_service;
 pub mod use_checks;
 pub mod worktree_containment;
+pub mod worktree_inspection;
 
 pub use creation_plan::CreateRequest;
 pub use delete_impact::{DeleteConfirmation, DeleteImpact};

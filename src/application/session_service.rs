@@ -159,6 +159,16 @@ impl SessionService {
         Ok(renamed)
     }
 
+    pub fn restart_session(&mut self, name: &str) -> Result<(), ServiceError> {
+        let reconciliation = self.reconcile()?;
+        let config_path = self.config_path();
+        let restarted =
+            self.lifecycle
+                .restart(&reconciliation, name, self.config(), &config_path)?;
+        self.entries = reconciliation.entries_with(name, restarted);
+        Ok(())
+    }
+
     pub fn attach(&mut self, name: &str, mode: ReturnMode) -> Result<AttachOutcome, ServiceError> {
         let reconciliation = self.reconcile()?;
         self.access.attach(reconciliation.row(name)?, mode)

@@ -6,9 +6,11 @@ use super::reconciliation::ManagedRow;
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
 use super::worktree_containment::WorktreeContainment;
+use super::worktree_inspection::WorktreeInspection;
 use crate::domain::{Session, SessionState};
 
 pub struct DeletionGuards {
+    inspection: WorktreeInspection,
     workspace: Arc<dyn Workspace>,
     multiplexer: Arc<dyn Multiplexer>,
     host: Arc<dyn HostProbe>,
@@ -17,6 +19,7 @@ pub struct DeletionGuards {
 impl DeletionGuards {
     pub fn new(ports: &ServicePorts) -> Self {
         Self {
+            inspection: WorktreeInspection::new(ports),
             workspace: ports.repos().workspace(),
             multiplexer: ports.tmux().multiplexer(),
             host: ports.repos().host(),
@@ -51,18 +54,10 @@ impl DeletionGuards {
         self.refuse_what_git_refuses(session)
     }
 
-    pub fn listed_entry(&self, session: &Session) -> Result<Option<WorktreeEntry>, ServiceError> {
-        let canonical = self.host.canonicalize_lenient(session.worktree_path())?;
-        let worktrees = self.workspace.list_worktrees(session.repo_path())?;
-        Ok(worktrees
-            .into_iter()
-            .find(|entry| entry.path() == canonical))
-    }
-
     fn refuse_unmeasurable(&self, session: &Session) -> Result<(), ServiceError> {
         let reason = match self.workspace.validate_repo(session.repo_path()) {
             Err(error) => Some(error.to_string()),
-            Ok(_) => self.worktree_problem(session)?,
+            Ok(_) => self.inspection.leftover_problem(session)?,
         };
         match reason {
             None => Ok(()),
@@ -72,20 +67,6 @@ impl DeletionGuards {
                 session.repo_path().display()
             ))),
         }
-    }
-
-    fn worktree_problem(&self, session: &Session) -> Result<Option<String>, ServiceError> {
-        let worktree = session.worktree_path();
-        if !self.host.path_exists(worktree) {
-            return Ok(None);
-        }
-        if self.listed_entry(session)?.is_none() {
-            return Ok(Some("git does not list it as a worktree".to_string()));
-        }
-        if !self.host.is_file(&worktree.join(".git")) {
-            return Ok(Some("its .git is missing or is not a file".to_string()));
-        }
-        Ok(None)
     }
 
     fn pane_sessions(&self, row: &ManagedRow) -> Result<Vec<u32>, ServiceError> {

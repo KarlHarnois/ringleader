@@ -11,6 +11,7 @@ use super::service_ports::ServicePorts;
 use super::session_creation::SessionCreation;
 use super::session_deletion::SessionDeletion;
 use super::session_renaming::SessionRenaming;
+use super::session_restart::SessionRestart;
 use crate::domain::{Config, Session, SessionState};
 
 pub struct SessionLifecycle {
@@ -18,6 +19,7 @@ pub struct SessionLifecycle {
     creation: SessionCreation,
     renaming: SessionRenaming,
     deletion: SessionDeletion,
+    restart: SessionRestart,
 }
 
 impl SessionLifecycle {
@@ -27,6 +29,7 @@ impl SessionLifecycle {
             creation: SessionCreation::new(ports),
             renaming: SessionRenaming::new(ports),
             deletion: SessionDeletion::new(ports),
+            restart: SessionRestart::new(ports),
         }
     }
 
@@ -59,6 +62,18 @@ impl SessionLifecycle {
         let row = self.deletable_target(reconciliation, name)?;
         let remaining = reconciliation.entries_without(name);
         self.deletion.delete(&row, &remaining, confirmation)
+    }
+
+    pub fn restart(
+        &self,
+        reconciliation: &Reconciliation,
+        name: &str,
+        config: &Config,
+        config_path: &Path,
+    ) -> Result<Session, ServiceError> {
+        let row = self.managed_target(reconciliation, name)?;
+        self.restart
+            .restart(&row, reconciliation, config, config_path)
     }
 
     pub fn rename(

@@ -128,6 +128,8 @@ Examples: branch `ringleader/fix-auth`, tmux session `ringleader-fix-auth`, work
     │   ├── creation_plan.rs      # CreationPlan and CreateRequest
     │   ├── use_checks.rs         # UseChecks, the section 8 use checks
     │   ├── session_renaming.rs   # SessionRenaming: rename_session with its branch rollback
+    │   ├── session_restart.rs    # SessionRestart: restart of an Exited or Stopped session
+    │   ├── worktree_inspection.rs # WorktreeInspection, the worktree checks restart, delete, and doctor share
     │   ├── session_deletion.rs   # SessionDeletion: delete_session steps 5 to 8 and forget
     │   ├── deletion_guards.rs    # DeletionGuards: delete_session steps 2 to 4
     │   ├── delete_impact.rs      # DeleteImpact and DeleteConfirmation

@@ -8,10 +8,12 @@ use super::ports::{HostProbe, Multiplexer, ProcessInfo, SessionRegistry, Workspa
 use super::reconciliation::ManagedRow;
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
+use super::worktree_inspection::WorktreeInspection;
 use crate::domain::{Session, SessionState};
 
 pub struct SessionDeletion {
     guards: DeletionGuards,
+    inspection: WorktreeInspection,
     workspace: Arc<dyn Workspace>,
     multiplexer: Arc<dyn Multiplexer>,
     host: Arc<dyn HostProbe>,
@@ -22,6 +24,7 @@ impl SessionDeletion {
     pub fn new(ports: &ServicePorts) -> Self {
         Self {
             guards: DeletionGuards::new(ports),
+            inspection: WorktreeInspection::new(ports),
             workspace: ports.repos().workspace(),
             multiplexer: ports.tmux().multiplexer(),
             host: ports.repos().host(),
@@ -151,7 +154,7 @@ impl SessionDeletion {
         session: &Session,
         measurement: &Measurement,
     ) -> Result<(), ServiceError> {
-        if self.guards.listed_entry(session)?.is_none() {
+        if self.inspection.listed_entry(session)?.is_none() {
             return Ok(());
         }
         let Err(error) = self
@@ -161,7 +164,7 @@ impl SessionDeletion {
             return Ok(());
         };
         let error = ServiceError::from(error);
-        if self.guards.listed_entry(session)?.is_some() {
+        if self.inspection.listed_entry(session)?.is_some() {
             return Err(error.adding_context("kept the branch and the registry entry"));
         }
         Err(error.adding_context(&format!(

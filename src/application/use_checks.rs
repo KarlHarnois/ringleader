@@ -37,6 +37,17 @@ impl<'a> UseChecks<'a> {
         Ok(agent)
     }
 
+    pub fn agent_for_restart(&self, name: &str) -> Result<&'a Agent, ServiceError> {
+        let agent = self.config.agent(name).ok_or_else(|| {
+            ServiceError::Invalid(format!(
+                "agent {name} is no longer configured in {}, run ringleader doctor",
+                self.config_path.display()
+            ))
+        })?;
+        self.check_command(agent)?;
+        Ok(agent)
+    }
+
     fn requested_agent(&self, requested: Option<&str>) -> Result<&'a Agent, ServiceError> {
         let config_path = self.config_path.display();
         match requested {
