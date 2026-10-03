@@ -175,6 +175,8 @@ pub struct UnmergedCommits {
 }
 
 impl UnmergedCommits {
+    const NO_COMMIT: &'static str = "none";
+
     pub fn new(count: u64, tip: Option<&str>, head: Option<&str>) -> Self {
         Self {
             count,
@@ -193,6 +195,14 @@ impl UnmergedCommits {
 
     pub fn head(&self) -> Option<&str> {
         self.head.as_deref()
+    }
+
+    pub fn tip_label(&self) -> &str {
+        self.tip().unwrap_or(Self::NO_COMMIT)
+    }
+
+    pub fn head_label(&self) -> &str {
+        self.head().unwrap_or(Self::NO_COMMIT)
     }
 
     pub fn same_commits_as(&self, other: &UnmergedCommits) -> bool {

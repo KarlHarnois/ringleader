@@ -7,6 +7,7 @@ pub mod fake_repo_scanner;
 pub mod fake_return_binding;
 pub mod fake_session_registry;
 pub mod fake_workspace;
+pub mod service_fixture;
 
 pub use fake_clock::FakeClock;
 pub use fake_config_source::FakeConfigSource;
@@ -17,3 +18,4 @@ pub use fake_repo_scanner::FakeRepoScanner;
 pub use fake_return_binding::FakeReturnBinding;
 pub use fake_session_registry::FakeSessionRegistry;
 pub use fake_workspace::FakeWorkspace;
+pub use service_fixture::ServiceFixture;

@@ -24,4 +24,4 @@ pub use session_metadata::{SessionMetadata, SessionRepo, SessionWorktree};
 pub use session_name::{InvalidName, SessionName};
 pub use session_observation::{AgentPane, SessionObservation};
 pub use session_state::SessionState;
-pub use session_summary::{SessionSummary, UnmanagedSession};
+pub use session_summary::{PairMismatch, SessionSummary, UnmanagedSession};

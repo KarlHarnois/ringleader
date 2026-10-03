@@ -118,8 +118,22 @@ Examples: branch `ringleader/fix-auth`, tmux session `ringleader-fix-auth`, work
     ├── application/
     │   ├── mod.rs
     │   ├── session_service.rs    # SessionService, the facade the UI and CLI call
+    │   ├── service_context.rs    # ServiceContext and LoadedConfig, what main injects into the facade
+    │   ├── service_ports.rs      # ServicePorts with the StatePorts, RepoPorts, and TmuxPorts bundles
+    │   ├── service_error.rs      # ServiceError and its exit codes
     │   ├── session_lifecycle.rs  # SessionLifecycle: create, delete, rename, restart
+    │   ├── session_creation.rs   # SessionCreation: create_session with its rollbacks
+    │   ├── creation_plan.rs      # CreationPlan and CreateRequest
+    │   ├── use_checks.rs         # UseChecks, the section 8 use checks
+    │   ├── session_renaming.rs   # SessionRenaming: rename_session with its branch rollback
+    │   ├── session_deletion.rs   # SessionDeletion: delete_session steps 5 to 8 and forget
+    │   ├── deletion_guards.rs    # DeletionGuards: delete_session steps 2 to 4
+    │   ├── delete_impact.rs      # DeleteImpact and DeleteConfirmation
+    │   ├── delete_outcome.rs     # DeleteOutcome
+    │   ├── worktree_containment.rs # WorktreeContainment, shared by delete step 3 and reconciliation
     │   ├── session_monitor.rs    # SessionMonitor: reconcile, observe, diffs, preview, bell
+    │   ├── session_reconciler.rs # SessionReconciler, the section 8 reconciliation rules
+    │   ├── reconciliation.rs     # Reconciliation, the reconciled entries and rows
     │   ├── session_access.rs     # SessionAccess: attach, open_shell, return binding
     │   ├── repo_catalog.rs       # RepoCatalog: discover, add, and remove repos, read typed paths
     │   ├── doctor.rs             # Doctor
@@ -168,6 +182,7 @@ Examples: branch `ringleader/fix-auth`, tmux session `ringleader-fix-auth`, work
         ├── mod.rs
         ├── tmux_test_server.rs      # TmuxTestServer: private socket, control-mode clients, kill-server on drop
         ├── git_test_repo.rs         # GitTestRepo: hermetic git environment and fixture repos
+        ├── service_fixture.rs       # ServiceFixture: every fake wired into a SessionService
         ├── fake_session_registry.rs # FakeSessionRegistry
         ├── fake_workspace.rs        # FakeWorkspace
         ├── fake_multiplexer.rs      # FakeMultiplexer
