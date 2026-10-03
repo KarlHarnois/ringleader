@@ -15,6 +15,7 @@ pub struct App {
     rows: Vec<SessionSummary>,
     selection: Option<String>,
     message: Option<String>,
+    tick: u64,
     next_observe: Instant,
     theme: Theme,
 }
@@ -26,6 +27,7 @@ impl App {
             rows: Vec::new(),
             selection: None,
             message: None,
+            tick: 0,
             next_observe: now,
             theme: Theme,
         }
@@ -48,6 +50,7 @@ impl App {
     }
 
     pub fn on_tick(&mut self, now: Instant) {
+        self.tick = self.tick.wrapping_add(1);
         if now < self.next_observe {
             return;
         }
@@ -66,7 +69,8 @@ impl App {
     pub fn render(&self, frame: &mut Frame) {
         let [table, status] =
             Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(frame.area());
-        HomeView::new(&self.rows, self.selection.as_deref(), self.theme).render(frame, table);
+        HomeView::new(&self.rows, self.selection.as_deref(), self.tick, self.theme)
+            .render(frame, table);
         StatusBar::new(self.message.as_deref(), self.theme).render(frame, status);
     }
 
