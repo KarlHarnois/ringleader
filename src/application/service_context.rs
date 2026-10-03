@@ -7,6 +7,7 @@ pub struct ServiceContext {
     config: LoadedConfig,
     inside_tmux: bool,
     launch_directory: PathBuf,
+    home: Option<PathBuf>,
     shell: String,
 }
 
@@ -16,6 +17,7 @@ impl ServiceContext {
             config,
             inside_tmux: false,
             launch_directory: launch_directory.to_path_buf(),
+            home: None,
             shell: "sh".to_string(),
         }
     }
@@ -32,6 +34,17 @@ impl ServiceContext {
             shell: shell.to_string(),
             ..self
         }
+    }
+
+    pub fn with_home(self, home: Option<&Path>) -> Self {
+        Self {
+            home: home.map(Path::to_path_buf),
+            ..self
+        }
+    }
+
+    pub fn home(&self) -> Option<&Path> {
+        self.home.as_deref()
     }
 
     pub fn is_inside_tmux(&self) -> bool {

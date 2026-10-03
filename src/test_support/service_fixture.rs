@@ -33,6 +33,7 @@ impl ServiceFixture {
     pub const CREATED_AT: u64 = 1_700_000_000;
     pub const REPO: &'static str = "/repos/example-project";
     pub const DATA_DIR: &'static str = "/data/ringleader";
+    pub const HOME: &'static str = "/home/example";
     pub const WORKTREE_ROOT: &'static str = "/data/ringleader/worktrees";
     pub const TIP: &'static str = "feedfacefeedfacefeedfacefeedfacefeedface";
     pub const IDLE_SECONDS: u64 = 3;
@@ -290,6 +291,8 @@ impl ServiceFixture {
             Some(error) => LoadedConfig::failed(config, error.clone()),
             None => LoadedConfig::valid(config),
         };
-        ServiceContext::new(loaded, Path::new(Self::REPO)).with_inside_tmux(self.inside_tmux)
+        ServiceContext::new(loaded, Path::new(Self::REPO))
+            .with_inside_tmux(self.inside_tmux)
+            .with_home(Some(Path::new(Self::HOME)))
     }
 }

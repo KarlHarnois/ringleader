@@ -153,6 +153,7 @@ Examples: branch `ringleader/fix-auth`, tmux session `ringleader-fix-auth`, work
     │   ├── agent_launcher.rs     # AgentLauncher, the hidden __exec-agent mode, owns AgentHandoff and the exec seam
     │   ├── process_environment.rs # ProcessEnvironment, the environment snapshot main captures once
     │   ├── directory_repo_scanner.rs # DirectoryRepoScanner
+    │   ├── mount_table.rs        # MountTable, the network and FUSE mount points the scan skips
     │   ├── toml_config_source.rs # TomlConfigSource
     │   ├── json_session_registry.rs # JsonSessionRegistry
     │   ├── file_lock.rs          # FileLock

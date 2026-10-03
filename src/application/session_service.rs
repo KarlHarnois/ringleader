@@ -6,6 +6,7 @@ use super::delete_impact::{DeleteConfirmation, DeleteImpact};
 use super::delete_outcome::DeleteOutcome;
 use super::ports::{ConfigError, ConfigSource, RegistryError, SessionRegistry};
 use super::reconciliation::Reconciliation;
+use super::repo_catalog::{Pending, RepoCatalog, RepoDiscovery};
 use super::service_context::{LoadedConfig, ServiceContext};
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
@@ -22,6 +23,7 @@ pub struct SessionService {
     monitor: SessionMonitor,
     lifecycle: SessionLifecycle,
     access: SessionAccess,
+    catalog: RepoCatalog,
     inside_tmux: bool,
 }
 
@@ -31,6 +33,7 @@ impl SessionService {
             monitor: SessionMonitor::new(&ports),
             lifecycle: SessionLifecycle::new(&ports),
             access: SessionAccess::new(ports.tmux(), context.shell()),
+            catalog: RepoCatalog::new(&ports, &context),
             inside_tmux: context.is_inside_tmux(),
             config: context.into_config(),
             entries: Vec::new(),
@@ -71,6 +74,18 @@ impl SessionService {
 
     pub fn read_only_reason(&self) -> Option<&ConfigError> {
         self.config.error()
+    }
+
+    pub fn launch_directory(&self) -> &Path {
+        self.catalog.launch_directory()
+    }
+
+    pub fn discover_repos(&self, scope_directory: &Path) -> Pending<RepoDiscovery> {
+        self.catalog.discover(scope_directory, self.config())
+    }
+
+    pub fn read_typed_path(&self, input: &str) -> Pending<PathBuf> {
+        self.catalog.read_typed_path(input)
     }
 
     pub fn is_inside_tmux(&self) -> bool {

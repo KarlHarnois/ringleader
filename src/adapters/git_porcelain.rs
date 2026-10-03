@@ -81,18 +81,27 @@ impl GitPorcelain {
     }
 
     pub fn top_level(&self, path: &Path) -> Result<PathBuf, WorkspaceError> {
-        let lines = self.lines();
         let path = path.to_path_buf();
-        match lines.as_slice() {
-            [_, _, _, _] => Err(WorkspaceError::Submodule { path }),
-            [_, git_dir, common_dir] if git_dir != common_dir => {
-                Err(WorkspaceError::LinkedWorktree { path })
-            }
-            [top_level, _, _] => Ok(HostPath::new(Path::new(top_level)).canonical_lenient()),
-            _ => Err(WorkspaceError::NotARepository {
+        match self.repo_kind() {
+            Some(RepoKind::Repository(top_level)) => Ok(top_level),
+            Some(RepoKind::LinkedWorktree(_)) => Err(WorkspaceError::LinkedWorktree { path }),
+            Some(RepoKind::Submodule(_)) => Err(WorkspaceError::Submodule { path }),
+            None => Err(WorkspaceError::NotARepository {
                 path,
                 detail: "git printed no top level".to_string(),
             }),
+        }
+    }
+
+    pub fn repo_kind(&self) -> Option<RepoKind> {
+        let canonical = |text: &str| HostPath::new(Path::new(text)).canonical_lenient();
+        match self.lines().as_slice() {
+            [_, _, _, superproject] => Some(RepoKind::Submodule(canonical(superproject))),
+            [_, git_dir, common_dir] if git_dir != common_dir => {
+                Some(RepoKind::LinkedWorktree(canonical(common_dir)))
+            }
+            [top_level, _, _] => Some(RepoKind::Repository(canonical(top_level))),
+            _ => None,
         }
     }
 
@@ -129,6 +138,13 @@ impl GitPorcelain {
             _ => FileChange::Binary,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RepoKind {
+    Repository(PathBuf),
+    LinkedWorktree(PathBuf),
+    Submodule(PathBuf),
 }
 
 #[cfg(test)]
