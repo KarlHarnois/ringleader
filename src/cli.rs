@@ -2,7 +2,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -15,6 +15,17 @@ pub struct Cli {
     config: Option<PathBuf>,
     #[arg(long, global = true, value_name = "LEVEL")]
     log_level: Option<String>,
+    #[command(subcommand)]
+    command: Option<CliCommand>,
+}
+
+#[derive(Debug, Subcommand)]
+enum CliCommand {
+    #[command(name = "__exec-agent", hide = true)]
+    ExecAgent {
+        #[arg(long, value_name = "PATH")]
+        handoff: PathBuf,
+    },
 }
 
 impl Cli {
@@ -37,6 +48,13 @@ impl Cli {
 
     pub fn log_level(&self) -> Option<&str> {
         self.log_level.as_deref()
+    }
+
+    pub fn exec_agent_handoff(&self) -> Option<&Path> {
+        match &self.command {
+            Some(CliCommand::ExecAgent { handoff }) => Some(handoff),
+            None => None,
+        }
     }
 
     fn exit_code_for(error: &clap::Error) -> u8 {
@@ -72,6 +90,14 @@ mod tests {
     #[test]
     fn help_exits_zero() {
         assert_eq!(ParseFixture::exit_code(&["ringleader", "--help"]), 0);
+    }
+
+    #[test]
+    fn the_hidden_launcher_subcommand_takes_a_handoff_path() {
+        let cli = Cli::try_parse_from(["ringleader", "__exec-agent", "--handoff", "/run/h.json"])
+            .unwrap();
+
+        assert_eq!(cli.exec_agent_handoff(), Some(Path::new("/run/h.json")));
     }
 
     #[test]

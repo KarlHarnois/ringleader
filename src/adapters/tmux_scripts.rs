@@ -7,23 +7,17 @@ use super::tmux_sequence::TmuxSequence;
 use crate::application::ports::{AgentLaunch, SessionSpec};
 use crate::domain::SessionMetadata;
 
-pub struct TmuxScripts {
-    launcher: Vec<OsString>,
-}
+pub struct TmuxScripts;
 
 impl TmuxScripts {
     const SESSION_CREATED: &'static str = "ringleader-created #{session_id} #{pane_id}";
     const WINDOW_CREATED: &'static str = "ringleader-created #{window_id} #{pane_id}";
 
-    pub fn new(launcher: Vec<OsString>) -> Self {
-        Self { launcher }
-    }
-
     pub fn exact(tmux_name: &str) -> String {
         format!("={tmux_name}:")
     }
 
-    pub fn create_session(&self, spec: &SessionSpec) -> TmuxSequence {
+    pub fn create_session(spec: &SessionSpec, launcher: &[OsString]) -> TmuxSequence {
         let target = Self::exact(spec.tmux_name());
         let size = spec.size();
         let mut new_session = Self::words(&[
@@ -38,7 +32,7 @@ impl TmuxScripts {
         ]);
         new_session.extend(Self::start_in(spec.worktree()));
         new_session.extend(Self::words(&["-P", "-F", Self::SESSION_CREATED]));
-        new_session.extend(self.launcher.iter().cloned());
+        new_session.extend(launcher.iter().cloned());
         TmuxSequence::new()
             .command(new_session)
             .command(["set-option", "-p", "-t", &target, "@ringleader_agent", "1"])
@@ -54,12 +48,16 @@ impl TmuxScripts {
             ])
     }
 
-    pub fn agent_window(&self, tmux_name: &str, launch: &AgentLaunch) -> TmuxSequence {
+    pub fn agent_window(
+        tmux_name: &str,
+        launch: &AgentLaunch,
+        launcher: &[OsString],
+    ) -> TmuxSequence {
         let target = Self::exact(tmux_name);
         let mut new_window = Self::words(&["new-window", "-t", &target]);
         new_window.extend(Self::start_in(launch.worktree()));
         new_window.extend(Self::words(&["-P", "-F", Self::WINDOW_CREATED]));
-        new_window.extend(self.launcher.iter().cloned());
+        new_window.extend(launcher.iter().cloned());
         TmuxSequence::new()
             .command(new_window)
             .command(["set-option", "-p", "-t", &target, "@ringleader_agent", "1"])
@@ -73,10 +71,10 @@ impl TmuxScripts {
             ])
     }
 
-    pub fn respawn(&self, pane: &str, launch: &AgentLaunch) -> TmuxSequence {
+    pub fn respawn(pane: &str, launch: &AgentLaunch, launcher: &[OsString]) -> TmuxSequence {
         let mut respawn = Self::words(&["respawn-pane", "-t", pane]);
         respawn.extend(Self::start_in(launch.worktree()));
-        respawn.extend(self.launcher.iter().cloned());
+        respawn.extend(launcher.iter().cloned());
         TmuxSequence::new().command(respawn).command([
             "display-message",
             "-p",

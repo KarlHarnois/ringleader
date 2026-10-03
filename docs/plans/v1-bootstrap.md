@@ -153,6 +153,7 @@ Examples: branch `ringleader/fix-auth`, tmux session `ringleader-fix-auth`, work
     ├── adapters/
     │   ├── mod.rs
     │   ├── agent_launcher.rs     # AgentLauncher, the hidden __exec-agent mode, owns AgentHandoff and the exec seam
+    │   ├── agent_handoff.rs      # AgentHandoff, the handoff file a launch writes and the launcher takes
     │   ├── process_environment.rs # ProcessEnvironment, the environment snapshot main captures once
     │   ├── directory_repo_scanner.rs # DirectoryRepoScanner
     │   ├── mount_table.rs        # MountTable, the network and FUSE mount points the scan skips

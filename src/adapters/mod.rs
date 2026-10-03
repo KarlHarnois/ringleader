@@ -1,3 +1,5 @@
+pub mod agent_handoff;
+pub mod agent_launcher;
 pub mod binding_records;
 pub mod bounded_command;
 pub mod caller_process;

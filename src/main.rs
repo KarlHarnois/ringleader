@@ -19,6 +19,8 @@ use std::time::Instant;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
+use adapters::agent_handoff::AgentHandoff;
+use adapters::agent_launcher::{AgentLauncher, LauncherCommand, ProcessExec};
 use adapters::caller_process::CallerProcess;
 use adapters::directory_repo_scanner::DirectoryRepoScanner;
 use adapters::file_lock::FileLock;
@@ -72,7 +74,15 @@ impl CompositionRoot {
             Ok(cli) => cli,
             Err(code) => return code,
         };
+        if let Some(handoff) = cli.exec_agent_handoff() {
+            return self.exec_agent(handoff);
+        }
         self.run_tui(&cli)
+    }
+
+    fn exec_agent(&self, handoff: &Path) -> ExitCode {
+        let mut launcher = AgentLauncher::new(&self.environment, Box::new(ProcessExec));
+        Self::fail(&launcher.launch(handoff).to_string())
     }
 
     fn run_tui(&self, cli: &Cli) -> ExitCode {
@@ -83,6 +93,7 @@ impl CompositionRoot {
                 state_directory.display()
             ));
         }
+        self.handoff().delete_stale();
         let mut lock = FileLock::new(&state_directory.join("lock"));
         if let Err(error) = lock.acquire_lifetime() {
             return Self::lock_failure(&error);
@@ -187,9 +198,14 @@ impl CompositionRoot {
         .removing_env_names(env_names)
     }
 
-    fn launcher(&self) -> Vec<OsString> {
+    fn launcher(&self) -> LauncherCommand {
         let executable = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("ringleader"));
-        vec![executable.into_os_string(), OsString::from("__exec-agent")]
+        let prefix = vec![executable.into_os_string(), OsString::from("__exec-agent")];
+        LauncherCommand::new(prefix, self.handoff())
+    }
+
+    fn handoff(&self) -> AgentHandoff {
+        AgentHandoff::new(&self.paths.handoff_directory(), &self.environment)
     }
 
     fn shell(&self) -> String {
@@ -219,6 +235,7 @@ struct XdgPaths {
     config_home: PathBuf,
     state_home: PathBuf,
     data_home: PathBuf,
+    runtime_directory: Option<PathBuf>,
 }
 
 impl XdgPaths {
@@ -240,6 +257,10 @@ impl XdgPaths {
             config_home: base("XDG_CONFIG_HOME", ".config"),
             state_home: base("XDG_STATE_HOME", ".local/state"),
             data_home: base("XDG_DATA_HOME", ".local/share"),
+            runtime_directory: environment
+                .get("XDG_RUNTIME_DIR")
+                .map(PathBuf::from)
+                .filter(|path| path.is_absolute()),
             home,
         }
     }
@@ -258,5 +279,10 @@ impl XdgPaths {
 
     fn worktree_root(&self) -> PathBuf {
         self.data_home.join(Self::APPLICATION).join("worktrees")
+    }
+
+    fn handoff_directory(&self) -> PathBuf {
+        let base = self.runtime_directory.as_ref().unwrap_or(&self.state_home);
+        base.join(Self::APPLICATION).join("handoff")
     }
 }

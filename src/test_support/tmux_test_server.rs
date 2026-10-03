@@ -8,6 +8,8 @@ use std::time::{Duration, Instant};
 
 use tempfile::TempDir;
 
+use crate::adapters::agent_handoff::AgentHandoff;
+use crate::adapters::agent_launcher::LauncherCommand;
 use crate::adapters::process_environment::ProcessEnvironment;
 use crate::adapters::tmux_command::TmuxCommand;
 use crate::adapters::tmux_multiplexer::TmuxMultiplexer;
@@ -102,15 +104,28 @@ impl TmuxTestServer {
     }
 
     pub fn multiplexer(&self) -> TmuxMultiplexer {
-        TmuxMultiplexer::new(self.command(), Self::stand_in(), false)
+        TmuxMultiplexer::new(self.command(), self.stand_in(), false)
     }
 
     pub fn inside_multiplexer(&self) -> TmuxMultiplexer {
-        TmuxMultiplexer::new(self.command(), Self::stand_in(), true)
+        TmuxMultiplexer::new(self.command(), self.stand_in(), true)
     }
 
-    pub fn stand_in() -> Vec<OsString> {
-        Self::STAND_IN.iter().map(OsString::from).collect()
+    pub fn stand_in(&self) -> LauncherCommand {
+        self.launcher(Self::STAND_IN.iter().map(OsString::from).collect())
+    }
+
+    pub fn launcher(&self, prefix: Vec<OsString>) -> LauncherCommand {
+        let handoff = AgentHandoff::new(&self.handoff_directory(), &self.environment());
+        LauncherCommand::new(prefix, handoff)
+    }
+
+    pub fn handoff_directory(&self) -> PathBuf {
+        self.directory().join("handoff")
+    }
+
+    pub fn handoff_files(&self) -> usize {
+        std::fs::read_dir(self.handoff_directory()).map_or(0, |entries| entries.count())
     }
 
     pub fn tmux(&self, args: &[&str]) -> Output {
