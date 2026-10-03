@@ -37,3 +37,21 @@ Section 6 describes the startup repair as restoring only "when the pid matches a
 ### tmux 3.7 release used
 
 Section 6 names 3.7b as the 3.7 release the binding forms were checked on. `nixpkgs/nixos-unstable#tmux` now provides tmux 3.7c. The milestone 6 run accepted it, since the milestone asks for "a 3.7 release". All 88 `adapters::tmux` tests passed on it with none skipped.
+
+## Milestone 9
+
+### Shell of the sessions made for manual runs
+
+Section 0 says:
+
+> Before the binary runs, start the server with the prefix and `tmux -u -S <tempdir>/tmux-<uid>/default -f /dev/null new-session -d -s holder`
+
+and milestone 9 says:
+
+> A session made on the private server with `new-session -d -s ringleader-demo` lists as `Unmanaged`
+
+Section 0 also says never to touch the owner's config. Without a shell command, tmux starts the owner's login shell, which ran the owner's shell startup files and raised a tool's trust prompt in the throwaway pane. Nothing answered the prompt and nothing changed. Choice: from then on, manual runs pass `sh` as the pane command of `holder` and of the demo session, which keeps the owner's startup files out of the throwaway server.
+
+### Clearing the screen at startup
+
+After `script` dies by SIGKILL, it cannot restore the outer terminal, which stays on the alternate screen. The next TUI then drew its first frame over leftover text, because ratatui assumes a blank screen. The TUI now clears the terminal once before its first frame. The milestone 9 checks passed after the change: attach, `C-b C-z`, `fg`, `C-b d`, and `q` on the outside-tmux path, `kill-pane` ending the TUI in 0.16 seconds, and SIGKILL to `script` ending it in 0.16 seconds, each followed by a run that took the lock.

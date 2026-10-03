@@ -8,11 +8,17 @@ description = "A tmux session manager for Claude and opencode"
 repository = "https://github.com/KarlHarnois/ringleader"
 
 [dependencies]
+clap = { version = "4.6.7", features = ["derive"] }
+crossterm = { version = "0.29.0", features = ["use-dev-tty"] }
+dirs = "7.0.0"
 libc = "0.2.190"
 log = "0.4.34"
+ratatui = "0.30.2"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
+signal-hook = "0.4.4"
 thiserror = "2.0.21"
+toml = "1.1.6"
 
 [dev-dependencies]
 tempfile = "3.27.0"

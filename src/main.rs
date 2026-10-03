@@ -2,8 +2,261 @@
 
 mod adapters;
 mod application;
+mod cli;
 mod domain;
 #[cfg(test)]
 mod test_support;
+mod ui;
 
-fn main() {}
+use std::ffi::OsString;
+use std::fs;
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
+use std::sync::Arc;
+use std::time::Instant;
+
+use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
+
+use adapters::caller_process::CallerProcess;
+use adapters::directory_repo_scanner::DirectoryRepoScanner;
+use adapters::file_lock::FileLock;
+use adapters::git_runner::GitRunner;
+use adapters::json_session_registry::JsonSessionRegistry;
+use adapters::process_environment::{ProcessEnvironment, ProgramPaths};
+use adapters::signal_flags::SignalFlags;
+use adapters::system_clock::SystemClock;
+use adapters::system_host_probe::SystemHostProbe;
+use adapters::tmux_command::TmuxCommand;
+use adapters::tmux_multiplexer::TmuxMultiplexer;
+use adapters::tmux_return_binding::TmuxReturnBinding;
+use adapters::toml_config_source::TomlConfigSource;
+use adapters::{BoundedCommand, Deadlines, GitWorkspace};
+use application::ports::{ConfigSource, Lock, LockError};
+use application::{
+    CorruptRegistry, LoadedConfig, RepoPorts, ServiceContext, ServicePorts, SessionService,
+    StatePorts, TmuxPorts,
+};
+use cli::Cli;
+use ui::{App, CrosstermInput, CrosstermScreenMode, EventLoop, TerminalGuard};
+
+fn main() -> ExitCode {
+    CompositionRoot::capture().run()
+}
+
+struct CompositionRoot {
+    environment: ProcessEnvironment,
+    programs: ProgramPaths,
+    paths: XdgPaths,
+    launch_directory: PathBuf,
+}
+
+impl CompositionRoot {
+    const FAILURE: u8 = 1;
+    const CONFLICT: u8 = 3;
+
+    fn capture() -> Self {
+        let snapshot = ProcessEnvironment::capture();
+        let (programs, environment) = snapshot.split_program_paths();
+        Self {
+            paths: XdgPaths::from_environment(&environment),
+            launch_directory: std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")),
+            environment,
+            programs,
+        }
+    }
+
+    fn run(self) -> ExitCode {
+        let cli = match Cli::parse_arguments(std::env::args_os()) {
+            Ok(cli) => cli,
+            Err(code) => return code,
+        };
+        self.run_tui(&cli)
+    }
+
+    fn run_tui(&self, cli: &Cli) -> ExitCode {
+        let state_directory = self.paths.state_directory();
+        if let Err(error) = fs::create_dir_all(&state_directory) {
+            return Self::fail(&format!(
+                "cannot create {}: {error}",
+                state_directory.display()
+            ));
+        }
+        let mut lock = FileLock::new(&state_directory.join("lock"));
+        if let Err(error) = lock.acquire_lifetime() {
+            return Self::lock_failure(&error);
+        }
+        let config_source = self.config_source(cli);
+        let loaded = Self::load(&config_source);
+        let startup_message = loaded.error().map(ToString::to_string);
+        let inside_tmux = self.tmux(&[]).is_inside_client(&CallerProcess::read());
+        let mut service = self.service(config_source, loaded, inside_tmux);
+        let registry_warning = match service.load_registry(CorruptRegistry::MoveAside) {
+            Ok(warning) => warning,
+            Err(error) => return Self::fail(&error.to_string()),
+        };
+        let app =
+            App::new(service, Instant::now()).with_message(registry_warning.or(startup_message));
+        match Self::run_event_loop(app) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => Self::fail(&error.to_string()),
+        }
+    }
+
+    fn run_event_loop(mut app: App) -> io::Result<()> {
+        let signals = SignalFlags::register()?;
+        let guard = TerminalGuard::enter(Box::new(CrosstermScreenMode))?;
+        guard.state().install_panic_hook();
+        let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
+        terminal.clear()?;
+        EventLoop::new(terminal, CrosstermInput, signals, guard.state()).run(&mut app)
+    }
+
+    fn config_source(&self, cli: &Cli) -> TomlConfigSource {
+        let path = cli
+            .config_path()
+            .map(Path::to_path_buf)
+            .or_else(|| self.environment.get("RINGLEADER_CONFIG").map(PathBuf::from))
+            .unwrap_or_else(|| self.paths.config_file());
+        TomlConfigSource::new(&path, &self.paths.worktree_root())
+    }
+
+    fn load(source: &TomlConfigSource) -> LoadedConfig {
+        match source.load() {
+            Ok(config) => LoadedConfig::valid(config),
+            Err(error) => LoadedConfig::failed(source.defaults(), error),
+        }
+    }
+
+    fn service(
+        &self,
+        config_source: TomlConfigSource,
+        loaded: LoadedConfig,
+        inside_tmux: bool,
+    ) -> SessionService {
+        let env_names = loaded.config().agent_env_union();
+        let tmux = self.tmux(&env_names);
+        let bounded = BoundedCommand::new(Deadlines::standard());
+        let clock = Arc::new(SystemClock);
+        let state_directory = self.paths.state_directory();
+        let tmux_prefix = loaded.config().naming().tmux_prefix().to_string();
+        let state = StatePorts::new(
+            Arc::new(JsonSessionRegistry::new(
+                &state_directory.join("sessions.json"),
+                clock.clone(),
+            )),
+            Arc::new(config_source),
+            clock,
+        );
+        let repos = RepoPorts::new(
+            Arc::new(GitWorkspace::new(self.programs.git(), bounded)),
+            Arc::new(DirectoryRepoScanner::new(
+                GitRunner::new(self.programs.git(), bounded),
+                DirectoryRepoScanner::VISIT_CAP,
+                Path::new(DirectoryRepoScanner::MOUNT_TABLE),
+            )),
+            Arc::new(SystemHostProbe::new(&self.environment)),
+        );
+        let tmux_ports = TmuxPorts::new(
+            Arc::new(TmuxMultiplexer::new(
+                tmux.clone(),
+                self.launcher(),
+                inside_tmux,
+            )),
+            Arc::new(TmuxReturnBinding::new(
+                tmux,
+                &state_directory.join("bindings.json"),
+                inside_tmux,
+                &tmux_prefix,
+            )),
+        );
+        let context = ServiceContext::new(loaded, &self.launch_directory)
+            .with_inside_tmux(inside_tmux)
+            .with_home(self.paths.home())
+            .with_shell(&self.shell());
+        SessionService::new(ServicePorts::new(state, repos, tmux_ports), context)
+    }
+
+    fn tmux(&self, env_names: &[String]) -> TmuxCommand {
+        TmuxCommand::new(
+            self.programs.tmux(),
+            &self.environment,
+            BoundedCommand::new(Deadlines::standard()),
+        )
+        .removing_env_names(env_names)
+    }
+
+    fn launcher(&self) -> Vec<OsString> {
+        let executable = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("ringleader"));
+        vec![executable.into_os_string(), OsString::from("__exec-agent")]
+    }
+
+    fn shell(&self) -> String {
+        self.environment
+            .get("SHELL")
+            .map(|shell| shell.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "sh".to_string())
+    }
+
+    fn lock_failure(error: &LockError) -> ExitCode {
+        let code = match error {
+            LockError::Held { .. } => Self::CONFLICT,
+            LockError::Io { .. } => Self::FAILURE,
+        };
+        let _ = writeln!(io::stderr(), "ringleader: {error}");
+        ExitCode::from(code)
+    }
+
+    fn fail(message: &str) -> ExitCode {
+        let _ = writeln!(io::stderr(), "ringleader: {message}");
+        ExitCode::from(Self::FAILURE)
+    }
+}
+
+struct XdgPaths {
+    home: Option<PathBuf>,
+    config_home: PathBuf,
+    state_home: PathBuf,
+    data_home: PathBuf,
+}
+
+impl XdgPaths {
+    const APPLICATION: &'static str = "ringleader";
+
+    fn from_environment(environment: &ProcessEnvironment) -> Self {
+        let home = environment
+            .get("HOME")
+            .map(PathBuf::from)
+            .or_else(dirs::home_dir);
+        let base = |variable: &str, fallback: &str| {
+            environment
+                .get(variable)
+                .map(PathBuf::from)
+                .filter(|path| path.is_absolute())
+                .unwrap_or_else(|| home.clone().unwrap_or_default().join(fallback))
+        };
+        Self {
+            config_home: base("XDG_CONFIG_HOME", ".config"),
+            state_home: base("XDG_STATE_HOME", ".local/state"),
+            data_home: base("XDG_DATA_HOME", ".local/share"),
+            home,
+        }
+    }
+
+    fn home(&self) -> Option<&Path> {
+        self.home.as_deref()
+    }
+
+    fn config_file(&self) -> PathBuf {
+        self.config_home.join(Self::APPLICATION).join("config.toml")
+    }
+
+    fn state_directory(&self) -> PathBuf {
+        self.state_home.join(Self::APPLICATION)
+    }
+
+    fn worktree_root(&self) -> PathBuf {
+        self.data_home.join(Self::APPLICATION).join("worktrees")
+    }
+}

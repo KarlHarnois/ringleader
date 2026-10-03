@@ -123,6 +123,7 @@ impl TmuxTestServer {
             .arg(&self.socket)
             .args(["-f", "/dev/null"])
             .args(args)
+            .current_dir(self.directory())
             .stdin(Stdio::null())
             .output()
             .expect("tmux runs")

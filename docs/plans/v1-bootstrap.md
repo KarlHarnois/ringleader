@@ -114,7 +114,9 @@ Examples: branch `ringleader/fix-auth`, tmux session `ringleader-fix-auth`, work
     │   ├── repo.rs               # Repo
     │   ├── repo_name.rs          # RepoName
     │   ├── base_branch.rs        # BaseBranch
-    │   └── config.rs             # Config, the parsed config.toml
+    │   ├── config.rs             # Config, the parsed config.toml
+    │   ├── config_draft.rs       # ConfigDraft, the raw config values the Config constructor checks
+    │   └── naming_scheme.rs      # NamingScheme, the worktree root and prefixes a session records
     ├── application/
     │   ├── mod.rs
     │   ├── session_service.rs    # SessionService, the facade the UI and CLI call
@@ -169,6 +171,7 @@ Examples: branch `ringleader/fix-auth`, tmux session `ringleader-fix-auth`, work
     │   ├── submodule_commits.rs  # SubmoduleCommits, the submodule walk of unmerged_commits
     │   ├── system_clock.rs       # SystemClock, reads `SystemTime`
     │   ├── system_host_probe.rs  # SystemHostProbe
+    │   ├── signal_flags.rs       # SignalFlags, the SIGHUP, SIGINT, SIGTERM, and SIGQUIT flags
     │   ├── durable_file.rs       # DurableFile, synced temp file renamed over the target
     │   ├── tmux_command.rs       # TmuxCommand, socket and config args, `-u` and `-N`, child environment, labeled output, exact targets, `#` and `;` escaping, CallerProcess
     │   ├── caller_process.rs     # CallerProcess, the parent chain is_inside_client reads from /proc
@@ -210,6 +213,7 @@ Examples: branch `ringleader/fix-auth`, tmux session `ringleader-fix-auth`, work
         ├── fake_host_probe.rs       # FakeHostProbe
         ├── fake_clock.rs            # FakeClock
         ├── recording_screen_mode.rs # RecordingScreenMode, the screen mode that records each switch
+        ├── ui_harness.rs            # UiHarness: scripted input and a TestBackend wrapper for EventLoop tests
         └── fake_lock.rs             # FakeLock
 ```
 

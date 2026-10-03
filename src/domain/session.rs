@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use super::config::NamingScheme;
+use super::naming_scheme::NamingScheme;
 use super::repo_name::RepoName;
 use super::session_metadata::SessionMetadata;
 use super::session_name::SessionName;

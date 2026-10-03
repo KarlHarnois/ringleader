@@ -1,7 +1,9 @@
 pub mod agent;
 pub mod base_branch;
 pub mod config;
+pub mod config_draft;
 pub mod diff_stat;
+pub mod naming_scheme;
 pub mod repo;
 pub mod repo_name;
 pub mod session;
@@ -14,8 +16,10 @@ pub mod session_summary;
 
 pub use agent::Agent;
 pub use base_branch::BaseBranch;
-pub use config::{Config, NamingScheme, RefreshIntervals, SessionSize};
+pub use config::{Config, RefreshIntervals, SessionSize};
+pub use config_draft::{ConfigDraft, RepoDraft};
 pub use diff_stat::{DiffStat, FileChange};
+pub use naming_scheme::NamingScheme;
 pub use repo::{Repo, RepoScope};
 pub use repo_name::RepoName;
 pub use session::{Registration, Session, TmuxAddress};

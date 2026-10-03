@@ -1,0 +1,26 @@
+branch_prefix = "ringleader/"
+tmux_prefix = "ringleader-"
+state_poll_ms = 1000
+preview_refresh_ms = 750
+diff_refresh_ms = 3000
+activity_idle_seconds = 3
+session_size = "160x48"
+bell_on_waiting = false
+scan_depth = 3
+
+[[repos]]
+name = "example-project"
+path = "/home/user/projects/example-project"
+base_branch = "main"
+
+[[agents]]
+name = "claude"
+command = "claude"
+env = ["ANTHROPIC_API_KEY"]
+prompt_args = ["{prompt}"]
+
+[[agents]]
+name = "opencode"
+command = "opencode"
+env = ["OPENAI_API_KEY"]
+prompt_args = ["--prompt={prompt}"]
