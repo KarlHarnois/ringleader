@@ -203,6 +203,10 @@ Examples: branch `ringleader/fix-auth`, tmux session `ringleader-fix-auth`, work
     ├── ui/
     │   ├── mod.rs
     │   ├── app.rs                  # App
+    │   ├── action_gate.rs          # ActionGate, which actions the selected row allows
+    │   ├── home_state.rs           # HomeState, the polled rows, selection, and preview
+    │   ├── session_list.rs         # SessionList, sorted rows and name-based selection
+    │   ├── preview_feed.rs         # PreviewFeed, the preview capture and its timer
     │   ├── event_loop.rs           # EventLoop
     │   ├── terminal_guard.rs       # TerminalGuard
     │   ├── home_view.rs            # HomeView

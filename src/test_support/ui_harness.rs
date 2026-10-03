@@ -9,7 +9,7 @@ use ratatui::backend::{Backend, ClearType, TestBackend, WindowSize};
 use ratatui::buffer::{Buffer, Cell};
 use ratatui::layout::{Position, Size};
 
-use super::{RecordingScreenMode, ServiceFixture};
+use super::{FakeMultiplexer, RecordingScreenMode, ServiceFixture};
 use crate::adapters::signal_flags::SignalFlags;
 use crate::ui::App;
 use crate::ui::event_loop::{EventLoop, InputSource};
@@ -33,6 +33,15 @@ impl UiHarness {
             mode,
             guard,
         }
+    }
+
+    pub fn exited_session_fixture(name: &str) -> ServiceFixture {
+        let session = ServiceFixture::session(name);
+        ServiceFixture::new()
+            .with_sessions(std::slice::from_ref(&session))
+            .with_workspace(ServiceFixture::workspace_for(&[&session]))
+            .with_host(ServiceFixture::host_for(&[&session]))
+            .with_multiplexer(FakeMultiplexer::new().with_live(ServiceFixture::exited(&session)))
     }
 
     pub fn app(fixture: &ServiceFixture) -> App {
@@ -84,6 +93,13 @@ impl ScriptedInput {
         }
     }
 
+    pub fn then_after_a_pause(mut self, events: Vec<Event>) -> Self {
+        self.events.push_back(Ok(None));
+        self.events
+            .extend(events.into_iter().map(|event| Ok(Some(event))));
+        self
+    }
+
     pub fn failing() -> Self {
         Self {
             events: VecDeque::from([Err(io::Error::other("the terminal hung up"))]),
@@ -92,10 +108,12 @@ impl ScriptedInput {
 }
 
 impl InputSource for ScriptedInput {
-    fn next_event(&mut self, _timeout: Duration) -> io::Result<Option<Event>> {
-        self.events
-            .pop_front()
-            .unwrap_or_else(|| Ok(Some(UiHarness::character('q'))))
+    fn next_event(&mut self, timeout: Duration) -> io::Result<Option<Event>> {
+        match self.events.pop_front() {
+            Some(event) => event,
+            None if timeout.is_zero() => Ok(None),
+            None => Ok(Some(UiHarness::character('q'))),
+        }
     }
 }
 
@@ -103,6 +121,7 @@ pub struct FixtureBackend {
     inner: TestBackend,
     failing_draws: bool,
     clears: usize,
+    frames: Vec<String>,
 }
 
 impl FixtureBackend {
@@ -111,6 +130,7 @@ impl FixtureBackend {
             inner: TestBackend::new(width, height),
             failing_draws: false,
             clears: 0,
+            frames: Vec::new(),
         }
     }
 
@@ -123,6 +143,10 @@ impl FixtureBackend {
 
     pub fn clears(&self) -> usize {
         self.clears
+    }
+
+    pub fn frames(&self) -> &[String] {
+        &self.frames
     }
 
     pub fn buffer(&self) -> &Buffer {
@@ -195,6 +219,7 @@ impl Backend for FixtureBackend {
     }
 
     fn flush(&mut self) -> io::Result<()> {
+        self.frames.push(self.text());
         self.inner.flush().map_err(io::Error::other)
     }
 }

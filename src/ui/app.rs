@@ -3,47 +3,41 @@ use std::time::Instant;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind};
 use ratatui::Frame;
 
+use super::action_gate::ActionGate;
+use super::home_state::HomeState;
 use super::home_view::{HomeView, LayoutTier};
-use super::preview_panel::{PreviewCapture, PreviewPanel};
-use super::session_table::SessionTable;
-use super::status_bar::{StatusBar, StatusNote};
+use super::preview_panel::PreviewPanel;
+use super::status_bar::{StatusBar, StatusMessage, StatusNote};
 use super::theme::Theme;
-use crate::application::{ReturnMode, SessionService};
-use crate::domain::{SessionState, SessionSummary};
+use crate::application::{ReturnMode, ServiceError, SessionService};
 
 pub struct App {
     service: SessionService,
-    rows: Vec<SessionSummary>,
-    selection: Option<String>,
-    message: Option<String>,
-    preview: Option<PreviewCapture>,
-    tier: LayoutTier,
+    home: HomeState,
+    message: Option<StatusMessage>,
     tick: u64,
-    next_observe: Instant,
-    next_preview: Instant,
     theme: Theme,
 }
 
 impl App {
-    const STOPPED: &'static str = "the tmux session is stopped";
+    const RELOADED: &'static str = "Reloaded the config and the registry.";
+    const RELOAD_FAILED: &'static str = "reload failed, kept the previous config";
 
     pub fn new(service: SessionService, now: Instant) -> Self {
         Self {
             service,
-            rows: Vec::new(),
-            selection: None,
+            home: HomeState::new(now),
             message: None,
-            preview: None,
-            tier: LayoutTier::TooSmall,
             tick: 0,
-            next_observe: now,
-            next_preview: now,
             theme: Theme,
         }
     }
 
     pub fn with_message(self, message: Option<String>) -> Self {
-        Self { message, ..self }
+        Self {
+            message: message.map(StatusMessage::Error),
+            ..self
+        }
     }
 
     pub fn is_inside_tmux(&self) -> bool {
@@ -62,41 +56,45 @@ impl App {
     }
 
     pub fn resize(&mut self, width: u16, height: u16) {
-        self.tier = LayoutTier::for_size(width, height);
-        self.refresh_preview();
+        self.home
+            .resize(LayoutTier::for_size(width, height), &self.service);
     }
 
     pub fn on_tick(&mut self, now: Instant) {
         self.tick = self.tick.wrapping_add(1);
-        let intervals = self.service.config().intervals();
-        if now >= self.next_observe {
-            self.next_observe = now + intervals.state_poll();
-            self.observe();
-        }
-        if now >= self.next_preview {
-            self.next_preview = now + intervals.preview_refresh();
-            self.refresh_preview();
-        }
+        let outcome = self.home.tick(now, &mut self.service);
+        self.report_failure(outcome);
     }
 
     pub fn attach(&mut self, name: &str) {
-        match self.service.attach(name, ReturnMode::None) {
-            Ok(outcome) => self.message = outcome.binding_warning().map(str::to_string),
-            Err(error) => self.message = Some(error.to_string()),
-        }
+        self.message = match self.service.attach(name, ReturnMode::None) {
+            Ok(outcome) => outcome
+                .binding_warning()
+                .map(|warning| StatusMessage::Warning(warning.to_string())),
+            Err(error) => Some(StatusMessage::Error(error.to_string())),
+        };
         self.observe();
     }
 
+    pub fn perform(&mut self, operation: BlockingOperation) {
+        match operation {
+            BlockingOperation::Restart(name) => self.restart(&name),
+        }
+    }
+
     pub fn render(&self, frame: &mut Frame) {
-        let selected = self.selected_row();
-        let table = SessionTable::new(&self.rows, self.selection.as_deref(), self.tick, self.theme);
-        let preview = PreviewPanel::new(selected, self.preview.as_ref(), self.theme);
+        let sessions = self.home.sessions();
+        let selected = sessions.selected();
         let prefix = self.service.config().naming().tmux_prefix();
-        let note = selected.and_then(|row| StatusNote::new(row, prefix).text());
         let status = StatusBar::new(self.theme)
-            .with_message(self.message.as_deref())
-            .with_note(note);
-        HomeView::new(table, preview, status).render(frame);
+            .with_message(self.message.as_ref())
+            .with_note(selected.and_then(|row| StatusNote::new(row, prefix).text()));
+        HomeView::new(
+            sessions.table(self.tick, self.theme),
+            PreviewPanel::new(selected, self.home.preview(), self.theme),
+            status,
+        )
+        .render(frame);
     }
 
     fn handle_key(&mut self, key: &KeyEvent) -> AppRequest {
@@ -105,71 +103,82 @@ impl App {
             KeyCode::Char('q') => AppRequest::Quit,
             KeyCode::Down | KeyCode::Right | KeyCode::Char('j' | 'l') => self.move_selection(1),
             KeyCode::Up | KeyCode::Left | KeyCode::Char('k' | 'h') => self.move_selection(-1),
-            KeyCode::Enter => match &self.selection {
-                Some(name) => AppRequest::Attach(name.clone()),
-                None => AppRequest::Continue,
-            },
+            KeyCode::Enter => self.request_attach(),
+            KeyCode::Char('s') => self.request_restart(),
+            KeyCode::Char('r') => self.reload(),
             _ => AppRequest::Continue,
         }
     }
 
     fn move_selection(&mut self, offset: isize) -> AppRequest {
-        let current = self.selected_index().unwrap_or(0);
-        let last = self.rows.len().saturating_sub(1);
-        let target = current.saturating_add_signed(offset).min(last);
-        self.select(self.rows.get(target).map(|row| row.name().to_string()));
+        self.home.move_selection(offset, &self.service);
         AppRequest::Continue
     }
 
-    fn select(&mut self, selection: Option<String>) {
-        if selection == self.selection {
-            return;
+    fn request_attach(&mut self) -> AppRequest {
+        match self.gate().attach() {
+            Ok(name) => AppRequest::Attach(name),
+            Err(refusal) => self.refuse(refusal),
         }
-        self.selection = selection;
-        self.refresh_preview();
     }
 
-    fn selected_index(&self) -> Option<usize> {
-        let selected = self.selection.as_deref()?;
-        self.rows.iter().position(|row| row.name() == selected)
-    }
-
-    fn selected_row(&self) -> Option<&SessionSummary> {
-        self.rows.get(self.selected_index()?)
-    }
-
-    fn refresh_preview(&mut self) {
-        self.preview = self
-            .selected_row()
-            .filter(|_| self.tier.shows_preview())
-            .map(|row| self.capture(row));
-    }
-
-    fn capture(&self, row: &SessionSummary) -> PreviewCapture {
-        if row.state() == SessionState::Stopped {
-            return PreviewCapture::Unavailable(Self::STOPPED.to_string());
+    fn request_restart(&mut self) -> AppRequest {
+        match self.gate().restart() {
+            Ok(name) => self.block(
+                format!("Restarting {name}…"),
+                BlockingOperation::Restart(name),
+            ),
+            Err(refusal) => self.refuse(refusal),
         }
-        match self.service.preview(row.tmux_name()) {
-            Ok(text) => PreviewCapture::Text(text),
-            Err(error) => PreviewCapture::Unavailable(error.to_string()),
-        }
+    }
+
+    fn gate(&self) -> ActionGate<'_> {
+        ActionGate::new(
+            self.home.sessions().selected(),
+            self.service.read_only_reason(),
+        )
+    }
+
+    fn block(&mut self, busy: String, operation: BlockingOperation) -> AppRequest {
+        self.message = Some(StatusMessage::Info(busy));
+        AppRequest::Block(operation)
+    }
+
+    fn refuse(&mut self, reason: String) -> AppRequest {
+        self.message = Some(StatusMessage::Error(reason));
+        AppRequest::Continue
+    }
+
+    fn restart(&mut self, name: &str) {
+        let outcome = self.service.restart_session(name);
+        self.observe();
+        self.message = Some(StatusMessage::reporting(
+            outcome,
+            format!("Restarted {name}."),
+        ));
+    }
+
+    fn reload(&mut self) -> AppRequest {
+        let outcome = self
+            .service
+            .reload()
+            .map_err(|error| format!("{}: {error}", Self::RELOAD_FAILED));
+        self.observe();
+        self.message = Some(StatusMessage::reporting(
+            outcome,
+            Self::RELOADED.to_string(),
+        ));
+        AppRequest::Continue
     }
 
     fn observe(&mut self) {
-        let persist = self.service.read_only_reason().is_none();
-        match self.service.observe(persist) {
-            Ok(rows) => self.show(rows),
-            Err(error) => self.message = Some(error.to_string()),
-        }
+        let outcome = self.home.observe(&mut self.service);
+        self.report_failure(outcome);
     }
 
-    fn show(&mut self, mut rows: Vec<SessionSummary>) {
-        rows.sort_by(|first, second| {
-            (first.state(), first.name()).cmp(&(second.state(), second.name()))
-        });
-        self.rows = rows;
-        if self.selected_index().is_none() {
-            self.select(self.rows.first().map(|row| row.name().to_string()));
+    fn report_failure(&mut self, outcome: Result<(), ServiceError>) {
+        if let Err(error) = outcome {
+            self.message = Some(StatusMessage::Error(error.to_string()));
         }
     }
 }
@@ -180,6 +189,12 @@ pub enum AppRequest {
     Redraw,
     Quit,
     Attach(String),
+    Block(BlockingOperation),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BlockingOperation {
+    Restart(String),
 }
 
 #[cfg(test)]
@@ -250,7 +265,21 @@ mod tests {
         }
 
         fn selected(app: &App) -> Option<String> {
-            app.selection.clone()
+            app.home.sessions().selected_name().map(str::to_string)
+        }
+
+        fn config_error() -> ConfigError {
+            ConfigError::Parse {
+                path: PathBuf::from("/config/ringleader/config.toml"),
+                detail: "expected `=`".to_string(),
+            }
+        }
+
+        fn config_with_prefix(tmux_prefix: &str) -> Config {
+            let draft = ConfigDraft::new(Path::new(ServiceFixture::WORKTREE_ROOT))
+                .tmux_prefix(tmux_prefix)
+                .agent(ServiceFixture::agent());
+            Config::new(&draft).unwrap()
         }
     }
 
@@ -330,25 +359,6 @@ mod tests {
     }
 
     #[test]
-    fn rows_sort_by_state_priority_then_name() {
-        let waiting = ServiceFixture::session("a-waiting");
-        let working = ServiceFixture::session("b-working");
-        let stopped = ServiceFixture::session("c-stopped");
-        let fixture = ServiceFixture::new()
-            .with_sessions(&[waiting.clone(), working.clone(), stopped.clone()])
-            .with_multiplexer(
-                FakeMultiplexer::new()
-                    .with_live(ServiceFixture::waiting(&waiting))
-                    .with_live(ServiceFixture::working(&working)),
-            );
-
-        let app = AppFixture::started(&fixture, 100, 28);
-        let names: Vec<&str> = app.rows.iter().map(SessionSummary::name).collect();
-
-        assert_eq!(names, ["b-working", "a-waiting", "c-stopped"]);
-    }
-
-    #[test]
     fn the_selection_follows_its_session_when_rows_reorder() {
         let fixture = AppFixture::two_waiting_sessions();
         let start = Instant::now();
@@ -358,18 +368,15 @@ mod tests {
 
         app.on_tick(start + Duration::from_secs(2));
 
-        assert_eq!(app.rows.first().unwrap().name(), "fix-auth");
+        assert_eq!(app.home.sessions().rows()[0].name(), "fix-auth");
         assert_eq!(AppFixture::selected(&app).as_deref(), Some("fix-auth"));
     }
 
     #[test]
     fn the_status_bar_explains_ctrl_q_for_a_session_under_an_earlier_prefix() {
         let session = ServiceFixture::session("fix-auth");
-        let draft = ConfigDraft::new(Path::new(ServiceFixture::WORKTREE_ROOT))
-            .tmux_prefix("agents-")
-            .agent(ServiceFixture::agent());
         let fixture = ServiceFixture::new()
-            .with_config(Config::new(&draft).unwrap())
+            .with_config(AppFixture::config_with_prefix("agents-"))
             .with_sessions(std::slice::from_ref(&session))
             .with_multiplexer(FakeMultiplexer::new().with_live(ServiceFixture::waiting(&session)));
 
@@ -396,6 +403,105 @@ mod tests {
         assert!(
             AppFixture::status_line(&app, 250).contains("Inspect it, then end it with tmux -S")
         );
+    }
+
+    #[test]
+    fn s_on_an_exited_session_asks_for_a_restart_behind_a_busy_message() {
+        let fixture = UiHarness::exited_session_fixture("fix-auth");
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        let request = app.handle_event(&UiHarness::character('s'));
+
+        assert_eq!(
+            request,
+            AppRequest::Block(BlockingOperation::Restart("fix-auth".to_string()))
+        );
+        assert_eq!(AppFixture::status_line(&app, 100), " Restarting fix-auth…");
+    }
+
+    #[test]
+    fn performing_a_restart_respawns_the_agent_and_reports_it() {
+        let fixture = UiHarness::exited_session_fixture("fix-auth");
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        app.perform(BlockingOperation::Restart("fix-auth".to_string()));
+
+        assert_eq!(fixture.multiplexer().launches().len(), 1);
+        assert_eq!(AppFixture::status_line(&app, 100), " Restarted fix-auth.");
+    }
+
+    #[test]
+    fn s_on_a_waiting_session_explains_the_refusal() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        let request = app.handle_event(&UiHarness::character('s'));
+
+        assert_eq!(request, AppRequest::Continue);
+        assert_eq!(
+            AppFixture::status_line(&app, 100),
+            " dark-mode is waiting, so it cannot be restarted."
+        );
+    }
+
+    #[test]
+    fn s_in_a_read_only_tui_shows_the_config_error_and_restarts_nothing() {
+        let fixture = UiHarness::exited_session_fixture("fix-auth")
+            .with_broken_config(AppFixture::config_error());
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        let request = app.handle_event(&UiHarness::character('s'));
+
+        assert_eq!(request, AppRequest::Continue);
+        assert!(
+            AppFixture::status_line(&app, 200).starts_with(" config error, running read-only:")
+        );
+    }
+
+    #[test]
+    fn r_reloads_the_config() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        fixture
+            .config_source()
+            .replace(AppFixture::config_with_prefix("agents-"));
+
+        AppFixture::press(&mut app, 'r');
+
+        assert_eq!(app.service.config().naming().tmux_prefix(), "agents-");
+        assert_eq!(
+            AppFixture::status_line(&app, 100),
+            " Reloaded the config and the registry."
+        );
+    }
+
+    #[test]
+    fn r_on_a_broken_file_keeps_the_previous_config_and_shows_the_error() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        fixture
+            .config_source()
+            .break_with(AppFixture::config_error());
+
+        AppFixture::press(&mut app, 'r');
+
+        assert_eq!(app.service.config(), &ServiceFixture::config());
+        assert!(
+            AppFixture::status_line(&app, 200)
+                .starts_with(" reload failed, kept the previous config:")
+        );
+    }
+
+    #[test]
+    fn r_on_a_fixed_config_lets_a_read_only_tui_restart_again() {
+        let fixture = UiHarness::exited_session_fixture("fix-auth")
+            .with_broken_config(AppFixture::config_error());
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press(&mut app, 'r');
+        let request = app.handle_event(&UiHarness::character('s'));
+
+        assert!(matches!(request, AppRequest::Block(_)));
     }
 
     #[test]

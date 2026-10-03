@@ -112,8 +112,9 @@ impl SessionService {
 
     pub fn reload(&mut self) -> Result<(), ServiceError> {
         let config = self.config_source.load()?;
+        let entries = self.registry.load()?;
         self.config = LoadedConfig::valid(config);
-        self.entries = self.registry.load()?;
+        self.entries = entries;
         Ok(())
     }
 
@@ -242,6 +243,47 @@ mod tests {
         });
 
         assert!(fixture.service().read_only_reason().is_some());
+    }
+
+    #[test]
+    fn a_reload_reads_the_config_again() {
+        let fixture = ServiceFixture::new();
+        let mut service = fixture.service();
+        let replaced = ServiceFixture::config().with_agents(Vec::new());
+        fixture.config_source().replace(replaced.clone());
+
+        service.reload().unwrap();
+
+        assert_eq!(service.config(), &replaced);
+    }
+
+    #[test]
+    fn a_reload_of_a_valid_config_ends_read_only_mode() {
+        let fixture = ServiceFixture::new().with_broken_config(ConfigError::Parse {
+            path: PathBuf::from("/config/ringleader/config.toml"),
+            detail: "expected `=`".to_string(),
+        });
+        let mut service = fixture.service();
+
+        service.reload().unwrap();
+
+        assert!(service.read_only_reason().is_none());
+    }
+
+    #[test]
+    fn a_failed_registry_load_during_a_reload_keeps_the_previous_config() {
+        let fixture = ServiceFixture::new();
+        let mut service = fixture.service();
+        fixture
+            .config_source()
+            .replace(ServiceFixture::config().with_agents(Vec::new()));
+        fixture.registry().break_loads(RegistryError::Corrupt {
+            path: PathBuf::from("/state/ringleader/sessions.json"),
+            detail: "expected value".to_string(),
+        });
+
+        assert!(service.reload().is_err());
+        assert_eq!(service.config(), &ServiceFixture::config());
     }
 
     #[test]

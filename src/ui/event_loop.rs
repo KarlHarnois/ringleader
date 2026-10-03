@@ -6,7 +6,7 @@ use crossterm::event::{self, Event};
 use ratatui::Terminal;
 use ratatui::backend::Backend;
 
-use super::app::{App, AppRequest};
+use super::app::{App, AppRequest, BlockingOperation};
 use super::terminal_guard::TerminalState;
 use crate::adapters::signal_flags::SignalFlags;
 
@@ -67,8 +67,8 @@ where
                 app.on_tick(now);
                 next_tick = now + Self::TICK;
             }
-            if let Err(error) = self.terminal.draw(|frame| app.render(frame)) {
-                return self.unless_signaled(io::Error::other(error));
+            if let Err(error) = self.draw(app) {
+                return self.unless_signaled(error);
             }
             let timeout = next_tick.saturating_duration_since(Instant::now());
             let event = match self.input.next_event(timeout) {
@@ -93,9 +93,36 @@ where
             AppRequest::Quit => return Ok(Flow::Stop),
             AppRequest::Redraw => self.clear()?,
             AppRequest::Attach(name) => self.attach(app, &name)?,
+            AppRequest::Block(operation) => self.perform(app, operation)?,
             AppRequest::Continue => {}
         }
         Ok(Flow::Continue)
+    }
+
+    fn perform(&mut self, app: &mut App, operation: BlockingOperation) -> io::Result<()> {
+        self.draw(app)?;
+        app.perform(operation);
+        self.drop_queued_input(app)
+    }
+
+    fn drop_queued_input(&mut self, app: &mut App) -> io::Result<()> {
+        let mut last_resize = None;
+        while let Some(event) = self.input.next_event(Duration::ZERO)? {
+            if matches!(event, Event::Resize(_, _)) {
+                last_resize = Some(event);
+            }
+        }
+        if let Some(resize) = last_resize {
+            self.handle(app, &resize)?;
+        }
+        Ok(())
+    }
+
+    fn draw(&mut self, app: &App) -> io::Result<()> {
+        self.terminal
+            .draw(|frame| app.render(frame))
+            .map(drop)
+            .map_err(io::Error::other)
     }
 
     fn attach(&mut self, app: &mut App, name: &str) -> io::Result<()> {
@@ -222,6 +249,56 @@ mod tests {
         let mut event_loop = harness.event_loop(ScriptedInput::events(vec![
             crossterm::event::Event::Resize(80, 24),
             UiHarness::character('q'),
+        ]));
+
+        event_loop.run(&mut app).unwrap();
+
+        assert_eq!(event_loop.backend().clears(), 1);
+    }
+
+    #[test]
+    fn a_restart_draws_the_busy_message_before_it_runs() {
+        let fixture = UiHarness::exited_session_fixture("fix-auth");
+        let harness = UiHarness::new();
+        let mut app = UiHarness::app(&fixture);
+        let mut event_loop =
+            harness.event_loop(ScriptedInput::events(vec![UiHarness::character('s')]));
+
+        event_loop.run(&mut app).unwrap();
+
+        let frames = event_loop.backend().frames();
+        assert!(
+            frames
+                .iter()
+                .any(|frame| frame.contains("Restarting fix-auth…"))
+        );
+        assert!(frames.last().unwrap().contains("Restarted fix-auth."));
+    }
+
+    #[test]
+    fn keys_queued_during_a_restart_are_dropped() {
+        let fixture = UiHarness::exited_session_fixture("fix-auth");
+        let harness = UiHarness::new();
+        let mut app = UiHarness::app(&fixture);
+        let input =
+            ScriptedInput::events(vec![UiHarness::character('s'), UiHarness::character('q')])
+                .then_after_a_pause(vec![UiHarness::character('r')]);
+        let mut event_loop = harness.event_loop(input);
+
+        event_loop.run(&mut app).unwrap();
+
+        let last_frame = event_loop.backend().frames().last().unwrap().clone();
+        assert!(last_frame.contains("Reloaded the config and the registry."));
+    }
+
+    #[test]
+    fn a_resize_queued_during_a_restart_is_kept() {
+        let fixture = UiHarness::exited_session_fixture("fix-auth");
+        let harness = UiHarness::new();
+        let mut app = UiHarness::app(&fixture);
+        let mut event_loop = harness.event_loop(ScriptedInput::events(vec![
+            UiHarness::character('s'),
+            crossterm::event::Event::Resize(UiHarness::WIDTH, UiHarness::HEIGHT),
         ]));
 
         event_loop.run(&mut app).unwrap();

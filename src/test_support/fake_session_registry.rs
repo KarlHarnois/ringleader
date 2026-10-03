@@ -41,6 +41,10 @@ impl FakeSessionRegistry {
         self
     }
 
+    pub fn break_loads(&self, error: RegistryError) {
+        self.state.lock().unwrap().load_error = Some(error);
+    }
+
     pub fn sessions(&self) -> Vec<Session> {
         self.state.lock().unwrap().sessions.clone()
     }

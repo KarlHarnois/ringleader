@@ -1,7 +1,11 @@
+pub mod action_gate;
 pub mod app;
 pub mod event_loop;
+pub mod home_state;
 pub mod home_view;
+pub mod preview_feed;
 pub mod preview_panel;
+pub mod session_list;
 pub mod session_table;
 pub mod status_bar;
 pub mod table_columns;

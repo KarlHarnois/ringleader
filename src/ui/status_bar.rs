@@ -1,5 +1,8 @@
+use std::fmt::Display;
+
 use ratatui::Frame;
 use ratatui::layout::Rect;
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
@@ -7,7 +10,7 @@ use super::theme::Theme;
 use crate::domain::{SessionState, SessionSummary};
 
 pub struct StatusBar<'a> {
-    message: Option<&'a str>,
+    message: Option<&'a StatusMessage>,
     note: Option<String>,
     theme: Theme,
 }
@@ -21,7 +24,7 @@ impl<'a> StatusBar<'a> {
         }
     }
 
-    pub fn with_message(self, message: Option<&'a str>) -> Self {
+    pub fn with_message(self, message: Option<&'a StatusMessage>) -> Self {
         Self { message, ..self }
     }
 
@@ -31,15 +34,46 @@ impl<'a> StatusBar<'a> {
 
     pub fn render(&self, frame: &mut Frame, area: Rect) {
         let line = match (self.message, &self.note) {
-            (Some(message), _) => {
-                Line::from(Span::styled(format!(" {message}"), self.theme.error()))
-            }
+            (Some(message), _) => Line::from(Span::styled(
+                format!(" {}", message.text()),
+                message.style(&self.theme),
+            )),
             (None, Some(note)) => {
                 Line::from(Span::styled(format!(" {note}"), self.theme.warning()))
             }
             (None, None) => Line::from(KeyHints::new(usize::from(area.width)).text()),
         };
         frame.render_widget(Paragraph::new(line), area);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StatusMessage {
+    Info(String),
+    Warning(String),
+    Error(String),
+}
+
+impl StatusMessage {
+    pub fn reporting(outcome: Result<(), impl Display>, success: String) -> Self {
+        match outcome {
+            Ok(()) => Self::Info(success),
+            Err(error) => Self::Error(error.to_string()),
+        }
+    }
+
+    pub fn text(&self) -> &str {
+        match self {
+            Self::Info(text) | Self::Warning(text) | Self::Error(text) => text,
+        }
+    }
+
+    fn style(&self, theme: &Theme) -> Style {
+        match self {
+            Self::Info(_) => theme.base(),
+            Self::Warning(_) => theme.warning(),
+            Self::Error(_) => theme.error(),
+        }
     }
 }
 
@@ -196,8 +230,9 @@ mod tests {
 
     #[test]
     fn a_message_replaces_the_key_hints() {
+        let message = StatusMessage::Error("config error".to_string());
         let status = StatusBar::new(Theme)
-            .with_message(Some("config error"))
+            .with_message(Some(&message))
             .with_note(Some("note".to_string()));
 
         assert_eq!(BarFixture::render(status, 60), " config error");
