@@ -100,6 +100,12 @@ Examples: branch `ringleader/fix-auth`, tmux session `ringleader-fix-auth`, work
 └── src/
     ├── main.rs             # fn main and CompositionRoot
     ├── cli.rs              # Cli struct, clap definitions, dispatch
+    ├── cli/
+    │   ├── cli_output.rs         # CliOutput, writeln! output that stops at a broken pipe
+    │   ├── session_commands.rs   # SessionCommands: list, new, delete, attach, rename, restart
+    │   ├── list_report.rs        # ListReport, the list text and JSON
+    │   ├── repo_argument.rs      # RepoArgument, the --repo name or path resolution
+    │   └── delete_report.rs      # DeleteReport, the delete warnings and results
     ├── domain/
     │   ├── mod.rs
     │   ├── session.rs            # Session
@@ -219,6 +225,7 @@ Examples: branch `ringleader/fix-auth`, tmux session `ringleader-fix-auth`, work
         ├── fake_clock.rs            # FakeClock
         ├── recording_screen_mode.rs # RecordingScreenMode, the screen mode that records each switch
         ├── ui_harness.rs            # UiHarness: scripted input and a TestBackend wrapper for EventLoop tests
+        ├── cli_harness.rs           # CliHarness: a Cli run against the fakes with captured output
         └── fake_lock.rs             # FakeLock
 ```
 

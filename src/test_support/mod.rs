@@ -1,3 +1,4 @@
+pub mod cli_harness;
 pub mod fake_clock;
 pub mod fake_config_source;
 pub mod fake_host_probe;
@@ -13,6 +14,7 @@ pub mod service_fixture;
 pub mod tmux_test_server;
 pub mod ui_harness;
 
+pub use cli_harness::{CapturedWriter, CliHarness};
 pub use fake_clock::FakeClock;
 pub use fake_config_source::FakeConfigSource;
 pub use fake_host_probe::FakeHostProbe;

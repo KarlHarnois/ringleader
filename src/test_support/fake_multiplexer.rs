@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use crate::application::ports::{
     AgentLaunch, AttachTarget, Multiplexer, MultiplexerError, SessionSpec,
@@ -9,7 +9,10 @@ use crate::domain::{AgentPane, SessionMetadata, SessionObservation, TmuxAddress}
 
 pub struct FakeMultiplexer {
     state: Mutex<MultiplexerState>,
+    hooks: Mutex<HashMap<&'static str, CallHook>>,
 }
+
+type CallHook = Arc<dyn Fn() + Send + Sync>;
 
 struct MultiplexerState {
     socket: PathBuf,
@@ -39,6 +42,7 @@ impl FakeMultiplexer {
 
     pub fn new() -> Self {
         Self {
+            hooks: Mutex::new(HashMap::new()),
             state: Mutex::new(MultiplexerState {
                 socket: PathBuf::from(Self::SOCKET),
                 live: Vec::new(),
@@ -93,6 +97,11 @@ impl FakeMultiplexer {
 
     pub fn failing(self, operation: &'static str, error: MultiplexerError) -> Self {
         self.edit(|state| state.failures.insert(operation, error));
+        self
+    }
+
+    pub fn on_call(self, operation: &'static str, hook: impl Fn() + Send + Sync + 'static) -> Self {
+        self.hooks.lock().unwrap().insert(operation, Arc::new(hook));
         self
     }
 
@@ -155,6 +164,10 @@ impl FakeMultiplexer {
     }
 
     fn call(&self, operation: &'static str, detail: &str) -> Result<(), MultiplexerError> {
+        let hook = self.hooks.lock().unwrap().get(operation).cloned();
+        if let Some(hook) = hook {
+            hook();
+        }
         self.edit(|state| {
             state.calls.push(format!("{operation} {detail}"));
             match state.failures.get(operation) {

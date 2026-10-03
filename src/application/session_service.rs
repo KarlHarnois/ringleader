@@ -88,6 +88,10 @@ impl SessionService {
         self.catalog.read_typed_path(input)
     }
 
+    pub fn validated_top_level(&self, path: &Path) -> Pending<PathBuf> {
+        self.catalog.validated_top_level(path)
+    }
+
     pub fn is_inside_tmux(&self) -> bool {
         self.inside_tmux
     }

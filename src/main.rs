@@ -40,7 +40,7 @@ use application::{
     CorruptRegistry, LoadedConfig, RepoPorts, ServiceContext, ServicePorts, SessionService,
     StatePorts, TmuxPorts,
 };
-use cli::Cli;
+use cli::{Cli, CliExit, CliOutput, CliSession};
 use ui::{App, CrosstermInput, CrosstermScreenMode, EventLoop, TerminalGuard};
 
 fn main() -> ExitCode {
@@ -77,7 +77,48 @@ impl CompositionRoot {
         if let Some(handoff) = cli.exec_agent_handoff() {
             return self.exec_agent(handoff);
         }
-        self.run_tui(&cli)
+        if cli.runs_tui() {
+            return self.run_tui(&cli);
+        }
+        self.run_cli(&cli)
+    }
+
+    fn run_cli(&self, cli: &Cli) -> ExitCode {
+        let state_directory = self.paths.state_directory();
+        let state_ready = fs::create_dir_all(&state_directory);
+        if let (Err(error), true) = (&state_ready, cli.is_mutating()) {
+            return Self::fail(&format!(
+                "cannot create {}: {error}",
+                state_directory.display()
+            ));
+        }
+        self.handoff().delete_stale();
+        let signals = match cli.is_mutating() {
+            true => SignalFlags::register().unwrap_or_else(|_| SignalFlags::unregistered()),
+            false => SignalFlags::unregistered(),
+        };
+        let mut session = CliSession::new(CliOutput::standard(), signals);
+        let mut lock = FileLock::new(&state_directory.join("lock"));
+        if let Err(exit) = cli.take_write_lock(&mut lock, &mut session) {
+            return Self::exit_with(exit);
+        }
+        let config_source = self.config_source(cli);
+        if cli.is_mutating()
+            && let Some(warning) = Self::write_template_if_missing(&config_source)
+        {
+            session.output().error(&warning);
+        }
+        let loaded = Self::load(&config_source);
+        let inside_tmux = self.tmux(&[]).is_inside_client(&CallerProcess::read());
+        let mut service = self.service(config_source, loaded, inside_tmux);
+        Self::exit_with(cli.execute(&mut service, &mut session))
+    }
+
+    fn exit_with(exit: CliExit) -> ExitCode {
+        if let CliExit::Interrupted { signal, .. } = exit {
+            let _ = signal_hook::low_level::emulate_default_handler(signal);
+        }
+        ExitCode::from(exit.code())
     }
 
     fn exec_agent(&self, handoff: &Path) -> ExitCode {

@@ -4,7 +4,7 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, TryRecvError};
 use std::thread;
 use std::time::Duration;
 
-use super::ports::{HostProbe, RepoScanner};
+use super::ports::{HostProbe, RepoScanner, Workspace};
 use super::service_context::ServiceContext;
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
@@ -12,6 +12,7 @@ use crate::domain::{Config, Repo, RepoName, RepoScope};
 
 pub struct RepoCatalog {
     scanner: Arc<dyn RepoScanner>,
+    workspace: Arc<dyn Workspace>,
     host: Arc<dyn HostProbe>,
     home: Option<PathBuf>,
     launch_directory: PathBuf,
@@ -21,6 +22,7 @@ impl RepoCatalog {
     pub fn new(ports: &ServicePorts, context: &ServiceContext) -> Self {
         Self {
             scanner: ports.repos().scanner(),
+            workspace: ports.repos().workspace(),
             host: ports.repos().host(),
             home: context.home().map(Path::to_path_buf),
             launch_directory: context.launch_directory().to_path_buf(),
@@ -51,6 +53,12 @@ impl RepoCatalog {
                 cut_short: outcome.cut_short(),
             })
         })
+    }
+
+    pub fn validated_top_level(&self, path: &Path) -> Pending<PathBuf> {
+        let workspace = Arc::clone(&self.workspace);
+        let path = path.to_path_buf();
+        Pending::start(move || Ok(workspace.validate_repo(&path)?))
     }
 
     pub fn read_typed_path(&self, input: &str) -> Pending<PathBuf> {
