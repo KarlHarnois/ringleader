@@ -76,7 +76,7 @@ impl App {
         let outcome = self.home.tick(now, &mut self.service);
         self.status.failure(outcome);
         if let Some(dialog) = &mut self.dialog {
-            dialog.poll(&self.service);
+            dialog.poll(&mut self.service);
         }
     }
 

@@ -1,6 +1,10 @@
+use std::path::PathBuf;
+
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::text::Line;
 
+use super::add_repo_dialog::AddRepoDialog;
+use super::picker_row::PickerRow;
 use super::repo_scan::RepoScan;
 use super::scope_input::ScopeInput;
 use crate::application::SessionService;
@@ -12,28 +16,28 @@ pub struct RepoPicker {
     scan: RepoScan,
     cursor: usize,
     chosen: Option<usize>,
-    scope_input: Option<ScopeInput>,
+    form: Option<PickerForm>,
+    select_after_scan: Option<PathBuf>,
 }
 
 impl RepoPicker {
-    const CHANGE_SCOPE: &'static str = "Change scope…";
-    const CONFIG_MARK: &'static str = " · config";
     const NO_REPO: &'static str = "no repo selected";
     const CHOSEN: &'static str = "> ";
     const UNCHOSEN: &'static str = "  ";
-    const PATH_LABEL: usize = "Path: ".len();
+    const FORM_HEIGHT: usize = 3;
 
     pub fn open(service: &SessionService) -> Self {
         Self {
             scan: RepoScan::start(service, service.launch_directory()),
             cursor: 0,
             chosen: None,
-            scope_input: None,
+            form: None,
+            select_after_scan: None,
         }
     }
 
-    pub fn is_editing_scope(&self) -> bool {
-        self.scope_input.is_some()
+    pub fn has_open_form(&self) -> bool {
+        self.form.is_some()
     }
 
     pub fn selected_repo(&self) -> Option<&Repo> {
@@ -48,62 +52,69 @@ impl RepoPicker {
         }
     }
 
-    pub fn poll(&mut self, service: &SessionService) {
-        let checked_scope = self.scope_input.as_mut().and_then(ScopeInput::checked_path);
-        if let Some(scope) = checked_scope {
-            self.scope_input = None;
-            self.scan = RepoScan::start(service, &scope);
-            self.move_cursor_to(0);
+    pub fn poll(&mut self, service: &mut SessionService) {
+        match &mut self.form {
+            Some(PickerForm::Scope(input)) => {
+                if let Some(scope) = input.checked_path() {
+                    self.form = None;
+                    self.scan = RepoScan::start(service, &scope);
+                }
+            }
+            Some(PickerForm::AddRepo(dialog)) => {
+                if let Some(repo) = dialog.poll(service) {
+                    match service.reload() {
+                        Ok(()) => self.rescan_selecting(service, &repo),
+                        Err(error) => dialog.fail(error.to_string()),
+                    }
+                }
+            }
+            None => {}
         }
         if self.scan.finish_if_done() {
-            self.move_cursor_to(0);
+            self.select_scanned();
         }
     }
 
     pub fn handle_key(&mut self, key: &KeyEvent, service: &SessionService) -> bool {
-        if let Some(input) = &mut self.scope_input {
+        if let Some(form) = &mut self.form {
             if key.code == KeyCode::Esc {
-                self.scope_input = None;
+                self.form = None;
                 return true;
             }
-            return input.handle_key(key, service);
+            return form.handle_key(key, service);
         }
-        let last = self.rows().len().saturating_sub(1);
+        let rows = self.rows().len();
         match key.code {
             KeyCode::Up => self.move_cursor_to(self.cursor.saturating_sub(1)),
-            KeyCode::Down => self.move_cursor_to((self.cursor + 1).min(last)),
-            KeyCode::Enter if self.cursor == last => {
-                self.scope_input = Some(ScopeInput::default());
+            KeyCode::Down => self.move_cursor_to((self.cursor + 1).min(rows.saturating_sub(1))),
+            KeyCode::Enter if self.cursor + 2 == rows => {
+                self.form = Some(PickerForm::AddRepo(AddRepoDialog::open()));
+            }
+            KeyCode::Enter if self.cursor + 1 == rows => {
+                self.form = Some(PickerForm::Scope(ScopeInput::default()));
             }
             _ => return false,
         }
         true
     }
 
-    fn move_cursor_to(&mut self, row: usize) {
-        self.cursor = row;
-        if row < self.scan.repos().len() {
-            self.chosen = Some(row);
-        } else if self.scan.repos().is_empty() {
-            self.chosen = None;
-        }
-    }
-
     pub fn paste(&mut self, text: &str) {
-        if let Some(input) = &mut self.scope_input {
-            input.paste(text);
+        if let Some(form) = &mut self.form {
+            form.paste(text);
         }
     }
 
     pub fn lines(&self, width: usize, room: usize, theme: &Theme) -> Vec<Line<'static>> {
         let mut lines = vec![Line::from(self.scan.header())];
         let notices = self.scan.notices().into_iter();
-        lines.extend(notices.map(|notice| Line::styled(notice, theme.dim())));
+        lines.extend(
+            notices.flat_map(|notice| TextFit::new(&notice).styled_lines(width, theme.dim())),
+        );
         if let Some(problem) = self.scan.problem() {
-            lines.push(Line::styled(problem, theme.error()));
+            lines.extend(TextFit::new(&problem).styled_lines(width, theme.error()));
         }
         let rows = self.rows();
-        let room = room.saturating_sub(lines.len() + ScopeInput::HEIGHT).max(1);
+        let room = room.saturating_sub(lines.len() + Self::FORM_HEIGHT).max(1);
         let first = (self.cursor + 1).saturating_sub(room);
         for (index, row) in rows.iter().enumerate().skip(first).take(room) {
             let mark = if Some(index) == self.chosen {
@@ -122,40 +133,68 @@ impl RepoPicker {
             };
             lines.push(Line::styled(text, style));
         }
-        if let Some(input) = &self.scope_input {
-            lines.extend(input.lines(width.saturating_sub(Self::PATH_LABEL), theme));
+        if let Some(form) = &self.form {
+            lines.extend(form.lines(width, theme));
         }
         lines
     }
 
     fn rows(&self) -> Vec<PickerRow<'_>> {
         let repos = self.scan.repos().iter().map(PickerRow::Repo);
-        repos.chain([PickerRow::ChangeScope]).collect()
+        repos
+            .chain([PickerRow::AddRepo, PickerRow::ChangeScope])
+            .collect()
+    }
+
+    fn move_cursor_to(&mut self, row: usize) {
+        self.cursor = row;
+        if row < self.scan.repos().len() {
+            self.chosen = Some(row);
+        } else if self.scan.repos().is_empty() {
+            self.chosen = None;
+        }
+    }
+
+    fn rescan_selecting(&mut self, service: &SessionService, repo: &Repo) {
+        self.form = None;
+        self.select_after_scan = Some(repo.path().to_path_buf());
+        self.scan = self.scan.again(service);
+    }
+
+    fn select_scanned(&mut self) {
+        let wanted = self.select_after_scan.take();
+        let repos = self.scan.repos();
+        let position = repos
+            .iter()
+            .position(|repo| Some(repo.path()) == wanted.as_deref());
+        self.move_cursor_to(position.unwrap_or(0));
     }
 }
 
-enum PickerRow<'a> {
-    Repo(&'a Repo),
-    ChangeScope,
+enum PickerForm {
+    Scope(ScopeInput),
+    AddRepo(AddRepoDialog),
 }
 
-impl PickerRow<'_> {
-    fn text(&self, rows: &[PickerRow], width: usize) -> String {
-        let PickerRow::Repo(repo) = self else {
-            return RepoPicker::CHANGE_SCOPE.to_string();
-        };
-        let mut text = repo.name().to_string();
-        if repo.is_explicit() {
-            text.push_str(RepoPicker::CONFIG_MARK);
+impl PickerForm {
+    fn handle_key(&mut self, key: &KeyEvent, service: &SessionService) -> bool {
+        match self {
+            Self::Scope(input) => input.handle_key(key, service),
+            Self::AddRepo(dialog) => dialog.handle_key(key, service),
         }
-        let namesakes = rows
-            .iter()
-            .filter(|other| matches!(other, PickerRow::Repo(other) if other.name() == repo.name()));
-        if namesakes.count() > 1 {
-            let room = width.saturating_sub(text.chars().count() + 2);
-            let path = repo.path().display().to_string();
-            text.push_str(&format!("  {}", TextFit::new(&path).left_truncated(room)));
+    }
+
+    fn paste(&mut self, text: &str) {
+        match self {
+            Self::Scope(input) => input.paste(text),
+            Self::AddRepo(dialog) => dialog.paste(text),
         }
-        text
+    }
+
+    fn lines(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
+        match self {
+            Self::Scope(input) => input.lines(width, theme),
+            Self::AddRepo(dialog) => dialog.lines(width, theme),
+        }
     }
 }

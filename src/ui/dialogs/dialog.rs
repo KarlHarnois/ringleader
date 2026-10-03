@@ -22,7 +22,7 @@ impl Dialog {
         Self::NewSession(Box::new(NewSessionDialog::open(service)))
     }
 
-    pub fn poll(&mut self, service: &SessionService) {
+    pub fn poll(&mut self, service: &mut SessionService) {
         match self {
             Self::NewSession(dialog) => dialog.poll(service),
         }

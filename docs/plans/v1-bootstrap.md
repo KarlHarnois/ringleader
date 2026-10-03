@@ -226,6 +226,7 @@ Examples: branch `ringleader/fix-auth`, tmux session `ringleader-fix-auth`, work
     │       ├── text_field.rs            # TextField, typing and paste rules for name, prompt, and path fields
     │       ├── new_session_dialog.rs    # NewSessionDialog
     │       ├── repo_picker.rs           # RepoPicker, the n dialog's repo list and its actions
+    │       ├── picker_row.rs            # PickerRow, the text of one repo picker row
     │       ├── repo_scan.rs             # RepoScan, one discover_repos run and its result
     │       ├── scope_input.rs           # ScopeInput, the typed path that changes the scope
     │       ├── agent_picker.rs          # AgentPicker, the n dialog's agent list

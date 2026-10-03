@@ -56,7 +56,27 @@ impl Lock for FileLock {
 
 #[cfg(test)]
 mod tests {
+    use std::thread;
+    use std::time::{Duration, Instant};
+
     use super::*;
+
+    struct LockFixture;
+
+    impl LockFixture {
+        const FORKED_CHILD_EXEC_LIMIT: Duration = Duration::from_secs(1);
+
+        fn acquired_once_forked_children_exec(path: &Path) -> bool {
+            let deadline = Instant::now() + Self::FORKED_CHILD_EXEC_LIMIT;
+            while Instant::now() < deadline {
+                if FileLock::new(path).acquire_for_write().is_ok() {
+                    return true;
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+            false
+        }
+    }
 
     #[test]
     fn two_locks_on_one_path_in_one_process_conflict() {
@@ -79,7 +99,7 @@ mod tests {
         first.acquire_lifetime().unwrap();
         drop(first);
 
-        assert!(FileLock::new(&path).acquire_for_write().is_ok());
+        assert!(LockFixture::acquired_once_forked_children_exec(&path));
     }
 
     #[test]

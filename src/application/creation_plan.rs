@@ -51,6 +51,10 @@ impl CreateRequest {
         &self.name
     }
 
+    pub fn repo(&self) -> &Repo {
+        &self.repo
+    }
+
     pub fn agent(&self) -> Option<&str> {
         self.agent.as_deref()
     }

@@ -5,6 +5,7 @@ use ratatui::text::Line;
 
 use super::text_field::{FieldKind, TextField};
 use crate::application::{Pending, SessionService};
+use crate::ui::text_fit::TextFit;
 use crate::ui::theme::Theme;
 
 pub struct ScopeInput {
@@ -24,7 +25,8 @@ impl Default for ScopeInput {
 }
 
 impl ScopeInput {
-    pub const HEIGHT: usize = 2;
+    const LABEL: &'static str = "Scope path: ";
+    const CURSOR: char = '█';
 
     pub fn handle_key(&mut self, key: &KeyEvent, service: &SessionService) -> bool {
         if key.code == KeyCode::Enter {
@@ -52,15 +54,14 @@ impl ScopeInput {
     }
 
     pub fn lines(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
-        let mut lines = vec![Line::from(format!(
-            "Path: {}",
-            self.field.visible(width, Some('█'))
-        ))];
+        let room = width.saturating_sub(Self::LABEL.len());
+        let shown = self.field.visible(room, Some(Self::CURSOR));
+        let mut lines = vec![Line::from(format!("{}{shown}", Self::LABEL))];
         if self.checking.is_some() {
             lines.push(Line::styled("Checking the path…", theme.dim()));
         }
         if let Some(error) = &self.error {
-            lines.push(Line::styled(error.clone(), theme.error()));
+            lines.extend(TextFit::new(error).styled_lines(width, theme.error()));
         }
         lines
     }

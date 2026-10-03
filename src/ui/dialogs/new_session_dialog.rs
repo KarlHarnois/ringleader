@@ -8,6 +8,7 @@ use super::text_field::{FieldKind, TextField};
 use crate::application::{CreateRequest, SessionService};
 use crate::ui::app::AppRequest;
 use crate::ui::blocking_operation::BlockingOperation;
+use crate::ui::text_fit::TextFit;
 use crate::ui::theme::Theme;
 
 pub struct NewSessionDialog {
@@ -36,7 +37,7 @@ impl NewSessionDialog {
         }
     }
 
-    pub fn poll(&mut self, service: &SessionService) {
+    pub fn poll(&mut self, service: &mut SessionService) {
         self.repos.poll(service);
     }
 
@@ -45,7 +46,7 @@ impl NewSessionDialog {
     }
 
     pub fn handle_key(&mut self, key: &KeyEvent, service: &SessionService) -> DialogStep {
-        let picker_has_focus = self.repos.is_editing_scope() || self.focus == Field::Repo;
+        let picker_has_focus = self.repos.has_open_form() || self.focus == Field::Repo;
         if picker_has_focus && self.repos.handle_key(key, service) {
             return DialogStep::Stay;
         }
@@ -60,7 +61,7 @@ impl NewSessionDialog {
     }
 
     pub fn paste(&mut self, text: &str) {
-        if self.repos.is_editing_scope() {
+        if self.repos.has_open_form() {
             self.repos.paste(text);
             return;
         }
@@ -92,10 +93,8 @@ impl NewSessionDialog {
         ));
         lines.push(self.text_line(Field::Prompt, &self.prompt, labels, width));
         lines.push(Line::from(""));
-        lines.push(Line::styled(
-            self.error.clone().unwrap_or_default(),
-            theme.error(),
-        ));
+        let error = self.error.as_deref().unwrap_or_default();
+        lines.extend(TextFit::new(error).styled_lines(width, theme.error()));
         lines.push(Line::styled(Self::HINTS, theme.dim()));
         lines
     }
@@ -107,7 +106,7 @@ impl NewSessionDialog {
         labels: DialogLabels,
         theme: &Theme,
     ) -> Vec<Line<'static>> {
-        if self.focus == Field::Repo || self.repos.is_editing_scope() {
+        if self.focus == Field::Repo || self.repos.has_open_form() {
             return self
                 .repos
                 .lines(width.saturating_sub(labels.width()), room, theme);
@@ -211,9 +210,9 @@ mod tests {
         const SETTLE_LIMIT: Duration = Duration::from_secs(2);
 
         fn opened(fixture: &ServiceFixture) -> (NewSessionDialog, SessionService) {
-            let service = fixture.service();
+            let mut service = fixture.service();
             let mut dialog = NewSessionDialog::open(&service);
-            Self::settle(&mut dialog, &service, |text| !text.contains("Scanning"));
+            Self::settle(&mut dialog, &mut service, |text| !text.contains("Scanning"));
             (dialog, service)
         }
 
@@ -231,9 +230,13 @@ mod tests {
                 .join("\n")
         }
 
+        fn flat_text(dialog: &NewSessionDialog) -> String {
+            Self::text(dialog).replace('\n', " ")
+        }
+
         fn settle(
             dialog: &mut NewSessionDialog,
-            service: &SessionService,
+            service: &mut SessionService,
             done: impl Fn(&str) -> bool,
         ) {
             let deadline = Instant::now() + Self::SETTLE_LIMIT;
@@ -254,6 +257,12 @@ mod tests {
         fn type_text(dialog: &mut NewSessionDialog, service: &SessionService, text: &str) {
             for character in text.chars() {
                 Self::press(dialog, service, KeyCode::Char(character));
+            }
+        }
+
+        fn open_scope_input(dialog: &mut NewSessionDialog, service: &SessionService) {
+            for code in [KeyCode::Tab, KeyCode::Down, KeyCode::Down, KeyCode::Enter] {
+                Self::press(dialog, service, code);
             }
         }
 
@@ -279,13 +288,13 @@ mod tests {
     fn the_picker_shows_scanning_until_the_scan_finishes() {
         let fixture = ServiceFixture::new()
             .with_scanner(FakeRepoScanner::finding(vec![ServiceFixture::repo()]).blocked());
-        let service = fixture.service();
+        let mut service = fixture.service();
         let mut dialog = NewSessionDialog::open(&service);
         DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
         let while_scanning = DialogFixture::text(&dialog);
 
         fixture.scanner().release();
-        DialogFixture::settle(&mut dialog, &service, |text| text.contains("Scope:"));
+        DialogFixture::settle(&mut dialog, &mut service, |text| text.contains("Scope:"));
 
         assert!(while_scanning.contains("Scanning /repos/example-project"));
         assert!(DialogFixture::text(&dialog).contains("> example-project"));
@@ -366,14 +375,12 @@ mod tests {
     fn changing_the_scope_scans_the_typed_directory() {
         let fixture = ServiceFixture::new()
             .with_host(FakeHostProbe::default().with_directory(Path::new("/work/other")));
-        let (mut dialog, service) = DialogFixture::opened(&fixture);
-        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
-        DialogFixture::press(&mut dialog, &service, KeyCode::Down);
-        DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
+        let (mut dialog, mut service) = DialogFixture::opened(&fixture);
+        DialogFixture::open_scope_input(&mut dialog, &service);
 
         DialogFixture::type_text(&mut dialog, &service, "/work/other");
         DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
-        DialogFixture::settle(&mut dialog, &service, |text| {
+        DialogFixture::settle(&mut dialog, &mut service, |text| {
             text.contains("Scope: /work/other")
         });
 
@@ -383,21 +390,19 @@ mod tests {
     #[test]
     fn a_missing_scope_keeps_the_input_open_with_the_error_and_the_previous_list() {
         let fixture = ServiceFixture::new();
-        let (mut dialog, service) = DialogFixture::opened(&fixture);
-        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
-        DialogFixture::press(&mut dialog, &service, KeyCode::Down);
-        DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
+        let (mut dialog, mut service) = DialogFixture::opened(&fixture);
+        DialogFixture::open_scope_input(&mut dialog, &service);
 
         DialogFixture::type_text(&mut dialog, &service, "/nowhere");
         DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
-        DialogFixture::settle(&mut dialog, &service, |text| {
+        DialogFixture::settle(&mut dialog, &mut service, |text| {
             text.contains("no such directory")
         });
 
         let text = DialogFixture::text(&dialog);
         assert!(text.contains("no such directory: /nowhere"));
         assert!(text.contains("Scope: /repos/example-project"));
-        assert!(text.contains("Path: /nowhere"));
+        assert!(text.contains("Scope path: /nowhere"));
     }
 
     #[test]
@@ -405,9 +410,7 @@ mod tests {
         let fixture = ServiceFixture::new();
         let (mut dialog, service) = DialogFixture::opened(&fixture);
         DialogFixture::type_text(&mut dialog, &service, "fix-auth");
-        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
-        DialogFixture::press(&mut dialog, &service, KeyCode::Down);
-        DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
+        DialogFixture::open_scope_input(&mut dialog, &service);
         DialogFixture::press(&mut dialog, &service, KeyCode::Esc);
         DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
 
@@ -422,12 +425,35 @@ mod tests {
     }
 
     #[test]
+    fn adding_a_repo_reloads_the_picker_and_selects_the_new_repo() {
+        let fixture = ServiceFixture::new()
+            .with_host(FakeHostProbe::default().with_directory(Path::new("/work/new-project")));
+        let (mut dialog, mut service) = DialogFixture::opened(&fixture);
+        DialogFixture::type_text(&mut dialog, &service, "fix-auth");
+        for code in [KeyCode::Tab, KeyCode::Down, KeyCode::Enter] {
+            DialogFixture::press(&mut dialog, &service, code);
+        }
+
+        DialogFixture::type_text(&mut dialog, &service, "/work/new-project");
+        DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
+        DialogFixture::settle(&mut dialog, &mut service, |text| {
+            text.contains("> new-project · config")
+        });
+        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
+        let step = DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
+
+        assert_eq!(
+            DialogFixture::submitted(step).repo().path(),
+            Path::new("/work/new-project")
+        );
+        assert_eq!(service.config().repos().len(), 1);
+    }
+
+    #[test]
     fn esc_in_the_scope_input_closes_only_the_input() {
         let fixture = ServiceFixture::new();
         let (mut dialog, service) = DialogFixture::opened(&fixture);
-        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
-        DialogFixture::press(&mut dialog, &service, KeyCode::Down);
-        DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
+        DialogFixture::open_scope_input(&mut dialog, &service);
 
         let first = DialogFixture::press(&mut dialog, &service, KeyCode::Esc);
         let second = DialogFixture::press(&mut dialog, &service, KeyCode::Esc);
@@ -439,9 +465,7 @@ mod tests {
     fn a_pasted_scope_with_an_inner_line_break_is_a_field_error() {
         let fixture = ServiceFixture::new();
         let (mut dialog, service) = DialogFixture::opened(&fixture);
-        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
-        DialogFixture::press(&mut dialog, &service, KeyCode::Down);
-        DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
+        DialogFixture::open_scope_input(&mut dialog, &service);
 
         dialog.paste("/work\n/other");
 
@@ -504,7 +528,7 @@ mod tests {
 
         assert_eq!(step, DialogStep::Stay);
         assert!(
-            DialogFixture::text(&dialog).contains(
+            DialogFixture::flat_text(&dialog).contains(
                 "agent plain-agent cannot take a prompt, its prompt_args has no {prompt}"
             )
         );

@@ -16,6 +16,10 @@ impl RepoScan {
         }
     }
 
+    pub fn again(&self, service: &SessionService) -> Self {
+        Self::start(service, &self.requested_scope)
+    }
+
     pub fn finish_if_done(&mut self) -> bool {
         let ScanState::Scanning(pending) = &self.state else {
             return false;
