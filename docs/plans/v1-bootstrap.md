@@ -206,6 +206,9 @@ Examples: branch `ringleader/fix-auth`, tmux session `ringleader-fix-auth`, work
     │   ├── event_loop.rs           # EventLoop
     │   ├── terminal_guard.rs       # TerminalGuard
     │   ├── home_view.rs            # HomeView
+    │   ├── session_table.rs        # SessionTable, the home screen's session list
+    │   ├── table_columns.rs        # TableColumns, column widths and dropping
+    │   ├── preview_panel.rs        # PreviewPanel, the Full tier's preview
     │   ├── help_view.rs            # HelpView
     │   ├── status_bar.rs           # StatusBar
     │   ├── theme.rs                # Theme

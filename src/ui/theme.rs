@@ -26,6 +26,10 @@ impl Theme {
         self.base().fg(Color::Red)
     }
 
+    pub fn warning(&self) -> Style {
+        self.base().fg(Color::Yellow)
+    }
+
     pub fn insertions(&self) -> Style {
         self.base().fg(Color::Green)
     }
@@ -40,7 +44,7 @@ impl Theme {
             SessionState::Waiting => self.base().fg(Color::Green),
             SessionState::Exited => self.base().fg(Color::Red),
             SessionState::Stopped => self.dim(),
-            SessionState::Unmanaged => self.base().fg(Color::Yellow),
+            SessionState::Unmanaged => self.warning(),
         }
     }
 }

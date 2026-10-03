@@ -55,6 +55,8 @@ where
     }
 
     pub fn run(&mut self, app: &mut App) -> io::Result<()> {
+        let size = self.terminal.size().map_err(io::Error::other)?;
+        app.resize(size.width, size.height);
         let mut next_tick = Instant::now();
         loop {
             if self.signals.raised().is_some() {

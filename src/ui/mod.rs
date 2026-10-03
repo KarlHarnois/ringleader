@@ -1,7 +1,10 @@
 pub mod app;
 pub mod event_loop;
 pub mod home_view;
+pub mod preview_panel;
+pub mod session_table;
 pub mod status_bar;
+pub mod table_columns;
 pub mod terminal_guard;
 pub mod theme;
 
