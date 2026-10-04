@@ -5,6 +5,7 @@ pub mod dialog;
 pub mod dialog_slot;
 pub mod new_session_dialog;
 pub mod picker_row;
+pub mod rename_session_dialog;
 pub mod repo_picker;
 pub mod repo_scan;
 pub mod scope_input;

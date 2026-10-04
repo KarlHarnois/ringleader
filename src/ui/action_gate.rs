@@ -34,6 +34,7 @@ impl<'a> ActionGate<'a> {
             KeyCode::Char('t') => KeyAction::from(self.shell().map(KeyAction::Request)),
             KeyCode::Char('s') => KeyAction::from(self.restart().map(KeyAction::Request)),
             KeyCode::Char('d') => KeyAction::from(self.delete().map(KeyAction::Request)),
+            KeyCode::Char('R') => KeyAction::from(self.rename().map(KeyAction::Rename)),
             _ => KeyAction::Ignore,
         }
     }
@@ -62,6 +63,18 @@ impl<'a> ActionGate<'a> {
         }
         let operation = BlockingOperation::MeasureDelete(name.to_string());
         Ok(AppRequest::Block(operation))
+    }
+
+    pub fn rename(&self) -> Result<String, String> {
+        self.writable()?;
+        let row = self.selected()?;
+        match row.state() {
+            SessionState::Unmanaged => Err(format!(
+                "{} is unmanaged, so it cannot be renamed.",
+                row.name()
+            )),
+            _ => Ok(row.name().to_string()),
+        }
     }
 
     pub fn restart(&self) -> Result<AppRequest, String> {
@@ -99,6 +112,7 @@ pub enum KeyAction {
     Request(AppRequest),
     Move(isize),
     NewSession,
+    Rename(String),
     Reload,
     Refuse(String),
     Ignore,
@@ -289,6 +303,38 @@ mod tests {
         assert_eq!(
             ActionGate::new(Some(&row), None).delete(),
             Err("mystery is unmanaged, so it cannot be deleted.".to_string())
+        );
+    }
+
+    #[test]
+    fn capital_r_opens_the_rename_dialog_for_the_selected_session() {
+        let row = GateFixture::row(SessionState::Waiting);
+        let key = KeyEvent::from(KeyCode::Char('R'));
+
+        assert_eq!(
+            ActionGate::new(Some(&row), None).action_for(&key),
+            KeyAction::Rename("fix-auth".to_string())
+        );
+    }
+
+    #[test]
+    fn rename_in_a_read_only_tui_and_of_an_unmanaged_session_is_refused() {
+        let error = GateFixture::config_error();
+        let managed = GateFixture::row(SessionState::Waiting);
+        let stranger = ServiceFixture::session("mystery");
+        let unmanaged = SessionSummary::unmanaged(UnmanagedSession::new(
+            "mystery",
+            ServiceFixture::waiting(&stranger).without_metadata(),
+        ));
+
+        assert!(
+            ActionGate::new(Some(&managed), Some(&error))
+                .rename()
+                .is_err()
+        );
+        assert_eq!(
+            ActionGate::new(Some(&unmanaged), None).rename(),
+            Err("mystery is unmanaged, so it cannot be renamed.".to_string())
         );
     }
 

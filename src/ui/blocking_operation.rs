@@ -7,7 +7,15 @@ pub enum BlockingOperation {
     Restart(String),
     Create(CreateRequest),
     MeasureDelete(String),
-    Delete { name: String, seen: DeleteImpact },
+    Delete {
+        name: String,
+        seen: DeleteImpact,
+    },
+    Rename {
+        old: String,
+        new: String,
+        keep_branch: bool,
+    },
 }
 
 impl BlockingOperation {
@@ -17,6 +25,7 @@ impl BlockingOperation {
             Self::Create(request) => format!("Creating {}…", request.name()),
             Self::MeasureDelete(name) => format!("Checking what deleting {name} would lose…"),
             Self::Delete { name, .. } => format!("Deleting {name}…"),
+            Self::Rename { old, .. } => format!("Renaming {old}…"),
         }
     }
 
@@ -35,6 +44,21 @@ impl BlockingOperation {
             },
             Self::MeasureDelete(name) => Self::measure(service, name),
             Self::Delete { name, seen } => Self::delete(service, name, seen),
+            Self::Rename {
+                old,
+                new,
+                keep_branch,
+            } => match service.rename_session(&old, &new, keep_branch) {
+                Ok(session) => OperationOutcome::done(
+                    format!(
+                        "Renamed {old} to {}, branch {}.",
+                        session.name(),
+                        session.branch()
+                    ),
+                    Some(session.name().to_string()),
+                ),
+                Err(error) => OperationOutcome::Failed(error.to_string()),
+            },
         }
     }
 

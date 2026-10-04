@@ -1,6 +1,6 @@
 use super::session_table::SessionTable;
 use super::theme::Theme;
-use crate::domain::SessionSummary;
+use crate::domain::{Session, SessionSummary};
 
 #[derive(Debug, Default)]
 pub struct SessionList {
@@ -19,6 +19,14 @@ impl SessionList {
 
     pub fn selected_name(&self) -> Option<&str> {
         self.selected().map(SessionSummary::name)
+    }
+
+    pub fn managed_sessions(&self) -> Vec<Session> {
+        self.rows
+            .iter()
+            .filter_map(SessionSummary::session)
+            .cloned()
+            .collect()
     }
 
     pub fn row(&self, name: &str) -> Option<&SessionSummary> {

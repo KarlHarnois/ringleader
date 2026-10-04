@@ -47,11 +47,9 @@ impl App {
         self
     }
 
-    pub fn with_binding_guard(self, binding: BindingGuard) -> Self {
-        Self {
-            binding: Some(binding),
-            ..self
-        }
+    pub fn with_binding_guard(mut self, binding: BindingGuard) -> Self {
+        self.binding = Some(binding);
+        self
     }
 
     pub fn is_inside_tmux(&self) -> bool {
@@ -156,6 +154,9 @@ impl App {
             KeyAction::Request(request) => return self.request(request),
             KeyAction::Move(offset) => self.home.move_selection(offset, &self.service),
             KeyAction::NewSession => self.dialogs.open(Dialog::new_session(&self.service)),
+            KeyAction::Rename(name) => self
+                .dialogs
+                .open(Dialog::rename(&name, self.home.sessions())),
             KeyAction::Reload => self.reload(),
             KeyAction::Refuse(refusal) => self.status.error(refusal),
             KeyAction::Ignore => {}
@@ -907,6 +908,44 @@ mod tests {
         drop(notice);
 
         assert!(writer.text().contains("send-keys example"));
+    }
+
+    #[test]
+    fn capital_r_renames_the_session_and_selects_its_new_name() {
+        let fixture = AppFixture::deletable();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, 'R');
+        for character in "fix-login".chars() {
+            AppFixture::press(&mut app, character);
+        }
+
+        let request = app.handle_event(&UiHarness::key(KeyCode::Enter));
+        let busy = AppFixture::status_line(&app, 100);
+        AppFixture::perform(&mut app, request);
+
+        assert_eq!(busy, " Renaming fix-auth…");
+        assert!(!app.dialogs.is_open());
+        assert_eq!(AppFixture::selected(&app).as_deref(), Some("fix-login"));
+        assert_eq!(
+            AppFixture::status_line(&app, 100),
+            " Renamed fix-auth to fix-login, branch ringleader/fix-login."
+        );
+    }
+
+    #[test]
+    fn a_refused_rename_keeps_the_dialog_open_with_the_error() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, 'R');
+        for character in "fix-auth".chars() {
+            AppFixture::press(&mut app, character);
+        }
+
+        let request = app.handle_event(&UiHarness::key(KeyCode::Enter));
+        AppFixture::perform(&mut app, request);
+
+        assert!(app.dialogs.is_open());
+        assert_eq!(fixture.registry().sessions().len(), 2);
     }
 
     #[test]

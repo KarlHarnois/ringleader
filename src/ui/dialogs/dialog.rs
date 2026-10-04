@@ -6,15 +6,18 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use super::delete_session_dialog::DeleteSessionDialog;
 use super::new_session_dialog::NewSessionDialog;
+use super::rename_session_dialog::RenameSessionDialog;
 use crate::application::{DeleteImpact, SessionService};
 use crate::domain::SessionSummary;
 use crate::ui::app::AppRequest;
 use crate::ui::home_view::LayoutTier;
+use crate::ui::session_list::SessionList;
 use crate::ui::theme::Theme;
 
 pub enum Dialog {
     NewSession(Box<NewSessionDialog>),
     Delete(Box<DeleteSessionDialog>),
+    Rename(Box<RenameSessionDialog>),
 }
 
 impl Dialog {
@@ -39,6 +42,11 @@ impl Dialog {
         }))
     }
 
+    pub fn rename(selected: &str, sessions: &SessionList) -> Self {
+        let managed = sessions.managed_sessions();
+        Self::Rename(Box::new(RenameSessionDialog::open(selected, managed)))
+    }
+
     pub fn poll(&mut self, service: &mut SessionService) {
         if let Self::NewSession(dialog) = self {
             dialog.poll(service);
@@ -46,7 +54,7 @@ impl Dialog {
     }
 
     pub fn shows_failures(&self) -> bool {
-        matches!(self, Self::NewSession(_))
+        matches!(self, Self::NewSession(_) | Self::Rename(_))
     }
 
     pub fn handle_event(&mut self, event: &Event, service: &SessionService) -> DialogStep {
@@ -61,13 +69,22 @@ impl Dialog {
             (Self::Delete(dialog), Event::Key(key)) if key.kind != KeyEventKind::Release => {
                 dialog.handle_key(key)
             }
+            (Self::Rename(dialog), Event::Key(key)) if key.kind != KeyEventKind::Release => {
+                dialog.handle_key(key)
+            }
+            (Self::Rename(dialog), Event::Paste(text)) => {
+                dialog.paste(text);
+                DialogStep::Stay
+            }
             _ => DialogStep::Stay,
         }
     }
 
     pub fn fail(&mut self, error: String) {
-        if let Self::NewSession(dialog) = self {
-            dialog.fail(error);
+        match self {
+            Self::NewSession(dialog) => dialog.fail(error),
+            Self::Rename(dialog) => dialog.fail(error),
+            Self::Delete(_) => {}
         }
     }
 
@@ -81,6 +98,7 @@ impl Dialog {
         let lines = match self {
             Self::NewSession(dialog) => dialog.lines(width, height, labels, theme),
             Self::Delete(dialog) => dialog.lines(width, labels, theme),
+            Self::Rename(dialog) => dialog.lines(width, labels, theme),
         };
         frame.render_widget(Paragraph::new(lines), inner);
     }
@@ -89,6 +107,7 @@ impl Dialog {
         match self {
             Self::NewSession(_) => NewSessionDialog::TITLE,
             Self::Delete(_) => DeleteSessionDialog::TITLE,
+            Self::Rename(_) => RenameSessionDialog::TITLE,
         }
     }
 
