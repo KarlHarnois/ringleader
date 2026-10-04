@@ -61,7 +61,7 @@ impl DeletionGuards {
         };
         match reason {
             None => Ok(()),
-            Some(reason) => Err(ServiceError::Conflict(format!(
+            Some(reason) => Err(ServiceError::Unmeasurable(format!(
                 "git cannot measure the worktree {} of repository {}: {reason}. Restore the repository, remove a leftover worktree directory by hand, or delete with --forget",
                 session.worktree_path().display(),
                 session.repo_path().display()

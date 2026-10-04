@@ -4,14 +4,17 @@ use ratatui::layout::{Margin, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
+use super::delete_session_dialog::DeleteSessionDialog;
 use super::new_session_dialog::NewSessionDialog;
-use crate::application::SessionService;
+use crate::application::{DeleteImpact, SessionService};
+use crate::domain::SessionSummary;
 use crate::ui::app::AppRequest;
 use crate::ui::home_view::LayoutTier;
 use crate::ui::theme::Theme;
 
 pub enum Dialog {
     NewSession(Box<NewSessionDialog>),
+    Delete(Box<DeleteSessionDialog>),
 }
 
 impl Dialog {
@@ -22,10 +25,28 @@ impl Dialog {
         Self::NewSession(Box::new(NewSessionDialog::open(service)))
     }
 
+    pub fn delete(
+        row: Option<&SessionSummary>,
+        name: &str,
+        impact: DeleteImpact,
+        changed: bool,
+    ) -> Self {
+        let dialog = DeleteSessionDialog::new(row, name, impact);
+        Self::Delete(Box::new(if changed {
+            dialog.after_a_change()
+        } else {
+            dialog
+        }))
+    }
+
     pub fn poll(&mut self, service: &mut SessionService) {
-        match self {
-            Self::NewSession(dialog) => dialog.poll(service),
+        if let Self::NewSession(dialog) = self {
+            dialog.poll(service);
         }
+    }
+
+    pub fn shows_failures(&self) -> bool {
+        matches!(self, Self::NewSession(_))
     }
 
     pub fn handle_event(&mut self, event: &Event, service: &SessionService) -> DialogStep {
@@ -37,13 +58,16 @@ impl Dialog {
                 dialog.paste(text);
                 DialogStep::Stay
             }
+            (Self::Delete(dialog), Event::Key(key)) if key.kind != KeyEventKind::Release => {
+                dialog.handle_key(key)
+            }
             _ => DialogStep::Stay,
         }
     }
 
     pub fn fail(&mut self, error: String) {
-        match self {
-            Self::NewSession(dialog) => dialog.fail(error),
+        if let Self::NewSession(dialog) = self {
+            dialog.fail(error);
         }
     }
 
@@ -56,6 +80,7 @@ impl Dialog {
         let (width, height) = (usize::from(inner.width), usize::from(inner.height));
         let lines = match self {
             Self::NewSession(dialog) => dialog.lines(width, height, labels, theme),
+            Self::Delete(dialog) => dialog.lines(width, labels, theme),
         };
         frame.render_widget(Paragraph::new(lines), inner);
     }
@@ -63,6 +88,7 @@ impl Dialog {
     fn title(&self) -> &'static str {
         match self {
             Self::NewSession(_) => NewSessionDialog::TITLE,
+            Self::Delete(_) => DeleteSessionDialog::TITLE,
         }
     }
 
@@ -92,7 +118,7 @@ pub struct DialogLabels {
 }
 
 impl DialogLabels {
-    const FULL_WIDTH: usize = 8;
+    const FULL_WIDTH: usize = 10;
     const ABBREVIATED_WIDTH: usize = 2;
 
     pub fn full() -> Self {

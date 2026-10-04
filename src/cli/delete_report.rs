@@ -1,4 +1,4 @@
-use crate::application::{BranchPresence, DeleteImpact, DeleteOutcome};
+use crate::application::{DeleteImpact, DeleteOutcome};
 
 pub struct DeleteReport<'a> {
     name: &'a str,
@@ -30,31 +30,6 @@ impl<'a> DeleteReport<'a> {
     }
 
     pub fn success(&self, outcome: &DeleteOutcome) -> String {
-        if let Some((worktree, branch)) = outcome.kept() {
-            return format!(
-                "forgot {}, left the worktree {} and the branch {} on disk, run ringleader doctor",
-                self.name,
-                worktree.display(),
-                branch
-            );
-        }
-        match (outcome.branch(), outcome.tip()) {
-            (_, Some(tip)) => self.deleted_with_tip(tip, outcome.head()),
-            (BranchPresence::Unborn, None) => {
-                format!("deleted {}, the session had no commits", self.name)
-            }
-            _ => format!(
-                "deleted {}, the branch was already gone; an interrupted earlier delete logged its SHAs in app.log",
-                self.name
-            ),
-        }
-    }
-
-    fn deleted_with_tip(&self, tip: &str, head: Option<&str>) -> String {
-        let head = head.map_or(String::new(), |head| format!(", worktree HEAD {head}"));
-        format!(
-            "deleted {}, branch tip {tip}{head}; recover with git branch <name> <sha>",
-            self.name
-        )
+        outcome.summary(self.name)
     }
 }

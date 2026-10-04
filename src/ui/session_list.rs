@@ -21,6 +21,10 @@ impl SessionList {
         self.selected().map(SessionSummary::name)
     }
 
+    pub fn row(&self, name: &str) -> Option<&SessionSummary> {
+        self.rows.iter().find(|row| row.name() == name)
+    }
+
     pub fn selected(&self) -> Option<&SessionSummary> {
         let selected = self.selection.as_deref()?;
         self.rows.iter().find(|row| row.name() == selected)

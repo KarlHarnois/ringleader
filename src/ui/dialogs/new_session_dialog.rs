@@ -309,7 +309,7 @@ mod tests {
 
         DialogFixture::type_text(&mut dialog, &service, "fix-auth");
 
-        assert!(DialogFixture::text(&dialog).starts_with("Name    fix-auth"));
+        assert!(DialogFixture::text(&dialog).starts_with("Name      fix-auth"));
         fixture.scanner().release();
     }
 
@@ -510,7 +510,7 @@ mod tests {
         let shown = DialogFixture::text(&dialog);
         let step = DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
 
-        assert!(shown.contains("Prompt  one⏎two█"));
+        assert!(shown.contains("Prompt    one⏎two█"));
         assert_eq!(DialogFixture::submitted(step).prompt(), "one\ntwo");
     }
 
@@ -546,7 +546,7 @@ mod tests {
         assert_eq!(step, DialogStep::Stay);
         assert!(
             DialogFixture::text(&dialog)
-                .contains("Agent   no agents configured in /config/ringleader/config.toml")
+                .contains("Agent     no agents configured in /config/ringleader/config.toml")
         );
     }
 
@@ -565,7 +565,7 @@ mod tests {
         DialogFixture::press(&mut dialog, &service, KeyCode::Down);
         let text = DialogFixture::text(&dialog);
 
-        assert!(text.contains("Agent     claude\n          plain-agent · no prompt"));
+        assert!(text.contains("Agent       claude\n            plain-agent · no prompt"));
     }
 
     #[test]

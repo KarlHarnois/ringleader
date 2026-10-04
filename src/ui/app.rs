@@ -5,8 +5,8 @@ use crossterm::event::{Event, KeyEvent, KeyEventKind};
 use ratatui::Frame;
 
 use super::action_gate::{ActionGate, KeyAction};
-use super::blocking_operation::BlockingOperation;
-use super::dialogs::{Dialog, DialogStep};
+use super::blocking_operation::{BlockingOperation, OperationOutcome};
+use super::dialogs::{Dialog, DialogSlot, DialogStep};
 use super::home_state::HomeState;
 use super::home_view::{HomeView, LayoutTier};
 use super::status_bar::{StatusBar, StatusMessage};
@@ -17,7 +17,7 @@ use crate::application::{EphemeralShell, ReturnMode, SessionService, ShellOutcom
 pub struct App {
     service: SessionService,
     home: HomeState,
-    dialog: Option<Dialog>,
+    dialogs: DialogSlot,
     status: StatusReport,
     tick: u64,
     theme: Theme,
@@ -31,7 +31,7 @@ impl App {
         Self {
             service,
             home: HomeState::new(now),
-            dialog: None,
+            dialogs: DialogSlot::default(),
             status: StatusReport::default(),
             tick: 0,
             theme: Theme,
@@ -48,20 +48,16 @@ impl App {
     }
 
     pub fn handle_event(&mut self, event: &Event) -> AppRequest {
-        match (event, &mut self.dialog) {
-            (Event::Resize(width, height), _) => {
+        match event {
+            Event::Resize(width, height) => {
                 self.resize(*width, *height);
                 AppRequest::Redraw
             }
-            (_, Some(dialog)) => match dialog.handle_event(event, &self.service) {
-                DialogStep::Stay => AppRequest::Continue,
-                DialogStep::Close => {
-                    self.dialog = None;
-                    AppRequest::Continue
-                }
+            _ if self.dialogs.is_open() => match self.dialogs.handle_event(event, &self.service) {
                 DialogStep::Request(request) => self.request(request),
+                DialogStep::Stay | DialogStep::Close => AppRequest::Continue,
             },
-            (Event::Key(key), None) if key.kind != KeyEventKind::Release => self.handle_key(key),
+            Event::Key(key) if key.kind != KeyEventKind::Release => self.handle_key(key),
             _ => AppRequest::Continue,
         }
     }
@@ -75,9 +71,7 @@ impl App {
         self.tick = self.tick.wrapping_add(1);
         let outcome = self.home.tick(now, &mut self.service);
         self.status.failure(outcome);
-        if let Some(dialog) = &mut self.dialog {
-            dialog.poll(&mut self.service);
-        }
+        self.dialogs.poll(&mut self.service);
     }
 
     pub fn attach(&mut self, name: &str) {
@@ -110,17 +104,25 @@ impl App {
     pub fn perform(&mut self, operation: BlockingOperation) {
         let outcome = operation.run(&mut self.service);
         self.observe();
-        match (outcome, &mut self.dialog) {
-            (Ok(done), _) => {
-                self.dialog = None;
-                self.home.select(done.session(), &self.service);
-                self.status.info(done.message().to_string());
+        match outcome {
+            OperationOutcome::Done { message, select } => {
+                self.dialogs.close();
+                if let Some(name) = select {
+                    self.home.select(&name, &self.service);
+                }
+                self.status.info(message);
             }
-            (Err(error), Some(dialog)) => {
-                dialog.fail(error);
+            OperationOutcome::ConfirmDelete {
+                name,
+                impact,
+                changed,
+            } => {
+                let row = self.home.sessions().row(&name);
+                self.dialogs
+                    .open(Dialog::delete(row, &name, impact, changed));
                 self.status.show(None);
             }
-            (Err(error), None) => self.status.error(error),
+            OperationOutcome::Failed(error) => self.report_failure(error),
         }
     }
 
@@ -131,9 +133,7 @@ impl App {
             .with_note(self.home.note(prefix));
         let table = self.home.table(self.tick, self.theme);
         HomeView::new(table, self.home.preview_panel(self.theme), status).render(frame);
-        if let Some(dialog) = &self.dialog {
-            dialog.render(frame, &self.theme);
-        }
+        self.dialogs.render(frame, &self.theme);
     }
 
     fn handle_key(&mut self, key: &KeyEvent) -> AppRequest {
@@ -142,7 +142,7 @@ impl App {
         match ActionGate::new(selected, self.service.read_only_reason()).action_for(key) {
             KeyAction::Request(request) => return self.request(request),
             KeyAction::Move(offset) => self.home.move_selection(offset, &self.service),
-            KeyAction::NewSession => self.dialog = Some(Dialog::new_session(&self.service)),
+            KeyAction::NewSession => self.dialogs.open(Dialog::new_session(&self.service)),
             KeyAction::Reload => self.reload(),
             KeyAction::Refuse(refusal) => self.status.error(refusal),
             KeyAction::Ignore => {}
@@ -162,6 +162,13 @@ impl App {
         self.observe();
         let outcome = outcome.map_err(|error| format!("{}: {error}", Self::RELOAD_FAILED));
         self.status.outcome(outcome, Self::RELOADED.to_string());
+    }
+
+    fn report_failure(&mut self, error: String) {
+        match self.dialogs.fail(error) {
+            Ok(()) => self.status.show(None),
+            Err(error) => self.status.error(error),
+        }
     }
 
     fn observe(&mut self) {
@@ -190,7 +197,7 @@ mod tests {
     use ratatui::backend::TestBackend;
 
     use super::*;
-    use crate::application::ports::ConfigError;
+    use crate::application::ports::{ConfigError, UnmergedCommits};
     use crate::domain::{Config, ConfigDraft};
     use crate::test_support::{FakeMultiplexer, ServiceFixture, UiHarness};
 
@@ -254,6 +261,24 @@ mod tests {
                 app.on_tick(Instant::now());
                 std::thread::sleep(Duration::from_millis(5));
             }
+        }
+
+        fn deletable() -> ServiceFixture {
+            let session = ServiceFixture::session("fix-auth");
+            ServiceFixture::new()
+                .with_sessions(std::slice::from_ref(&session))
+                .with_workspace(ServiceFixture::workspace_for(&[&session]))
+                .with_host(ServiceFixture::host_for(&[&session]))
+                .with_multiplexer(
+                    FakeMultiplexer::new().with_live(ServiceFixture::waiting(&session)),
+                )
+        }
+
+        fn perform(app: &mut App, request: AppRequest) {
+            let AppRequest::Block(operation) = request else {
+                panic!("expected a blocking operation, got {request:?}");
+            };
+            app.perform(operation);
         }
 
         fn selected(app: &App) -> Option<String> {
@@ -524,7 +549,7 @@ mod tests {
         app.perform(operation);
 
         assert_eq!(busy, " Creating new-idea…");
-        assert!(app.dialog.is_none());
+        assert!(!app.dialogs.is_open());
         assert_eq!(AppFixture::selected(&app).as_deref(), Some("new-idea"));
         assert_eq!(
             AppFixture::status_line(&app, 100),
@@ -547,7 +572,7 @@ mod tests {
         };
         app.perform(operation);
 
-        assert!(app.dialog.is_some());
+        assert!(app.dialogs.is_open());
         assert!(AppFixture::screen(&app, 100, 28).contains("fix-auth"));
         assert!(!AppFixture::status_line(&app, 100).contains("Created"));
     }
@@ -560,7 +585,7 @@ mod tests {
 
         AppFixture::press(&mut app, 'n');
 
-        assert!(app.dialog.is_none());
+        assert!(!app.dialogs.is_open());
         assert!(
             AppFixture::status_line(&app, 200).starts_with(" config error, running read-only:")
         );
@@ -585,6 +610,101 @@ mod tests {
         let request = app.handle_event(&Event::Paste("q".to_string()));
 
         assert_eq!(request, AppRequest::Continue);
+    }
+
+    #[test]
+    fn d_measures_first_and_then_opens_the_confirmation() {
+        let fixture = AppFixture::deletable();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        let request = app.handle_event(&UiHarness::character('d'));
+        let busy = AppFixture::status_line(&app, 100);
+        AppFixture::perform(&mut app, request);
+
+        assert_eq!(busy, " Checking what deleting fix-auth would lose…");
+        assert!(app.dialogs.is_open());
+        assert!(AppFixture::screen(&app, 100, 28).contains("Delete session"));
+    }
+
+    #[test]
+    fn confirming_deletes_the_session_and_reports_the_branch_tip() {
+        let fixture = AppFixture::deletable();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        let measure = app.handle_event(&UiHarness::character('d'));
+        AppFixture::perform(&mut app, measure);
+
+        let delete = app.handle_event(&UiHarness::key(KeyCode::Enter));
+        AppFixture::perform(&mut app, delete);
+
+        assert!(!app.dialogs.is_open());
+        assert!(fixture.registry().sessions().is_empty());
+        assert!(AppFixture::status_line(&app, 200).starts_with(&format!(
+            " deleted fix-auth, branch tip {}",
+            ServiceFixture::TIP
+        )));
+    }
+
+    #[test]
+    fn changed_guards_reopen_the_dialog_with_the_new_impact() {
+        let session = ServiceFixture::session("fix-auth");
+        let workspace = ServiceFixture::workspace_for(&[&session]).with_unmerged(
+            "ringleader/fix-auth",
+            vec![
+                UnmergedCommits::new(0, Some(ServiceFixture::TIP), Some(ServiceFixture::TIP)),
+                UnmergedCommits::new(2, Some(ServiceFixture::TIP), Some(ServiceFixture::TIP)),
+            ],
+        );
+        let fixture = AppFixture::deletable().with_workspace(workspace);
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        let measure = app.handle_event(&UiHarness::character('d'));
+        AppFixture::perform(&mut app, measure);
+
+        let delete = app.handle_event(&UiHarness::key(KeyCode::Enter));
+        AppFixture::perform(&mut app, delete);
+
+        let screen = AppFixture::screen(&app, 100, 28);
+        assert!(screen.contains("2 commits exist on no other ref"));
+        assert!(screen.contains("What delete would lose changed"));
+        assert_eq!(fixture.registry().sessions().len(), 1);
+    }
+
+    #[test]
+    fn a_refused_measure_shows_in_the_status_bar_instead_of_a_dialog() {
+        let session = ServiceFixture::session("fix-auth");
+        let fixture = AppFixture::deletable().with_multiplexer(
+            FakeMultiplexer::new()
+                .with_live(ServiceFixture::waiting(&session))
+                .with_caller("ringleader-fix-auth"),
+        );
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        let measure = app.handle_event(&UiHarness::character('d'));
+        AppFixture::perform(&mut app, measure);
+
+        assert!(!app.dialogs.is_open());
+        assert_eq!(
+            AppFixture::status_line(&app, 200),
+            " session fix-auth runs this Ringleader, delete it from another terminal"
+        );
+    }
+
+    #[test]
+    fn an_unmeasurable_worktree_says_forget_needs_the_tui_to_quit() {
+        let session = ServiceFixture::session("fix-auth");
+        let fixture = AppFixture::deletable().with_workspace(
+            ServiceFixture::workspace_for(&[&session])
+                .with_invalid_repo(Path::new(ServiceFixture::REPO)),
+        );
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        let measure = app.handle_event(&UiHarness::character('d'));
+        AppFixture::perform(&mut app, measure);
+
+        let status = AppFixture::status_line(&app, 400);
+        assert!(status.contains("git cannot measure the worktree"));
+        assert!(
+            status.contains("ringleader delete fix-auth --forget needs this TUI to quit first")
+        );
     }
 
     #[test]

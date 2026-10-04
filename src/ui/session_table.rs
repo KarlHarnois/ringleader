@@ -48,7 +48,7 @@ impl<'a> SessionTable<'a> {
         if self.shows_header() {
             lines.push(Line::styled(columns.header(), self.theme.emphasis()));
         }
-        if self.rows.is_empty() {
+        if self.rows.is_empty() && !self.tier.shows_preview() {
             frame.render_widget(Paragraph::new(lines), inner);
             CenteredText::new(&CenteredText::EMPTY_STATE).render(frame, inner);
             return;
@@ -110,14 +110,7 @@ impl<'a> SessionTable<'a> {
         if row.session().is_none() {
             return Self::NO_DIFF.to_string();
         }
-        row.diff().map_or(String::new(), |diff| {
-            format!(
-                "+{} -{} ?{}",
-                diff.insertions(),
-                diff.deletions(),
-                diff.untracked()
-            )
-        })
+        row.diff().map_or(String::new(), |diff| diff.to_string())
     }
 }
 

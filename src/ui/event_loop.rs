@@ -360,6 +360,28 @@ mod tests {
     }
 
     #[test]
+    fn an_enter_typed_while_delete_measures_cannot_confirm_the_dialog() {
+        let session = ServiceFixture::session("fix-auth");
+        let fixture = ServiceFixture::new()
+            .with_sessions(std::slice::from_ref(&session))
+            .with_workspace(ServiceFixture::workspace_for(&[&session]))
+            .with_host(ServiceFixture::host_for(&[&session]))
+            .with_multiplexer(FakeMultiplexer::new().with_live(ServiceFixture::waiting(&session)));
+        let harness = UiHarness::new();
+        let mut app = UiHarness::app(&fixture);
+        let input = ScriptedInput::events(vec![
+            UiHarness::character('d'),
+            UiHarness::key(KeyCode::Enter),
+        ])
+        .then_after_a_pause(vec![UiHarness::key(KeyCode::Esc)]);
+        let mut event_loop = harness.event_loop(input);
+
+        event_loop.run(&mut app).unwrap();
+
+        assert_eq!(fixture.registry().sessions().len(), 1);
+    }
+
+    #[test]
     fn t_outside_tmux_attaches_to_the_shell_window_behind_a_suspended_screen() {
         let fixture = ShellLoopFixture::live();
         let harness = UiHarness::new();

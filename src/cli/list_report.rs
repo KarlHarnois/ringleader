@@ -31,14 +31,9 @@ impl<'a> ListReport<'a> {
         let worktree = metadata.map_or(String::new(), |metadata| {
             metadata.worktree_path().display().to_string()
         });
-        let diff = self.diff(row).map_or(Self::NO_DIFF.to_string(), |diff| {
-            format!(
-                "+{} -{} ?{}",
-                diff.insertions(),
-                diff.deletions(),
-                diff.untracked()
-            )
-        });
+        let diff = self
+            .diff(row)
+            .map_or(Self::NO_DIFF.to_string(), |diff| diff.to_string());
         format!(
             "{:<9} {:<20} {:<30} {:<16} {}",
             row.state().label(),

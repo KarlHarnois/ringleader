@@ -18,6 +18,8 @@ pub enum ServiceError {
     NotFound(String),
     #[error("{0}")]
     Conflict(String),
+    #[error("{0}")]
+    Unmeasurable(String),
     #[error("{message}")]
     GuardsChanged {
         message: String,
@@ -37,7 +39,9 @@ impl ServiceError {
     pub fn exit_code(&self) -> u8 {
         match self {
             ServiceError::NotFound(_) => Self::NOT_FOUND_EXIT,
-            ServiceError::Conflict(_) | ServiceError::GuardsChanged { .. } => Self::CONFLICT_EXIT,
+            ServiceError::Conflict(_)
+            | ServiceError::Unmeasurable(_)
+            | ServiceError::GuardsChanged { .. } => Self::CONFLICT_EXIT,
             _ => Self::INVALID_EXIT,
         }
     }
@@ -53,6 +57,7 @@ impl ServiceError {
             ServiceError::Invalid(_) => ServiceError::Invalid(message),
             ServiceError::NotFound(_) => ServiceError::NotFound(message),
             ServiceError::Conflict(_) => ServiceError::Conflict(message),
+            ServiceError::Unmeasurable(_) => ServiceError::Unmeasurable(message),
             ServiceError::GuardsChanged { impact, .. } => {
                 ServiceError::GuardsChanged { message, impact }
             }

@@ -211,8 +211,9 @@ mod tests {
     fn the_full_tier_without_sessions_invites_the_user_to_create_one() {
         let screen = ViewFixture::render(&[], 100, 28);
 
-        assert!(screen.contains("No sessions yet."));
+        assert_eq!(screen.matches("No sessions yet.").count(), 1);
         assert!(screen.contains("Press n to create one."));
+        assert!(screen.contains("  Name"));
     }
 
     #[test]

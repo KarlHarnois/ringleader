@@ -65,4 +65,27 @@ impl DeleteOutcome {
             .as_ref()
             .map(|(path, branch)| (path.as_path(), branch.as_str()))
     }
+
+    pub fn summary(&self, name: &str) -> String {
+        if let Some((worktree, branch)) = self.kept() {
+            return format!(
+                "forgot {name}, left the worktree {} and the branch {branch} on disk, run ringleader doctor",
+                worktree.display()
+            );
+        }
+        match (self.branch, self.tip()) {
+            (_, Some(tip)) => {
+                let head = self
+                    .head()
+                    .map_or(String::new(), |head| format!(", worktree HEAD {head}"));
+                format!(
+                    "deleted {name}, branch tip {tip}{head}; recover with git branch <name> <sha>"
+                )
+            }
+            (BranchPresence::Unborn, None) => format!("deleted {name}, the session had no commits"),
+            _ => format!(
+                "deleted {name}, the branch was already gone; an interrupted earlier delete logged its SHAs in app.log"
+            ),
+        }
+    }
 }

@@ -33,6 +33,7 @@ impl<'a> ActionGate<'a> {
             KeyCode::Enter => KeyAction::from(self.attach().map(KeyAction::Request)),
             KeyCode::Char('t') => KeyAction::from(self.shell().map(KeyAction::Request)),
             KeyCode::Char('s') => KeyAction::from(self.restart().map(KeyAction::Request)),
+            KeyCode::Char('d') => KeyAction::from(self.delete().map(KeyAction::Request)),
             _ => KeyAction::Ignore,
         }
     }
@@ -50,6 +51,17 @@ impl<'a> ActionGate<'a> {
             )),
             _ => Ok(AppRequest::Shell(name.to_string())),
         }
+    }
+
+    pub fn delete(&self) -> Result<AppRequest, String> {
+        self.writable()?;
+        let row = self.selected()?;
+        let name = row.name();
+        if row.state() == SessionState::Unmanaged {
+            return Err(format!("{name} is unmanaged, so it cannot be deleted."));
+        }
+        let operation = BlockingOperation::MeasureDelete(name.to_string());
+        Ok(AppRequest::Block(operation))
     }
 
     pub fn restart(&self) -> Result<AppRequest, String> {
@@ -243,6 +255,41 @@ mod tests {
         assert_eq!(action(KeyCode::Right), KeyAction::Move(1));
         assert_eq!(action(KeyCode::Char('h')), KeyAction::Move(-1));
         assert_eq!(action(KeyCode::Left), KeyAction::Move(-1));
+    }
+
+    #[test]
+    fn d_measures_what_deleting_the_selected_session_would_lose() {
+        let row = GateFixture::row(SessionState::Waiting);
+        let key = KeyEvent::from(KeyCode::Char('d'));
+
+        assert_eq!(
+            ActionGate::new(Some(&row), None).action_for(&key),
+            KeyAction::Request(AppRequest::Block(BlockingOperation::MeasureDelete(
+                "fix-auth".to_string()
+            )))
+        );
+    }
+
+    #[test]
+    fn d_in_a_read_only_tui_is_refused() {
+        let row = GateFixture::row(SessionState::Waiting);
+        let error = GateFixture::config_error();
+
+        assert!(ActionGate::new(Some(&row), Some(&error)).delete().is_err());
+    }
+
+    #[test]
+    fn an_unmanaged_session_cannot_be_deleted() {
+        let stranger = ServiceFixture::session("mystery");
+        let row = SessionSummary::unmanaged(UnmanagedSession::new(
+            "mystery",
+            ServiceFixture::waiting(&stranger).without_metadata(),
+        ));
+
+        assert_eq!(
+            ActionGate::new(Some(&row), None).delete(),
+            Err("mystery is unmanaged, so it cannot be deleted.".to_string())
+        );
     }
 
     #[test]

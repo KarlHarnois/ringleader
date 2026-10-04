@@ -1,3 +1,5 @@
+use std::fmt;
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DiffStat {
     files: u64,
@@ -44,6 +46,16 @@ impl DiffStat {
     }
 }
 
+impl fmt::Display for DiffStat {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "+{} -{} ?{}",
+            self.insertions, self.deletions, self.untracked
+        )
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileChange {
     Text { insertions: u64, deletions: u64 },
@@ -65,6 +77,19 @@ impl FileChange {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_diff_stat_shows_insertions_deletions_and_untracked_files() {
+        let diff = DiffStat::from_changes(
+            [FileChange::Text {
+                insertions: 12,
+                deletions: 4,
+            }],
+            2,
+        );
+
+        assert_eq!(diff.to_string(), "+12 -4 ?2");
+    }
 
     #[test]
     fn accumulates_text_changes() {
