@@ -8,6 +8,7 @@ description = "A tmux session manager for Claude and opencode"
 repository = "https://github.com/KarlHarnois/ringleader"
 
 [dependencies]
+ansi-to-tui = "8.0.1"
 clap = { version = "4.6.7", features = ["derive"] }
 crossterm = { version = "0.29.0", features = ["use-dev-tty"] }
 dirs = "7.0.0"

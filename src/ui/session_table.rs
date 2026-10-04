@@ -70,8 +70,14 @@ impl<'a> SessionTable<'a> {
             .selection
             .and_then(|name| self.rows.iter().position(|row| row.name() == name))
             .unwrap_or(0);
-        let first = (selected + 1).saturating_sub(room);
-        self.rows.iter().skip(first).take(room)
+        self.rows
+            .iter()
+            .skip(Self::first_visible(selected, room))
+            .take(room)
+    }
+
+    pub fn first_visible(selected: usize, room: usize) -> usize {
+        (selected + 1).saturating_sub(room)
     }
 
     fn columns(&self, inner_width: usize) -> TableColumns {

@@ -68,6 +68,9 @@ impl LayoutTier {
     const FULL: (u16, u16) = (80, 24);
     const COMPACT: (u16, u16) = (60, 12);
     const MINIMAL: (u16, u16) = (36, 8);
+    const STATUS_BAR: usize = 1;
+    const BORDERS: usize = 2;
+    const HEADER: usize = 1;
 
     pub fn for_size(width: u16, height: u16) -> Self {
         let reaches = |(minimum_width, minimum_height): (u16, u16)| {
@@ -87,6 +90,15 @@ impl LayoutTier {
 
     pub fn shows_preview(self) -> bool {
         self == Self::Full
+    }
+
+    pub fn table_rows(self, height: u16) -> usize {
+        let chrome = match self {
+            Self::TooSmall => return 0,
+            Self::Minimal => Self::STATUS_BAR + Self::BORDERS,
+            Self::Full | Self::Compact => Self::STATUS_BAR + Self::BORDERS + Self::HEADER,
+        };
+        usize::from(height).saturating_sub(chrome)
     }
 }
 
@@ -173,6 +185,13 @@ mod tests {
         assert_eq!(LayoutTier::for_size(36, 8), LayoutTier::Minimal);
         assert_eq!(LayoutTier::for_size(35, 8), LayoutTier::TooSmall);
         assert_eq!(LayoutTier::for_size(36, 7), LayoutTier::TooSmall);
+    }
+
+    #[test]
+    fn the_table_shows_the_rows_left_by_the_status_bar_borders_and_header() {
+        assert_eq!(LayoutTier::Full.table_rows(28), 24);
+        assert_eq!(LayoutTier::Minimal.table_rows(8), 5);
+        assert_eq!(LayoutTier::TooSmall.table_rows(7), 0);
     }
 
     #[test]

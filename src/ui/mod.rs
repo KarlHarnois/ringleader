@@ -2,6 +2,7 @@ pub mod action_gate;
 pub mod app;
 pub mod blocking_operation;
 pub mod dialogs;
+pub mod diff_queue;
 pub mod event_loop;
 pub mod home_state;
 pub mod home_view;

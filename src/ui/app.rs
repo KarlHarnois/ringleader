@@ -9,7 +9,7 @@ use super::action_gate::{ActionGate, KeyAction};
 use super::blocking_operation::{BlockingOperation, OperationOutcome};
 use super::dialogs::{Dialog, DialogSlot, DialogStep};
 use super::home_state::HomeState;
-use super::home_view::{HomeView, LayoutTier};
+use super::home_view::HomeView;
 use super::status_bar::{StatusBar, StatusMessage};
 use super::status_report::StatusReport;
 use super::theme::Theme;
@@ -72,8 +72,7 @@ impl App {
     }
 
     pub fn resize(&mut self, width: u16, height: u16) {
-        self.home
-            .resize(LayoutTier::for_size(width, height), &self.service);
+        self.home.resize(width, height, &self.service);
     }
 
     pub fn on_tick(&mut self, now: Instant) {
@@ -174,6 +173,7 @@ impl App {
     fn reload(&mut self) {
         let outcome = self.service.reload();
         self.observe();
+        self.home.refresh_diffs();
         let outcome = outcome.map_err(|error| format!("{}: {error}", Self::RELOAD_FAILED));
         self.status.outcome(outcome, Self::RELOADED.to_string());
     }
@@ -286,7 +286,7 @@ mod tests {
 
     use super::*;
     use crate::application::ports::{ConfigError, UnmergedCommits};
-    use crate::domain::{Config, ConfigDraft};
+    use crate::domain::{Config, ConfigDraft, DiffStat};
     use crate::test_support::{
         CapturedWriter, FakeMultiplexer, FakeReturnBinding, ServiceFixture, UiHarness,
     };
@@ -946,6 +946,22 @@ mod tests {
 
         assert!(app.dialogs.is_open());
         assert_eq!(fixture.registry().sessions().len(), 2);
+    }
+
+    #[test]
+    fn a_measured_diff_shows_in_the_table_and_survives_the_next_poll() {
+        let session = ServiceFixture::session("fix-auth");
+        let workspace = ServiceFixture::workspace_for(&[&session])
+            .with_diff(session.worktree_path(), DiffStat::from_changes([], 3));
+        let fixture = AppFixture::deletable().with_workspace(workspace);
+        let start = Instant::now();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        let measured = AppFixture::screen(&app, 100, 28);
+
+        app.on_tick(start + Duration::from_millis(1100));
+
+        assert!(measured.contains("+0 -0 ?3"));
+        assert!(AppFixture::screen(&app, 100, 28).contains("+0 -0 ?3"));
     }
 
     #[test]

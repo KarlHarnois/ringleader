@@ -1,3 +1,4 @@
+use ansi_to_tui::IntoText;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::Line;
@@ -54,14 +55,17 @@ impl<'a> PreviewPanel<'a> {
             Line::styled(Self::SEPARATOR.to_string().repeat(width), self.theme.dim()),
         ];
         let room = usize::from(area.height).saturating_sub(lines.len());
-        lines.extend(self.body(row, room).into_iter().map(Line::from));
+        lines.extend(self.body(row, room));
         frame.render_widget(Paragraph::new(lines), area);
     }
 
-    fn body(&self, row: &SessionSummary, room: usize) -> Vec<String> {
+    fn body(&self, row: &SessionSummary, room: usize) -> Vec<Line<'static>> {
         match self.capture {
-            Some(PreviewCapture::Text(text)) => PreviewText::new(text).bottom_rows(room),
-            Some(PreviewCapture::Unavailable(reason)) => Self::metadata_lines(row, reason),
+            Some(PreviewCapture::Text(text)) => PreviewText::new(text).bottom_lines(room),
+            Some(PreviewCapture::Unavailable(reason)) => Self::metadata_lines(row, reason)
+                .into_iter()
+                .map(Line::from)
+                .collect(),
             None => Vec::new(),
         }
     }
@@ -134,14 +138,31 @@ impl<'a> PreviewText<'a> {
         plain
     }
 
-    pub fn bottom_rows(&self, room: usize) -> Vec<String> {
-        let plain = self.plain();
-        let mut rows: Vec<&str> = plain.lines().collect();
-        while rows.last().is_some_and(|row| row.trim().is_empty()) {
-            rows.pop();
+    pub fn bottom_lines(&self, room: usize) -> Vec<Line<'static>> {
+        let mut lines = self.styled_lines().unwrap_or_else(|| self.plain_lines());
+        while lines.last().is_some_and(Self::is_blank) {
+            lines.pop();
         }
-        let first = rows.len().saturating_sub(room);
-        rows[first..].iter().map(|row| row.to_string()).collect()
+        let shown = lines.split_off(lines.len().saturating_sub(room));
+        let padding = room.saturating_sub(shown.len());
+        std::iter::repeat_n(Line::default(), padding)
+            .chain(shown)
+            .collect()
+    }
+
+    fn styled_lines(&self) -> Option<Vec<Line<'static>>> {
+        self.raw.as_bytes().into_text().ok().map(|text| text.lines)
+    }
+
+    fn plain_lines(&self) -> Vec<Line<'static>> {
+        self.plain()
+            .lines()
+            .map(|row| Line::from(row.to_string()))
+            .collect()
+    }
+
+    fn is_blank(line: &Line) -> bool {
+        line.spans.iter().all(|span| span.content.trim().is_empty())
     }
 
     fn skip_through(characters: &mut impl Iterator<Item = char>, ends: impl Fn(char) -> bool) {
@@ -217,7 +238,7 @@ mod tests {
 
         let lines = PanelFixture::lines(Some(&capture), 50, 8);
 
-        assert_eq!(lines[4..6], ["✻ Thinking…", "link"]);
+        assert_eq!(lines[5..7], ["✻ Thinking…", "link"]);
     }
 
     #[test]
@@ -235,7 +256,43 @@ mod tests {
 
         let lines = PanelFixture::lines(Some(&capture), 30, 8);
 
-        assert_eq!(lines[4..6], ["x".repeat(26), "next".to_string()]);
+        assert_eq!(lines[5..7], ["x".repeat(26), "next".to_string()]);
+    }
+
+    #[test]
+    fn a_short_capture_is_anchored_to_the_bottom_of_the_panel() {
+        let capture = PreviewCapture::Text("sh-5.3$\n\n\n".to_string());
+
+        let lines = PanelFixture::lines(Some(&capture), 50, 10);
+
+        assert_eq!(lines[4..9], ["", "", "", "", "sh-5.3$"]);
+    }
+
+    #[test]
+    fn captured_colors_are_kept() {
+        let capture = PreviewCapture::Text("\u{1b}[32mready\u{1b}[0m".to_string());
+        let row = PanelFixture::row();
+        let mut terminal = Terminal::new(TestBackend::new(30, 6)).unwrap();
+
+        terminal
+            .draw(|frame| {
+                PreviewPanel::new(Some(&row), Some(&capture), Theme).render(frame, frame.area())
+            })
+            .unwrap();
+
+        let cell = &terminal.backend().buffer()[(2, 4)];
+        assert_eq!(
+            (cell.symbol(), cell.fg),
+            ("r", ratatui::style::Color::Green)
+        );
+    }
+
+    #[test]
+    fn the_plain_text_fallback_drops_every_escape_sequence() {
+        let raw =
+            "\u{1b}[1;32mready\u{1b}[0m \u{1b}]8;;https://example.com\u{7}link\u{1b}]8;;\u{1b}\\";
+
+        assert_eq!(PreviewText::new(raw).plain(), "ready link");
     }
 
     #[test]

@@ -1,6 +1,8 @@
+use std::collections::HashMap;
+
 use super::session_table::SessionTable;
 use super::theme::Theme;
-use crate::domain::{Session, SessionSummary};
+use crate::domain::{DiffStat, Session, SessionSummary};
 
 #[derive(Debug, Default)]
 pub struct SessionList {
@@ -27,6 +29,30 @@ impl SessionList {
             .filter_map(SessionSummary::session)
             .cloned()
             .collect()
+    }
+
+    pub fn visible_managed(&self, room: usize) -> Vec<String> {
+        let first = SessionTable::first_visible(self.selected_index().unwrap_or(0), room);
+        let visible = self.rows.iter().skip(first).take(room);
+        visible
+            .filter(|row| row.session().is_some())
+            .map(|row| row.name().to_string())
+            .collect()
+    }
+
+    pub fn names(&self) -> Vec<String> {
+        self.rows.iter().map(|row| row.name().to_string()).collect()
+    }
+
+    pub fn apply_diffs(&mut self, diffs: &HashMap<String, DiffStat>) {
+        let rows = std::mem::take(&mut self.rows);
+        self.rows = rows
+            .into_iter()
+            .map(|row| match diffs.get(row.name()) {
+                Some(diff) => row.with_diff(*diff),
+                None => row,
+            })
+            .collect();
     }
 
     pub fn row(&self, name: &str) -> Option<&SessionSummary> {
@@ -152,6 +178,25 @@ mod tests {
         list.show(vec![ListFixture::row("dark-mode", SessionState::Waiting)]);
 
         assert_eq!(list.selected_name(), Some("dark-mode"));
+    }
+
+    #[test]
+    fn only_visible_managed_rows_are_offered_for_diffs() {
+        let stranger = ServiceFixture::session("mystery");
+        let unmanaged = SessionSummary::unmanaged(crate::domain::UnmanagedSession::new(
+            "mystery",
+            ServiceFixture::waiting(&stranger).without_metadata(),
+        ));
+        let mut list = SessionList::default();
+        list.show(vec![
+            ListFixture::row("a-one", SessionState::Waiting),
+            ListFixture::row("b-two", SessionState::Waiting),
+            ListFixture::row("c-three", SessionState::Waiting),
+            unmanaged,
+        ]);
+        list.move_selection(3);
+
+        assert_eq!(list.visible_managed(2), ["c-three"]);
     }
 
     #[test]

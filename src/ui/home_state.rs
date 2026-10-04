@@ -1,5 +1,6 @@
 use std::time::Instant;
 
+use super::diff_queue::DiffQueue;
 use super::home_view::LayoutTier;
 use super::preview_feed::PreviewFeed;
 use super::preview_panel::PreviewPanel;
@@ -12,6 +13,8 @@ use crate::application::{ServiceError, SessionService};
 pub struct HomeState {
     sessions: SessionList,
     preview: PreviewFeed,
+    diffs: DiffQueue,
+    table_rows: usize,
     next_observe: Instant,
 }
 
@@ -20,6 +23,8 @@ impl HomeState {
         Self {
             sessions: SessionList::default(),
             preview: PreviewFeed::new(now),
+            diffs: DiffQueue::default(),
+            table_rows: 0,
             next_observe: now,
         }
     }
@@ -41,9 +46,15 @@ impl HomeState {
         StatusNote::new(row, tmux_prefix).text()
     }
 
-    pub fn resize(&mut self, tier: LayoutTier, service: &SessionService) {
+    pub fn resize(&mut self, width: u16, height: u16, service: &SessionService) {
+        let tier = LayoutTier::for_size(width, height);
+        self.table_rows = tier.table_rows(height);
         self.preview.resize(tier);
         self.preview.refresh(service, self.sessions.selected());
+    }
+
+    pub fn refresh_diffs(&mut self) {
+        self.diffs.refresh_soon();
     }
 
     pub fn tick(&mut self, now: Instant, service: &mut SessionService) -> Result<(), ServiceError> {
@@ -54,6 +65,9 @@ impl HomeState {
         }
         self.preview
             .refresh_if_due(now, service, self.sessions.selected());
+        let visible = self.sessions.visible_managed(self.table_rows);
+        self.diffs.tick(now, &visible, service);
+        self.sessions.apply_diffs(self.diffs.diffs());
         observed
     }
 
@@ -61,6 +75,8 @@ impl HomeState {
         let persist = service.read_only_reason().is_none();
         let rows = service.observe(persist)?;
         self.change_selection(service, |sessions| sessions.show(rows));
+        self.diffs.keep_only(&self.sessions.names());
+        self.sessions.apply_diffs(self.diffs.diffs());
         Ok(())
     }
 
