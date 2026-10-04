@@ -192,7 +192,7 @@ impl CompositionRoot {
         .into_iter()
         .flatten()
         .collect();
-        let app = App::new(service, Instant::now())
+        let app = App::new(service, Box::new(io::stdout()), Instant::now())
             .with_binding_guard(binding_guard)
             .with_message((!warnings.is_empty()).then(|| warnings.join("; ")));
         let outcome = Self::run_event_loop(app);

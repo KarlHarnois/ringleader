@@ -6,6 +6,7 @@ use crossterm::event::{Event, KeyEvent, KeyEventKind};
 use ratatui::Frame;
 
 use super::action_gate::{ActionGate, KeyAction};
+use super::bell::Bell;
 use super::blocking_operation::{BlockingOperation, OperationOutcome};
 use super::dialogs::{Dialog, DialogSlot, DialogStep};
 use super::home_state::HomeState;
@@ -30,10 +31,10 @@ impl App {
     const RELOADED: &'static str = "Reloaded the config and the registry.";
     const RELOAD_FAILED: &'static str = "reload failed, kept the previous config";
 
-    pub fn new(service: SessionService, now: Instant) -> Self {
+    pub fn new(service: SessionService, bell_sink: Box<dyn Write>, now: Instant) -> Self {
         Self {
             service,
-            home: HomeState::new(now),
+            home: HomeState::new(now, Bell::new(bell_sink)),
             dialogs: DialogSlot::default(),
             status: StatusReport::default(),
             binding: None,

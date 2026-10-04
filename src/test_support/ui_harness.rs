@@ -47,7 +47,7 @@ impl UiHarness {
     }
 
     pub fn app(fixture: &ServiceFixture) -> App {
-        App::new(fixture.service(), Instant::now())
+        App::new(fixture.service(), Box::new(io::sink()), Instant::now())
     }
 
     pub fn signals(&self) -> &SignalFlags {

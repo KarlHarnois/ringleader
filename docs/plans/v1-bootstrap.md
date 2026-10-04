@@ -209,6 +209,7 @@ Examples: branch `ringleader/fix-auth`, tmux session `ringleader-fix-auth`, work
     │   ├── session_list.rs         # SessionList, sorted rows and name-based selection
     │   ├── preview_feed.rs         # PreviewFeed, the preview capture and its timer
     │   ├── diff_queue.rs           # DiffQueue, round-robin diffs of visible rows
+    │   ├── bell.rs                 # Bell, rings on a Working to Waiting edge
     │   ├── shell_runner.rs         # ShellRunner, runs the ephemeral t shell
     │   ├── blocking_operation.rs   # BlockingOperation, a create, delete, rename, or restart run behind a busy message
     │   ├── status_report.rs        # StatusReport, the status bar message and how outcomes become one

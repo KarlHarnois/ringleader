@@ -1157,4 +1157,28 @@ mod tests {
         assert!(error.is_timeout());
         assert_eq!(fixture.sessions(), ["holder"]);
     }
+
+    #[test]
+    fn the_bell_reaches_a_server_whose_only_client_is_in_control_mode() {
+        let fixture = MultiplexerFixture::with_holder();
+        let _client = fixture.server.control_client("=holder:");
+
+        assert!(fixture.server.multiplexer().ring_bell().is_ok());
+    }
+
+    #[test]
+    fn a_bell_for_a_tty_that_would_block_returns_at_once() {
+        let directory = tempfile::tempdir().unwrap();
+        let fifo = directory.path().join("unread-tty");
+        let made = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap();
+        assert!(made.success());
+        let started = Instant::now();
+
+        TmuxMultiplexer::write_bell(&fifo);
+
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
 }

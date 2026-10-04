@@ -1,5 +1,6 @@
 pub mod action_gate;
 pub mod app;
+pub mod bell;
 pub mod blocking_operation;
 pub mod dialogs;
 pub mod diff_queue;

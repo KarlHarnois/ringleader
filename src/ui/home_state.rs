@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant};
 
+use super::bell::Bell;
 use super::diff_queue::DiffQueue;
 use super::home_view::LayoutTier;
 use super::preview_feed::PreviewFeed;
@@ -12,6 +13,7 @@ use crate::application::{ServiceError, SessionService, Tool};
 
 pub struct HomeState {
     sessions: SessionList,
+    bell: Bell,
     preview: PreviewFeed,
     diffs: DiffQueue,
     table_rows: usize,
@@ -22,9 +24,10 @@ pub struct HomeState {
 impl HomeState {
     pub const TMUX_PAUSE: Duration = Duration::from_secs(30);
 
-    pub fn new(now: Instant) -> Self {
+    pub fn new(now: Instant, bell: Bell) -> Self {
         Self {
             sessions: SessionList::default(),
+            bell,
             preview: PreviewFeed::new(now),
             diffs: DiffQueue::default(),
             table_rows: 0,
@@ -99,7 +102,11 @@ impl HomeState {
         self.change_selection(service, |sessions| sessions.show(rows));
         self.diffs.keep_only(&self.sessions.names());
         self.sessions.apply_diffs(self.diffs.diffs());
-        Ok(())
+        let rung = self.bell.watch(self.sessions.rows(), service);
+        if let Err(error) = &rung {
+            self.pause_after(error);
+        }
+        rung
     }
 
     pub fn select(&mut self, name: &str, service: &SessionService) {
