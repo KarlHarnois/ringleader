@@ -124,11 +124,15 @@ impl<'a> SessionTable<'a> {
         };
         let (before, rest) = text.split_at(start);
         let after = &rest[diff_text.len()..];
+        let untracked = diff.untracked_marker().map(|marker| format!(" {marker}"));
         vec![
             Span::styled(before.to_string(), self.theme.base()),
             Span::styled(format!("+{}", diff.insertions()), self.theme.insertions()),
             Span::styled(format!(" -{}", diff.deletions()), self.theme.deletions()),
-            Span::styled(format!(" ?{}{after}", diff.untracked()), self.theme.base()),
+            Span::styled(
+                format!("{}{after}", untracked.unwrap_or_default()),
+                self.theme.base(),
+            ),
         ]
     }
 
@@ -321,7 +325,8 @@ mod tests {
         let (plus, minus) = (column("+12"), column("-4"));
         let buffer = terminal.backend().buffer();
 
-        assert!(line.contains("+12 -4 ?0"));
+        assert!(line.contains("+12 -4 "));
+        assert!(!line.contains("?0"));
         assert_eq!(buffer[(plus, 2)].fg, Color::Green);
         assert_eq!(buffer[(minus, 2)].fg, Color::Red);
     }

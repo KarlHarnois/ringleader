@@ -35,6 +35,10 @@ impl DiffStat {
         self.untracked
     }
 
+    pub fn untracked_marker(&self) -> Option<String> {
+        (self.untracked > 0).then(|| format!("?{}", self.untracked))
+    }
+
     fn adding(self, change: FileChange) -> Self {
         let (insertions, deletions) = change.line_counts();
         Self {
@@ -48,11 +52,11 @@ impl DiffStat {
 
 impl fmt::Display for DiffStat {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            formatter,
-            "+{} -{} ?{}",
-            self.insertions, self.deletions, self.untracked
-        )
+        write!(formatter, "+{} -{}", self.insertions, self.deletions)?;
+        match self.untracked_marker() {
+            Some(marker) => write!(formatter, " {marker}"),
+            None => Ok(()),
+        }
     }
 }
 
@@ -77,6 +81,19 @@ impl FileChange {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_diff_stat_without_untracked_files_shows_only_the_line_counts() {
+        let diff = DiffStat::from_changes(
+            [FileChange::Text {
+                insertions: 26,
+                deletions: 0,
+            }],
+            0,
+        );
+
+        assert_eq!(diff.to_string(), "+26 -0");
+    }
 
     #[test]
     fn a_diff_stat_shows_insertions_deletions_and_untracked_files() {
