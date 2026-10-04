@@ -14,7 +14,7 @@ use super::status_bar::{StatusBar, StatusMessage};
 use super::status_report::StatusReport;
 use super::theme::Theme;
 use crate::application::ports::{BindingError, ReturnBinding};
-use crate::application::{EphemeralShell, ReturnMode, SessionService, ShellOutcome};
+use crate::application::{EphemeralShell, ReturnMode, ServiceError, SessionService, ShellOutcome};
 
 pub struct App {
     service: SessionService,
@@ -87,7 +87,7 @@ impl App {
         self.observe();
         match outcome {
             Ok(attached) => self.status.attached(&attached),
-            Err(error) => self.status.error(error.to_string()),
+            Err(error) => self.report_failure(error),
         }
     }
 
@@ -99,7 +99,7 @@ impl App {
         match outcome {
             Ok(ShellOutcome::Ephemeral(shell)) => return Some(shell),
             Ok(ShellOutcome::Attached(attached)) => self.status.attached(&attached),
-            Err(error) => self.status.error(error.to_string()),
+            Err(error) => self.report_failure(error),
         }
         None
     }
@@ -172,14 +172,15 @@ impl App {
 
     fn reload(&mut self) {
         let outcome = self.service.reload();
+        self.home.refresh_now();
         self.observe();
-        self.home.refresh_diffs();
         let outcome = outcome.map_err(|error| format!("{}: {error}", Self::RELOAD_FAILED));
         self.status.outcome(outcome, Self::RELOADED.to_string());
     }
 
-    fn report_failure(&mut self, error: String) {
-        match self.dialogs.fail(error) {
+    fn report_failure(&mut self, error: ServiceError) {
+        self.home.pause_after(&error);
+        match self.dialogs.fail(error.to_string()) {
             Ok(()) => self.status.show(None),
             Err(error) => self.status.error(error),
         }
@@ -285,7 +286,7 @@ mod tests {
     use ratatui::backend::TestBackend;
 
     use super::*;
-    use crate::application::ports::{ConfigError, UnmergedCommits};
+    use crate::application::ports::{ConfigError, MultiplexerError, UnmergedCommits};
     use crate::domain::{Config, ConfigDraft, DiffStat};
     use crate::test_support::{
         CapturedWriter, FakeMultiplexer, FakeReturnBinding, ServiceFixture, UiHarness,
@@ -369,6 +370,21 @@ mod tests {
                 panic!("expected a blocking operation, got {request:?}");
             };
             app.perform(operation);
+        }
+
+        fn tmux_timeout() -> MultiplexerError {
+            MultiplexerError::TimedOut {
+                subcommand: "list-panes".to_string(),
+                seconds: 2,
+            }
+        }
+
+        fn observe_calls(fixture: &ServiceFixture) -> usize {
+            let calls = fixture.multiplexer().calls();
+            calls
+                .iter()
+                .filter(|call| call.starts_with("observe_all"))
+                .count()
         }
 
         fn selected(app: &App) -> Option<String> {
@@ -962,6 +978,42 @@ mod tests {
 
         assert!(measured.contains("+0 -0 ?3"));
         assert!(AppFixture::screen(&app, 100, 28).contains("+0 -0 ?3"));
+    }
+
+    #[test]
+    fn a_tmux_timeout_pauses_observing_until_r() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let start = Instant::now();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        fixture
+            .multiplexer()
+            .fail("observe_all", AppFixture::tmux_timeout());
+
+        app.on_tick(start + Duration::from_secs(2));
+        let after_the_timeout = AppFixture::observe_calls(&fixture);
+        app.on_tick(start + Duration::from_secs(4));
+        let while_paused = AppFixture::observe_calls(&fixture);
+        AppFixture::press(&mut app, 'r');
+
+        assert_eq!(while_paused, after_the_timeout);
+        assert_eq!(AppFixture::observe_calls(&fixture), after_the_timeout + 1);
+    }
+
+    #[test]
+    fn a_preview_timeout_pauses_the_preview_too() {
+        let fixture = AppFixture::two_waiting_sessions();
+        fixture
+            .multiplexer()
+            .fail("capture_pane", AppFixture::tmux_timeout());
+        let start = Instant::now();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        let first = AppFixture::captures(&fixture).len();
+
+        app.on_tick(start + Duration::from_secs(1));
+        app.on_tick(start + Duration::from_secs(2));
+
+        assert_eq!(first, 1);
+        assert_eq!(AppFixture::captures(&fixture).len(), 1);
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use super::diff_queue::DiffQueue;
 use super::home_view::LayoutTier;
@@ -8,7 +8,7 @@ use super::session_list::SessionList;
 use super::session_table::SessionTable;
 use super::status_bar::StatusNote;
 use super::theme::Theme;
-use crate::application::{ServiceError, SessionService};
+use crate::application::{ServiceError, SessionService, Tool};
 
 pub struct HomeState {
     sessions: SessionList,
@@ -16,9 +16,12 @@ pub struct HomeState {
     diffs: DiffQueue,
     table_rows: usize,
     next_observe: Instant,
+    tmux_paused_until: Option<Instant>,
 }
 
 impl HomeState {
+    pub const TMUX_PAUSE: Duration = Duration::from_secs(30);
+
     pub fn new(now: Instant) -> Self {
         Self {
             sessions: SessionList::default(),
@@ -26,6 +29,7 @@ impl HomeState {
             diffs: DiffQueue::default(),
             table_rows: 0,
             next_observe: now,
+            tmux_paused_until: None,
         }
     }
 
@@ -50,30 +54,48 @@ impl HomeState {
         let tier = LayoutTier::for_size(width, height);
         self.table_rows = tier.table_rows(height);
         self.preview.resize(tier);
-        self.preview.refresh(service, self.sessions.selected());
+        self.refresh_preview(service);
     }
 
-    pub fn refresh_diffs(&mut self) {
+    pub fn refresh_now(&mut self) {
+        self.tmux_paused_until = None;
         self.diffs.refresh_soon();
+    }
+
+    pub fn pause_after(&mut self, error: &ServiceError) {
+        if error.is_timeout_of(Tool::Tmux) {
+            self.tmux_paused_until = Some(Instant::now() + Self::TMUX_PAUSE);
+        }
     }
 
     pub fn tick(&mut self, now: Instant, service: &mut SessionService) -> Result<(), ServiceError> {
         let mut observed = Ok(());
-        if now >= self.next_observe {
+        if now >= self.next_observe && !self.is_tmux_paused() {
             self.next_observe = now + service.config().intervals().state_poll();
             observed = self.observe(service);
         }
-        self.preview
-            .refresh_if_due(now, service, self.sessions.selected());
+        if !self.is_tmux_paused() {
+            let previewed = self
+                .preview
+                .refresh_if_due(now, service, self.sessions.selected());
+            self.pause_on_failure(previewed);
+        }
         let visible = self.sessions.visible_managed(self.table_rows);
-        self.diffs.tick(now, &visible, service);
+        let measured = self.diffs.tick(now, &visible, service);
         self.sessions.apply_diffs(self.diffs.diffs());
-        observed
+        observed.and(measured)
     }
 
     pub fn observe(&mut self, service: &mut SessionService) -> Result<(), ServiceError> {
+        if self.is_tmux_paused() {
+            return Ok(());
+        }
         let persist = service.read_only_reason().is_none();
-        let rows = service.observe(persist)?;
+        let observed = service.observe(persist);
+        if let Err(error) = &observed {
+            self.pause_after(error);
+        }
+        let rows = observed?;
         self.change_selection(service, |sessions| sessions.show(rows));
         self.diffs.keep_only(&self.sessions.names());
         self.sessions.apply_diffs(self.diffs.diffs());
@@ -96,7 +118,26 @@ impl HomeState {
         let before = self.sessions.selected_name().map(str::to_string);
         change(&mut self.sessions);
         if self.sessions.selected_name() != before.as_deref() {
-            self.preview.refresh(service, self.sessions.selected());
+            self.refresh_preview(service);
         }
+    }
+
+    fn refresh_preview(&mut self, service: &SessionService) {
+        if self.is_tmux_paused() {
+            return;
+        }
+        let previewed = self.preview.refresh(service, self.sessions.selected());
+        self.pause_on_failure(previewed);
+    }
+
+    fn pause_on_failure(&mut self, outcome: Result<(), ServiceError>) {
+        if let Err(error) = outcome {
+            self.pause_after(&error);
+        }
+    }
+
+    fn is_tmux_paused(&self) -> bool {
+        self.tmux_paused_until
+            .is_some_and(|until| Instant::now() < until)
     }
 }

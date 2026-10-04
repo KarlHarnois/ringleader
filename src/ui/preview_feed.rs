@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use super::home_view::LayoutTier;
 use super::preview_panel::PreviewCapture;
-use crate::application::SessionService;
+use crate::application::{ServiceError, SessionService};
 use crate::domain::{SessionState, SessionSummary};
 
 pub struct PreviewFeed {
@@ -35,27 +35,32 @@ impl PreviewFeed {
         now: Instant,
         service: &SessionService,
         row: Option<&SessionSummary>,
-    ) {
+    ) -> Result<(), ServiceError> {
         if now < self.next_refresh {
-            return;
+            return Ok(());
         }
         self.next_refresh = now + service.config().intervals().preview_refresh();
-        self.refresh(service, row);
+        self.refresh(service, row)
     }
 
-    pub fn refresh(&mut self, service: &SessionService, row: Option<&SessionSummary>) {
-        self.capture = row
-            .filter(|_| self.tier.shows_preview())
-            .map(|row| Self::captured(service, row));
-    }
-
-    fn captured(service: &SessionService, row: &SessionSummary) -> PreviewCapture {
+    pub fn refresh(
+        &mut self,
+        service: &SessionService,
+        row: Option<&SessionSummary>,
+    ) -> Result<(), ServiceError> {
+        let Some(row) = row.filter(|_| self.tier.shows_preview()) else {
+            self.capture = None;
+            return Ok(());
+        };
         if row.state() == SessionState::Stopped {
-            return PreviewCapture::Unavailable(Self::STOPPED.to_string());
+            self.capture = Some(PreviewCapture::Unavailable(Self::STOPPED.to_string()));
+            return Ok(());
         }
-        match service.preview(row.tmux_name()) {
-            Ok(text) => PreviewCapture::Text(text),
+        let captured = service.preview(row.tmux_name());
+        self.capture = Some(match &captured {
+            Ok(text) => PreviewCapture::Text(text.clone()),
             Err(error) => PreviewCapture::Unavailable(error.to_string()),
-        }
+        });
+        captured.map(drop)
     }
 }

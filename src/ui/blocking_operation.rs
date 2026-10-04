@@ -33,14 +33,14 @@ impl BlockingOperation {
         match self {
             Self::Restart(name) => match service.restart_session(&name) {
                 Ok(()) => OperationOutcome::done(format!("Restarted {name}."), Some(name)),
-                Err(error) => OperationOutcome::Failed(error.to_string()),
+                Err(error) => OperationOutcome::Failed(error),
             },
             Self::Create(request) => match service.create_session(&request) {
                 Ok(session) => OperationOutcome::done(
                     format!("Created {} on branch {}.", session.name(), session.branch()),
                     Some(session.name().to_string()),
                 ),
-                Err(error) => OperationOutcome::Failed(error.to_string()),
+                Err(error) => OperationOutcome::Failed(error),
             },
             Self::MeasureDelete(name) => Self::measure(service, name),
             Self::Delete { name, seen } => Self::delete(service, name, seen),
@@ -57,7 +57,7 @@ impl BlockingOperation {
                     ),
                     Some(session.name().to_string()),
                 ),
-                Err(error) => OperationOutcome::Failed(error.to_string()),
+                Err(error) => OperationOutcome::Failed(error),
             },
         }
     }
@@ -69,10 +69,10 @@ impl BlockingOperation {
                 impact,
                 changed: false,
             },
-            Err(ServiceError::Unmeasurable(message)) => OperationOutcome::Failed(format!(
-                "{message}; ringleader delete {name} --forget needs this TUI to quit first, since the TUI holds the lock"
-            )),
-            Err(error) => OperationOutcome::Failed(error.to_string()),
+            Err(error @ ServiceError::Unmeasurable(_)) => OperationOutcome::Failed(error.adding_context(&format!(
+                "ringleader delete {name} --forget needs this TUI to quit first, since the TUI holds the lock"
+            ))),
+            Err(error) => OperationOutcome::Failed(error),
         }
     }
 
@@ -84,7 +84,7 @@ impl BlockingOperation {
                 impact: *impact,
                 changed: true,
             },
-            Err(error) => OperationOutcome::Failed(error.to_string()),
+            Err(error) => OperationOutcome::Failed(error),
         }
     }
 }
@@ -100,7 +100,7 @@ pub enum OperationOutcome {
         impact: DeleteImpact,
         changed: bool,
     },
-    Failed(String),
+    Failed(ServiceError),
 }
 
 impl OperationOutcome {

@@ -28,7 +28,12 @@ use crate::application::{CorruptRegistry, Pending, ServiceError, SessionService}
 pub struct Cli {
     #[arg(long, global = true, value_name = "PATH")]
     config: Option<PathBuf>,
-    #[arg(long, global = true, value_name = "LEVEL")]
+    #[arg(
+        long,
+        global = true,
+        value_name = "LEVEL",
+        value_parser = ["off", "error", "warn", "info", "debug", "trace"]
+    )]
     log_level: Option<String>,
     #[command(subcommand)]
     command: Option<CliCommand>,

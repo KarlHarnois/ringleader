@@ -16,11 +16,13 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Instant;
 
+use log::LevelFilter;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
 use adapters::agent_handoff::AgentHandoff;
 use adapters::agent_launcher::{AgentLauncher, LauncherCommand, ProcessExec};
+use adapters::app_log::AppLog;
 use adapters::caller_process::CallerProcess;
 use adapters::directory_repo_scanner::DirectoryRepoScanner;
 use adapters::file_lock::FileLock;
@@ -93,15 +95,28 @@ impl CompositionRoot {
                 state_directory.display()
             ));
         }
+        let log = match &state_ready {
+            Ok(()) => self.start_log(cli),
+            Err(error) => Err(AppLog::disabled(
+                &state_directory.join(AppLog::FILE_NAME),
+                &error.to_string(),
+            )),
+        };
         self.handoff().delete_stale();
         let signals = match cli.is_mutating() {
             true => SignalFlags::register().unwrap_or_else(|_| SignalFlags::unregistered()),
             false => SignalFlags::unregistered(),
         };
         let mut session = CliSession::new(CliOutput::standard(), signals);
+        if let Err(message) = &log {
+            session.output().error(message);
+        }
         let mut lock = FileLock::new(&state_directory.join("lock"));
         if let Err(exit) = cli.take_write_lock(&mut lock, &mut session) {
             return Self::exit_with(exit);
+        }
+        if let (Ok(log), true) = (&log, cli.is_mutating()) {
+            log.truncate_if_large();
         }
         let config_source = self.config_source(cli);
         if cli.is_mutating()
@@ -114,6 +129,13 @@ impl CompositionRoot {
         let binding = self.return_binding(&loaded, inside_tmux);
         let mut service = self.service(config_source, loaded, inside_tmux, binding);
         Self::exit_with(cli.execute(&mut service, &mut session))
+    }
+
+    fn start_log(&self, cli: &Cli) -> Result<AppLog, String> {
+        let log = AppLog::open(&self.paths.state_directory())?;
+        let level = cli.log_level().and_then(|level| level.parse().ok());
+        log.start(level.unwrap_or(LevelFilter::Info))?;
+        Ok(log)
     }
 
     fn exit_with(exit: CliExit) -> ExitCode {
@@ -136,10 +158,14 @@ impl CompositionRoot {
                 state_directory.display()
             ));
         }
+        let log = self.start_log(cli);
         self.handoff().delete_stale();
         let mut lock = FileLock::new(&state_directory.join("lock"));
         if let Err(error) = lock.acquire_lifetime() {
             return Self::lock_failure(&error);
+        }
+        if let Ok(log) = &log {
+            log.truncate_if_large();
         }
         let config_source = self.config_source(cli);
         let template_warning = Self::write_template_if_missing(&config_source);
@@ -158,6 +184,7 @@ impl CompositionRoot {
         let notice = ExitNotice::new(Box::new(io::stderr()));
         let binding_guard = BindingGuard::new(binding, notice.handle());
         let warnings: Vec<String> = [
+            log.err(),
             registry_warning,
             startup_message,
             binding_guard.repair_stale(),
