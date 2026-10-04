@@ -1,6 +1,6 @@
 # Plan: Ringleader, a tmux session manager for Claude and opencode
 
-> Status: active. The milestone 30 commit flips this to `completed`. This file is the historical plan, not living documentation; `AGENTS.md` is the living documentation.
+> Status: completed. The milestone 30 commit flips this to `completed`. This file is the historical plan, not living documentation; `AGENTS.md` is the living documentation.
 
 ## 0. Ground rules for the implementing agent
 
