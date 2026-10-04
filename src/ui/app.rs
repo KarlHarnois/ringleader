@@ -1,4 +1,5 @@
-use std::io;
+use std::io::{self, Write};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
 use crossterm::event::{Event, KeyEvent, KeyEventKind};
@@ -12,6 +13,7 @@ use super::home_view::{HomeView, LayoutTier};
 use super::status_bar::{StatusBar, StatusMessage};
 use super::status_report::StatusReport;
 use super::theme::Theme;
+use crate::application::ports::{BindingError, ReturnBinding};
 use crate::application::{EphemeralShell, ReturnMode, SessionService, ShellOutcome};
 
 pub struct App {
@@ -19,6 +21,7 @@ pub struct App {
     home: HomeState,
     dialogs: DialogSlot,
     status: StatusReport,
+    binding: Option<BindingGuard>,
     tick: u64,
     theme: Theme,
 }
@@ -33,6 +36,7 @@ impl App {
             home: HomeState::new(now),
             dialogs: DialogSlot::default(),
             status: StatusReport::default(),
+            binding: None,
             tick: 0,
             theme: Theme,
         }
@@ -41,6 +45,13 @@ impl App {
     pub fn with_message(mut self, message: Option<String>) -> Self {
         self.status.show(message.map(StatusMessage::Error));
         self
+    }
+
+    pub fn with_binding_guard(self, binding: BindingGuard) -> Self {
+        Self {
+            binding: Some(binding),
+            ..self
+        }
     }
 
     pub fn is_inside_tmux(&self) -> bool {
@@ -75,7 +86,7 @@ impl App {
     }
 
     pub fn attach(&mut self, name: &str) {
-        let outcome = self.service.attach(name, ReturnMode::None);
+        let outcome = self.service.attach(name, ReturnMode::InstallReturnBinding);
         self.observe();
         match outcome {
             Ok(attached) => self.status.attached(&attached),
@@ -84,7 +95,9 @@ impl App {
     }
 
     pub fn open_shell(&mut self, name: &str) -> Option<EphemeralShell> {
-        let outcome = self.service.open_shell(name, ReturnMode::None);
+        let outcome = self
+            .service
+            .open_shell(name, ReturnMode::InstallReturnBinding);
         self.observe();
         match outcome {
             Ok(ShellOutcome::Ephemeral(shell)) => return Some(shell),
@@ -187,6 +200,80 @@ pub enum AppRequest {
     Block(BlockingOperation),
 }
 
+pub struct BindingGuard {
+    binding: Arc<dyn ReturnBinding>,
+    notice: NoticeHandle,
+}
+
+impl BindingGuard {
+    pub fn new(binding: Arc<dyn ReturnBinding>, notice: NoticeHandle) -> Self {
+        Self { binding, notice }
+    }
+
+    pub fn repair_stale(&self) -> Option<String> {
+        self.report(self.binding.repair_stale())
+    }
+
+    fn report(&self, outcome: Result<(), BindingError>) -> Option<String> {
+        let error = outcome.err()?;
+        log::warn!("{error}");
+        if let BindingError::NotRestored { saved_line } = &error {
+            self.notice.add(saved_line);
+        }
+        Some(error.to_string())
+    }
+}
+
+impl Drop for BindingGuard {
+    fn drop(&mut self) {
+        self.report(self.binding.restore());
+    }
+}
+
+pub struct ExitNotice {
+    lines: Arc<Mutex<Vec<String>>>,
+    sink: Box<dyn Write>,
+}
+
+impl ExitNotice {
+    pub fn new(sink: Box<dyn Write>) -> Self {
+        Self {
+            lines: Arc::default(),
+            sink,
+        }
+    }
+
+    pub fn handle(&self) -> NoticeHandle {
+        NoticeHandle {
+            lines: Arc::clone(&self.lines),
+        }
+    }
+}
+
+impl Drop for ExitNotice {
+    fn drop(&mut self) {
+        let lines = self.lines.lock().unwrap_or_else(PoisonError::into_inner);
+        for line in lines.iter() {
+            let _ = writeln!(
+                self.sink,
+                "ringleader: could not restore your Ctrl-Q binding, rebind it by hand: {line}"
+            );
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct NoticeHandle {
+    lines: Arc<Mutex<Vec<String>>>,
+}
+
+impl NoticeHandle {
+    fn add(&self, line: &str) {
+        let mut lines = self.lines.lock().unwrap_or_else(PoisonError::into_inner);
+        lines.push(line.to_string());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};
@@ -199,7 +286,9 @@ mod tests {
     use super::*;
     use crate::application::ports::{ConfigError, UnmergedCommits};
     use crate::domain::{Config, ConfigDraft};
-    use crate::test_support::{FakeMultiplexer, ServiceFixture, UiHarness};
+    use crate::test_support::{
+        CapturedWriter, FakeMultiplexer, FakeReturnBinding, ServiceFixture, UiHarness,
+    };
 
     struct AppFixture;
 
@@ -705,6 +794,119 @@ mod tests {
         assert!(
             status.contains("ringleader delete fix-auth --forget needs this TUI to quit first")
         );
+    }
+
+    #[test]
+    fn attach_from_the_tui_installs_the_return_binding_first() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        app.attach("dark-mode");
+
+        assert_eq!(fixture.binding().calls(), ["install"]);
+        assert_eq!(fixture.multiplexer().attached().len(), 1);
+    }
+
+    #[test]
+    fn a_shell_from_the_tui_installs_the_return_binding_first() {
+        let fixture = AppFixture::deletable();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        app.open_shell("fix-auth");
+
+        assert_eq!(fixture.binding().calls(), ["install"]);
+    }
+
+    #[test]
+    fn a_binding_that_cannot_be_installed_is_explained_in_the_status_bar() {
+        let fixture = AppFixture::two_waiting_sessions().with_binding(
+            FakeReturnBinding::default().failing_install(BindingError::Unavailable {
+                reason: "TMUX_PANE is not set, as in a display-popup".to_string(),
+            }),
+        );
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        app.attach("dark-mode");
+
+        assert_eq!(
+            AppFixture::status_line(&app, 200),
+            " Ctrl-Q return binding not installed: TMUX_PANE is not set, as in a display-popup"
+        );
+    }
+
+    #[test]
+    fn dropping_the_app_restores_the_binding() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let notice = ExitNotice::new(Box::new(CapturedWriter::default()));
+        let app = UiHarness::app(&fixture)
+            .with_binding_guard(BindingGuard::new(fixture.shared_binding(), notice.handle()));
+
+        drop(app);
+
+        assert_eq!(fixture.binding().calls(), ["restore"]);
+    }
+
+    #[test]
+    fn a_binding_that_cannot_be_restored_reaches_the_exit_notice() {
+        let fixture = AppFixture::two_waiting_sessions().with_binding(
+            FakeReturnBinding::default().failing_restore(BindingError::NotRestored {
+                saved_line: "bind-key -T root C-q send-keys example".to_string(),
+            }),
+        );
+        let writer = CapturedWriter::default();
+        let notice = ExitNotice::new(Box::new(writer.clone()));
+        let guard = BindingGuard::new(fixture.shared_binding(), notice.handle());
+
+        drop(guard);
+        let before_the_notice_drops = writer.text();
+        drop(notice);
+
+        assert_eq!(before_the_notice_drops, "");
+        assert_eq!(
+            writer.text(),
+            "ringleader: could not restore your Ctrl-Q binding, rebind it by hand: bind-key -T root C-q send-keys example\n"
+        );
+    }
+
+    #[test]
+    fn a_kept_record_at_startup_is_a_warning_and_never_a_notice() {
+        let fixture = AppFixture::two_waiting_sessions().with_binding(
+            FakeReturnBinding::default().failing_repair(BindingError::RecordKept {
+                detail: "Permission denied".to_string(),
+                saved_line: "bind-key -T root C-q send-keys example".to_string(),
+            }),
+        );
+        let writer = CapturedWriter::default();
+        let notice = ExitNotice::new(Box::new(writer.clone()));
+        let guard = BindingGuard::new(fixture.shared_binding(), notice.handle());
+
+        let warning = guard.repair_stale();
+        drop(guard);
+        drop(notice);
+
+        assert_eq!(
+            warning.as_deref(),
+            Some("kept the saved Ctrl-Q binding for a later retry: Permission denied")
+        );
+        assert_eq!(writer.text(), "");
+    }
+
+    #[test]
+    fn a_stale_binding_that_cannot_be_restored_at_startup_reaches_the_exit_notice() {
+        let fixture = AppFixture::two_waiting_sessions().with_binding(
+            FakeReturnBinding::default().failing_repair(BindingError::NotRestored {
+                saved_line: "bind-key -T root C-q send-keys example".to_string(),
+            }),
+        );
+        let writer = CapturedWriter::default();
+        let notice = ExitNotice::new(Box::new(writer.clone()));
+        let guard = BindingGuard::new(fixture.shared_binding(), notice.handle());
+
+        assert!(guard.repair_stale().is_some());
+        drop(guard);
+        drop(notice);
+
+        assert!(writer.text().contains("send-keys example"));
     }
 
     #[test]

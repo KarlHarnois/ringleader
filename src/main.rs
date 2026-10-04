@@ -35,12 +35,13 @@ use adapters::tmux_multiplexer::TmuxMultiplexer;
 use adapters::tmux_return_binding::TmuxReturnBinding;
 use adapters::toml_config_source::TomlConfigSource;
 use adapters::{BoundedCommand, Deadlines, GitWorkspace};
-use application::ports::{ConfigSource, Lock, LockError};
+use application::ports::{ConfigSource, Lock, LockError, ReturnBinding};
 use application::{
     CorruptRegistry, DiagnosticPaths, LoadedConfig, RepoPorts, ServiceContext, ServicePorts,
     SessionService, StatePorts, TmuxPorts,
 };
 use cli::{Cli, CliExit, CliOutput, CliSession};
+use ui::app::{BindingGuard, ExitNotice};
 use ui::{App, CrosstermInput, CrosstermScreenMode, EventLoop, TerminalGuard};
 
 fn main() -> ExitCode {
@@ -110,7 +111,8 @@ impl CompositionRoot {
         }
         let loaded = Self::load(&config_source);
         let inside_tmux = self.tmux(&[]).is_inside_client(&CallerProcess::read());
-        let mut service = self.service(config_source, loaded, inside_tmux);
+        let binding = self.return_binding(&loaded, inside_tmux);
+        let mut service = self.service(config_source, loaded, inside_tmux, binding);
         Self::exit_with(cli.execute(&mut service, &mut session))
     }
 
@@ -147,26 +149,42 @@ impl CompositionRoot {
             .map(|error| format!("config error, running read-only: {error}"))
             .or(template_warning);
         let inside_tmux = self.tmux(&[]).is_inside_client(&CallerProcess::read());
-        let mut service = self.service(config_source, loaded, inside_tmux);
+        let binding = self.return_binding(&loaded, inside_tmux);
+        let mut service = self.service(config_source, loaded, inside_tmux, binding.clone());
         let registry_warning = match service.load_registry(CorruptRegistry::MoveAside) {
             Ok(warning) => warning,
             Err(error) => return Self::fail(&error.to_string()),
         };
-        let app =
-            App::new(service, Instant::now()).with_message(registry_warning.or(startup_message));
-        match Self::run_event_loop(app) {
+        let notice = ExitNotice::new(Box::new(io::stderr()));
+        let binding_guard = BindingGuard::new(binding, notice.handle());
+        let warnings: Vec<String> = [
+            registry_warning,
+            startup_message,
+            binding_guard.repair_stale(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        let app = App::new(service, Instant::now())
+            .with_binding_guard(binding_guard)
+            .with_message((!warnings.is_empty()).then(|| warnings.join("; ")));
+        let outcome = Self::run_event_loop(app);
+        drop(notice);
+        match outcome {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => Self::fail(&error.to_string()),
         }
     }
 
-    fn run_event_loop(mut app: App) -> io::Result<()> {
+    fn run_event_loop(app: App) -> io::Result<()> {
         let signals = SignalFlags::register()?;
-        let guard = TerminalGuard::enter(Box::new(CrosstermScreenMode))?;
-        guard.state().install_panic_hook();
+        let screen = TerminalGuard::enter(Box::new(CrosstermScreenMode))?;
+        screen.state().install_panic_hook();
+        let mut app_inside_the_screen = app;
         let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
         terminal.clear()?;
-        EventLoop::new(terminal, CrosstermInput, signals, guard.state()).run(&mut app)
+        EventLoop::new(terminal, CrosstermInput, signals, screen.state())
+            .run(&mut app_inside_the_screen)
     }
 
     fn config_source(&self, cli: &Cli) -> TomlConfigSource {
@@ -195,18 +213,28 @@ impl CompositionRoot {
         }
     }
 
+    fn return_binding(&self, loaded: &LoadedConfig, inside_tmux: bool) -> Arc<dyn ReturnBinding> {
+        let env_names = loaded.config().agent_env_union();
+        Arc::new(TmuxReturnBinding::new(
+            self.tmux(&env_names),
+            &self.paths.state_directory().join("bindings.json"),
+            inside_tmux,
+            loaded.config().naming().tmux_prefix(),
+        ))
+    }
+
     fn service(
         &self,
         config_source: TomlConfigSource,
         loaded: LoadedConfig,
         inside_tmux: bool,
+        binding: Arc<dyn ReturnBinding>,
     ) -> SessionService {
         let env_names = loaded.config().agent_env_union();
         let tmux = self.tmux(&env_names);
         let bounded = BoundedCommand::new(Deadlines::standard());
         let clock = Arc::new(SystemClock);
         let state_directory = self.paths.state_directory();
-        let tmux_prefix = loaded.config().naming().tmux_prefix().to_string();
         let state = StatePorts::new(
             Arc::new(JsonSessionRegistry::new(
                 &state_directory.join("sessions.json"),
@@ -225,17 +253,8 @@ impl CompositionRoot {
             Arc::new(SystemHostProbe::new(&self.environment)),
         );
         let tmux_ports = TmuxPorts::new(
-            Arc::new(TmuxMultiplexer::new(
-                tmux.clone(),
-                self.launcher(),
-                inside_tmux,
-            )),
-            Arc::new(TmuxReturnBinding::new(
-                tmux,
-                &state_directory.join("bindings.json"),
-                inside_tmux,
-                &tmux_prefix,
-            )),
+            Arc::new(TmuxMultiplexer::new(tmux, self.launcher(), inside_tmux)),
+            binding,
         );
         let context = ServiceContext::new(loaded, &self.launch_directory)
             .with_inside_tmux(inside_tmux)

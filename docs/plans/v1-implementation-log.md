@@ -62,3 +62,27 @@ After `script` dies by SIGKILL, it cannot restore the outer terminal, which stay
 
 Section 0 gives the prefix for manual runs, which sets `TMUX_TMPDIR` and the XDG directories and leaves `HOME` and `SHELL` as the owner's. The `t` check runs `$SHELL` in a tmux window and as an ephemeral shell, so the owner's shell would have read the owner's startup files, and `ringleader new` would have run git with the owner's global git config. Section 0 also says never to touch the owner's config. Choice: manual runs from milestone 19 on add `HOME=<tempdir>/home`, `SHELL=sh`, `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_NOSYSTEM=1`, and a fake git author and committer to the section 0 prefix. The milestone 19 check passed under it: `t` on a live session opened a window tagged `@ringleader_shell` in the worktree, a second `t` reused that window, `t` on a stopped session ran `sh` in the worktree and returned to the TUI on `exit`, `s` restarted the stopped session, `s` on a live session was refused, and `r` reported a reload and a broken config.
 
+## Milestone 23
+
+### Binding guard and exit notice stay in app.rs
+
+Section 6 says:
+
+> The binding guard and the exit notice are support types of `App` in `app.rs`.
+
+Section 0 says:
+
+> Source files target under 200 lines excluding tests.
+
+With `BindingGuard`, `ExitNotice`, and its `NoticeHandle`, `app.rs` holds about 275 lines of non-test code. Choice: section 6 is the more detailed passage, since it names these two types and their file, so they stay in `app.rs`. `App` itself stays under 200 lines because the open dialog lives in `DialogSlot`, the key table in `ActionGate`, and the polled rows in `HomeState`.
+
+### Ctrl-Q verification by hand
+
+The section 6 verification criteria were checked under the section 0 rule for manual runs, with the milestone 19 additions to the prefix, once on a private server started by the pinned tmux 3.6a and once on one started by tmux 3.7c from `nixpkgs/nixos-unstable#tmux`. In the 3.7 run, `RINGLEADER_TMUX` pointed the TUI and the CLI at the same 3.7c binary that started the server, so client and server matched. Both runs started with a user `C-q` binding and a user `F12` binding in the root table and two managed sessions made with `ringleader new`. Both passed every check:
+
+- Outside tmux, `C-q` returned to the home screen after switching from the attached managed session to the other one with `C-b )`.
+- `C-q` in the unmanaged `holder` session reached its pane, where `cat -v` printed `^Q`, and the client stayed attached.
+- A second attach in the same run reused the saved record, and `q` restored the user's `C-q` binding with `F12` untouched.
+- After SIGKILL the Ringleader binding remained, and the next start restored the user's binding before any attach.
+- Inside tmux, with the TUI in a window of `ringleader-alpha`, `C-q` from the agent window of the same session, from `ringleader-beta` after a session switch, and from `alpha` after a visit to `holder` each brought the client back to the TUI's pane id. `C-q` in `holder` reached its pane. Quitting and a SIGKILL followed by a restart both restored the user's binding.
+

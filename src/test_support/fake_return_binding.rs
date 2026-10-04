@@ -6,11 +6,23 @@ use crate::application::ports::{BindingError, ReturnBinding};
 pub struct FakeReturnBinding {
     calls: Mutex<Vec<&'static str>>,
     install_error: Mutex<Option<BindingError>>,
+    restore_error: Mutex<Option<BindingError>>,
+    repair_error: Mutex<Option<BindingError>>,
 }
 
 impl FakeReturnBinding {
     pub fn failing_install(self, error: BindingError) -> Self {
         *self.install_error.lock().unwrap() = Some(error);
+        self
+    }
+
+    pub fn failing_restore(self, error: BindingError) -> Self {
+        *self.restore_error.lock().unwrap() = Some(error);
+        self
+    }
+
+    pub fn failing_repair(self, error: BindingError) -> Self {
+        *self.repair_error.lock().unwrap() = Some(error);
         self
     }
 
@@ -34,11 +46,19 @@ impl ReturnBinding for FakeReturnBinding {
 
     fn restore(&self) -> Result<(), BindingError> {
         self.record("restore");
-        Ok(())
+        self.restore_error
+            .lock()
+            .unwrap()
+            .clone()
+            .map_or(Ok(()), Err)
     }
 
     fn repair_stale(&self) -> Result<(), BindingError> {
         self.record("repair_stale");
-        Ok(())
+        self.repair_error
+            .lock()
+            .unwrap()
+            .clone()
+            .map_or(Ok(()), Err)
     }
 }

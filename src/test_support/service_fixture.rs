@@ -155,6 +155,10 @@ impl ServiceFixture {
         &self.binding
     }
 
+    pub fn shared_binding(&self) -> Arc<FakeReturnBinding> {
+        Arc::clone(&self.binding)
+    }
+
     pub fn config_source(&self) -> &FakeConfigSource {
         &self.config_source
     }
