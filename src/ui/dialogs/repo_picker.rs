@@ -85,8 +85,10 @@ impl RepoPicker {
         }
         let rows = self.rows().len();
         match key.code {
-            KeyCode::Up => self.move_cursor_to(self.cursor.saturating_sub(1)),
-            KeyCode::Down => self.move_cursor_to((self.cursor + 1).min(rows.saturating_sub(1))),
+            KeyCode::Up | KeyCode::Char('k') => self.move_cursor_to(self.cursor.saturating_sub(1)),
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.move_cursor_to((self.cursor + 1).min(rows.saturating_sub(1)));
+            }
             KeyCode::Enter if self.cursor + 2 == rows => {
                 self.form = Some(PickerForm::AddRepo(AddRepoDialog::open()));
             }

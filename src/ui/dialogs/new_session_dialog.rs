@@ -23,7 +23,7 @@ pub struct NewSessionDialog {
 
 impl NewSessionDialog {
     pub const TITLE: &'static str = " New session ";
-    const HINTS: &'static str = "Tab next field · Enter create · Esc cancel";
+    const HINTS: &'static str = "Tab next field · ↑ ↓ j k choose · Enter create · Esc cancel";
     const CURSOR: char = '█';
     const FIXED_LINES: usize = 7;
 
@@ -451,6 +451,58 @@ mod tests {
     }
 
     #[test]
+    fn j_and_k_move_through_the_repo_rows() {
+        let fixture = DialogFixture::with_repos(vec![
+            DialogFixture::repo("alpha-project", "/repos/alpha-project"),
+            DialogFixture::repo("beta-project", "/repos/beta-project"),
+        ]);
+        let (mut dialog, service) = DialogFixture::opened(&fixture);
+        DialogFixture::type_text(&mut dialog, &service, "fix-auth");
+        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
+
+        DialogFixture::press(&mut dialog, &service, KeyCode::Char('j'));
+        DialogFixture::press(&mut dialog, &service, KeyCode::Char('j'));
+        DialogFixture::press(&mut dialog, &service, KeyCode::Char('k'));
+        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
+        let step = DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
+
+        assert_eq!(
+            DialogFixture::submitted(step).repo().name().as_str(),
+            "beta-project"
+        );
+    }
+
+    #[test]
+    fn j_and_k_move_through_the_agents() {
+        let agents = vec![ServiceFixture::agent(), Agent::new("opencode", "opencode")];
+        let fixture =
+            ServiceFixture::new().with_config(ServiceFixture::config().with_agents(agents));
+        let (mut dialog, service) = DialogFixture::opened(&fixture);
+        DialogFixture::type_text(&mut dialog, &service, "fix-auth");
+        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
+        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
+
+        DialogFixture::press(&mut dialog, &service, KeyCode::Char('j'));
+        let after_j = DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
+        DialogFixture::press(&mut dialog, &service, KeyCode::Char('k'));
+        let after_k = DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
+
+        assert_eq!(DialogFixture::submitted(after_j).agent(), Some("opencode"));
+        assert_eq!(DialogFixture::submitted(after_k).agent(), Some("claude"));
+    }
+
+    #[test]
+    fn j_and_k_type_into_the_scope_input() {
+        let fixture = ServiceFixture::new();
+        let (mut dialog, service) = DialogFixture::opened(&fixture);
+        DialogFixture::open_scope_input(&mut dialog, &service);
+
+        DialogFixture::type_text(&mut dialog, &service, "/jk");
+
+        assert!(DialogFixture::text(&dialog).contains("Scope path: /jk█"));
+    }
+
+    #[test]
     fn esc_in_the_scope_input_closes_only_the_input() {
         let fixture = ServiceFixture::new();
         let (mut dialog, service) = DialogFixture::opened(&fixture);
@@ -566,7 +618,7 @@ mod tests {
         DialogFixture::press(&mut dialog, &service, KeyCode::Down);
         let text = DialogFixture::text(&dialog);
 
-        assert!(text.contains("Agent       claude\n            plain-agent · no prompt"));
+        assert!(text.contains("Agent     claude\n          plain-agent · no prompt"));
     }
 
     #[test]

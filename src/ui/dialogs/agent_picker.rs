@@ -40,8 +40,8 @@ impl AgentPicker {
     pub fn handle_key(&mut self, key: &KeyEvent) -> bool {
         let last = self.agents.len().saturating_sub(1);
         match key.code {
-            KeyCode::Up => self.selected = self.selected.saturating_sub(1),
-            KeyCode::Down => self.selected = (self.selected + 1).min(last),
+            KeyCode::Up | KeyCode::Char('k') => self.selected = self.selected.saturating_sub(1),
+            KeyCode::Down | KeyCode::Char('j') => self.selected = (self.selected + 1).min(last),
             _ => return false,
         }
         true
@@ -64,7 +64,7 @@ impl AgentPicker {
                 } else {
                     theme.base()
                 };
-                Line::styled(format!("  {}", Self::text(agent)), style)
+                Line::styled(Self::text(agent), style)
             })
             .collect()
     }
