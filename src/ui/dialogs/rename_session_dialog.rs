@@ -11,11 +11,10 @@ use crate::ui::text_fit::TextFit;
 use crate::ui::theme::Theme;
 
 pub struct RenameSessionDialog {
-    old: TextField,
+    session: Session,
     new: TextField,
     rename_branch: bool,
     focus: Field,
-    sessions: Vec<Session>,
     error: Option<String>,
 }
 
@@ -23,14 +22,14 @@ impl RenameSessionDialog {
     pub const TITLE: &'static str = " Rename session ";
     const HINTS: &'static str = "Tab next field · Space toggle · Enter rename · Esc cancel";
     const CURSOR: char = '█';
+    const NEW_NAME_MISSING: &'static str = "enter a new name";
 
-    pub fn open(selected: &str, sessions: Vec<Session>) -> Self {
+    pub fn open(session: Session) -> Self {
         Self {
-            old: TextField::new(FieldKind::Name).with_value(selected),
+            session,
             new: TextField::new(FieldKind::Name),
             rename_branch: true,
             focus: Field::New,
-            sessions,
             error: None,
         }
     }
@@ -43,44 +42,34 @@ impl RenameSessionDialog {
         match key.code {
             KeyCode::Esc => return DialogStep::Close,
             KeyCode::Enter => return self.submit(),
-            KeyCode::Tab => self.focus = self.focus.step(1),
-            KeyCode::BackTab => self.focus = self.focus.step(Field::ORDER.len() - 1),
+            KeyCode::Tab | KeyCode::BackTab => self.focus = self.focus.other(),
             KeyCode::Char(' ') if self.focus == Field::Branch => {
                 self.rename_branch = !self.rename_branch;
             }
-            _ => {
-                if let Some(field) = self.focused_field() {
-                    field.edit(key);
-                }
+            _ if self.focus == Field::New => {
+                self.new.edit(key);
             }
+            _ => {}
         }
         DialogStep::Stay
     }
 
     pub fn paste(&mut self, text: &str) {
-        if let Some(field) = self.focused_field() {
-            self.error = field.paste(text).err();
+        if self.focus == Field::New {
+            self.error = self.new.paste(text).err();
         }
     }
 
     pub fn lines(&self, width: usize, labels: DialogLabels, theme: &Theme) -> Vec<Line<'static>> {
         let room = width.saturating_sub(labels.width());
-        let toggle = if self.rename_branch {
-            "[x] rename branch"
-        } else {
-            "[ ] rename branch"
-        };
-        let toggle_style = if self.focus == Field::Branch {
-            theme.selected()
-        } else {
-            theme.base()
-        };
-        let mut lines = labels.labeled("Old", vec![self.text_line(Field::Old, &self.old, room)]);
-        lines.extend(labels.labeled("New", vec![self.text_line(Field::New, &self.new, room)]));
+        let old = TextFit::new(self.session.name().as_str()).right_truncated(room);
+        let cursor = (self.focus == Field::New).then_some(Self::CURSOR);
+        let mut lines = labels.labeled("Old", vec![Line::from(old)]);
+        lines.extend(labels.labeled("New", vec![Line::from(self.new.visible(room, cursor))]));
         lines.extend(labels.labeled(
             "Branch",
             vec![
-                Line::styled(toggle, toggle_style),
+                self.toggle_line(theme),
                 Line::styled(self.branch_preview(), theme.dim()),
             ],
         ));
@@ -91,52 +80,41 @@ impl RenameSessionDialog {
         lines
     }
 
-    fn text_line(&self, field: Field, text: &TextField, room: usize) -> Line<'static> {
-        let cursor = (self.focus == field).then_some(Self::CURSOR);
-        Line::from(text.visible(room, cursor))
+    fn toggle_line(&self, theme: &Theme) -> Line<'static> {
+        let toggle = if self.rename_branch {
+            "[x] rename branch"
+        } else {
+            "[ ] rename branch"
+        };
+        let style = if self.focus == Field::Branch {
+            theme.selected()
+        } else {
+            theme.base()
+        };
+        Line::styled(toggle, style)
     }
 
     fn branch_preview(&self) -> String {
-        let Some(session) = self.renamed_session() else {
-            return format!("no session named {}", self.old.value());
-        };
-        let current = session.branch();
+        let current = self.session.branch();
         if !self.rename_branch {
             return format!("{current} stays");
         }
         match SessionName::new(self.new.value()) {
-            Ok(name) => format!("{current} → {}", session.naming().branch_name(&name)),
-            Err(_) => format!("{current} → (enter a new name)"),
-        }
-    }
-
-    fn renamed_session(&self) -> Option<&Session> {
-        let old = self.old.value().trim();
-        self.sessions
-            .iter()
-            .find(|session| session.name().as_str() == old)
-    }
-
-    fn focused_field(&mut self) -> Option<&mut TextField> {
-        match self.focus {
-            Field::Old => Some(&mut self.old),
-            Field::New => Some(&mut self.new),
-            Field::Branch => None,
+            Ok(name) => format!("{current} → {}", self.session.naming().branch_name(&name)),
+            Err(_) => format!("{current} → ({})", Self::NEW_NAME_MISSING),
         }
     }
 
     fn submit(&mut self) -> DialogStep {
-        let old = self.old.value().trim().to_string();
-        let new = self.new.value().trim().to_string();
-        if old.is_empty() || new.is_empty() {
-            self.error = Some("enter the old and the new name".to_string());
+        let new = self.new.value().trim();
+        if new.is_empty() {
+            self.error = Some(Self::NEW_NAME_MISSING.to_string());
             return DialogStep::Stay;
         }
-        let keep_branch = !self.rename_branch;
         let operation = BlockingOperation::Rename {
-            old,
-            new,
-            keep_branch,
+            old: self.session.name().as_str().to_string(),
+            new: new.to_string(),
+            keep_branch: !self.rename_branch,
         };
         DialogStep::Request(AppRequest::Block(operation))
     }
@@ -144,17 +122,16 @@ impl RenameSessionDialog {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Field {
-    Old,
     New,
     Branch,
 }
 
 impl Field {
-    const ORDER: [Field; 3] = [Field::Old, Field::New, Field::Branch];
-
-    fn step(self, offset: usize) -> Self {
-        let position = Self::ORDER.iter().position(|field| *field == self);
-        Self::ORDER[(position.unwrap_or(0) + offset) % Self::ORDER.len()]
+    fn other(self) -> Self {
+        match self {
+            Field::New => Field::Branch,
+            Field::Branch => Field::New,
+        }
     }
 }
 
@@ -169,11 +146,7 @@ mod tests {
 
     impl RenameFixture {
         fn dialog() -> RenameSessionDialog {
-            let sessions = vec![
-                ServiceFixture::session("fix-auth"),
-                ServiceFixture::session("docs"),
-            ];
-            RenameSessionDialog::open("fix-auth", sessions)
+            RenameSessionDialog::open(ServiceFixture::session("fix-auth"))
         }
 
         fn press(dialog: &mut RenameSessionDialog, code: KeyCode) -> DialogStep {
@@ -254,17 +227,26 @@ mod tests {
     }
 
     #[test]
-    fn the_old_name_can_be_changed_to_another_session() {
+    fn tab_moves_only_between_the_new_name_and_the_toggle() {
         let mut dialog = RenameFixture::dialog();
-        RenameFixture::press(&mut dialog, KeyCode::BackTab);
-        for _ in "fix-auth".chars() {
-            RenameFixture::press(&mut dialog, KeyCode::Backspace);
-        }
-        RenameFixture::type_text(&mut dialog, "docs");
-        RenameFixture::press(&mut dialog, KeyCode::Tab);
-        RenameFixture::type_text(&mut dialog, "guides");
 
-        assert!(RenameFixture::text(&dialog).contains("ringleader/docs → ringleader/guides"));
+        RenameFixture::press(&mut dialog, KeyCode::Tab);
+        RenameFixture::type_text(&mut dialog, "xyz");
+        RenameFixture::press(&mut dialog, KeyCode::Tab);
+        RenameFixture::type_text(&mut dialog, "docs");
+
+        assert!(RenameFixture::text(&dialog).starts_with("Old       fix-auth\nNew       docs█"));
+    }
+
+    #[test]
+    fn backtab_also_returns_to_the_new_name() {
+        let mut dialog = RenameFixture::dialog();
+
+        RenameFixture::press(&mut dialog, KeyCode::BackTab);
+        RenameFixture::press(&mut dialog, KeyCode::BackTab);
+        RenameFixture::type_text(&mut dialog, "docs");
+
+        assert!(RenameFixture::text(&dialog).contains("New       docs█"));
     }
 
     #[test]
@@ -284,7 +266,7 @@ mod tests {
         let step = RenameFixture::press(&mut dialog, KeyCode::Enter);
 
         assert_eq!(step, DialogStep::Stay);
-        assert!(RenameFixture::text(&dialog).contains("enter the old and the new name"));
+        assert!(RenameFixture::text(&dialog).contains("enter a new name"));
     }
 
     #[test]

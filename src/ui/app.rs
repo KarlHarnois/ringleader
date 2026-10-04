@@ -154,8 +154,7 @@ impl App {
             KeyAction::Request(request) => return self.request(request),
             KeyAction::Move(offset) => self.home.move_selection(offset, &self.service),
             KeyAction::Open(opening) => {
-                let dialog = Dialog::open(opening, &self.service, self.home.sessions());
-                self.dialogs.open(dialog);
+                self.dialogs.open(Dialog::open(opening, &self.service));
             }
             KeyAction::Reload => self.reload(),
             KeyAction::Refuse(refusal) => self.status.error(refusal),

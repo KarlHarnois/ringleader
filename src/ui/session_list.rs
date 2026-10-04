@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use super::session_table::SessionTable;
 use super::theme::Theme;
-use crate::domain::{DiffStat, Session, SessionSummary};
+use crate::domain::{DiffStat, SessionSummary};
 
 #[derive(Debug, Default)]
 pub struct SessionList {
@@ -21,14 +21,6 @@ impl SessionList {
 
     pub fn selected_name(&self) -> Option<&str> {
         self.selected().map(SessionSummary::name)
-    }
-
-    pub fn managed_sessions(&self) -> Vec<Session> {
-        self.rows
-            .iter()
-            .filter_map(SessionSummary::session)
-            .cloned()
-            .collect()
     }
 
     pub fn visible_managed(&self, room: usize) -> Vec<String> {

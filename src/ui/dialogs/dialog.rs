@@ -9,11 +9,10 @@ use super::new_session_dialog::NewSessionDialog;
 use super::rename_session_dialog::RenameSessionDialog;
 use crate::adapters::app_log::AppLog;
 use crate::application::{DeleteImpact, SessionService};
-use crate::domain::SessionSummary;
+use crate::domain::{Session, SessionSummary};
 use crate::ui::app::AppRequest;
 use crate::ui::help_view::HelpView;
 use crate::ui::home_view::LayoutTier;
-use crate::ui::session_list::SessionList;
 use crate::ui::theme::Theme;
 
 pub enum Dialog {
@@ -27,14 +26,13 @@ impl Dialog {
     const WIDTH: u16 = 76;
     const HEIGHT: u16 = 22;
 
-    pub fn open(opening: DialogOpening, service: &SessionService, sessions: &SessionList) -> Self {
+    pub fn open(opening: DialogOpening, service: &SessionService) -> Self {
         match opening {
             DialogOpening::NewSession => {
                 Self::NewSession(Box::new(NewSessionDialog::open(service)))
             }
-            DialogOpening::Rename(name) => {
-                let managed = sessions.managed_sessions();
-                Self::Rename(Box::new(RenameSessionDialog::open(&name, managed)))
+            DialogOpening::Rename(session) => {
+                Self::Rename(Box::new(RenameSessionDialog::open(*session)))
             }
             DialogOpening::Help => Self::help(service),
         }
@@ -149,7 +147,7 @@ impl Dialog {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DialogOpening {
     NewSession,
-    Rename(String),
+    Rename(Box<Session>),
     Help,
 }
 
@@ -173,7 +171,7 @@ mod tests {
     impl PlacementFixture {
         fn render(width: u16, height: u16) -> Terminal<TestBackend> {
             let service = ServiceFixture::new().service();
-            let dialog = Dialog::open(DialogOpening::NewSession, &service, &SessionList::default());
+            let dialog = Dialog::open(DialogOpening::NewSession, &service);
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
             terminal.draw(|frame| dialog.render(frame, &Theme)).unwrap();
             terminal

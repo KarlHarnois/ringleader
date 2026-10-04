@@ -4,7 +4,7 @@ use super::app::AppRequest;
 use super::blocking_operation::BlockingOperation;
 use super::dialogs::DialogOpening;
 use crate::application::ports::ConfigError;
-use crate::domain::{SessionState, SessionSummary};
+use crate::domain::{Session, SessionState, SessionSummary};
 
 pub struct ActionGate<'a> {
     selected: Option<&'a SessionSummary>,
@@ -41,7 +41,7 @@ impl<'a> ActionGate<'a> {
             KeyCode::Char('d') => KeyAction::from(self.delete().map(KeyAction::Request)),
             KeyCode::Char('R') => KeyAction::from(
                 self.rename()
-                    .map(|name| KeyAction::Open(DialogOpening::Rename(name))),
+                    .map(|session| KeyAction::Open(DialogOpening::Rename(Box::new(session)))),
             ),
             _ => KeyAction::Ignore,
         }
@@ -73,16 +73,11 @@ impl<'a> ActionGate<'a> {
         Ok(AppRequest::Block(operation))
     }
 
-    pub fn rename(&self) -> Result<String, String> {
+    pub fn rename(&self) -> Result<Session, String> {
         self.writable()?;
         let row = self.selected()?;
-        match row.state() {
-            SessionState::Unmanaged => Err(format!(
-                "{} is unmanaged, so it cannot be renamed.",
-                row.name()
-            )),
-            _ => Ok(row.name().to_string()),
-        }
+        let unmanaged = || format!("{} is unmanaged, so it cannot be renamed.", row.name());
+        row.session().cloned().ok_or_else(unmanaged)
     }
 
     pub fn restart(&self) -> Result<AppRequest, String> {
@@ -320,7 +315,9 @@ mod tests {
 
         assert_eq!(
             ActionGate::new(Some(&row), None).action_for(&key),
-            KeyAction::Open(DialogOpening::Rename("fix-auth".to_string()))
+            KeyAction::Open(DialogOpening::Rename(Box::new(
+                row.session().unwrap().clone()
+            )))
         );
     }
 
