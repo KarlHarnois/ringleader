@@ -1,15 +1,17 @@
 use crossterm::event::{Event, KeyEventKind};
 use ratatui::Frame;
 use ratatui::layout::{Margin, Rect};
-use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use super::delete_session_dialog::DeleteSessionDialog;
+use super::dialog_labels::DialogLabels;
 use super::new_session_dialog::NewSessionDialog;
 use super::rename_session_dialog::RenameSessionDialog;
+use crate::adapters::app_log::AppLog;
 use crate::application::{DeleteImpact, SessionService};
 use crate::domain::SessionSummary;
 use crate::ui::app::AppRequest;
+use crate::ui::help_view::HelpView;
 use crate::ui::home_view::LayoutTier;
 use crate::ui::session_list::SessionList;
 use crate::ui::theme::Theme;
@@ -18,14 +20,24 @@ pub enum Dialog {
     NewSession(Box<NewSessionDialog>),
     Delete(Box<DeleteSessionDialog>),
     Rename(Box<RenameSessionDialog>),
+    Help(Box<HelpView>),
 }
 
 impl Dialog {
     const WIDTH: u16 = 76;
     const HEIGHT: u16 = 22;
 
-    pub fn new_session(service: &SessionService) -> Self {
-        Self::NewSession(Box::new(NewSessionDialog::open(service)))
+    pub fn open(opening: DialogOpening, service: &SessionService, sessions: &SessionList) -> Self {
+        match opening {
+            DialogOpening::NewSession => {
+                Self::NewSession(Box::new(NewSessionDialog::open(service)))
+            }
+            DialogOpening::Rename(name) => {
+                let managed = sessions.managed_sessions();
+                Self::Rename(Box::new(RenameSessionDialog::open(&name, managed)))
+            }
+            DialogOpening::Help => Self::help(service),
+        }
     }
 
     pub fn delete(
@@ -42,9 +54,14 @@ impl Dialog {
         }))
     }
 
-    pub fn rename(selected: &str, sessions: &SessionList) -> Self {
-        let managed = sessions.managed_sessions();
-        Self::Rename(Box::new(RenameSessionDialog::open(selected, managed)))
+    fn help(service: &SessionService) -> Self {
+        let log_path = service.state_directory().join(AppLog::FILE_NAME);
+        let tmux_prefix = service.config().naming().tmux_prefix();
+        Self::Help(Box::new(HelpView::new(
+            &service.config_path(),
+            &log_path,
+            tmux_prefix,
+        )))
     }
 
     pub fn poll(&mut self, service: &mut SessionService) {
@@ -72,6 +89,9 @@ impl Dialog {
             (Self::Rename(dialog), Event::Key(key)) if key.kind != KeyEventKind::Release => {
                 dialog.handle_key(key)
             }
+            (Self::Help(help), Event::Key(key)) if key.kind != KeyEventKind::Release => {
+                help.handle_key(key)
+            }
             (Self::Rename(dialog), Event::Paste(text)) => {
                 dialog.paste(text);
                 DialogStep::Stay
@@ -84,7 +104,7 @@ impl Dialog {
         match self {
             Self::NewSession(dialog) => dialog.fail(error),
             Self::Rename(dialog) => dialog.fail(error),
-            Self::Delete(_) => {}
+            Self::Delete(_) | Self::Help(_) => {}
         }
     }
 
@@ -99,6 +119,7 @@ impl Dialog {
             Self::NewSession(dialog) => dialog.lines(width, height, labels, theme),
             Self::Delete(dialog) => dialog.lines(width, labels, theme),
             Self::Rename(dialog) => dialog.lines(width, labels, theme),
+            Self::Help(help) => help.lines(width, height, theme),
         };
         frame.render_widget(Paragraph::new(lines), inner);
     }
@@ -108,6 +129,7 @@ impl Dialog {
             Self::NewSession(_) => NewSessionDialog::TITLE,
             Self::Delete(_) => DeleteSessionDialog::TITLE,
             Self::Rename(_) => RenameSessionDialog::TITLE,
+            Self::Help(_) => HelpView::TITLE,
         }
     }
 
@@ -125,59 +147,17 @@ impl Dialog {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DialogOpening {
+    NewSession,
+    Rename(String),
+    Help,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DialogStep {
     Stay,
     Close,
     Request(AppRequest),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DialogLabels {
-    abbreviated: bool,
-}
-
-impl DialogLabels {
-    const FULL_WIDTH: usize = 10;
-    const ABBREVIATED_WIDTH: usize = 2;
-
-    pub fn full() -> Self {
-        Self { abbreviated: false }
-    }
-
-    pub fn abbreviated() -> Self {
-        Self { abbreviated: true }
-    }
-
-    pub fn width(self) -> usize {
-        if self.abbreviated {
-            Self::ABBREVIATED_WIDTH
-        } else {
-            Self::FULL_WIDTH
-        }
-    }
-
-    pub fn labeled(self, label: &str, lines: Vec<Line<'static>>) -> Vec<Line<'static>> {
-        let shown: String = if self.abbreviated {
-            label.chars().take(1).collect()
-        } else {
-            label.to_string()
-        };
-        let width = self.width();
-        lines
-            .into_iter()
-            .enumerate()
-            .map(|(index, line)| {
-                let prefix = if index == 0 { shown.as_str() } else { "" };
-                let mut spans = vec![Span::raw(format!("{prefix:<width$}"))];
-                spans.extend(
-                    line.spans
-                        .into_iter()
-                        .map(|span| span.patch_style(line.style)),
-                );
-                Line::from(spans)
-            })
-            .collect()
-    }
 }
 
 #[cfg(test)]
@@ -193,7 +173,7 @@ mod tests {
     impl PlacementFixture {
         fn render(width: u16, height: u16) -> Terminal<TestBackend> {
             let service = ServiceFixture::new().service();
-            let dialog = Dialog::new_session(&service);
+            let dialog = Dialog::open(DialogOpening::NewSession, &service, &SessionList::default());
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
             terminal.draw(|frame| dialog.render(frame, &Theme)).unwrap();
             terminal

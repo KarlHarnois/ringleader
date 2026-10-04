@@ -208,6 +208,10 @@ impl DiagnosticPaths {
             state_directory: state_directory.to_path_buf(),
         }
     }
+
+    pub fn state_directory(&self) -> &Path {
+        &self.state_directory
+    }
 }
 
 impl Default for DiagnosticPaths {

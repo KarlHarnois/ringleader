@@ -1,7 +1,8 @@
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::text::Line;
 
-use super::dialog::{DialogLabels, DialogStep};
+use super::dialog::DialogStep;
+use super::dialog_labels::DialogLabels;
 use crate::application::DeleteImpact;
 use crate::domain::SessionSummary;
 use crate::ui::app::AppRequest;

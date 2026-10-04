@@ -5,6 +5,7 @@ pub mod blocking_operation;
 pub mod dialogs;
 pub mod diff_queue;
 pub mod event_loop;
+pub mod help_view;
 pub mod home_state;
 pub mod home_view;
 pub mod preview_feed;

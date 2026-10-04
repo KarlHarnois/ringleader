@@ -2,7 +2,8 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::text::Line;
 
 use super::agent_picker::AgentPicker;
-use super::dialog::{DialogLabels, DialogStep};
+use super::dialog::DialogStep;
+use super::dialog_labels::DialogLabels;
 use super::repo_picker::RepoPicker;
 use super::text_field::{FieldKind, TextField};
 use crate::application::{CreateRequest, SessionService};

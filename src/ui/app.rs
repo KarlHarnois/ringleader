@@ -153,10 +153,10 @@ impl App {
         match ActionGate::new(selected, self.service.read_only_reason()).action_for(key) {
             KeyAction::Request(request) => return self.request(request),
             KeyAction::Move(offset) => self.home.move_selection(offset, &self.service),
-            KeyAction::NewSession => self.dialogs.open(Dialog::new_session(&self.service)),
-            KeyAction::Rename(name) => self
-                .dialogs
-                .open(Dialog::rename(&name, self.home.sessions())),
+            KeyAction::Open(opening) => {
+                let dialog = Dialog::open(opening, &self.service, self.home.sessions());
+                self.dialogs.open(dialog);
+            }
             KeyAction::Reload => self.reload(),
             KeyAction::Refuse(refusal) => self.status.error(refusal),
             KeyAction::Ignore => {}
@@ -1015,6 +1015,20 @@ mod tests {
 
         assert_eq!(first, 1);
         assert_eq!(AppFixture::captures(&fixture).len(), 1);
+    }
+
+    #[test]
+    fn question_mark_opens_the_help_and_closes_it_again() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press(&mut app, '?');
+        let opened = AppFixture::screen(&app, 100, 28);
+        AppFixture::press(&mut app, '?');
+
+        assert!(opened.contains("┌ Help "));
+        assert!(opened.contains("n           create a session"));
+        assert!(!app.dialogs.is_open());
     }
 
     #[test]

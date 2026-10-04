@@ -227,6 +227,7 @@ Examples: branch `ringleader/fix-auth`, tmux session `ringleader-fix-auth`, work
     │       ├── mod.rs
     │       ├── dialog.rs                # Dialog, the open dialog, its key routing and placement
     │       ├── dialog_slot.rs           # DialogSlot, the dialog App shows, if any
+    │       ├── dialog_labels.rs         # DialogLabels, full or abbreviated field labels
     │       ├── text_field.rs            # TextField, typing and paste rules for name, prompt, and path fields
     │       ├── new_session_dialog.rs    # NewSessionDialog
     │       ├── repo_picker.rs           # RepoPicker, the n dialog's repo list and its actions

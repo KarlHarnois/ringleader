@@ -2,6 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 
 use super::app::AppRequest;
 use super::blocking_operation::BlockingOperation;
+use super::dialogs::DialogOpening;
 use crate::application::ports::ConfigError;
 use crate::domain::{SessionState, SessionSummary};
 
@@ -27,14 +28,21 @@ impl<'a> ActionGate<'a> {
         match key.code {
             KeyCode::Char('q') => KeyAction::Request(AppRequest::Quit),
             KeyCode::Char('r') => KeyAction::Reload,
+            KeyCode::Char('?') => KeyAction::Open(DialogOpening::Help),
             KeyCode::Down | KeyCode::Right | KeyCode::Char('j' | 'l') => KeyAction::Move(1),
             KeyCode::Up | KeyCode::Left | KeyCode::Char('k' | 'h') => KeyAction::Move(-1),
-            KeyCode::Char('n') => KeyAction::from(self.writable().map(|()| KeyAction::NewSession)),
+            KeyCode::Char('n') => KeyAction::from(
+                self.writable()
+                    .map(|()| KeyAction::Open(DialogOpening::NewSession)),
+            ),
             KeyCode::Enter => KeyAction::from(self.attach().map(KeyAction::Request)),
             KeyCode::Char('t') => KeyAction::from(self.shell().map(KeyAction::Request)),
             KeyCode::Char('s') => KeyAction::from(self.restart().map(KeyAction::Request)),
             KeyCode::Char('d') => KeyAction::from(self.delete().map(KeyAction::Request)),
-            KeyCode::Char('R') => KeyAction::from(self.rename().map(KeyAction::Rename)),
+            KeyCode::Char('R') => KeyAction::from(
+                self.rename()
+                    .map(|name| KeyAction::Open(DialogOpening::Rename(name))),
+            ),
             _ => KeyAction::Ignore,
         }
     }
@@ -111,8 +119,7 @@ impl<'a> ActionGate<'a> {
 pub enum KeyAction {
     Request(AppRequest),
     Move(isize),
-    NewSession,
-    Rename(String),
+    Open(DialogOpening),
     Reload,
     Refuse(String),
     Ignore,
@@ -256,7 +263,7 @@ mod tests {
 
         assert_eq!(
             ActionGate::new(None, None).action_for(&key),
-            KeyAction::NewSession
+            KeyAction::Open(DialogOpening::NewSession)
         );
     }
 
@@ -313,7 +320,7 @@ mod tests {
 
         assert_eq!(
             ActionGate::new(Some(&row), None).action_for(&key),
-            KeyAction::Rename("fix-auth".to_string())
+            KeyAction::Open(DialogOpening::Rename("fix-auth".to_string()))
         );
     }
 

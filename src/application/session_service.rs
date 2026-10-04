@@ -30,6 +30,7 @@ pub struct SessionService {
     catalog: RepoCatalog,
     doctor: Doctor,
     inside_tmux: bool,
+    state_directory: PathBuf,
 }
 
 impl SessionService {
@@ -41,6 +42,7 @@ impl SessionService {
             catalog: RepoCatalog::new(&ports, &context),
             doctor: Doctor::new(&ports, context.diagnostics().clone()),
             inside_tmux: context.is_inside_tmux(),
+            state_directory: context.diagnostics().state_directory().to_path_buf(),
             config: context.into_config(),
             entries: Vec::new(),
             registry: ports.state().registry(),
@@ -108,6 +110,10 @@ impl SessionService {
 
     pub fn is_inside_tmux(&self) -> bool {
         self.inside_tmux
+    }
+
+    pub fn state_directory(&self) -> &Path {
+        &self.state_directory
     }
 
     pub fn reload(&mut self) -> Result<(), ServiceError> {
