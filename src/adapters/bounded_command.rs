@@ -176,10 +176,6 @@ impl Call {
             ..self
         }
     }
-
-    pub fn subcommand(&self) -> &str {
-        &self.subcommand
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]

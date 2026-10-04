@@ -74,9 +74,7 @@ impl From<WorkspaceError> for ServiceError {
                 tool: Tool::Git,
                 message,
             },
-            WorkspaceError::Failed { .. } | WorkspaceError::Io { .. } => {
-                ServiceError::Failed(message)
-            }
+            WorkspaceError::Failed { .. } => ServiceError::Failed(message),
             _ => ServiceError::Invalid(message),
         }
     }

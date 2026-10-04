@@ -889,7 +889,7 @@ mod tests {
             .create_worktree(fixture.path(), &target, BRANCH, &start)
             .unwrap_err();
 
-        assert!(error.is_timeout());
+        assert!(matches!(error, WorkspaceError::TimedOut { .. }));
         assert!(!WorktreeFixture::listed(&fixture, &target));
     }
 

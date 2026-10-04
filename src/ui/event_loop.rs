@@ -59,6 +59,7 @@ where
         }
     }
 
+    #[cfg(test)]
     pub fn with_shells(self, shells: Box<dyn ShellRunner>) -> Self {
         Self { shells, ..self }
     }

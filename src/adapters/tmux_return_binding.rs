@@ -1,12 +1,9 @@
-use std::fs;
-use std::io;
-use std::path::{Path, PathBuf};
-
-use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 use super::binding_records::{BindingRecord, BindingRecords, ServerIdentity};
 use super::key_binding::KeyBinding;
-use super::tmux_command::{TmuxCommand, TmuxError};
+use super::tmux_command::TmuxCommand;
+use super::tmux_error::TmuxError;
 use super::tmux_output::TmuxOutput;
 use super::tmux_sequence::TmuxSequence;
 use crate::application::ports::{BindingError, ReturnBinding};
@@ -244,7 +241,7 @@ impl ReturnBinding for TmuxReturnBinding {
             Ok(records) => self.settle(records),
             Err(problem) => {
                 log::warn!(
-                    "discarding unreadable {}: {problem:?}",
+                    "discarding {}, which is {problem}",
                     self.records.path().display()
                 );
                 self.records.write(Vec::new())
@@ -282,6 +279,8 @@ enum RecordFate {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+    use std::path::PathBuf;
     use std::time::Duration;
 
     use super::*;

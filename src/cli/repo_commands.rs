@@ -26,7 +26,7 @@ impl<'a> RepoCommands<'a> {
         self.session.stop_if_signaled()?;
         match self.session.wait(&self.service.add_repo(request))? {
             RepoAddition::Added(repo) => {
-                self.session.output.line(&format!(
+                self.session.output().line(&format!(
                     "added {} for {}",
                     repo.name(),
                     repo.path().display()
@@ -35,7 +35,7 @@ impl<'a> RepoCommands<'a> {
             }
             RepoAddition::AlreadyConfigured(repo) => {
                 self.session
-                    .output
+                    .output()
                     .line(&format!("already configured as {}", repo.name()));
                 Ok(0)
             }
@@ -51,7 +51,7 @@ impl<'a> RepoCommands<'a> {
         self.session.stop_if_signaled()?;
         let removed = self.session.wait(&self.service.remove_repo(name))?;
         self.session
-            .output
+            .output()
             .line(&format!("removed the [[repos]] entry {removed}"));
         Ok(0)
     }
@@ -66,14 +66,14 @@ impl<'a> RepoCommands<'a> {
             } else {
                 ""
             };
-            self.session.output.line(&format!(
+            self.session.output().line(&format!(
                 "{:<24} {}{marker}",
                 repo.name(),
                 repo.path().display()
             ));
         }
         for notice in discovery.notices() {
-            self.session.output.error(&notice);
+            self.session.output().error(&notice);
         }
         Ok(0)
     }

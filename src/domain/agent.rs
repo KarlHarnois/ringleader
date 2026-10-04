@@ -95,10 +95,6 @@ impl Agent {
         &self.command
     }
 
-    pub fn args(&self) -> &[String] {
-        &self.args
-    }
-
     pub fn env_names(&self) -> &[String] {
         &self.env_names
     }

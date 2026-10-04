@@ -56,6 +56,7 @@ impl DeleteOutcome {
         &self.impact
     }
 
+    #[cfg(test)]
     pub fn branch(&self) -> BranchPresence {
         self.branch
     }

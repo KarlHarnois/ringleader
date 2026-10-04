@@ -24,10 +24,6 @@ impl ScanOutcome {
         &self.repos
     }
 
-    pub fn into_repos(self) -> Vec<Repo> {
-        self.repos
-    }
-
     pub fn cut_short(&self) -> bool {
         self.cut_short
     }

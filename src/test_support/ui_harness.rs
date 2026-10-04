@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::Terminal;
 use ratatui::backend::{Backend, ClearType, TestBackend, WindowSize};
-use ratatui::buffer::{Buffer, Cell};
+use ratatui::buffer::Cell;
 use ratatui::layout::{Position, Size};
 
 use super::{FakeMultiplexer, RecordingScreenMode, ServiceFixture};
@@ -178,10 +178,6 @@ impl FixtureBackend {
 
     pub fn frames(&self) -> &[String] {
         &self.frames
-    }
-
-    pub fn buffer(&self) -> &Buffer {
-        self.inner.buffer()
     }
 
     pub fn text(&self) -> String {

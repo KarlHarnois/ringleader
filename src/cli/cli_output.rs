@@ -40,6 +40,7 @@ impl CliOutput {
         let _ = writeln!(self.stderr, "{text}");
     }
 
+    #[cfg(test)]
     pub fn is_closed(&self) -> bool {
         self.stdout_closed
     }

@@ -1,7 +1,7 @@
 use super::service_error::ServiceError;
 use crate::domain::{
-    NamingScheme, Session, SessionMetadata, SessionName, SessionObservation, SessionState,
-    SessionSummary, UnmanagedSession,
+    NamingScheme, Session, SessionMetadata, SessionObservation, SessionState, SessionSummary,
+    UnmanagedSession,
 };
 
 pub struct Reconciliation {

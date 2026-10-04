@@ -35,6 +35,7 @@ impl SessionObservation {
         }
     }
 
+    #[cfg(test)]
     pub fn without_metadata(&self) -> Self {
         Self {
             metadata: None,

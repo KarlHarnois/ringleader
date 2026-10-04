@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 
@@ -12,6 +13,7 @@ pub struct CliHarness {
     stdout: CapturedWriter,
     stderr: CapturedWriter,
     signals: SignalFlags,
+    lock: RefCell<FakeLock>,
 }
 
 impl CliHarness {
@@ -21,7 +23,19 @@ impl CliHarness {
             stdout: CapturedWriter::default(),
             stderr: CapturedWriter::default(),
             signals: SignalFlags::unregistered(),
+            lock: RefCell::new(FakeLock::free()),
         }
+    }
+
+    pub fn with_lock(self, lock: FakeLock) -> Self {
+        Self {
+            lock: RefCell::new(lock),
+            ..self
+        }
+    }
+
+    pub fn lock_acquisitions(&self) -> Vec<&'static str> {
+        self.lock.borrow().acquisitions().to_vec()
     }
 
     pub fn with_stdout(self, stdout: CapturedWriter) -> Self {
@@ -38,7 +52,7 @@ impl CliHarness {
                 .expect("the arguments parse");
         let output = CliOutput::new(Box::new(self.stdout.clone()), Box::new(self.stderr.clone()));
         let mut session = CliSession::new(output, self.signals.clone());
-        if let Err(exit) = cli.take_write_lock(&mut FakeLock::free(), &mut session) {
+        if let Err(exit) = cli.take_write_lock(&mut *self.lock.borrow_mut(), &mut session) {
             return exit;
         }
         cli.execute(&mut self.fixture.unloaded_service(), &mut session)

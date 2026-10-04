@@ -31,24 +31,8 @@ impl DeleteImpact {
         Self { working, ..self }
     }
 
-    pub fn dirty_files(&self) -> u64 {
-        self.dirty_files
-    }
-
-    pub fn nested_repos(&self) -> &[PathBuf] {
-        &self.nested_repos
-    }
-
-    pub fn unmerged_commits(&self) -> u64 {
-        self.unmerged_commits
-    }
-
     pub fn processes(&self) -> &[ProcessInfo] {
         &self.processes
-    }
-
-    pub fn working(&self) -> bool {
-        self.working
     }
 
     pub fn needs_confirmation(&self) -> bool {
@@ -81,9 +65,7 @@ impl DeleteImpact {
         }
         for process in &self.processes {
             warnings.push(format!(
-                "process {} ({}) runs in the worktree, delete sends it SIGTERM and stops if it survives",
-                process.pid(),
-                process.command()
+                "process {process} runs in the worktree, delete sends it SIGTERM and stops if it survives"
             ));
         }
         if self.working {

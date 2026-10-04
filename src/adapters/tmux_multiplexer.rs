@@ -1,11 +1,11 @@
-use std::ffi::OsString;
 use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use super::agent_launcher::{LauncherCommand, PreparedLaunch};
-use super::tmux_command::{TmuxCommand, TmuxError};
+use super::tmux_command::TmuxCommand;
+use super::tmux_error::TmuxError;
 use super::tmux_launch::{Launched, TmuxLaunch};
 use super::tmux_listing::TmuxListing;
 use super::tmux_output::TmuxOutput;
@@ -352,6 +352,7 @@ impl From<TmuxError> for MultiplexerError {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsString;
     use std::fs;
     use std::os::unix::net::UnixListener;
     use std::time::{Duration, Instant};

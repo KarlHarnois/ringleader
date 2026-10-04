@@ -171,10 +171,6 @@ impl ServiceFixture {
         &self.host
     }
 
-    pub fn clock(&self) -> &FakeClock {
-        &self.clock
-    }
-
     pub fn repo() -> Repo {
         Repo::discovered(
             RepoName::parse("example-project").unwrap(),

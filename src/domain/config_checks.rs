@@ -191,7 +191,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::domain::config_draft::RepoDraft;
+    use crate::domain::repo_draft::RepoDraft;
 
     struct ChecksFixture;
 

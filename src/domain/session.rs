@@ -29,10 +29,6 @@ impl Session {
         &self.metadata
     }
 
-    pub fn registration(&self) -> &Registration {
-        &self.registration
-    }
-
     pub fn repo_name(&self) -> &RepoName {
         self.metadata.repo_name()
     }

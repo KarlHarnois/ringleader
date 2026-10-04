@@ -1,4 +1,5 @@
-use super::tmux_command::{TmuxCommand, TmuxError};
+use super::tmux_command::TmuxCommand;
+use super::tmux_error::TmuxError;
 use super::tmux_output::TmuxOutput;
 use super::tmux_sequence::TmuxSequence;
 

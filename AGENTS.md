@@ -1,17 +1,281 @@
 # Ringleader agent guide
 
+This file is the living reference for agents working in this repository. `docs/plans/v1-bootstrap.md` is the v1 plan, kept as a historical record, and `docs/plans/v1-implementation-log.md` records the decisions made while implementing it. Neither replaces this file.
+
 ## Ground rules
 
-- Load the clean-code skill before writing any code.
-- Comments are treated as failures to express intent in code. Every comment is a signal, not documentation: revisit the code it explains and improve it until the comment is unnecessary, then delete the comment. Rename the variable, extract the function, introduce the type, or restructure the control flow that made the explanation feel needed. Never add a comment to justify messy code, and never leave a comment as a substitute for a better name. The only surviving comments are the clean-code exceptions: legal headers, non-obvious intent that cannot be encoded in structure, warnings of real consequences, and TODOs that reference a tracked issue. A surviving comment is never announced in a commit body. Instead, the implementing agent stops and justifies the comment to the project owner before committing. If the justification against an exception is not convincing, delete the comment and fix the code instead. This rule outranks convenience; a commit that adds an unjustified comment is not done.
-- Write object-oriented Rust: state in structs with private fields, behavior in `impl` blocks, traits as interfaces, composition over inheritance, dependencies injected through constructors. No free functions except `main` and `#[test]` functions, which Rust requires to be free. A test helper that is not a `#[test]` function is a method or associated function of a fixture struct. A fixture struct used by one file's tests lives in that file's `mod tests`, and one shared across files lives in `src/test_support/` with a tree entry. `main.rs` holds `fn main` and `CompositionRoot`, whose methods build the adapters and services. Argument parsing and dispatch stay in `Cli`.
-- One primary type per file, file named after it in snake case. The tree in section 3 of docs/plans/v1-bootstrap.md is the file contract: every listed file exists and holds its one type. Types absent from the tree are support types (error enums, builders, request structs, iterators, parser results, dialog state) and fold into their owner's file. Unit tests live inline in `#[cfg(test)] mod tests`. `mod.rs` declares and re-exports only. Source files target under 200 lines excluding tests.
-- Commit after every milestone item. Capital first letter, title under 72 chars, imperative body.
-- Build, test, and run every tool inside `nix develop`. The host PATH may carry other versions of `cargo`, `rustc`, and `tmux`, including a tmux newer than the pinned one, so never rely on what the host provides.
+- Load the clean-code skill before writing, modifying, or reviewing any code.
+- Comments are failures to express intent in code. Every comment is a signal, not documentation: revisit the code it explains and improve it until the comment is unnecessary, then delete it. Rename the variable, extract the function, introduce the type, or restructure the control flow. Never add a comment to justify messy code or to stand in for a better name. The only surviving comments are the clean-code exceptions: legal headers, non-obvious intent that cannot be encoded in structure, warnings of real consequences, and TODOs that reference a tracked issue. Doc comments are comments and follow the same rule. When a comment seems to survive, stop and justify it to the project owner before committing, and never announce it in the commit body. If the justification against an exception is not convincing, delete the comment and fix the code. A commit that adds an unjustified comment is not done.
+- Write object-oriented Rust: state in structs with private fields, behavior in `impl` blocks, traits as interfaces, composition over inheritance, dependencies injected through constructors. No public data fields and no free functions except `main` and `#[test]` functions, which Rust requires to be free. A test helper that is not a `#[test]` function is a method or associated function of a fixture struct. A fixture struct used by one file's tests lives in that file's `mod tests`, and one shared across files lives in `src/test_support/` with a tree entry.
+- Names reveal intent. Types are nouns, methods that act are verbs, and accessors are named after what they return. No abbreviations, no number series, no noise words, and no magic numbers or strings: a value whose meaning is not obvious becomes a named constant. Files are named after their primary type in snake case.
+- Build, test, and run every tool inside `nix develop`. The host `PATH` may carry other versions of `cargo`, `rustc`, and `tmux`, so never rely on what the host provides.
 - Stage each new file by path with `git add` before running any `nix` command, because `nix develop`, `nix build`, and `nix flake check` ignore files outside the git index.
-- Every ad-hoc tmux command, such as a binding experiment, runs as `env -u TMUX -u TMUX_PANE tmux -u -S <tempdir>/x.sock -f /dev/null ...` and ends with `kill-server` on that socket. `nix develop` passes `$TMUX` through, so a bare `tmux` command reaches the user's live server. Never touch the default server or the server named in `$TMUX`. Keep the socket path under 100 bytes, because tmux rejects a longer one with `File name too long`. Use a directory from `mktemp -d` under `/tmp`, or `cd` into the scratch directory and pass a relative path such as `-S ./x.sock`.
-- Every manual run of the `ringleader` binary, TUI or CLI, uses throwaway state, because production `TmuxCommand` passes no socket or config arguments and `main` resolves the real XDG paths. Create `<tempdir>` with `mktemp -d /tmp/rl.XXXXXX`, and inside it `tmux-<uid>` with mode 0700 (`<uid>` from `id -u`), `config/ringleader`, `state`, `data`, `run`, and `repos`. The prefix is `env -u TMUX -u TMUX_PANE -u RINGLEADER_CONFIG TMUX_TMPDIR=<tempdir> XDG_CONFIG_HOME=<tempdir>/config XDG_STATE_HOME=<tempdir>/state XDG_DATA_HOME=<tempdir>/data XDG_RUNTIME_DIR=<tempdir>/run`, which sends Ringleader's tmux calls to the private server at `<tempdir>/tmux-<uid>/default`. Every tmux command typed for that server uses the prefix and also passes that path with `-S`, because tmux silently uses the user's default server when `TMUX_TMPDIR` names a missing directory. Before the binary runs, start the server with the prefix and `tmux -u -S <tempdir>/tmux-<uid>/default -f /dev/null new-session -d -s holder`, so it never loads the user's tmux config. Before the first run, write `<tempdir>/config/ringleader/config.toml` with one stand-in agent, `name = "stand-in"` and `command = "sh"`, and never `claude` or `opencode`. Build fixture repos under `<tempdir>/repos` with the hermetic git environment of section 10 of docs/plans/v1-bootstrap.md, and run the binary by absolute path with `<tempdir>/repos` as the working directory, so no real repository is in scope. An outside-tmux check runs the binary with the prefix in a pane of a second server started under the ad-hoc tmux rule. An inside-tmux check runs it in a pane of the `holder` server with the prefix minus `-u TMUX -u TMUX_PANE`. End with `kill-server` on each socket by explicit `-S` path, then remove `<tempdir>`. Never run the binary against the user's tmux server, config, state, data, or repositories.
+- Every ad-hoc tmux command, such as a binding experiment, runs as `env -u TMUX -u TMUX_PANE tmux -u -S <tempdir>/x.sock -f /dev/null ...` and ends with `kill-server` on that socket. `nix develop` passes `$TMUX` through, so a bare `tmux` command reaches the user's live server. Never touch the default server or the server named in `$TMUX`. Keep the socket path under 100 bytes, because tmux rejects a longer one with `File name too long`. Use a directory from `mktemp -d` under `/tmp`.
+- Every manual run of the `ringleader` binary, TUI or CLI, uses throwaway state, because production `TmuxCommand` passes no socket or config arguments and `main` resolves the real XDG paths.
+  - Create `<tempdir>` with `mktemp -d /tmp/rl.XXXXXX`, and inside it `tmux-<uid>` with mode 0700 (`<uid>` from `id -u`), `config/ringleader`, `state`, `data`, `run`, `repos`, and `home`.
+  - The prefix is `env -u TMUX -u TMUX_PANE -u RINGLEADER_CONFIG TMUX_TMPDIR=<tempdir> XDG_CONFIG_HOME=<tempdir>/config XDG_STATE_HOME=<tempdir>/state XDG_DATA_HOME=<tempdir>/data XDG_RUNTIME_DIR=<tempdir>/run HOME=<tempdir>/home SHELL=sh` followed by the hermetic git environment below. It sends Ringleader's tmux calls to the private server at `<tempdir>/tmux-<uid>/default`, and it keeps the owner's shell and git startup files out of the run.
+  - Every tmux command typed for that server uses the prefix and also passes that path with `-S`, because tmux silently uses the user's default server when `TMUX_TMPDIR` names a missing directory.
+  - Before the binary runs, start the server with the prefix and `tmux -u -S <tempdir>/tmux-<uid>/default -f /dev/null new-session -d -s holder sh`, so it never loads the user's tmux config or login shell.
+  - Before the first run, write `<tempdir>/config/ringleader/config.toml` with one stand-in agent, `name = "stand-in"` and `command = "sh"`, never `claude` or `opencode`.
+  - Build fixture repos under `<tempdir>/repos` with the hermetic git environment, and run the binary by absolute path with `<tempdir>/repos` as the working directory, so no real repository is in scope.
+  - An outside-tmux check runs the binary with the prefix in a pane of a second server started under the ad-hoc tmux rule, and drives it with `send-keys` on that server. An inside-tmux check runs it in a pane of the `holder` server with the prefix minus `-u TMUX -u TMUX_PANE`.
+  - End with `kill-server` on each socket by explicit `-S` path, then remove `<tempdir>`. Never run the binary against the user's tmux server, config, state, data, or repositories.
+- The hermetic git environment is `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_NOSYSTEM=1`, `HOME=<tempdir>`, and fake `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME`, and `GIT_COMMITTER_EMAIL` values. Fixture repos are created with `git init -b <branch>`, never relying on `init.defaultBranch`.
 - The private GitHub repository exists and is configured as `origin`. Do not create another repository or add another remote. Push only when the project owner asks.
-- Keep the repo consumer-agnostic. Never reference or assume any specific downstream setup, local directory layout, or personal configuration. Examples and fixtures use generic names such as `example-project`.
+- Keep the repository consumer-agnostic. Never reference or assume any specific downstream setup, local directory layout, or personal configuration. Examples and fixtures use generic names such as `example-project`.
 - Human-facing prose uses "Ringleader". Identifiers stay lowercase: binary, crate, repo, flake input, config paths, tmux and branch prefixes, JSON fields.
-- `docs/plans/v1-bootstrap.md` is the source of truth while its header says `active`. Every session reads it before any work. A later instruction that conflicts with it means stop and ask.
+
+## Commands
+
+```sh
+nix develop -c cargo fmt --check
+nix develop -c cargo clippy --all-targets -- -D warnings
+nix develop -c cargo test
+nix build .#
+nix flake check
+```
+
+These are the commands `.github/workflows/ci.yml` runs. A change is done when all of them pass.
+
+## Layout
+
+```
+.
+├── Cargo.toml              # rust-version = "1.95", edition = "2024", license = "MIT"
+├── Cargo.lock
+├── rustfmt.toml            # max_width = 100
+├── LICENSE                 # MIT
+├── .gitignore              # /target, /result, /result-*
+├── flake.nix
+├── flake.lock
+├── .github/workflows/ci.yml
+├── README.md               # human readers, terse
+├── AGENTS.md               # agent repo documentation, living
+├── docs/
+│   └── plans/
+│       ├── v1-bootstrap.md  # v1 plan, historical record
+│       └── v1-implementation-log.md  # decisions made while implementing the v1 plan
+├── tests/fixtures/         # fake config, registry, tmux and git output
+└── src/
+    ├── main.rs             # fn main and CompositionRoot
+    ├── cli.rs              # Cli struct, clap definitions, dispatch
+    ├── cli/
+    │   ├── cli_output.rs         # CliOutput, writeln! output that stops at a broken pipe
+    │   ├── cli_session.rs        # CliSession, signal checks, worker waits, and the exit of one command
+    │   ├── session_commands.rs   # SessionCommands: list, new, delete, attach, rename, restart
+    │   ├── list_report.rs        # ListReport, the list text and JSON
+    │   ├── repo_argument.rs      # RepoArgument, the --repo name or path resolution
+    │   ├── repo_commands.rs      # RepoCommands: repo add, remove, list
+    │   └── delete_report.rs      # DeleteReport, the delete warnings and results
+    ├── domain/
+    │   ├── mod.rs
+    │   ├── session.rs            # Session
+    │   ├── session_name.rs       # SessionName
+    │   ├── session_state.rs      # SessionState
+    │   ├── session_metadata.rs   # SessionMetadata
+    │   ├── session_observation.rs # SessionObservation
+    │   ├── session_classifier.rs # SessionClassifier, the pure state classifier
+    │   ├── diff_stat.rs          # DiffStat
+    │   ├── session_summary.rs    # SessionSummary
+    │   ├── agent.rs              # Agent
+    │   ├── repo.rs               # Repo
+    │   ├── repo_name.rs          # RepoName
+    │   ├── repo_draft.rs         # RepoDraft, a [[repos]] entry before the load checks
+    │   ├── base_branch.rs        # BaseBranch
+    │   ├── config.rs             # Config, the parsed config.toml
+    │   ├── config_draft.rs       # ConfigDraft, the raw config values the Config constructor checks
+    │   ├── config_checks.rs      # ConfigChecks, the checks every config load runs
+    │   └── naming_scheme.rs      # NamingScheme, the worktree root and prefixes a session records
+    ├── application/
+    │   ├── mod.rs
+    │   ├── session_service.rs    # SessionService, the facade the UI and CLI call
+    │   ├── service_context.rs    # ServiceContext and LoadedConfig, what main injects into the facade
+    │   ├── service_ports.rs      # ServicePorts with the StatePorts, RepoPorts, and TmuxPorts bundles
+    │   ├── service_error.rs      # ServiceError and its exit codes
+    │   ├── session_lifecycle.rs  # SessionLifecycle: create, delete, rename, restart
+    │   ├── session_creation.rs   # SessionCreation: create_session with its rollbacks
+    │   ├── worktree_rollback.rs  # WorktreeRollback, removes the worktree and branch of a failed create
+    │   ├── creation_plan.rs      # CreationPlan and CreateRequest
+    │   ├── use_checks.rs         # UseChecks, the checks a create or a restart runs before acting
+    │   ├── session_renaming.rs   # SessionRenaming: rename_session with its branch rollback
+    │   ├── session_restart.rs    # SessionRestart: restart of an Exited or Stopped session
+    │   ├── worktree_inspection.rs # WorktreeInspection, the worktree checks restart, delete, and doctor share
+    │   ├── session_deletion.rs   # SessionDeletion: delete_session steps 5 to 8 and forget
+    │   ├── deletion_guards.rs    # DeletionGuards: delete_session steps 2 to 4
+    │   ├── delete_impact.rs      # DeleteImpact and DeleteConfirmation
+    │   ├── delete_outcome.rs     # DeleteOutcome
+    │   ├── worktree_containment.rs # WorktreeContainment, shared by delete step 3 and reconciliation
+    │   ├── session_monitor.rs    # SessionMonitor: reconcile, observe, diffs, preview, bell
+    │   ├── session_reconciler.rs # SessionReconciler, pairs registry entries with live tmux sessions
+    │   ├── reconciliation.rs     # Reconciliation, the reconciled entries and rows
+    │   ├── session_access.rs     # SessionAccess: attach, open_shell, return binding
+    │   ├── repo_catalog.rs       # RepoCatalog: discover, add, and remove repos, read typed paths
+    │   ├── repo_overrides.rs     # RepoOverrides: the add_repo and remove_repo workers
+    │   ├── pending.rs            # Pending, a worker result the TUI polls and the CLI waits on
+    │   ├── doctor.rs             # Doctor
+    │   ├── diagnostic_paths.rs   # DiagnosticPaths, the program and state paths doctor and help report
+    │   ├── tool_version.rs       # ToolVersion, the major and minor numbers of a tmux or git version
+    │   ├── doctor_report.rs      # DoctorReport, the doctor's info, warning, and problem lines
+    │   ├── registry_audit.rs     # RegistryAudit, the doctor's checks of each registry entry
+    │   └── ports/
+    │       ├── mod.rs
+    │       ├── session_registry.rs   # SessionRegistry trait
+    │       ├── workspace.rs          # Workspace trait
+    │       ├── dirty_state.rs        # DirtyState, the uncommitted files and nested repos of a worktree
+    │       ├── unmerged_commits.rs   # UnmergedCommits, commits on no other ref with the tip and HEAD
+    │       ├── multiplexer.rs        # Multiplexer trait
+    │       ├── return_binding.rs     # ReturnBinding trait
+    │       ├── config_source.rs      # ConfigSource trait
+    │       ├── repo_scanner.rs       # RepoScanner trait
+    │       ├── host_probe.rs         # HostProbe trait
+    │       ├── clock.rs              # Clock trait
+    │       └── lock.rs               # Lock trait
+    ├── adapters/
+    │   ├── mod.rs
+    │   ├── agent_launcher.rs     # AgentLauncher, the hidden __exec-agent mode, owns AgentHandoff and the exec seam
+    │   ├── agent_handoff.rs      # AgentHandoff, the handoff file a launch writes and the launcher takes
+    │   ├── app_log.rs            # AppLog, the append-mode app.log behind env_logger
+    │   ├── process_environment.rs # ProcessEnvironment, the environment snapshot main captures once
+    │   ├── xdg_paths.rs          # XdgPaths, the config, state, data, and runtime directories
+    │   ├── directory_repo_scanner.rs # DirectoryRepoScanner
+    │   ├── mount_table.rs        # MountTable, the network and FUSE mount points the scan skips
+    │   ├── toml_config_source.rs # TomlConfigSource
+    │   ├── raw_config.rs         # RawConfig, the config.toml shape before the load checks
+    │   ├── config_file_writer.rs # ConfigFileWriter, the read-only checks and mode-keeping config write
+    │   ├── json_session_registry.rs # JsonSessionRegistry
+    │   ├── file_lock.rs          # FileLock
+    │   ├── bounded_command.rs    # BoundedCommand, runs git and tmux children in a new session with a deadline
+    │   ├── command_output.rs     # CommandOutput, a finished child's status and output
+    │   ├── host_path.rs          # HostPath, lenient canonicalization and directory listing
+    │   ├── git_workspace.rs      # GitWorkspace
+    │   ├── git_runner.rs         # GitRunner, runs a GitInvocation through BoundedCommand
+    │   ├── git_invocation.rs     # GitInvocation, one git call with its child environment
+    │   ├── git_porcelain.rs      # GitPorcelain, parses git's machine-readable output
+    │   ├── git_branches.rs       # GitBranches: compare-and-swap delete, rename, listing
+    │   ├── start_point_resolver.rs # StartPointResolver, the base branch ladder
+    │   ├── submodule_commits.rs  # SubmoduleCommits, the submodule walk of unmerged_commits
+    │   ├── system_clock.rs       # SystemClock, reads `SystemTime`
+    │   ├── system_host_probe.rs  # SystemHostProbe
+    │   ├── live_process.rs       # LiveProcess, one /proc entry
+    │   ├── signal_flags.rs       # SignalFlags, the SIGHUP, SIGINT, SIGTERM, and SIGQUIT flags
+    │   ├── durable_file.rs       # DurableFile, synced temp file renamed over the target
+    │   ├── tmux_command.rs       # TmuxCommand, socket and config args, `-u` and `-N`, child environment, labeled output, exact targets, `#` and `;` escaping, CallerProcess
+    │   ├── caller_process.rs     # CallerProcess, the parent chain is_inside_client reads from /proc
+    │   ├── tmux_error.rs         # TmuxError
+    │   ├── tmux_sequence.rs      # TmuxSequence, `;`-separated commands with `#` and `;` escaping
+    │   ├── tmux_output.rs        # TmuxOutput, labeled lines and the zero-session errors
+    │   ├── tmux_scripts.rs       # TmuxScripts, every tmux command sequence the multiplexer sends
+    │   ├── tmux_launch.rs        # TmuxLaunch, ringleader-created and ringleader-done handling, rollback, tag move
+    │   ├── tmux_listing.rs       # TmuxListing, parses list-panes, list-windows, and list-clients rows and @ringleader_meta
+    │   ├── tmux_multiplexer.rs   # TmuxMultiplexer
+    │   ├── tmux_return_binding.rs # TmuxReturnBinding, owns bindings.json
+    │   ├── binding_records.rs    # BindingRecords, the bindings.json records
+    │   └── key_binding.rs        # KeyBinding, parses and compares list-keys lines
+    ├── ui/
+    │   ├── mod.rs
+    │   ├── app.rs                  # App
+    │   ├── action_gate.rs          # ActionGate, which actions the selected row allows
+    │   ├── home_state.rs           # HomeState, the polled rows, selection, and preview
+    │   ├── session_list.rs         # SessionList, sorted rows and name-based selection
+    │   ├── preview_feed.rs         # PreviewFeed, the preview capture and its timer
+    │   ├── diff_queue.rs           # DiffQueue, round-robin diffs of visible rows
+    │   ├── bell.rs                 # Bell, rings on a Working to Waiting edge
+    │   ├── shell_runner.rs         # ShellRunner, runs the ephemeral t shell
+    │   ├── blocking_operation.rs   # BlockingOperation, a create, delete, rename, or restart run behind a busy message
+    │   ├── status_report.rs        # StatusReport, the status bar message and how outcomes become one
+    │   ├── text_fit.rs             # TextFit, padding and ellipsis truncation
+    │   ├── event_loop.rs           # EventLoop
+    │   ├── terminal_guard.rs       # TerminalGuard
+    │   ├── home_view.rs            # HomeView
+    │   ├── session_table.rs        # SessionTable, the home screen's session list
+    │   ├── table_columns.rs        # TableColumns, column widths and dropping
+    │   ├── preview_panel.rs        # PreviewPanel, the Full tier's preview
+    │   ├── help_view.rs            # HelpView
+    │   ├── status_bar.rs           # StatusBar
+    │   ├── theme.rs                # Theme
+    │   └── dialogs/
+    │       ├── mod.rs
+    │       ├── dialog.rs                # Dialog, the open dialog, its key routing and placement
+    │       ├── dialog_slot.rs           # DialogSlot, the dialog App shows, if any
+    │       ├── dialog_labels.rs         # DialogLabels, full or abbreviated field labels
+    │       ├── text_field.rs            # TextField, typing and paste rules for name, prompt, and path fields
+    │       ├── new_session_dialog.rs    # NewSessionDialog
+    │       ├── repo_picker.rs           # RepoPicker, the n dialog's repo list and its actions
+    │       ├── picker_row.rs            # PickerRow, the text of one repo picker row
+    │       ├── repo_scan.rs             # RepoScan, one discover_repos run and its result
+    │       ├── scope_input.rs           # ScopeInput, the typed path that changes the scope
+    │       ├── agent_picker.rs          # AgentPicker, the n dialog's agent list
+    │       ├── delete_session_dialog.rs # DeleteSessionDialog
+    │       ├── rename_session_dialog.rs # RenameSessionDialog
+    │       └── add_repo_dialog.rs       # AddRepoDialog
+    └── test_support/               # #[cfg(test)] doubles and fixtures shared by unit tests
+        ├── mod.rs
+        ├── tmux_test_server.rs      # TmuxTestServer: private socket, control-mode clients, kill-server on drop
+        ├── git_test_repo.rs         # GitTestRepo: hermetic git environment and fixture repos
+        ├── service_fixture.rs       # ServiceFixture: every fake wired into a SessionService
+        ├── fake_session_registry.rs # FakeSessionRegistry
+        ├── fake_workspace.rs        # FakeWorkspace
+        ├── fake_multiplexer.rs      # FakeMultiplexer
+        ├── fake_return_binding.rs   # FakeReturnBinding
+        ├── fake_config_source.rs    # FakeConfigSource
+        ├── fake_repo_scanner.rs     # FakeRepoScanner
+        ├── fake_host_probe.rs       # FakeHostProbe
+        ├── fake_clock.rs            # FakeClock
+        ├── recording_screen_mode.rs # RecordingScreenMode, the screen mode that records each switch
+        ├── ui_harness.rs            # UiHarness: scripted input and a TestBackend wrapper for EventLoop tests
+        ├── cli_harness.rs           # CliHarness: a Cli run against the fakes with captured output
+        └── fake_lock.rs             # FakeLock
+```
+
+## Layout rules
+
+- `domain` never imports `crossterm`, `ratatui`, `std::process`, or any adapter.
+- `application` defines traits and use cases, never shells out, never touches the filesystem directly, and never reads the system clock. Ports are traits in `application/ports/`, and adapters implement them.
+- `ui` calls the `SessionService` facade only. `SessionLifecycle`, `SessionMonitor`, `SessionAccess`, `RepoCatalog`, and `Doctor` are composed by the facade and are not called from `ui` or `cli.rs`.
+- One primary type per file, named after it in snake case. Supporting types owned by the primary type live in the same file. Unit tests live inline. `mod.rs` declares and re-exports only. The tree in this file is the file contract: every listed file exists and holds its one type, and primary types are never merged into one file. Source files target under 200 lines excluding tests. When one outgrows that, extract its largest behavior-bearing type into its own file. A commit that adds a file under `src/` that the tree does not list, or moves, renames, or removes a listed file, updates the tree in this file in the same commit.
+- `cli.rs` owns the clap argument structs (`ListArgs`, `NewArgs`, and so on) as support types of `Cli`. They get no files of their own. The binding guard and the exit notice are support types of `App` in `app.rs`.
+- Prefer a separate file for a type that is used across modules, carries behavior or invariants, and changes for its own reasons. Merging files later is mechanical, and splitting a file that grew is disruptive. The reverse also holds: do not invent files for types that need none.
+- `src/test_support/` is `#[cfg(test)]` only and never appears in the binary. It holds the hand-written doubles and fixtures that tests across modules share.
+- Other support types, such as a parser result, a doctor finding, a session spec, or a dialog's in-progress state, live in their primary type's file and get no tree entry.
+- No code below `main` calls `std::env::current_exe`, reads the process environment (including `$TMUX`, `$TMUX_PANE`, `$HOME`, and `$SHELL`) or the process cwd, resolves XDG paths, or asks which terminal standard input is. `main` reads them once and injects them, with environment values in the `ProcessEnvironment` snapshot. `ProcessEnvironment::capture` reads the terminal name of standard input with `libc::ttyname_r` on descriptor 0, in the type's only `unsafe` block.
+- Every `unsafe` block carries one `// SAFETY:` comment that states why the call is sound, and is confined to one adapter method.
+
+## Wiring
+
+- `main.rs` holds `fn main` and `CompositionRoot`, whose methods build the adapters, the `SessionService`, and the TUI or the CLI run. Argument parsing and dispatch stay in `Cli`.
+- `ringleader` with no subcommand opens the TUI. Any subcommand runs the CLI and never starts the TUI. The hidden `__exec-agent` path loads no config, opens no log, and takes no lock.
+- The TUI takes the lifetime lock, and the mutating commands (`new`, `delete`, `rename`, `restart`, `repo add`, `repo remove`) take the write lock. `list`, `doctor`, `attach`, `repo list`, and `__exec-agent` take no lock.
+- Only the TUI installs the Ctrl-Q return binding. The CLI never touches tmux key bindings.
+- Blocking TUI operations (create, delete, rename, restart, and the delete measurement) run behind a busy message, and the event loop drops the key and paste events queued while they ran.
+- Logs go to `$XDG_STATE_HOME/ringleader/app.log` through `env_logger`, never to the terminal.
+
+## CLI exit codes
+
+- 0: success.
+- 1: a user or validation error, including an argument error, and any other failure.
+- 2: a session name that was not found.
+- 3: a conflict, including a refused guard, an `Unmanaged` target, a session that is live and healthy, or the lock being held.
+
+A command interrupted by a signal before its use case starts never runs it, and one interrupted during its use case finishes it and then ends by that signal.
+
+## Tests
+
+- All tests are unit tests inside `src/`, in `#[cfg(test)] mod tests` or `src/test_support/`. `tests/fixtures/` holds fixtures only, with fake data, and there are no `tests/*.rs` integration tests.
+- Application tests run against the hand-written fakes in `src/test_support/`, wired by `ServiceFixture`. There is no mocking crate. One concept per test, public interfaces only.
+- Git adapter tests run real git in `tempfile` repos with the hermetic git environment set on each `Command`, never through `std::env::set_var`.
+- tmux tests never skip. Each starts its own server through `TmuxTestServer` on a private socket under `/tmp` with `-f /dev/null`, and builds its snapshot from the test process's own `PATH`. Tests that need a client hold a control-mode client.
+- UI tests render with `TestBackend` and drive `EventLoop` with scripted input, a recording screen mode, and a recording shell runner. No test calls crossterm or needs a terminal.
+- No test reads wall-clock time to classify a session, and tests read nothing from the process environment except their own `PATH`.
+- A constructor, accessor, or helper that only tests call carries `#[cfg(test)]`, so `cargo clippy --all-targets -- -D warnings` stays clean without any dead-code allowance.
+
+## Commits
+
+- One commit per finished change, after every command in Commands passes.
+- The title starts with a capital letter, uses the imperative mood, and stays under 72 characters. The body says what changed in plain language.
+- Push only when the project owner asks.
+
+## Documentation
+
+- `README.md` stays terse and human-facing: what Ringleader is, install, first run, keys, the CLI synopsis, and the exit codes. No architecture and no agent instructions.
+- The repository holds no `CLAUDE.md` or `CLAUDE.local.md`, because either would hide this file from Claude Code. If one is ever needed, its first line is `@AGENTS.md`.
+- Plans for future work go in one file per effort at `docs/plans/YYYY-MM-DD-slug.md`, with a `> Status:` header of `active`, `completed`, or `abandoned`.

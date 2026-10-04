@@ -27,5 +27,5 @@ pub use fake_workspace::FakeWorkspace;
 pub use git_test_repo::GitTestRepo;
 pub use recording_screen_mode::RecordingScreenMode;
 pub use service_fixture::ServiceFixture;
-pub use tmux_test_server::{ControlClient, TmuxTestServer};
+pub use tmux_test_server::TmuxTestServer;
 pub use ui_harness::{FixtureBackend, RecordingShells, ScriptedInput, UiHarness};

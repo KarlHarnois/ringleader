@@ -12,10 +12,6 @@ impl FakeClock {
             now: Mutex::new(now),
         }
     }
-
-    pub fn set(&self, now: u64) {
-        *self.now.lock().unwrap() = now;
-    }
 }
 
 impl Clock for FakeClock {

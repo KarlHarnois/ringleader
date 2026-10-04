@@ -7,7 +7,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use super::home_view::{CenteredText, LayoutTier};
 use super::table_columns::TableColumns;
 use super::theme::Theme;
-use crate::domain::{SessionState, SessionSummary};
+use crate::domain::{DiffStat, SessionState, SessionSummary};
 
 pub struct SessionTable<'a> {
     rows: &'a [SessionSummary],
@@ -93,17 +93,43 @@ impl<'a> SessionTable<'a> {
 
     fn row_line(&self, row: &SessionSummary, columns: &TableColumns) -> Line<'static> {
         let indicator = StateIndicator::new(row.state(), self.tick);
-        let text = columns.row(row.name(), &Self::branch_text(row), &Self::diff_text(row));
-        let is_selected = self.selection == Some(row.name());
-        let (indicator_style, text_style) = if is_selected {
-            (self.theme.selected(), self.theme.selected())
-        } else {
-            (indicator.style(&self.theme), self.theme.base())
+        let diff_text = Self::diff_text(row);
+        let text = columns.row(row.name(), &Self::branch_text(row), &diff_text);
+        if self.selection == Some(row.name()) {
+            let selected = self.theme.selected();
+            return Line::from(vec![
+                Span::styled(indicator.glyph().to_string(), selected),
+                Span::styled(text, selected),
+            ]);
+        }
+        let mut spans = vec![Span::styled(
+            indicator.glyph().to_string(),
+            indicator.style(&self.theme),
+        )];
+        spans.extend(self.colored_diff(text, &diff_text, row.diff()));
+        Line::from(spans)
+    }
+
+    fn colored_diff(
+        &self,
+        text: String,
+        diff_text: &str,
+        diff: Option<DiffStat>,
+    ) -> Vec<Span<'static>> {
+        let (Some(diff), Some(start)) = (
+            diff,
+            text.rfind(diff_text).filter(|_| !diff_text.is_empty()),
+        ) else {
+            return vec![Span::styled(text, self.theme.base())];
         };
-        Line::from(vec![
-            Span::styled(indicator.glyph().to_string(), indicator_style),
-            Span::styled(text, text_style),
-        ])
+        let (before, rest) = text.split_at(start);
+        let after = &rest[diff_text.len()..];
+        vec![
+            Span::styled(before.to_string(), self.theme.base()),
+            Span::styled(format!("+{}", diff.insertions()), self.theme.insertions()),
+            Span::styled(format!(" -{}", diff.deletions()), self.theme.deletions()),
+            Span::styled(format!(" ?{}{after}", diff.untracked()), self.theme.base()),
+        ]
     }
 
     fn branch_text(row: &SessionSummary) -> String {
@@ -272,6 +298,32 @@ mod tests {
         let terminal = TableFixture::render(&[row], None, 0, 6);
 
         assert!(TableFixture::line(&terminal, 2).contains("+0 -0 ?2"));
+    }
+
+    #[test]
+    fn insertions_show_in_green_and_deletions_in_red() {
+        let row = TableFixture::managed("fix-auth", SessionState::Waiting).with_diff(
+            DiffStat::from_changes(
+                [crate::domain::FileChange::Text {
+                    insertions: 12,
+                    deletions: 4,
+                }],
+                0,
+            ),
+        );
+
+        let terminal = TableFixture::render(&[row], None, 0, 6);
+        let line = TableFixture::line(&terminal, 2);
+        let column = |text: &str| {
+            let byte = line.find(text).unwrap();
+            u16::try_from(line[..byte].chars().count()).unwrap()
+        };
+        let (plus, minus) = (column("+12"), column("-4"));
+        let buffer = terminal.backend().buffer();
+
+        assert!(line.contains("+12 -4 ?0"));
+        assert_eq!(buffer[(plus, 2)].fg, Color::Green);
+        assert_eq!(buffer[(minus, 2)].fg, Color::Red);
     }
 
     #[test]

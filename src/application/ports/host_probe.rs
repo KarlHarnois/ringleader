@@ -1,3 +1,4 @@
+use std::fmt;
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
@@ -31,8 +32,15 @@ impl ProcessInfo {
         self.pid
     }
 
+    #[cfg(test)]
     pub fn command(&self) -> &str {
         &self.command
+    }
+}
+
+impl fmt::Display for ProcessInfo {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{} ({})", self.pid, self.command)
     }
 }
 

@@ -1,11 +1,13 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
+use super::diagnostic_paths::DiagnosticPaths;
 use super::doctor_report::DoctorReport;
 use super::ports::{Clock, ConfigError, HostProbe, Multiplexer, SessionRegistry, Workspace};
 use super::registry_audit::RegistryAudit;
 use super::service_ports::ServicePorts;
 use super::session_reconciler::SessionReconciler;
+use super::tool_version::ToolVersion;
 use super::use_checks::UnresolvedCommand;
 use crate::domain::{Agent, Config};
 
@@ -56,13 +58,13 @@ impl Doctor {
             }
         };
         self.check_config_writable(config_path, &mut report);
-        self.check_writable("state directory", &self.paths.state_directory, &mut report);
+        self.check_writable("state directory", self.paths.state_directory(), &mut report);
         self.check_registry(config, valid_config, &mut report);
         report
     }
 
     fn check_tmux(&self, report: &mut DoctorReport) {
-        let program = &self.paths.tmux_program;
+        let program = self.paths.tmux_program();
         report.info(format!("tmux program: {program}"));
         match self.multiplexer.version() {
             Ok(version) => Self::check_version("tmux client", &version, Self::MINIMUM_TMUX, report),
@@ -81,7 +83,7 @@ impl Doctor {
     }
 
     fn check_git(&self, report: &mut DoctorReport) {
-        let program = &self.paths.git_program;
+        let program = self.paths.git_program();
         report.info(format!("git program: {program}"));
         match self.workspace.version() {
             Ok(version) => Self::check_version("git", &version, Self::MINIMUM_GIT, report),
@@ -190,55 +192,6 @@ impl Doctor {
         let reconciliation = SessionReconciler::new(config, self.host.as_ref(), now)
             .reconcile(&entries, observations);
         self.audit.audit(&reconciliation, valid_config, report);
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DiagnosticPaths {
-    tmux_program: String,
-    git_program: String,
-    state_directory: PathBuf,
-}
-
-impl DiagnosticPaths {
-    pub fn new(tmux_program: &str, git_program: &str, state_directory: &Path) -> Self {
-        Self {
-            tmux_program: tmux_program.to_string(),
-            git_program: git_program.to_string(),
-            state_directory: state_directory.to_path_buf(),
-        }
-    }
-
-    pub fn state_directory(&self) -> &Path {
-        &self.state_directory
-    }
-}
-
-impl Default for DiagnosticPaths {
-    fn default() -> Self {
-        Self::new("tmux", "git", Path::new("/"))
-    }
-}
-
-struct ToolVersion<'a> {
-    text: &'a str,
-}
-
-impl<'a> ToolVersion<'a> {
-    fn new(text: &'a str) -> Self {
-        Self { text }
-    }
-
-    fn numbers(&self) -> Option<(u32, u32)> {
-        let mut parts = self.text.split('.');
-        let major = Self::leading_number(parts.next()?)?;
-        let minor = Self::leading_number(parts.next()?)?;
-        Some((major, minor))
-    }
-
-    fn leading_number(part: &str) -> Option<u32> {
-        let digits: String = part.chars().take_while(char::is_ascii_digit).collect();
-        digits.parse().ok()
     }
 }
 

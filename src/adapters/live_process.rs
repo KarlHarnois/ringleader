@@ -1,0 +1,91 @@
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use crate::application::ports::ProcessInfo;
+
+pub struct LiveProcess {
+    pid: u32,
+    parent: u32,
+    session: u32,
+    cwd: Option<PathBuf>,
+    executable: String,
+    command: String,
+}
+
+impl LiveProcess {
+    const ZOMBIE: &'static str = "Z";
+
+    pub fn pid(&self) -> u32 {
+        self.pid
+    }
+
+    pub fn parent(&self) -> u32 {
+        self.parent
+    }
+
+    pub fn session(&self) -> u32 {
+        self.session
+    }
+
+    pub fn cwd(&self) -> Option<&Path> {
+        self.cwd.as_deref()
+    }
+
+    pub fn executable(&self) -> &str {
+        &self.executable
+    }
+
+    pub fn all() -> Vec<Self> {
+        let Ok(entries) = fs::read_dir("/proc") else {
+            return Vec::new();
+        };
+        entries
+            .filter_map(Result::ok)
+            .filter_map(|entry| entry.file_name().to_string_lossy().parse().ok())
+            .filter_map(Self::read)
+            .collect()
+    }
+
+    pub fn read(pid: u32) -> Option<Self> {
+        let directory = PathBuf::from(format!("/proc/{pid}"));
+        let stat = fs::read_to_string(directory.join("stat")).ok()?;
+        let fields: Vec<&str> = stat[stat.rfind(')')? + 2..].split(' ').collect();
+        let command_line = fs::read(directory.join("cmdline")).unwrap_or_default();
+        Some(Self {
+            pid,
+            parent: fields.get(1)?.parse().ok()?,
+            session: fields.get(3)?.parse().ok()?,
+            cwd: fs::read_link(directory.join("cwd")).ok(),
+            executable: fs::read_link(directory.join("exe"))
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            command: String::from_utf8_lossy(&command_line)
+                .split('\0')
+                .filter(|part| !part.is_empty())
+                .collect::<Vec<_>>()
+                .join(" "),
+        })
+    }
+
+    pub fn lineage_of(pid: u32) -> Vec<u32> {
+        let mut lineage = Vec::new();
+        let mut current = Some(pid);
+        while let Some(pid) = current.filter(|&pid| pid > 0) {
+            lineage.push(pid);
+            current = Self::read(pid).map(|process| process.parent);
+        }
+        lineage
+    }
+
+    pub fn is_alive(&self) -> bool {
+        let Ok(stat) = fs::read_to_string(format!("/proc/{}/stat", self.pid)) else {
+            return false;
+        };
+        let state = stat.rfind(')').and_then(|end| stat.get(end + 2..end + 3));
+        state != Some(Self::ZOMBIE)
+    }
+
+    pub fn info(&self) -> ProcessInfo {
+        ProcessInfo::new(self.pid, &self.command)
+    }
+}

@@ -1,5 +1,3 @@
-#![allow(dead_code, unused_imports)]
-
 mod adapters;
 mod application;
 mod cli;
@@ -36,6 +34,7 @@ use adapters::tmux_command::TmuxCommand;
 use adapters::tmux_multiplexer::TmuxMultiplexer;
 use adapters::tmux_return_binding::TmuxReturnBinding;
 use adapters::toml_config_source::TomlConfigSource;
+use adapters::xdg_paths::XdgPaths;
 use adapters::{BoundedCommand, Deadlines, GitWorkspace};
 use application::ports::{ConfigSource, Lock, LockError, ReturnBinding};
 use application::{
@@ -333,62 +332,5 @@ impl CompositionRoot {
     fn fail(message: &str) -> ExitCode {
         let _ = writeln!(io::stderr(), "ringleader: {message}");
         ExitCode::from(Self::FAILURE)
-    }
-}
-
-struct XdgPaths {
-    home: Option<PathBuf>,
-    config_home: PathBuf,
-    state_home: PathBuf,
-    data_home: PathBuf,
-    runtime_directory: Option<PathBuf>,
-}
-
-impl XdgPaths {
-    const APPLICATION: &'static str = "ringleader";
-
-    fn from_environment(environment: &ProcessEnvironment) -> Self {
-        let home = environment
-            .get("HOME")
-            .map(PathBuf::from)
-            .or_else(dirs::home_dir);
-        let base = |variable: &str, fallback: &str| {
-            environment
-                .get(variable)
-                .map(PathBuf::from)
-                .filter(|path| path.is_absolute())
-                .unwrap_or_else(|| home.clone().unwrap_or_default().join(fallback))
-        };
-        Self {
-            config_home: base("XDG_CONFIG_HOME", ".config"),
-            state_home: base("XDG_STATE_HOME", ".local/state"),
-            data_home: base("XDG_DATA_HOME", ".local/share"),
-            runtime_directory: environment
-                .get("XDG_RUNTIME_DIR")
-                .map(PathBuf::from)
-                .filter(|path| path.is_absolute()),
-            home,
-        }
-    }
-
-    fn home(&self) -> Option<&Path> {
-        self.home.as_deref()
-    }
-
-    fn config_file(&self) -> PathBuf {
-        self.config_home.join(Self::APPLICATION).join("config.toml")
-    }
-
-    fn state_directory(&self) -> PathBuf {
-        self.state_home.join(Self::APPLICATION)
-    }
-
-    fn worktree_root(&self) -> PathBuf {
-        self.data_home.join(Self::APPLICATION).join("worktrees")
-    }
-
-    fn handoff_directory(&self) -> PathBuf {
-        let base = self.runtime_directory.as_ref().unwrap_or(&self.state_home);
-        base.join(Self::APPLICATION).join("handoff")
     }
 }

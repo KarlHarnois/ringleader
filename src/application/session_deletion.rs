@@ -1,4 +1,3 @@
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::delete_impact::{DeleteConfirmation, DeleteImpact};
@@ -103,7 +102,11 @@ impl SessionDeletion {
             return Err(ServiceError::Conflict(format!(
                 "processes still run in {}: {}; kept the worktree, the branch, and the session, which is now stopped",
                 session.worktree_path().display(),
-                ProcessList::new(&remaining).describe()
+                remaining
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
             )));
         }
         self.refuse_new_commits(session, measurement)
@@ -194,27 +197,9 @@ impl SessionDeletion {
     }
 }
 
-struct ProcessList<'a> {
-    processes: &'a [ProcessInfo],
-}
-
-impl<'a> ProcessList<'a> {
-    fn new(processes: &'a [ProcessInfo]) -> Self {
-        Self { processes }
-    }
-
-    fn describe(&self) -> String {
-        self.processes
-            .iter()
-            .map(|process| format!("{} ({})", process.pid(), process.command()))
-            .collect::<Vec<_>>()
-            .join(", ")
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
     use super::*;
     use crate::application::deletion_guards::BranchPresence;
@@ -224,7 +209,7 @@ mod tests {
     use crate::application::session_service::SessionService;
     use crate::domain::{AgentPane, NamingScheme, Registration, TmuxAddress};
     use crate::test_support::{
-        FakeHostProbe, FakeMultiplexer, FakeSessionRegistry, FakeWorkspace, ServiceFixture,
+        FakeMultiplexer, FakeSessionRegistry, FakeWorkspace, ServiceFixture,
     };
 
     const OTHER_TIP: &str = "0badc0de0badc0de0badc0de0badc0de0badc0de";

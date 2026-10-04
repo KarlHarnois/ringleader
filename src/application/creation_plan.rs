@@ -51,6 +51,7 @@ impl CreateRequest {
         &self.name
     }
 
+    #[cfg(test)]
     pub fn repo(&self) -> &Repo {
         &self.repo
     }

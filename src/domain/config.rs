@@ -49,14 +49,17 @@ impl Config {
         }
     }
 
+    #[cfg(test)]
     pub fn with_agents(self, agents: Vec<Agent>) -> Self {
         Self { agents, ..self }
     }
 
+    #[cfg(test)]
     pub fn with_repos(self, repos: Vec<Repo>) -> Self {
         Self { repos, ..self }
     }
 
+    #[cfg(test)]
     pub fn with_naming(self, naming: NamingScheme) -> Self {
         Self { naming, ..self }
     }
@@ -121,6 +124,15 @@ pub struct SessionSize {
 impl SessionSize {
     pub fn new(width: u16, height: u16) -> Self {
         Self { width, height }
+    }
+
+    pub fn parse(text: &str) -> Option<Self> {
+        let (width, height) = text.split_once('x')?;
+        let all_digits = |part: &str| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit());
+        if !all_digits(width) || !all_digits(height) {
+            return None;
+        }
+        Some(Self::new(width.parse().ok()?, height.parse().ok()?))
     }
 
     pub fn width(&self) -> u16 {

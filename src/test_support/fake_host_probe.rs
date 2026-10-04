@@ -84,14 +84,6 @@ impl FakeHostProbe {
         }
     }
 
-    pub fn remove_directory(&self, path: &Path) {
-        let mut state = self.state.lock().unwrap();
-        state
-            .directories
-            .retain(|directory| !directory.starts_with(path));
-        state.files.retain(|file| !file.starts_with(path));
-    }
-
     pub fn terminated(&self) -> Vec<u32> {
         self.state.lock().unwrap().terminated.clone()
     }

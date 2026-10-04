@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use super::doctor::DiagnosticPaths;
+use super::diagnostic_paths::DiagnosticPaths;
 use super::ports::ConfigError;
 use crate::domain::Config;
 

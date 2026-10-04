@@ -2,12 +2,11 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use super::agent::Agent;
-use super::base_branch::BaseBranch;
 use super::config::{RefreshIntervals, SessionSize};
 use super::config_checks::ConfigChecks;
 use super::naming_scheme::NamingScheme;
 use super::repo::Repo;
-use super::repo_name::RepoName;
+use super::repo_draft::RepoDraft;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfigDraft {
@@ -145,7 +144,7 @@ impl ConfigDraft {
     }
 
     pub(super) fn parsed_session_size(&self) -> Option<SessionSize> {
-        SizeText::new(&self.session_size).parsed()
+        SessionSize::parse(&self.session_size)
     }
 
     pub(super) fn raw_scan_depth(&self) -> i64 {
@@ -173,9 +172,7 @@ impl ConfigDraft {
     }
 
     pub(super) fn session_size_value(&self) -> SessionSize {
-        SizeText::new(&self.session_size)
-            .parsed()
-            .unwrap_or_default()
+        SessionSize::parse(&self.session_size).unwrap_or_default()
     }
 
     pub(super) fn bell_on_waiting_value(&self) -> bool {
@@ -192,85 +189,5 @@ impl ConfigDraft {
 
     pub(super) fn agents_value(&self) -> &[Agent] {
         &self.agents
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RepoDraft {
-    name: Option<String>,
-    path: PathBuf,
-    base_branch: Option<String>,
-}
-
-impl RepoDraft {
-    pub fn new(path: &Path) -> Self {
-        Self {
-            name: None,
-            path: path.to_path_buf(),
-            base_branch: None,
-        }
-    }
-
-    pub fn named(self, name: &str) -> Self {
-        Self {
-            name: Some(name.to_string()),
-            ..self
-        }
-    }
-
-    pub fn based_on(self, base_branch: &str) -> Self {
-        Self {
-            base_branch: Some(base_branch.to_string()),
-            ..self
-        }
-    }
-
-    fn repo_name(&self) -> Option<RepoName> {
-        match &self.name {
-            Some(name) => RepoName::parse(name).ok(),
-            None => RepoName::from_basename(&self.path.file_name()?.to_string_lossy()).ok(),
-        }
-    }
-
-    pub(super) fn path(&self) -> &Path {
-        &self.path
-    }
-
-    pub(super) fn shown_name(&self) -> String {
-        self.name
-            .clone()
-            .unwrap_or_else(|| self.path.display().to_string())
-    }
-
-    pub(super) fn has_valid_name(&self) -> bool {
-        self.repo_name().is_some()
-    }
-
-    pub(super) fn resolved_name(&self) -> Option<RepoName> {
-        self.repo_name()
-    }
-
-    fn repo(&self) -> Option<Repo> {
-        let base_branch = self.base_branch.as_deref().and_then(BaseBranch::new);
-        Some(Repo::explicit(self.repo_name()?, &self.path, base_branch))
-    }
-}
-
-struct SizeText<'a> {
-    text: &'a str,
-}
-
-impl<'a> SizeText<'a> {
-    fn new(text: &'a str) -> Self {
-        Self { text }
-    }
-
-    fn parsed(&self) -> Option<SessionSize> {
-        let (width, height) = self.text.split_once('x')?;
-        let all_digits = |part: &str| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit());
-        if !all_digits(width) || !all_digits(height) {
-            return None;
-        }
-        Some(SessionSize::new(width.parse().ok()?, height.parse().ok()?))
     }
 }

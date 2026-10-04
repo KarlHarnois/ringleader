@@ -46,14 +46,6 @@ impl TerminalGuard {
     pub fn state(&self) -> Arc<TerminalState> {
         Arc::clone(&self.state)
     }
-
-    pub fn suspend(&self) {
-        self.state.restore();
-    }
-
-    pub fn resume(&self) -> io::Result<()> {
-        self.state.enter()
-    }
 }
 
 impl Drop for TerminalGuard {
@@ -117,12 +109,12 @@ mod tests {
     }
 
     #[test]
-    fn a_suspend_and_a_resume_leave_and_reenter_together() {
+    fn a_restore_and_an_enter_leave_and_reenter_together() {
         let mode = RecordingScreenMode::default();
         let guard = TerminalGuard::enter(Box::new(mode.clone())).unwrap();
 
-        guard.suspend();
-        guard.resume().unwrap();
+        guard.state().restore();
+        guard.state().enter().unwrap();
 
         assert_eq!(mode.switches(), ["enter", "leave", "enter"]);
     }
@@ -143,7 +135,7 @@ mod tests {
     fn a_restore_outside_tui_mode_writes_nothing() {
         let mode = RecordingScreenMode::default();
         let guard = TerminalGuard::enter(Box::new(mode.clone())).unwrap();
-        guard.suspend();
+        guard.state().restore();
 
         guard.state().restore();
 

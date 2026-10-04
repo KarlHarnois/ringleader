@@ -3,6 +3,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 use super::durable_file::DurableFile;
 use crate::application::ports::BindingError;
@@ -49,9 +50,11 @@ impl BindingRecords {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum RecordFileProblem {
+    #[error("unreadable: {0}")]
     Unreadable(String),
+    #[error("not valid JSON: {0}")]
     Corrupt(String),
 }
 

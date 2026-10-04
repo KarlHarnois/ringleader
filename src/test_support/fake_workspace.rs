@@ -77,11 +77,6 @@ impl FakeWorkspace {
         self
     }
 
-    pub fn with_start_point(self, start: Result<StartPoint, WorkspaceError>) -> Self {
-        self.edit(|state| state.start_point = Some(start));
-        self
-    }
-
     pub fn with_invalid_repo(self, repo: &Path) -> Self {
         self.edit(|state| state.invalid_repos.insert(repo.to_path_buf()));
         self

@@ -31,16 +31,6 @@ impl FakeConfigSource {
         }
     }
 
-    pub fn failing_load(self, error: ConfigError) -> Self {
-        self.state.lock().unwrap().load_error = Some(error);
-        self
-    }
-
-    pub fn failing_writes(self, error: ConfigError) -> Self {
-        self.state.lock().unwrap().write_error = Some(error);
-        self
-    }
-
     pub fn replace(&self, config: Config) {
         let mut state = self.state.lock().unwrap();
         state.config = config;

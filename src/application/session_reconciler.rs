@@ -755,16 +755,4 @@ mod tests {
             )
         }
     }
-
-    struct SessionMetadataFixture;
-
-    impl SessionMetadataFixture {
-        fn claiming(metadata: &SessionMetadata, entry: &Session) -> SessionMetadata {
-            SessionMetadata::new(
-                crate::domain::SessionRepo::new(metadata.repo_name().clone(), metadata.repo_path()),
-                crate::domain::SessionWorktree::new(entry.worktree_path(), metadata.branch(), ""),
-                metadata.agent(),
-            )
-        }
-    }
 }

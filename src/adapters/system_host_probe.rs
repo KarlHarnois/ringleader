@@ -6,6 +6,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use super::host_path::HostPath;
+use super::live_process::LiveProcess;
 use super::process_environment::ProcessEnvironment;
 use crate::application::ports::{HostProbe, HostProbeError, ProcessInfo};
 
@@ -37,11 +38,11 @@ impl SystemHostProbe {
     }
 
     fn is_own(&self, process: &LiveProcess) -> bool {
-        self.own_lineage.contains(&process.pid) || process.parent == std::process::id()
+        self.own_lineage.contains(&process.pid()) || process.parent() == std::process::id()
     }
 
     fn is_tmux(process: &LiveProcess) -> bool {
-        let executable = process.executable.trim_end_matches(Self::DELETED_SUFFIX);
+        let executable = process.executable().trim_end_matches(Self::DELETED_SUFFIX);
         Path::new(executable)
             .file_name()
             .is_some_and(|name| name == "tmux")
@@ -105,13 +106,8 @@ impl HostProbe for SystemHostProbe {
         let canonical = HostPath::new(path).canonical_lenient();
         LiveProcess::all()
             .into_iter()
-            .filter(|process| {
-                process
-                    .cwd
-                    .as_ref()
-                    .is_some_and(|cwd| cwd.starts_with(&canonical))
-            })
-            .filter(|process| !excluded_sessions.contains(&process.session))
+            .filter(|process| process.cwd().is_some_and(|cwd| cwd.starts_with(&canonical)))
+            .filter(|process| !excluded_sessions.contains(&process.session()))
             .filter(|process| !self.is_own(process) && !Self::is_tmux(process))
             .map(|process| process.info())
             .collect()
@@ -120,7 +116,7 @@ impl HostProbe for SystemHostProbe {
     fn session_processes(&self, sessions: &[u32]) -> Vec<ProcessInfo> {
         LiveProcess::all()
             .into_iter()
-            .filter(|process| sessions.contains(&process.session))
+            .filter(|process| sessions.contains(&process.session()))
             .map(|process| process.info())
             .collect()
     }
@@ -131,7 +127,7 @@ impl HostProbe for SystemHostProbe {
             .filter_map(|pid| LiveProcess::read(*pid))
             .collect();
         for process in &targets {
-            let Ok(pid) = libc::pid_t::try_from(process.pid) else {
+            let Ok(pid) = libc::pid_t::try_from(process.pid()) else {
                 continue;
             };
             // SAFETY: kill only sends signals to a pid read from /proc a moment ago; it
@@ -152,73 +148,6 @@ impl HostProbe for SystemHostProbe {
             }
             thread::sleep(Self::TERMINATE_POLL);
         }
-    }
-}
-
-struct LiveProcess {
-    pid: u32,
-    parent: u32,
-    session: u32,
-    cwd: Option<PathBuf>,
-    executable: String,
-    command: String,
-}
-
-impl LiveProcess {
-    const ZOMBIE: &'static str = "Z";
-
-    fn all() -> Vec<Self> {
-        let Ok(entries) = fs::read_dir("/proc") else {
-            return Vec::new();
-        };
-        entries
-            .filter_map(Result::ok)
-            .filter_map(|entry| entry.file_name().to_string_lossy().parse().ok())
-            .filter_map(Self::read)
-            .collect()
-    }
-
-    fn read(pid: u32) -> Option<Self> {
-        let directory = PathBuf::from(format!("/proc/{pid}"));
-        let stat = fs::read_to_string(directory.join("stat")).ok()?;
-        let fields: Vec<&str> = stat[stat.rfind(')')? + 2..].split(' ').collect();
-        let command_line = fs::read(directory.join("cmdline")).unwrap_or_default();
-        Some(Self {
-            pid,
-            parent: fields.get(1)?.parse().ok()?,
-            session: fields.get(3)?.parse().ok()?,
-            cwd: fs::read_link(directory.join("cwd")).ok(),
-            executable: fs::read_link(directory.join("exe"))
-                .map(|path| path.to_string_lossy().into_owned())
-                .unwrap_or_default(),
-            command: String::from_utf8_lossy(&command_line)
-                .split('\0')
-                .filter(|part| !part.is_empty())
-                .collect::<Vec<_>>()
-                .join(" "),
-        })
-    }
-
-    fn lineage_of(pid: u32) -> Vec<u32> {
-        let mut lineage = Vec::new();
-        let mut current = Some(pid);
-        while let Some(pid) = current.filter(|&pid| pid > 0) {
-            lineage.push(pid);
-            current = Self::read(pid).map(|process| process.parent);
-        }
-        lineage
-    }
-
-    fn is_alive(&self) -> bool {
-        let Ok(stat) = fs::read_to_string(format!("/proc/{}/stat", self.pid)) else {
-            return false;
-        };
-        let state = stat.rfind(')').and_then(|end| stat.get(end + 2..end + 3));
-        state != Some(Self::ZOMBIE)
-    }
-
-    fn info(&self) -> ProcessInfo {
-        ProcessInfo::new(self.pid, &self.command)
     }
 }
 

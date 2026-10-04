@@ -34,10 +34,10 @@ impl<'a> SessionCommands<'a> {
             .collect();
         let report = ListReport::new(&rows, &diffs);
         if args.json {
-            self.session.output.line(&report.json());
+            self.session.output().line(&report.json());
         } else {
             for line in report.lines() {
-                self.session.output.line(&line);
+                self.session.output().line(&line);
             }
         }
         Ok(0)
@@ -56,7 +56,7 @@ impl<'a> SessionCommands<'a> {
         }
         self.session.stop_if_signaled()?;
         let created = self.service.create_session(&request)?;
-        self.session.output.line(&format!(
+        self.session.output().line(&format!(
             "created {} in {} on branch {}",
             created.name(),
             created.worktree_path().display(),
@@ -83,15 +83,15 @@ impl<'a> SessionCommands<'a> {
             Ok(outcome) => {
                 if outcome.kept().is_none() {
                     for warning in report.warnings(outcome.impact()) {
-                        self.session.output.note(&warning);
+                        self.session.output().note(&warning);
                     }
                 }
-                self.session.output.line(&report.success(&outcome));
+                self.session.output().line(&report.success(&outcome));
                 Ok(0)
             }
             Err(ServiceError::GuardsChanged { impact, .. }) => {
                 for line in report.refusal(&impact) {
-                    self.session.output.note(&line);
+                    self.session.output().note(&line);
                 }
                 Ok(ServiceError::CONFLICT_EXIT)
             }
@@ -110,7 +110,7 @@ impl<'a> SessionCommands<'a> {
         let renamed = self
             .service
             .rename_session(&args.old, &args.new, args.keep_branch)?;
-        self.session.output.line(&format!(
+        self.session.output().line(&format!(
             "renamed {} to {}, branch {}",
             args.old,
             renamed.name(),
@@ -123,7 +123,7 @@ impl<'a> SessionCommands<'a> {
         self.service.observe(true)?;
         self.session.stop_if_signaled()?;
         self.service.restart_session(name)?;
-        self.session.output.line(&format!("restarted {name}"));
+        self.session.output().line(&format!("restarted {name}"));
         Ok(0)
     }
 }

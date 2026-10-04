@@ -2,6 +2,8 @@ use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
+use super::dirty_state::DirtyState;
+use super::unmerged_commits::UnmergedCommits;
 use crate::domain::{BaseBranch, DiffStat};
 
 pub trait Workspace: Send + Sync {
@@ -131,85 +133,6 @@ impl WorktreeEntry {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct DirtyState {
-    missing: bool,
-    dirty_files: u64,
-    nested_repos: Vec<PathBuf>,
-}
-
-impl DirtyState {
-    pub fn missing() -> Self {
-        Self {
-            missing: true,
-            ..Self::default()
-        }
-    }
-
-    pub fn present(dirty_files: u64, nested_repos: Vec<PathBuf>) -> Self {
-        Self {
-            missing: false,
-            dirty_files,
-            nested_repos,
-        }
-    }
-
-    pub fn is_missing(&self) -> bool {
-        self.missing
-    }
-
-    pub fn dirty_files(&self) -> u64 {
-        self.dirty_files
-    }
-
-    pub fn nested_repos(&self) -> &[PathBuf] {
-        &self.nested_repos
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct UnmergedCommits {
-    count: u64,
-    tip: Option<String>,
-    head: Option<String>,
-}
-
-impl UnmergedCommits {
-    const NO_COMMIT: &'static str = "none";
-
-    pub fn new(count: u64, tip: Option<&str>, head: Option<&str>) -> Self {
-        Self {
-            count,
-            tip: tip.map(str::to_string),
-            head: head.map(str::to_string),
-        }
-    }
-
-    pub fn count(&self) -> u64 {
-        self.count
-    }
-
-    pub fn tip(&self) -> Option<&str> {
-        self.tip.as_deref()
-    }
-
-    pub fn head(&self) -> Option<&str> {
-        self.head.as_deref()
-    }
-
-    pub fn tip_label(&self) -> &str {
-        self.tip().unwrap_or(Self::NO_COMMIT)
-    }
-
-    pub fn head_label(&self) -> &str {
-        self.head().unwrap_or(Self::NO_COMMIT)
-    }
-
-    pub fn same_commits_as(&self, other: &UnmergedCommits) -> bool {
-        self.tip == other.tip && self.head == other.head
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum WorkspaceError {
     #[error("git {subcommand} failed ({status}): {stderr}")]
@@ -238,12 +161,4 @@ pub enum WorkspaceError {
         remote_ref: String,
         suggestion: Option<String>,
     },
-    #[error("cannot read {path}: {detail}")]
-    Io { path: PathBuf, detail: String },
-}
-
-impl WorkspaceError {
-    pub fn is_timeout(&self) -> bool {
-        matches!(self, WorkspaceError::TimedOut { .. })
-    }
 }

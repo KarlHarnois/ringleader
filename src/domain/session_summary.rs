@@ -128,14 +128,6 @@ impl UnmanagedSession {
         &self.label
     }
 
-    pub fn observation(&self) -> &SessionObservation {
-        &self.observation
-    }
-
-    pub fn shadowed_entry(&self) -> Option<&Session> {
-        self.shadowed.as_ref().map(|(entry, _)| entry)
-    }
-
     pub fn advice(&self) -> Option<String> {
         let (_, mismatch) = self.shadowed.as_ref()?;
         let tmux_name = self.observation.tmux_name();

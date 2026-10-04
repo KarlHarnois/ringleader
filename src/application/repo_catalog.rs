@@ -108,10 +108,6 @@ impl RepoDiscovery {
         &self.repos
     }
 
-    pub fn cut_short(&self) -> bool {
-        self.cut_short
-    }
-
     pub fn notices(&self) -> Vec<String> {
         let mut notices = Vec::new();
         if self.cut_short {
