@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::path::Path;
 
 use crossterm::event::{KeyCode, KeyEvent};
@@ -10,6 +11,7 @@ use super::theme::Theme;
 pub struct HelpView {
     sections: Vec<(&'static str, Vec<String>)>,
     scroll: usize,
+    max_scroll: Cell<usize>,
 }
 
 impl HelpView {
@@ -43,14 +45,19 @@ impl HelpView {
         Self {
             sections,
             scroll: 0,
+            max_scroll: Cell::new(0),
         }
     }
 
     pub fn handle_key(&mut self, key: &KeyEvent) -> DialogStep {
         match key.code {
             KeyCode::Char('?' | 'q') | KeyCode::Esc => return DialogStep::Close,
-            KeyCode::Down | KeyCode::Char('j') => self.scroll += 1,
-            KeyCode::Up | KeyCode::Char('k') => self.scroll = self.scroll.saturating_sub(1),
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.scroll = (self.visible_scroll() + 1).min(self.max_scroll.get());
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.scroll = self.visible_scroll().saturating_sub(1)
+            }
             _ => {}
         }
         DialogStep::Stay
@@ -66,10 +73,15 @@ impl HelpView {
             content.push(Line::from(""));
         }
         let room = height.saturating_sub(1);
-        let scroll = self.scroll.min(content.len().saturating_sub(room));
-        let mut lines: Vec<Line<'static>> = content.into_iter().skip(scroll).take(room).collect();
+        self.max_scroll.set(content.len().saturating_sub(room));
+        let shown = content.into_iter().skip(self.visible_scroll()).take(room);
+        let mut lines: Vec<Line<'static>> = shown.collect();
         lines.push(Line::styled(Self::CLOSING, theme.dim()));
         lines
+    }
+
+    fn visible_scroll(&self) -> usize {
+        self.scroll.min(self.max_scroll.get())
     }
 
     fn return_key(tmux_prefix: &str) -> Vec<String> {
@@ -144,8 +156,29 @@ mod tests {
                 .join(" ")
         }
 
+        const SHORT_WIDTH: usize = 56;
+        const SHORT_HEIGHT: usize = 8;
+        const PAST_THE_END: usize = 50;
+
         fn press(help: &mut HelpView, code: KeyCode) -> DialogStep {
             help.handle_key(&KeyEvent::new(code, KeyModifiers::NONE))
+        }
+
+        fn press_times(help: &mut HelpView, code: KeyCode, times: usize) {
+            for _ in 0..times {
+                Self::press(help, code);
+            }
+        }
+
+        fn short_page(help: &HelpView) -> Vec<Line<'static>> {
+            help.lines(Self::SHORT_WIDTH, Self::SHORT_HEIGHT, &Theme)
+        }
+
+        fn scrolled_past_the_end() -> HelpView {
+            let mut help = Self::help();
+            Self::short_page(&help);
+            Self::press_times(&mut help, KeyCode::Down, Self::PAST_THE_END);
+            help
         }
     }
 
@@ -202,5 +235,36 @@ mod tests {
 
         assert_eq!(top[0].spans[0].content, "Keys");
         assert_eq!(scrolled[0], top[1]);
+    }
+
+    #[test]
+    fn up_moves_at_once_after_scrolling_past_the_end() {
+        let mut help = HelpFixture::scrolled_past_the_end();
+        let last_page = HelpFixture::short_page(&help);
+
+        HelpFixture::press(&mut help, KeyCode::Up);
+        let moved = HelpFixture::short_page(&help);
+
+        assert_eq!(moved[1], last_page[0]);
+    }
+
+    #[test]
+    fn down_at_the_end_keeps_the_last_page() {
+        let mut help = HelpFixture::scrolled_past_the_end();
+        let last_page = HelpFixture::short_page(&help);
+
+        HelpFixture::press(&mut help, KeyCode::Down);
+
+        assert_eq!(HelpFixture::short_page(&help), last_page);
+    }
+
+    #[test]
+    fn a_taller_draw_leaves_no_hidden_offset_for_up() {
+        let mut help = HelpFixture::scrolled_past_the_end();
+        HelpFixture::text(&help);
+
+        HelpFixture::press(&mut help, KeyCode::Up);
+
+        assert_eq!(HelpFixture::short_page(&help)[0].spans[0].content, "Keys");
     }
 }
