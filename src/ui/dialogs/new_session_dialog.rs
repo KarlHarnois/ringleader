@@ -275,6 +275,15 @@ mod tests {
             dialog.handle_key(&KeyEvent::new(code, KeyModifiers::NONE), service)
         }
 
+        fn control(
+            dialog: &mut NewSessionDialog,
+            service: &SessionService,
+            character: char,
+        ) -> DialogStep {
+            let key = KeyEvent::new(KeyCode::Char(character), KeyModifiers::CONTROL);
+            dialog.handle_key(&key, service)
+        }
+
         fn type_text(dialog: &mut NewSessionDialog, service: &SessionService, text: &str) {
             for character in text.chars() {
                 Self::press(dialog, service, KeyCode::Char(character));
@@ -418,6 +427,16 @@ mod tests {
                 .with_agent("claude")
                 .with_prompt("")
         );
+    }
+
+    #[test]
+    fn control_w_deletes_the_last_word_of_the_name() {
+        let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
+        DialogFixture::type_text(&mut dialog, &service, "fix the auth");
+
+        DialogFixture::control(&mut dialog, &service, 'w');
+
+        assert!(DialogFixture::text(&dialog).starts_with("Name      fix the █"));
     }
 
     #[test]

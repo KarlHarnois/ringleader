@@ -45,6 +45,10 @@ impl TextField {
                 self.value.push(character);
                 true
             }
+            KeyCode::Char('w') if key.modifiers == KeyModifiers::CONTROL => {
+                self.delete_word();
+                true
+            }
             KeyCode::Backspace => {
                 self.value.pop();
                 true
@@ -67,6 +71,14 @@ impl TextField {
         Ok(())
     }
 
+    fn delete_word(&mut self) {
+        let kept = self
+            .value
+            .trim_end()
+            .trim_end_matches(|character: char| !character.is_whitespace());
+        self.value.truncate(kept.len());
+    }
+
     fn single_line_path(text: &str) -> Result<String, String> {
         let trimmed = text.trim();
         if trimmed.contains(['\r', '\n']) {
@@ -85,6 +97,12 @@ mod tests {
     impl FieldFixture {
         fn key(code: KeyCode) -> KeyEvent {
             KeyEvent::new(code, KeyModifiers::NONE)
+        }
+
+        fn after_control_w(kind: FieldKind, text: &str) -> (bool, String) {
+            let mut field = Self::holding(kind, text);
+            let consumed = field.edit(&KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+            (consumed, field.value().to_string())
         }
 
         fn holding(kind: FieldKind, text: &str) -> TextField {
@@ -110,6 +128,42 @@ mod tests {
         field.edit(&FieldFixture::key(KeyCode::Backspace));
 
         assert_eq!(field.value(), "fix-auth");
+    }
+
+    #[test]
+    fn control_w_deletes_the_last_word_and_keeps_the_space_before_it() {
+        let (_, value) = FieldFixture::after_control_w(FieldKind::Name, "fix the tests");
+
+        assert_eq!(value, "fix the ");
+    }
+
+    #[test]
+    fn control_w_takes_trailing_spaces_with_the_word_before_them() {
+        let (_, value) = FieldFixture::after_control_w(FieldKind::Name, "fix the  ");
+
+        assert_eq!(value, "fix ");
+    }
+
+    #[test]
+    fn control_w_deletes_a_path_without_spaces_whole() {
+        let (_, value) = FieldFixture::after_control_w(FieldKind::Path, "~/code/example");
+
+        assert_eq!(value, "");
+    }
+
+    #[test]
+    fn control_w_in_a_prompt_stops_at_the_line_break() {
+        let (_, value) = FieldFixture::after_control_w(FieldKind::Prompt, "first line\nsecond");
+
+        assert_eq!(value, "first line\n");
+    }
+
+    #[test]
+    fn control_w_on_an_empty_field_is_handled_and_changes_nothing() {
+        let (consumed, value) = FieldFixture::after_control_w(FieldKind::Name, "");
+
+        assert!(consumed);
+        assert_eq!(value, "");
     }
 
     #[test]

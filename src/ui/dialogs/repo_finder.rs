@@ -330,6 +330,19 @@ mod tests {
     }
 
     #[test]
+    fn control_w_deletes_the_last_query_word_and_ranks_again() {
+        let mut finder = FinderFixture::opened(&FinderFixture::fixture().service());
+        FinderFixture::type_text(&mut finder, "ring zzz");
+
+        FinderFixture::press(&mut finder, KeyCode::Char('w'), KeyModifiers::CONTROL);
+
+        assert_eq!(
+            FinderFixture::text(&finder),
+            "Find: ring █\n1/3 repos under ~\n~/hobby/ringleader"
+        );
+    }
+
+    #[test]
     fn j_and_k_are_typed_into_the_query() {
         let mut finder = FinderFixture::opened(&FinderFixture::fixture().service());
 
