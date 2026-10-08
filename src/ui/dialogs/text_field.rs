@@ -24,13 +24,6 @@ impl TextField {
         }
     }
 
-    pub fn with_value(self, value: &str) -> Self {
-        Self {
-            value: value.to_string(),
-            ..self
-        }
-    }
-
     pub fn value(&self) -> &str {
         &self.value
     }
@@ -94,6 +87,12 @@ mod tests {
             KeyEvent::new(code, KeyModifiers::NONE)
         }
 
+        fn holding(kind: FieldKind, text: &str) -> TextField {
+            let mut field = TextField::new(kind);
+            field.paste(text).unwrap();
+            field
+        }
+
         fn pasted(kind: FieldKind, text: &str) -> Result<String, String> {
             let mut field = TextField::new(kind);
             field.paste(text)?;
@@ -141,14 +140,14 @@ mod tests {
 
     #[test]
     fn a_prompt_field_shows_line_breaks_as_a_return_mark() {
-        let field = TextField::new(FieldKind::Prompt).with_value("one\ntwo");
+        let field = FieldFixture::holding(FieldKind::Prompt, "one\ntwo");
 
         assert_eq!(field.display(), "one⏎two");
     }
 
     #[test]
     fn a_long_value_shows_its_end_with_the_cursor() {
-        let field = TextField::new(FieldKind::Name).with_value("refactor-the-reconciler");
+        let field = FieldFixture::holding(FieldKind::Name, "refactor-the-reconciler");
 
         assert_eq!(field.visible(8, Some('█')), "onciler█");
     }

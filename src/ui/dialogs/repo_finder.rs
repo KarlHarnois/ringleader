@@ -1,12 +1,13 @@
-use std::path::PathBuf;
-
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::text::Line;
 
+use super::home_path::HomePath;
 use super::repo_filter::RepoFilter;
 use super::repo_scan::RepoScan;
 use super::text_field::{FieldKind, TextField};
+use super::typed_repo_check::TypedRepoCheck;
 use crate::application::SessionService;
+use crate::domain::Repo;
 use crate::ui::text_fit::TextFit;
 use crate::ui::theme::Theme;
 
@@ -16,36 +17,48 @@ pub struct RepoFinder {
     filter: RepoFilter,
     matches: Vec<usize>,
     cursor: usize,
+    check: Option<TypedRepoCheck>,
 }
 
 impl RepoFinder {
     const LABEL: &'static str = "Find: ";
     const CURSOR: char = '█';
     const SEARCHING: &'static str = "Searching ~ for repos…";
-    const NO_MATCH: &'static str = "no repo matches, Enter adds the typed path";
+    const NO_MATCH: &'static str = "no repo matches, Enter picks the typed path";
+    const HINTS: &'static str = "Type to search · ↑ ↓ ctrl-j ctrl-k choose · Enter pick · Esc back";
 
     pub fn open(service: &SessionService) -> Self {
         Self {
             query: TextField::new(FieldKind::Path),
-            scan: RepoScan::home(service),
-            filter: RepoFilter::default(),
+            scan: RepoScan::start(service),
+            filter: RepoFilter::new(HomePath::new(service.home_directory())),
             matches: Vec::new(),
             cursor: 0,
+            check: None,
         }
     }
 
-    pub fn query(&self) -> &str {
-        self.query.value()
+    pub fn hints(&self) -> &'static str {
+        Self::HINTS
     }
 
-    pub fn poll(&mut self) {
-        if !self.scan.finish_if_done() {
-            return;
-        }
-        if let Some(found) = self.scan.found() {
-            self.filter = RepoFilter::new(found.repos(), found.scope().root());
-        }
+    pub fn begin(&mut self, first_key: &KeyEvent) {
+        self.query = TextField::new(FieldKind::Path);
+        self.query.edit(first_key);
+        self.check = None;
         self.rank();
+    }
+
+    pub fn poll(&mut self) -> Option<Repo> {
+        if self.scan.finish_if_done() {
+            self.filter.load(self.scan.repos());
+            self.rank();
+        }
+        let picked = self.check.as_mut()?.poll();
+        if picked.is_some() {
+            self.check = None;
+        }
+        picked
     }
 
     pub fn handle_key(&mut self, key: &KeyEvent) -> bool {
@@ -55,6 +68,7 @@ impl RepoFinder {
         }
         let edited = self.query.edit(key);
         if edited {
+            self.check = None;
             self.rank();
         }
         edited
@@ -62,15 +76,19 @@ impl RepoFinder {
 
     pub fn paste(&mut self, text: &str) -> Result<(), String> {
         self.query.paste(text)?;
+        self.check = None;
         self.rank();
         Ok(())
     }
 
-    pub fn choice(&self) -> FinderChoice {
-        match self.matches.get(self.cursor) {
-            Some(&index) => FinderChoice::Repo(self.scan.repos()[index].path().to_path_buf()),
-            None if self.query().trim().is_empty() => FinderChoice::Nothing,
-            None => FinderChoice::TypedPath(self.query().to_string()),
+    pub fn pick(&mut self, service: &SessionService) -> Option<Repo> {
+        match self.choice() {
+            FinderChoice::Repo(repo) => Some(repo),
+            FinderChoice::TypedPath(typed) => {
+                self.check = Some(TypedRepoCheck::start(service, &typed));
+                None
+            }
+            FinderChoice::Nothing => None,
         }
     }
 
@@ -79,11 +97,20 @@ impl RepoFinder {
         let shown_query = self.query.visible(field_room, Some(Self::CURSOR));
         let mut lines = vec![Line::from(format!("{}{shown_query}", Self::LABEL))];
         lines.extend(self.summary_lines(width, theme));
-        let footer = self.footer(theme);
+        let footer = self.footer(width, theme);
         let rows = room.saturating_sub(lines.len() + footer.len()).max(1);
         lines.extend(self.match_lines(width, rows, theme));
         lines.extend(footer);
         lines
+    }
+
+    fn choice(&self) -> FinderChoice {
+        let query = self.query.value();
+        match self.matches.get(self.cursor) {
+            Some(&index) => FinderChoice::Repo(self.scan.repos()[index].clone()),
+            None if query.trim().is_empty() => FinderChoice::Nothing,
+            None => FinderChoice::TypedPath(query.to_string()),
+        }
     }
 
     fn cursor_offset(key: &KeyEvent) -> Option<isize> {
@@ -148,7 +175,10 @@ impl RepoFinder {
             .collect()
     }
 
-    fn footer(&self, theme: &Theme) -> Vec<Line<'static>> {
+    fn footer(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
+        if let Some(check) = &self.check {
+            return check.lines(width, theme);
+        }
         let offers_typed_path = matches!(self.choice(), FinderChoice::TypedPath(_));
         if self.scan.is_scanning() || !offers_typed_path {
             return Vec::new();
@@ -157,23 +187,22 @@ impl RepoFinder {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum FinderChoice {
-    Repo(PathBuf),
+enum FinderChoice {
+    Repo(Repo),
     TypedPath(String),
     Nothing,
 }
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
     use std::thread;
     use std::time::{Duration, Instant};
 
     use super::*;
     use crate::application::ports::ScanError;
-    use crate::domain::{Repo, RepoName};
-    use crate::test_support::{FakeRepoScanner, ServiceFixture};
+    use crate::domain::RepoName;
+    use crate::test_support::{FakeHostProbe, FakeRepoScanner, FakeWorkspace, ServiceFixture};
 
     struct FinderFixture;
 
@@ -182,13 +211,22 @@ mod tests {
         const RINGLEADER: &'static str = "/home/example/hobby/ringleader";
         const GATEWAY: &'static str = "/home/example/work/api-gateway";
         const NOTES: &'static str = "/home/example/notes";
+        const TOOLS: &'static str = "/srv/tools";
+        const PLAIN: &'static str = "/srv/plain";
 
         fn fixture() -> ServiceFixture {
             let repos = [Self::RINGLEADER, Self::NOTES, Self::GATEWAY]
                 .iter()
                 .map(|path| Self::repo(path))
                 .collect();
-            ServiceFixture::new().with_scanner(FakeRepoScanner::finding(repos))
+            ServiceFixture::new()
+                .with_scanner(FakeRepoScanner::finding(repos))
+                .with_host(
+                    FakeHostProbe::default()
+                        .with_directory(Path::new(Self::TOOLS))
+                        .with_directory(Path::new(Self::PLAIN)),
+                )
+                .with_workspace(FakeWorkspace::default().with_invalid_repo(Path::new(Self::PLAIN)))
         }
 
         fn repo(path: &str) -> Repo {
@@ -197,14 +235,21 @@ mod tests {
             Repo::discovered(RepoName::from_basename(&basename).unwrap(), path)
         }
 
-        fn opened(fixture: &ServiceFixture) -> RepoFinder {
-            let mut finder = RepoFinder::open(&fixture.service());
+        fn opened(service: &SessionService) -> RepoFinder {
+            let mut finder = RepoFinder::open(service);
+            Self::settle(&mut finder, |text| !text.contains("Searching"));
+            finder
+        }
+
+        fn settle(finder: &mut RepoFinder, done: impl Fn(&str) -> bool) -> Option<Repo> {
             let deadline = Instant::now() + Self::SETTLE_LIMIT;
-            while Instant::now() < deadline && Self::text(&finder).contains("Searching") {
-                finder.poll();
+            while Instant::now() < deadline && !done(&Self::text(finder)) {
+                if let Some(repo) = finder.poll() {
+                    return Some(repo);
+                }
                 thread::sleep(Duration::from_millis(5));
             }
-            finder
+            None
         }
 
         fn type_text(finder: &mut RepoFinder, text: &str) {
@@ -217,8 +262,8 @@ mod tests {
             finder.handle_key(&KeyEvent::new(code, modifiers));
         }
 
-        fn chosen(path: &str) -> FinderChoice {
-            FinderChoice::Repo(PathBuf::from(path))
+        fn picked_path(finder: &mut RepoFinder, service: &SessionService) -> Option<PathBuf> {
+            finder.pick(service).map(|repo| repo.path().to_path_buf())
         }
 
         fn text(finder: &RepoFinder) -> String {
@@ -249,7 +294,7 @@ mod tests {
 
     #[test]
     fn the_finder_lists_every_repo_under_home_before_any_typing() {
-        let finder = FinderFixture::opened(&FinderFixture::fixture());
+        let finder = FinderFixture::opened(&FinderFixture::fixture().service());
 
         assert_eq!(
             FinderFixture::text(&finder),
@@ -259,7 +304,8 @@ mod tests {
 
     #[test]
     fn typing_filters_the_list_and_updates_the_count() {
-        let mut finder = FinderFixture::opened(&FinderFixture::fixture());
+        let service = FinderFixture::fixture().service();
+        let mut finder = FinderFixture::opened(&service);
 
         FinderFixture::type_text(&mut finder, "ring");
 
@@ -268,14 +314,24 @@ mod tests {
             "Find: ring█\n1/3 repos under ~\n~/hobby/ringleader"
         );
         assert_eq!(
-            finder.choice(),
-            FinderFixture::chosen(FinderFixture::RINGLEADER)
+            FinderFixture::picked_path(&mut finder, &service),
+            Some(PathBuf::from(FinderFixture::RINGLEADER))
         );
     }
 
     #[test]
+    fn beginning_a_search_starts_a_fresh_query_with_the_first_key() {
+        let mut finder = FinderFixture::opened(&FinderFixture::fixture().service());
+        FinderFixture::type_text(&mut finder, "old");
+
+        finder.begin(&KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE));
+
+        assert!(FinderFixture::text(&finder).starts_with("Find: r█"));
+    }
+
+    #[test]
     fn j_and_k_are_typed_into_the_query() {
-        let mut finder = FinderFixture::opened(&FinderFixture::fixture());
+        let mut finder = FinderFixture::opened(&FinderFixture::fixture().service());
 
         FinderFixture::type_text(&mut finder, "jk");
 
@@ -284,53 +340,92 @@ mod tests {
 
     #[test]
     fn down_and_control_j_move_to_the_next_match() {
-        let mut finder = FinderFixture::opened(&FinderFixture::fixture());
+        let service = FinderFixture::fixture().service();
+        let mut finder = FinderFixture::opened(&service);
 
         FinderFixture::press(&mut finder, KeyCode::Down, KeyModifiers::NONE);
         FinderFixture::press(&mut finder, KeyCode::Char('j'), KeyModifiers::CONTROL);
 
         assert_eq!(
-            finder.choice(),
-            FinderFixture::chosen(FinderFixture::GATEWAY)
+            FinderFixture::picked_path(&mut finder, &service),
+            Some(PathBuf::from(FinderFixture::GATEWAY))
         );
     }
 
     #[test]
     fn up_and_control_k_move_back_and_stop_at_the_first_match() {
-        let mut finder = FinderFixture::opened(&FinderFixture::fixture());
+        let service = FinderFixture::fixture().service();
+        let mut finder = FinderFixture::opened(&service);
         FinderFixture::press(&mut finder, KeyCode::Down, KeyModifiers::NONE);
 
         FinderFixture::press(&mut finder, KeyCode::Char('k'), KeyModifiers::CONTROL);
         FinderFixture::press(&mut finder, KeyCode::Up, KeyModifiers::NONE);
 
         assert_eq!(
-            finder.choice(),
-            FinderFixture::chosen(FinderFixture::RINGLEADER)
+            FinderFixture::picked_path(&mut finder, &service),
+            Some(PathBuf::from(FinderFixture::RINGLEADER))
         );
     }
 
     #[test]
     fn a_query_without_matches_offers_the_typed_path() {
-        let mut finder = FinderFixture::opened(&FinderFixture::fixture());
+        let mut finder = FinderFixture::opened(&FinderFixture::fixture().service());
 
-        FinderFixture::type_text(&mut finder, "/srv/tools");
+        FinderFixture::type_text(&mut finder, FinderFixture::TOOLS);
 
         assert!(
-            FinderFixture::text(&finder).contains("no repo matches, Enter adds the typed path")
+            FinderFixture::text(&finder).contains("no repo matches, Enter picks the typed path")
         );
-        assert_eq!(
-            finder.choice(),
-            FinderChoice::TypedPath("/srv/tools".to_string())
-        );
+    }
+
+    #[test]
+    fn a_typed_repo_path_is_picked_once_git_confirms_it() {
+        let service = FinderFixture::fixture().service();
+        let mut finder = FinderFixture::opened(&service);
+        FinderFixture::type_text(&mut finder, FinderFixture::TOOLS);
+
+        let at_once = finder.pick(&service);
+        let checked = FinderFixture::settle(&mut finder, |_| false);
+
+        assert_eq!(at_once, None);
+        assert_eq!(checked.unwrap().path(), Path::new(FinderFixture::TOOLS));
+    }
+
+    #[test]
+    fn a_typed_plain_directory_shows_why_it_was_refused() {
+        let service = FinderFixture::fixture().service();
+        let mut finder = FinderFixture::opened(&service);
+        FinderFixture::type_text(&mut finder, FinderFixture::PLAIN);
+
+        finder.pick(&service);
+        let checked =
+            FinderFixture::settle(&mut finder, |text| text.contains("not a git repository"));
+
+        assert_eq!(checked, None);
+        assert!(FinderFixture::text(&finder).contains("not a git repository"));
+    }
+
+    #[test]
+    fn editing_the_query_clears_a_refusal() {
+        let service = FinderFixture::fixture().service();
+        let mut finder = FinderFixture::opened(&service);
+        FinderFixture::type_text(&mut finder, FinderFixture::PLAIN);
+        finder.pick(&service);
+        FinderFixture::settle(&mut finder, |text| text.contains("not a git repository"));
+
+        FinderFixture::press(&mut finder, KeyCode::Backspace, KeyModifiers::NONE);
+
+        assert!(!FinderFixture::text(&finder).contains("not a git repository"));
     }
 
     #[test]
     fn an_empty_home_offers_nothing_until_a_path_is_typed() {
         let fixture = ServiceFixture::new().with_scanner(FakeRepoScanner::finding(Vec::new()));
-        let finder = FinderFixture::opened(&fixture);
+        let service = fixture.service();
+        let mut finder = FinderFixture::opened(&service);
 
         assert!(FinderFixture::text(&finder).contains("no repos found in /home/example"));
-        assert_eq!(finder.choice(), FinderChoice::Nothing);
+        assert_eq!(finder.pick(&service), None);
     }
 
     #[test]
@@ -342,7 +437,7 @@ mod tests {
             }),
         );
 
-        let finder = FinderFixture::opened(&fixture);
+        let finder = FinderFixture::opened(&fixture.service());
 
         assert!(
             FinderFixture::text(&finder).contains("cannot list /home/example: permission denied")
@@ -351,19 +446,20 @@ mod tests {
 
     #[test]
     fn a_pasted_query_filters_the_list() {
-        let mut finder = FinderFixture::opened(&FinderFixture::fixture());
+        let service = FinderFixture::fixture().service();
+        let mut finder = FinderFixture::opened(&service);
 
         finder.paste(" gateway\n").unwrap();
 
         assert_eq!(
-            finder.choice(),
-            FinderFixture::chosen(FinderFixture::GATEWAY)
+            FinderFixture::picked_path(&mut finder, &service),
+            Some(PathBuf::from(FinderFixture::GATEWAY))
         );
     }
 
     #[test]
     fn the_list_scrolls_to_keep_the_cursor_in_view() {
-        let mut finder = FinderFixture::opened(&FinderFixture::fixture());
+        let mut finder = FinderFixture::opened(&FinderFixture::fixture().service());
         FinderFixture::press(&mut finder, KeyCode::Down, KeyModifiers::NONE);
         FinderFixture::press(&mut finder, KeyCode::Down, KeyModifiers::NONE);
 

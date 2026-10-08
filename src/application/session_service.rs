@@ -1,3 +1,4 @@
+use std::cmp::Reverse;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -17,7 +18,7 @@ use super::service_ports::ServicePorts;
 use super::session_access::{AttachOutcome, ReturnMode, SessionAccess, ShellOutcome};
 use super::session_lifecycle::SessionLifecycle;
 use super::session_monitor::SessionMonitor;
-use crate::domain::{Config, DiffStat, Session, SessionSummary};
+use crate::domain::{Config, DiffStat, Repo, Session, SessionSummary};
 
 pub struct SessionService {
     config: LoadedConfig,
@@ -92,8 +93,26 @@ impl SessionService {
         self.catalog.discover(scope_directory, self.config())
     }
 
-    pub fn find_home_repos(&self) -> Pending<RepoDiscovery> {
-        self.catalog.find_home_repos()
+    pub fn find_repos(&self) -> Pending<RepoDiscovery> {
+        self.catalog.find_repos(self.config())
+    }
+
+    pub fn default_repo(&self) -> Pending<Option<Repo>> {
+        let mut newest_first: Vec<&Session> = self.entries.iter().collect();
+        newest_first.sort_by_key(|entry| Reverse(entry.created_at()));
+        let recently_used = newest_first
+            .iter()
+            .map(|entry| entry.repo_path().to_path_buf())
+            .collect();
+        self.catalog.default_repo(self.config(), recently_used)
+    }
+
+    pub fn repo_at(&self, input: &str) -> Pending<Repo> {
+        self.catalog.repo_at(input, self.config())
+    }
+
+    pub fn home_directory(&self) -> Option<&Path> {
+        self.catalog.home()
     }
 
     pub fn read_typed_path(&self, input: &str) -> Pending<PathBuf> {
@@ -106,10 +125,6 @@ impl SessionService {
 
     pub fn remove_repo(&self, name: &str) -> Pending<String> {
         self.catalog.remove_repo(name, self.config(), &self.entries)
-    }
-
-    pub fn validated_top_level(&self, path: &Path) -> Pending<PathBuf> {
-        self.catalog.validated_top_level(path)
     }
 
     pub fn is_inside_tmux(&self) -> bool {

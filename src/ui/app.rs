@@ -80,7 +80,7 @@ impl App {
         self.tick = self.tick.wrapping_add(1);
         let outcome = self.home.tick(now, &mut self.service);
         self.status.failure(outcome);
-        self.dialogs.poll(&mut self.service);
+        self.dialogs.poll();
     }
 
     pub fn attach(&mut self, name: &str) {
@@ -348,7 +348,9 @@ mod tests {
 
         fn settle_dialog(app: &mut App) {
             let deadline = Instant::now() + Duration::from_secs(2);
-            while Instant::now() < deadline && Self::screen(app, 100, 28).contains("Scanning") {
+            while Instant::now() < deadline
+                && Self::screen(app, 100, 28).contains("Finding the repo")
+            {
                 app.on_tick(Instant::now());
                 std::thread::sleep(Duration::from_millis(5));
             }

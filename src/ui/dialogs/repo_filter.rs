@@ -1,26 +1,31 @@
 use std::cmp::Reverse;
-use std::path::Path;
 
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
 
+use super::home_path::HomePath;
 use crate::domain::Repo;
 
 pub struct RepoFilter {
     matcher: Matcher,
+    home: HomePath,
     shown_paths: Vec<String>,
 }
 
 impl RepoFilter {
-    pub fn new(repos: &[Repo], home: &Path) -> Self {
-        let shown_paths = repos
-            .iter()
-            .map(|repo| Self::home_relative(repo.path(), home))
-            .collect();
+    pub fn new(home: HomePath) -> Self {
         Self {
             matcher: Self::path_matcher(),
-            shown_paths,
+            home,
+            shown_paths: Vec::new(),
         }
+    }
+
+    pub fn load(&mut self, repos: &[Repo]) {
+        self.shown_paths = repos
+            .iter()
+            .map(|repo| self.home.shown(repo.path()))
+            .collect();
     }
 
     pub fn shown_path(&self, index: usize) -> &str {
@@ -53,23 +58,12 @@ impl RepoFilter {
         config.set_match_paths();
         Matcher::new(config)
     }
-
-    fn home_relative(path: &Path, home: &Path) -> String {
-        match path.strip_prefix(home) {
-            Ok(rest) => format!("~/{}", rest.display()),
-            Err(_) => path.display().to_string(),
-        }
-    }
-}
-
-impl Default for RepoFilter {
-    fn default() -> Self {
-        Self::new(&[], Path::new(""))
-    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
     use crate::domain::RepoName;
 
@@ -80,7 +74,9 @@ mod tests {
 
         fn filter(paths: &[&str]) -> RepoFilter {
             let repos: Vec<Repo> = paths.iter().map(|path| Self::repo(path)).collect();
-            RepoFilter::new(&repos, Path::new(Self::HOME))
+            let mut filter = RepoFilter::new(HomePath::new(Some(Path::new(Self::HOME))));
+            filter.load(&repos);
+            filter
         }
 
         fn repo(path: &str) -> Repo {
@@ -96,15 +92,6 @@ mod tests {
                 .map(|index| filter.shown_path(index).to_string())
                 .collect()
         }
-    }
-
-    #[test]
-    fn paths_under_home_are_shown_from_the_tilde() {
-        let filter =
-            FilterFixture::filter(&["/home/example/hobby/ringleader", "/srv/shared/tools"]);
-
-        assert_eq!(filter.shown_path(0), "~/hobby/ringleader");
-        assert_eq!(filter.shown_path(1), "/srv/shared/tools");
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use super::{CliSession, CommandStop};
 use crate::application::{ServiceError, SessionService};
-use crate::domain::{Repo, RepoName};
+use crate::domain::Repo;
 
 pub struct RepoArgument<'a> {
     value: &'a str,
@@ -29,16 +29,7 @@ impl<'a> RepoArgument<'a> {
                 several => return Err(self.ambiguous(several).into()),
             }
         }
-        let typed = session.wait(&service.read_typed_path(self.value))?;
-        let top_level = session.wait(&service.validated_top_level(&typed))?;
-        let configured = discovery
-            .repos()
-            .iter()
-            .find(|repo| repo.path() == top_level);
-        match configured {
-            Some(repo) => Ok(repo.clone()),
-            None => Self::discovered(&top_level),
-        }
+        session.wait(&service.repo_at(self.value))
     }
 
     fn is_path(&self) -> bool {
@@ -55,14 +46,5 @@ impl<'a> RepoArgument<'a> {
             self.value,
             paths.join(", ")
         ))
-    }
-
-    fn discovered(top_level: &std::path::Path) -> Result<Repo, CommandStop> {
-        let basename = top_level
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let name = RepoName::from_basename(&basename).map_err(ServiceError::from)?;
-        Ok(Repo::discovered(name, top_level))
     }
 }

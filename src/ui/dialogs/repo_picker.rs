@@ -1,209 +1,278 @@
-use std::path::PathBuf;
-
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::text::Line;
 
-use super::add_repo_dialog::AddRepoDialog;
-use super::picker_row::PickerRow;
-use super::repo_scan::RepoScan;
-use super::scope_input::ScopeInput;
+use super::chosen_repo::ChosenRepo;
+use super::repo_finder::RepoFinder;
 use crate::application::SessionService;
 use crate::domain::Repo;
-use crate::ui::text_fit::TextFit;
 use crate::ui::theme::Theme;
 
 pub struct RepoPicker {
-    scan: RepoScan,
-    cursor: usize,
-    chosen: Option<usize>,
-    form: Option<PickerForm>,
-    select_after_scan: Option<PathBuf>,
+    chosen: ChosenRepo,
+    finder: RepoFinder,
+    searching: bool,
 }
 
 impl RepoPicker {
-    const NO_REPO: &'static str = "no repo selected";
-    const CHOSEN: &'static str = "> ";
-    const UNCHOSEN: &'static str = "  ";
-    const FORM_HEIGHT: usize = 3;
+    const FIELD_HINTS: &'static str =
+        "Type to find another repo · Tab next field · Enter create · Esc cancel";
 
     pub fn open(service: &SessionService) -> Self {
         Self {
-            scan: RepoScan::start(service, service.launch_directory()),
-            cursor: 0,
-            chosen: None,
-            form: None,
-            select_after_scan: None,
+            chosen: ChosenRepo::open(service),
+            finder: RepoFinder::open(service),
+            searching: false,
         }
     }
 
     pub fn has_open_form(&self) -> bool {
-        self.form.is_some()
+        self.searching
     }
 
-    pub fn hints(&self) -> Option<&'static str> {
-        match &self.form {
-            Some(PickerForm::AddRepo(dialog)) => Some(dialog.hints()),
-            _ => None,
+    pub fn hints(&self) -> &'static str {
+        if self.searching {
+            self.finder.hints()
+        } else {
+            Self::FIELD_HINTS
         }
     }
 
     pub fn selected_repo(&self) -> Option<&Repo> {
-        self.scan.repos().get(self.chosen?)
+        self.chosen.repo()
     }
 
     pub fn summary(&self) -> String {
-        match self.selected_repo() {
-            _ if self.scan.is_scanning() => self.scan.header(),
-            Some(repo) => repo.name().to_string(),
-            None => Self::NO_REPO.to_string(),
-        }
+        self.chosen.text()
     }
 
-    pub fn poll(&mut self, service: &mut SessionService) {
-        match &mut self.form {
-            Some(PickerForm::Scope(input)) => {
-                if let Some(scope) = input.checked_path() {
-                    self.form = None;
-                    self.scan = RepoScan::start(service, &scope);
-                }
-            }
-            Some(PickerForm::AddRepo(dialog)) => {
-                if let Some(repo) = dialog.poll(service) {
-                    match service.reload() {
-                        Ok(()) => self.rescan_selecting(service, &repo),
-                        Err(error) => dialog.fail(error.to_string()),
-                    }
-                }
-            }
-            None => {}
-        }
-        if self.scan.finish_if_done() {
-            self.select_scanned();
+    pub fn poll(&mut self) {
+        self.chosen.poll();
+        if let Some(repo) = self.finder.poll() {
+            self.choose(repo);
         }
     }
 
     pub fn handle_key(&mut self, key: &KeyEvent, service: &SessionService) -> bool {
-        if let Some(form) = &mut self.form {
-            if key.code == KeyCode::Esc {
-                self.form = None;
-                return true;
-            }
-            return form.handle_key(key, service);
+        if self.searching {
+            self.search_key(key, service);
+            return true;
         }
-        let rows = self.rows().len();
-        match key.code {
-            KeyCode::Up | KeyCode::Char('k') => self.move_cursor_to(self.cursor.saturating_sub(1)),
-            KeyCode::Down | KeyCode::Char('j') => {
-                self.move_cursor_to((self.cursor + 1).min(rows.saturating_sub(1)));
-            }
-            KeyCode::Enter if self.cursor + 2 == rows => {
-                self.form = Some(PickerForm::AddRepo(Box::new(AddRepoDialog::open(service))));
-            }
-            KeyCode::Enter if self.cursor + 1 == rows => {
-                self.form = Some(PickerForm::Scope(ScopeInput::default()));
-            }
-            _ => return false,
+        if !Self::starts_search(key) {
+            return false;
         }
+        self.finder.begin(key);
+        self.searching = true;
         true
     }
 
-    pub fn paste(&mut self, text: &str) {
-        if let Some(form) = &mut self.form {
-            form.paste(text);
+    pub fn paste(&mut self, text: &str) -> Result<(), String> {
+        self.finder.paste(text)
+    }
+
+    pub fn search_lines(&self, width: usize, room: usize, theme: &Theme) -> Vec<Line<'static>> {
+        self.finder.lines(width, room, theme)
+    }
+
+    fn search_key(&mut self, key: &KeyEvent, service: &SessionService) {
+        match key.code {
+            KeyCode::Esc => self.searching = false,
+            KeyCode::Enter => {
+                if let Some(repo) = self.finder.pick(service) {
+                    self.choose(repo);
+                }
+            }
+            _ => {
+                self.finder.handle_key(key);
+            }
         }
     }
 
-    pub fn lines(&self, width: usize, room: usize, theme: &Theme) -> Vec<Line<'static>> {
-        match &self.form {
-            Some(PickerForm::AddRepo(dialog)) => dialog.lines(width, room, theme),
-            _ => self.scope_lines(width, room, theme),
-        }
+    fn choose(&mut self, repo: Repo) {
+        self.chosen.set(repo);
+        self.searching = false;
     }
 
-    fn scope_lines(&self, width: usize, room: usize, theme: &Theme) -> Vec<Line<'static>> {
-        let mut lines = vec![Line::from(self.scan.header())];
-        let notices = self.scan.notices().into_iter();
-        lines.extend(
-            notices.flat_map(|notice| TextFit::new(&notice).styled_lines(width, theme.dim())),
-        );
-        if let Some(problem) = self.scan.problem() {
-            lines.extend(TextFit::new(&problem).styled_lines(width, theme.error()));
-        }
-        let rows = self.rows();
-        let room = room.saturating_sub(lines.len() + Self::FORM_HEIGHT).max(1);
-        let first = (self.cursor + 1).saturating_sub(room);
-        for (index, row) in rows.iter().enumerate().skip(first).take(room) {
-            let mark = if Some(index) == self.chosen {
-                Self::CHOSEN
-            } else {
-                Self::UNCHOSEN
-            };
-            let text = format!(
-                "{mark}{}",
-                row.text(&rows, width.saturating_sub(mark.len()))
+    fn starts_search(key: &KeyEvent) -> bool {
+        let typed_text = key.modifiers.difference(KeyModifiers::SHIFT).is_empty();
+        matches!(key.code, KeyCode::Char(character) if typed_text && !character.is_whitespace())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    use super::*;
+    use crate::domain::RepoName;
+    use crate::test_support::{FakeHostProbe, FakeRepoScanner, ServiceFixture};
+
+    struct PickerFixture;
+
+    impl PickerFixture {
+        const SETTLE_LIMIT: Duration = Duration::from_secs(2);
+        const FOUND: &'static str = "/home/example/work/api-gateway";
+        const TYPED: &'static str = "/srv/tools";
+
+        fn fixture() -> ServiceFixture {
+            let found = Repo::discovered(
+                RepoName::parse("api-gateway").unwrap(),
+                Path::new(Self::FOUND),
             );
-            let style = if index == self.cursor {
-                theme.selected()
-            } else {
-                theme.base()
-            };
-            lines.push(Line::styled(text, style));
+            ServiceFixture::new()
+                .with_scanner(
+                    FakeRepoScanner::finding(vec![found])
+                        .inside_repo(Path::new(ServiceFixture::REPO)),
+                )
+                .with_host(FakeHostProbe::default().with_directory(Path::new(Self::TYPED)))
         }
-        if let Some(PickerForm::Scope(input)) = &self.form {
-            lines.extend(input.lines(width, theme));
+
+        fn opened(service: &SessionService) -> RepoPicker {
+            let mut picker = RepoPicker::open(service);
+            Self::settle(&mut picker, |picker| {
+                !picker.summary().starts_with("Finding")
+                    && !Self::search_text(picker).contains("Searching")
+            });
+            picker
         }
-        lines
-    }
 
-    fn rows(&self) -> Vec<PickerRow<'_>> {
-        let repos = self.scan.repos().iter().map(PickerRow::Repo);
-        repos
-            .chain([PickerRow::AddRepo, PickerRow::ChangeScope])
-            .collect()
-    }
-
-    fn move_cursor_to(&mut self, row: usize) {
-        self.cursor = row;
-        if row < self.scan.repos().len() {
-            self.chosen = Some(row);
-        } else if self.scan.repos().is_empty() {
-            self.chosen = None;
+        fn settle(picker: &mut RepoPicker, done: impl Fn(&RepoPicker) -> bool) {
+            let deadline = Instant::now() + Self::SETTLE_LIMIT;
+            while Instant::now() < deadline && !done(picker) {
+                picker.poll();
+                thread::sleep(Duration::from_millis(5));
+            }
         }
-    }
 
-    fn rescan_selecting(&mut self, service: &SessionService, repo: &Repo) {
-        self.form = None;
-        self.select_after_scan = Some(repo.path().to_path_buf());
-        self.scan = self.scan.again(service);
-    }
+        fn type_text(picker: &mut RepoPicker, service: &SessionService, text: &str) {
+            for character in text.chars() {
+                Self::press(picker, service, KeyCode::Char(character));
+            }
+        }
 
-    fn select_scanned(&mut self) {
-        let wanted = self.select_after_scan.take();
-        let repos = self.scan.repos();
-        let position = repos
-            .iter()
-            .position(|repo| Some(repo.path()) == wanted.as_deref());
-        self.move_cursor_to(position.unwrap_or(0));
-    }
-}
+        fn press(picker: &mut RepoPicker, service: &SessionService, code: KeyCode) -> bool {
+            picker.handle_key(&KeyEvent::new(code, KeyModifiers::NONE), service)
+        }
 
-enum PickerForm {
-    Scope(ScopeInput),
-    AddRepo(Box<AddRepoDialog>),
-}
-
-impl PickerForm {
-    fn handle_key(&mut self, key: &KeyEvent, service: &SessionService) -> bool {
-        match self {
-            Self::Scope(input) => input.handle_key(key, service),
-            Self::AddRepo(dialog) => dialog.handle_key(key, service),
+        fn search_text(picker: &RepoPicker) -> String {
+            picker
+                .search_lines(60, 10, &Theme)
+                .iter()
+                .map(|line| {
+                    line.spans
+                        .iter()
+                        .map(|span| span.content.as_ref())
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
         }
     }
 
-    fn paste(&mut self, text: &str) {
-        match self {
-            Self::Scope(input) => input.paste(text),
-            Self::AddRepo(dialog) => dialog.paste(text),
-        }
+    #[test]
+    fn the_field_says_it_is_finding_the_default_until_it_resolves() {
+        let picker = RepoPicker::open(&PickerFixture::fixture().service());
+
+        assert_eq!(picker.summary(), "Finding the repo you started in…");
+    }
+
+    #[test]
+    fn the_field_shows_the_repo_ringleader_started_in() {
+        let picker = PickerFixture::opened(&PickerFixture::fixture().service());
+
+        assert_eq!(picker.summary(), "example-project · /repos/example-project");
+        assert_eq!(
+            picker.selected_repo().unwrap().path(),
+            Path::new(ServiceFixture::REPO)
+        );
+    }
+
+    #[test]
+    fn without_a_default_the_field_asks_for_a_search() {
+        let picker = PickerFixture::opened(&ServiceFixture::new().service());
+
+        assert_eq!(picker.summary(), "none, type to find one");
+        assert_eq!(picker.selected_repo(), None);
+    }
+
+    #[test]
+    fn typing_opens_the_search_with_that_character() {
+        let service = PickerFixture::fixture().service();
+        let mut picker = PickerFixture::opened(&service);
+
+        let consumed = PickerFixture::press(&mut picker, &service, KeyCode::Char('r'));
+
+        assert!(consumed);
+        assert!(picker.has_open_form());
+        assert!(PickerFixture::search_text(&picker).starts_with("Find: r█"));
+    }
+
+    #[test]
+    fn keys_that_type_nothing_leave_the_search_closed() {
+        let service = PickerFixture::fixture().service();
+        let mut picker = PickerFixture::opened(&service);
+
+        let consumed = [KeyCode::Tab, KeyCode::Enter, KeyCode::Char(' ')]
+            .map(|code| PickerFixture::press(&mut picker, &service, code));
+
+        assert_eq!(consumed, [false, false, false]);
+        assert!(!picker.has_open_form());
+    }
+
+    #[test]
+    fn enter_on_a_match_picks_it_without_writing_the_config() {
+        let fixture = PickerFixture::fixture();
+        let service = fixture.service();
+        let mut picker = PickerFixture::opened(&service);
+
+        PickerFixture::type_text(&mut picker, &service, "gate");
+        PickerFixture::press(&mut picker, &service, KeyCode::Enter);
+
+        assert!(!picker.has_open_form());
+        assert_eq!(picker.summary(), "api-gateway · ~/work/api-gateway");
+        assert_eq!(fixture.config_source().write_count(), 0);
+    }
+
+    #[test]
+    fn esc_closes_the_search_and_keeps_the_previous_repo() {
+        let service = PickerFixture::fixture().service();
+        let mut picker = PickerFixture::opened(&service);
+        PickerFixture::type_text(&mut picker, &service, "gate");
+
+        PickerFixture::press(&mut picker, &service, KeyCode::Esc);
+
+        assert!(!picker.has_open_form());
+        assert_eq!(
+            picker.selected_repo().unwrap().path(),
+            Path::new(ServiceFixture::REPO)
+        );
+    }
+
+    #[test]
+    fn a_typed_repo_path_is_picked_after_the_check() {
+        let service = PickerFixture::fixture().service();
+        let mut picker = PickerFixture::opened(&service);
+        PickerFixture::type_text(&mut picker, &service, PickerFixture::TYPED);
+
+        PickerFixture::press(&mut picker, &service, KeyCode::Enter);
+        PickerFixture::settle(&mut picker, |picker| !picker.has_open_form());
+
+        assert_eq!(
+            picker.selected_repo().unwrap().path(),
+            Path::new(PickerFixture::TYPED)
+        );
+    }
+
+    #[test]
+    fn the_hints_follow_the_search() {
+        let service = PickerFixture::fixture().service();
+        let mut picker = PickerFixture::opened(&service);
+        let on_the_field = picker.hints();
+
+        PickerFixture::press(&mut picker, &service, KeyCode::Char('a'));
+
+        assert!(on_the_field.starts_with("Type to find another repo"));
+        assert!(picker.hints().ends_with("Enter pick · Esc back"));
     }
 }

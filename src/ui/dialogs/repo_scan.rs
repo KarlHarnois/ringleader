@@ -1,33 +1,14 @@
-use std::fmt;
-use std::path::{Path, PathBuf};
-
 use crate::application::{Pending, RepoDiscovery, SessionService};
 use crate::domain::Repo;
 
 pub struct RepoScan {
-    origin: ScanOrigin,
     state: ScanState,
 }
 
 impl RepoScan {
-    pub fn start(service: &SessionService, scope: &Path) -> Self {
+    pub fn start(service: &SessionService) -> Self {
         Self {
-            origin: ScanOrigin::Scope(scope.to_path_buf()),
-            state: ScanState::Scanning(service.discover_repos(scope)),
-        }
-    }
-
-    pub fn home(service: &SessionService) -> Self {
-        Self {
-            origin: ScanOrigin::Home,
-            state: ScanState::Scanning(service.find_home_repos()),
-        }
-    }
-
-    pub fn again(&self, service: &SessionService) -> Self {
-        match &self.origin {
-            ScanOrigin::Scope(scope) => Self::start(service, scope),
-            ScanOrigin::Home => Self::home(service),
+            state: ScanState::Scanning(service.find_repos()),
         }
     }
 
@@ -49,22 +30,10 @@ impl RepoScan {
         matches!(self.state, ScanState::Scanning(_))
     }
 
-    pub fn found(&self) -> Option<&RepoDiscovery> {
-        match &self.state {
-            ScanState::Found(found) => Some(found),
-            _ => None,
-        }
-    }
-
     pub fn repos(&self) -> &[Repo] {
-        self.found().map_or(&[], RepoDiscovery::repos)
-    }
-
-    pub fn header(&self) -> String {
         match &self.state {
-            ScanState::Scanning(_) => format!("Scanning {}", self.origin),
-            ScanState::Found(found) => format!("Scope: {}", found.scope().root().display()),
-            ScanState::Failed(_) => format!("Scope: {}", self.origin),
+            ScanState::Found(found) => found.repos(),
+            _ => &[],
         }
     }
 
@@ -83,20 +52,6 @@ impl RepoScan {
             )),
             ScanState::Failed(error) => Some(error.clone()),
             _ => None,
-        }
-    }
-}
-
-enum ScanOrigin {
-    Scope(PathBuf),
-    Home,
-}
-
-impl fmt::Display for ScanOrigin {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Scope(scope) => write!(formatter, "{}", scope.display()),
-            Self::Home => formatter.write_str("~"),
         }
     }
 }

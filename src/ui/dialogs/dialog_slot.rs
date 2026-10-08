@@ -23,9 +23,9 @@ impl DialogSlot {
         self.dialog = None;
     }
 
-    pub fn poll(&mut self, service: &mut SessionService) {
+    pub fn poll(&mut self) {
         if let Some(dialog) = &mut self.dialog {
-            dialog.poll(service);
+            dialog.poll();
         }
     }
 

@@ -1,23 +1,26 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use super::default_repo::DefaultRepo;
 use super::home_repo_search::HomeRepoSearch;
 use super::pending::Pending;
-use super::ports::{HostProbe, RepoScanner, Workspace};
+use super::ports::{HostProbe, RepoScanner};
+use super::repo_merge::RepoMerge;
 use super::repo_overrides::AddRepoRequest;
 use super::repo_overrides::{RepoAddition, RepoOverrides};
 use super::service_context::ServiceContext;
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
-use crate::domain::{Config, Repo, RepoName, RepoScope, Session};
+use super::typed_paths::TypedPaths;
+use crate::domain::{Config, Repo, RepoScope, Session};
 
 pub struct RepoCatalog {
     overrides: RepoOverrides,
     home_search: HomeRepoSearch,
+    default_repo: DefaultRepo,
+    typed_paths: TypedPaths,
     scanner: Arc<dyn RepoScanner>,
-    workspace: Arc<dyn Workspace>,
     host: Arc<dyn HostProbe>,
-    home: Option<PathBuf>,
     launch_directory: PathBuf,
 }
 
@@ -25,17 +28,29 @@ impl RepoCatalog {
     pub fn new(ports: &ServicePorts, context: &ServiceContext) -> Self {
         Self {
             overrides: RepoOverrides::new(ports),
-            home_search: HomeRepoSearch::new(ports.repos().scanner(), context.home()),
+            home_search: HomeRepoSearch::new(
+                ports.repos().scanner(),
+                ports.repos().host(),
+                context.home(),
+            ),
+            default_repo: DefaultRepo::new(
+                ports.repos().scanner(),
+                ports.repos().host(),
+                context.launch_directory(),
+            ),
+            typed_paths: TypedPaths::new(ports, context),
             scanner: ports.repos().scanner(),
-            workspace: ports.repos().workspace(),
             host: ports.repos().host(),
-            home: context.home().map(Path::to_path_buf),
             launch_directory: context.launch_directory().to_path_buf(),
         }
     }
 
     pub fn launch_directory(&self) -> &Path {
         &self.launch_directory
+    }
+
+    pub fn home(&self) -> Option<&Path> {
+        self.typed_paths.home()
     }
 
     pub fn discover(&self, scope_directory: &Path, config: &Config) -> Pending<RepoDiscovery> {
@@ -56,8 +71,17 @@ impl RepoCatalog {
         })
     }
 
-    pub fn find_home_repos(&self) -> Pending<RepoDiscovery> {
-        self.home_search.find()
+    pub fn find_repos(&self, config: &Config) -> Pending<RepoDiscovery> {
+        self.home_search.find(config.repos().to_vec())
+    }
+
+    pub fn default_repo(
+        &self,
+        config: &Config,
+        recently_used: Vec<PathBuf>,
+    ) -> Pending<Option<Repo>> {
+        self.default_repo
+            .find(config.repos().to_vec(), recently_used)
     }
 
     pub fn add_repo(&self, request: AddRepoRequest, config: &Config) -> Pending<RepoAddition> {
@@ -68,30 +92,12 @@ impl RepoCatalog {
         self.overrides.remove(name, config, entries)
     }
 
-    pub fn validated_top_level(&self, path: &Path) -> Pending<PathBuf> {
-        let workspace = Arc::clone(&self.workspace);
-        let path = path.to_path_buf();
-        Pending::start(move || Ok(workspace.validate_repo(&path)?))
+    pub fn read_typed_path(&self, input: &str) -> Pending<PathBuf> {
+        self.typed_paths.read(input)
     }
 
-    pub fn read_typed_path(&self, input: &str) -> Pending<PathBuf> {
-        let host = Arc::clone(&self.host);
-        let path = TypedPath::new(input, self.home.as_deref(), &self.launch_directory).expanded();
-        Pending::start(move || {
-            if !host.path_exists(&path) {
-                return Err(ServiceError::Invalid(format!(
-                    "no such directory: {}",
-                    path.display()
-                )));
-            }
-            if host.is_file(&path) {
-                return Err(ServiceError::Invalid(format!(
-                    "not a directory: {}",
-                    path.display()
-                )));
-            }
-            Ok(path)
-        })
+    pub fn repo_at(&self, input: &str, config: &Config) -> Pending<Repo> {
+        self.typed_paths.repo_at(input, config.repos().to_vec())
     }
 }
 
@@ -136,74 +142,6 @@ impl RepoDiscovery {
         notices
     }
 }
-
-struct RepoMerge<'a> {
-    host: &'a dyn HostProbe,
-}
-
-impl<'a> RepoMerge<'a> {
-    fn new(host: &'a dyn HostProbe) -> Self {
-        Self { host }
-    }
-
-    fn merge(&self, scope: &RepoScope, scanned: &[Repo], explicit: &[Repo]) -> Vec<Repo> {
-        let mut merged: Vec<Repo> = explicit.iter().map(|repo| self.canonical(repo)).collect();
-        let enclosing = scope.enclosing_repo().and_then(Self::discovered);
-        for repo in enclosing.iter().chain(scanned) {
-            if merged.iter().all(|kept| kept.path() != repo.path()) {
-                merged.push(repo.clone());
-            }
-        }
-        merged.sort_by(|first, second| {
-            (first.name(), first.path()).cmp(&(second.name(), second.path()))
-        });
-        merged
-    }
-
-    fn canonical(&self, repo: &Repo) -> Repo {
-        let canonical = self
-            .host
-            .canonicalize_lenient(repo.path())
-            .unwrap_or_else(|_| repo.path().to_path_buf());
-        repo.at_path(&canonical)
-    }
-
-    fn discovered(top_level: &Path) -> Option<Repo> {
-        let basename = top_level.file_name()?.to_string_lossy().into_owned();
-        Some(Repo::discovered(
-            RepoName::from_basename(&basename).ok()?,
-            top_level,
-        ))
-    }
-}
-
-struct TypedPath<'a> {
-    input: &'a str,
-    home: Option<&'a Path>,
-    launch_directory: &'a Path,
-}
-
-impl<'a> TypedPath<'a> {
-    fn new(input: &'a str, home: Option<&'a Path>, launch_directory: &'a Path) -> Self {
-        Self {
-            input,
-            home,
-            launch_directory,
-        }
-    }
-
-    fn expanded(&self) -> PathBuf {
-        let home_relative = match self.input {
-            "~" => Some(""),
-            input => input.strip_prefix("~/"),
-        };
-        match (home_relative, self.home) {
-            (Some(rest), Some(home)) => home.join(rest),
-            _ => self.launch_directory.join(self.input),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::time::{Duration, Instant};
@@ -211,7 +149,7 @@ mod tests {
     use super::*;
     use crate::application::pending::Pending;
     use crate::application::ports::ScanError;
-    use crate::domain::BaseBranch;
+    use crate::domain::{BaseBranch, RepoName};
     use crate::test_support::{FakeMultiplexer, FakeRepoScanner, ServiceFixture};
 
     struct CatalogFixture;
@@ -249,10 +187,6 @@ mod tests {
                 .iter()
                 .map(|repo| repo.path().to_path_buf())
                 .collect()
-        }
-
-        fn typed(fixture: &ServiceFixture, input: &str) -> Result<PathBuf, ServiceError> {
-            Self::settle(&fixture.service().read_typed_path(input))
         }
     }
 
@@ -404,75 +338,5 @@ mod tests {
         let rows = service.observe(false).unwrap();
 
         assert_eq!(rows.len(), 1);
-    }
-
-    #[test]
-    fn a_tilde_expands_to_the_home_directory() {
-        let fixture = ServiceFixture::new().with_host(
-            ServiceFixture::host_for(&[]).with_directory(Path::new("/home/example/projects")),
-        );
-
-        assert_eq!(
-            CatalogFixture::typed(&fixture, "~").unwrap(),
-            Path::new("/home/example")
-        );
-        assert_eq!(
-            CatalogFixture::typed(&fixture, "~/projects").unwrap(),
-            Path::new("/home/example/projects")
-        );
-    }
-
-    #[test]
-    fn another_users_tilde_and_a_variable_stay_literal() {
-        let fixture = ServiceFixture::new();
-
-        let other_user = CatalogFixture::typed(&fixture, "~other/projects").unwrap_err();
-        let variable = CatalogFixture::typed(&fixture, "$HOME/projects").unwrap_err();
-
-        assert!(
-            other_user
-                .to_string()
-                .contains("/repos/example-project/~other/projects")
-        );
-        assert!(
-            variable
-                .to_string()
-                .contains("/repos/example-project/$HOME/projects")
-        );
-    }
-
-    #[test]
-    fn a_relative_path_joins_the_launch_directory() {
-        let fixture = ServiceFixture::new().with_host(
-            ServiceFixture::host_for(&[]).with_directory(Path::new("/repos/example-project/src")),
-        );
-
-        assert_eq!(
-            CatalogFixture::typed(&fixture, "src").unwrap(),
-            Path::new("/repos/example-project/src")
-        );
-    }
-
-    #[test]
-    fn a_file_is_refused_as_not_a_directory() {
-        let fixture = ServiceFixture::new().with_host(
-            ServiceFixture::host_for(&[]).with_file(Path::new("/repos/example-project/README.md")),
-        );
-
-        let error = CatalogFixture::typed(&fixture, "README.md").unwrap_err();
-
-        assert_eq!(
-            error.to_string(),
-            "not a directory: /repos/example-project/README.md"
-        );
-    }
-
-    #[test]
-    fn a_missing_directory_is_refused() {
-        let fixture = ServiceFixture::new();
-
-        let error = CatalogFixture::typed(&fixture, "/nowhere").unwrap_err();
-
-        assert_eq!(error.to_string(), "no such directory: /nowhere");
     }
 }

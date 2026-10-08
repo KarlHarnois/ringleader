@@ -62,9 +62,9 @@ impl Dialog {
         )))
     }
 
-    pub fn poll(&mut self, service: &mut SessionService) {
+    pub fn poll(&mut self) {
         if let Self::NewSession(dialog) = self {
-            dialog.poll(service);
+            dialog.poll();
         }
     }
 

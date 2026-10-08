@@ -199,15 +199,19 @@ impl ServiceFixture {
     }
 
     pub fn session(name: &str) -> Session {
+        Self::session_at(name, Self::REPO, Self::CREATED_AT)
+    }
+
+    pub fn session_at(name: &str, repo_path: &str, created_at: u64) -> Session {
         let name = SessionName::new(name).unwrap();
         let naming = Self::naming();
+        let repo_path = Path::new(repo_path);
+        let basename = repo_path.file_name().unwrap().to_string_lossy();
+        let repo_name = RepoName::from_basename(&basename).unwrap();
         let metadata = SessionMetadata::new(
-            SessionRepo::new(
-                RepoName::parse("example-project").unwrap(),
-                Path::new(Self::REPO),
-            ),
+            SessionRepo::new(repo_name.clone(), repo_path),
             SessionWorktree::new(
-                &naming.worktree_path(&RepoName::parse("example-project").unwrap(), &name),
+                &naming.worktree_path(&repo_name, &name),
                 &naming.branch_name(&name),
                 FakeWorkspace::DEFAULT_START,
             ),
@@ -217,11 +221,7 @@ impl ServiceFixture {
             &naming.tmux_session_name(&name),
             Path::new(FakeMultiplexer::SOCKET),
         );
-        Session::new(
-            name,
-            metadata,
-            Registration::new(tmux, naming, Self::CREATED_AT),
-        )
+        Session::new(name, metadata, Registration::new(tmux, naming, created_at))
     }
 
     pub fn waiting(session: &Session) -> SessionObservation {

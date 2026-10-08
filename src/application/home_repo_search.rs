@@ -2,13 +2,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::pending::Pending;
-use super::ports::RepoScanner;
+use super::ports::{HostProbe, RepoScanner};
 use super::repo_catalog::RepoDiscovery;
+use super::repo_merge::RepoMerge;
 use super::service_error::ServiceError;
-use crate::domain::RepoScope;
+use crate::domain::{Repo, RepoScope};
 
 pub struct HomeRepoSearch {
     scanner: Arc<dyn RepoScanner>,
+    host: Arc<dyn HostProbe>,
     home: Option<PathBuf>,
 }
 
@@ -16,15 +18,21 @@ impl HomeRepoSearch {
     pub const DEPTH: usize = 5;
     const NO_HOME: &'static str = "there is no home directory to search, type a path instead";
 
-    pub fn new(scanner: Arc<dyn RepoScanner>, home: Option<&Path>) -> Self {
+    pub fn new(
+        scanner: Arc<dyn RepoScanner>,
+        host: Arc<dyn HostProbe>,
+        home: Option<&Path>,
+    ) -> Self {
         Self {
             scanner,
+            host,
             home: home.map(Path::to_path_buf),
         }
     }
 
-    pub fn find(&self) -> Pending<RepoDiscovery> {
+    pub fn find(&self, explicit: Vec<Repo>) -> Pending<RepoDiscovery> {
         let scanner = Arc::clone(&self.scanner);
+        let host = Arc::clone(&self.host);
         let home = self.home.clone();
         Pending::start(move || {
             let home = home.ok_or_else(|| ServiceError::Invalid(Self::NO_HOME.to_string()))?;
@@ -32,7 +40,7 @@ impl HomeRepoSearch {
             let outcome = scanner
                 .scan(&scope, Self::DEPTH)
                 .map_err(|error| ServiceError::Invalid(error.to_string()))?;
-            let mut repos = outcome.repos().to_vec();
+            let mut repos = RepoMerge::new(host.as_ref()).merge(&scope, outcome.repos(), &explicit);
             repos.sort_by(|first, second| first.path().cmp(second.path()));
             Ok(RepoDiscovery::new(scope, repos, outcome.cut_short()))
         })
@@ -44,7 +52,7 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use super::*;
-    use crate::domain::{Repo, RepoName};
+    use crate::domain::{Config, RepoName};
     use crate::test_support::{FakeRepoScanner, ServiceFixture};
 
     struct SearchFixture;
@@ -57,7 +65,7 @@ mod tests {
         }
 
         fn found(fixture: &ServiceFixture) -> Result<RepoDiscovery, ServiceError> {
-            let pending = fixture.service().find_home_repos();
+            let pending = fixture.service().find_repos();
             let started = Instant::now();
             pending
                 .wait_unless(|| started.elapsed() > Self::WAIT_LIMIT)
@@ -99,6 +107,32 @@ mod tests {
                 Path::new("/home/example/zeta"),
             ]
         );
+    }
+
+    #[test]
+    fn a_configured_entry_replaces_the_scanned_repo_at_its_path() {
+        let entry = Repo::explicit(
+            RepoName::parse("custom-name").unwrap(),
+            Path::new("/home/example/beta"),
+            None,
+        );
+        let config: Config = ServiceFixture::config().with_repos(vec![entry]);
+        let fixture =
+            ServiceFixture::new()
+                .with_config(config)
+                .with_scanner(FakeRepoScanner::finding(vec![
+                    SearchFixture::repo("beta", "/home/example/beta"),
+                    SearchFixture::repo("alpha", "/home/example/alpha"),
+                ]));
+
+        let found = SearchFixture::found(&fixture).unwrap();
+
+        let names: Vec<&str> = found
+            .repos()
+            .iter()
+            .map(|repo| repo.name().as_str())
+            .collect();
+        assert_eq!(names, ["alpha", "custom-name"]);
     }
 
     #[test]
