@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Condvar, Mutex};
 
 use crate::application::ports::{RepoScanner, ScanError, ScanOutcome};
@@ -6,10 +6,11 @@ use crate::domain::{Repo, RepoScope};
 
 pub struct FakeRepoScanner {
     repos: Vec<Repo>,
-    enclosing_repo: Option<std::path::PathBuf>,
+    enclosing_repo: Option<PathBuf>,
     scan_error: Option<ScanError>,
     cut_short: bool,
     gate: Gate,
+    scans: Mutex<Vec<(PathBuf, usize)>>,
 }
 
 impl FakeRepoScanner {
@@ -20,6 +21,7 @@ impl FakeRepoScanner {
             scan_error: None,
             cut_short: false,
             gate: Gate::open(),
+            scans: Mutex::new(Vec::new()),
         }
     }
 
@@ -54,6 +56,10 @@ impl FakeRepoScanner {
     pub fn release(&self) {
         self.gate.open_now();
     }
+
+    pub fn scans(&self) -> Vec<(PathBuf, usize)> {
+        self.scans.lock().unwrap().clone()
+    }
 }
 
 impl RepoScanner for FakeRepoScanner {
@@ -65,7 +71,9 @@ impl RepoScanner for FakeRepoScanner {
         })
     }
 
-    fn scan(&self, _scope: &RepoScope, _depth: usize) -> Result<ScanOutcome, ScanError> {
+    fn scan(&self, scope: &RepoScope, depth: usize) -> Result<ScanOutcome, ScanError> {
+        let scan = (scope.root().to_path_buf(), depth);
+        self.scans.lock().unwrap().push(scan);
         self.gate.wait();
         match &self.scan_error {
             Some(error) => Err(error.clone()),

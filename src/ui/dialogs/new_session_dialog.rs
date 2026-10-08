@@ -96,7 +96,8 @@ impl NewSessionDialog {
         lines.push(Line::from(""));
         let error = self.error.as_deref().unwrap_or_default();
         lines.extend(TextFit::new(error).styled_lines(width, theme.error()));
-        lines.push(Line::styled(Self::HINTS, theme.dim()));
+        let hints = self.repos.hints().unwrap_or(Self::HINTS);
+        lines.push(Line::styled(hints, theme.dim()));
         lines
     }
 
@@ -426,7 +427,7 @@ mod tests {
     }
 
     #[test]
-    fn adding_a_repo_reloads_the_picker_and_selects_the_new_repo() {
+    fn adding_a_typed_path_reloads_the_picker_and_selects_the_new_repo() {
         let fixture = ServiceFixture::new()
             .with_host(FakeHostProbe::default().with_directory(Path::new("/work/new-project")));
         let (mut dialog, mut service) = DialogFixture::opened(&fixture);
@@ -448,6 +449,47 @@ mod tests {
             Path::new("/work/new-project")
         );
         assert_eq!(service.config().repos().len(), 1);
+    }
+
+    #[test]
+    fn picking_a_found_repo_reloads_the_picker_and_selects_it() {
+        let found = DialogFixture::repo("ringleader", "/home/example/hobby/ringleader");
+        let fixture = DialogFixture::with_repos(vec![found]);
+        let (mut dialog, mut service) = DialogFixture::opened(&fixture);
+        DialogFixture::type_text(&mut dialog, &service, "fix-auth");
+        for code in [KeyCode::Tab, KeyCode::Down, KeyCode::Enter] {
+            DialogFixture::press(&mut dialog, &service, code);
+        }
+        DialogFixture::settle(&mut dialog, &mut service, |text| {
+            text.contains("1/1 repos under ~")
+        });
+
+        DialogFixture::type_text(&mut dialog, &service, "ring");
+        DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
+        DialogFixture::settle(&mut dialog, &mut service, |text| {
+            text.contains("> ringleader · config")
+        });
+        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
+        let step = DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
+
+        assert_eq!(
+            DialogFixture::submitted(step).repo().path(),
+            Path::new("/home/example/hobby/ringleader")
+        );
+        assert_eq!(service.config().repos().len(), 1);
+    }
+
+    #[test]
+    fn the_finder_replaces_the_dialog_hints_while_it_is_open() {
+        let fixture = ServiceFixture::new();
+        let (mut dialog, service) = DialogFixture::opened(&fixture);
+        for code in [KeyCode::Tab, KeyCode::Down, KeyCode::Enter] {
+            DialogFixture::press(&mut dialog, &service, code);
+        }
+
+        let text = DialogFixture::text(&dialog);
+
+        assert!(text.ends_with("Type to search · ↑ ↓ ctrl-j ctrl-k choose · Enter add · Esc back"));
     }
 
     #[test]

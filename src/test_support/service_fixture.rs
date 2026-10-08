@@ -27,6 +27,7 @@ pub struct ServiceFixture {
     config_error: Option<ConfigError>,
     inside_tmux: bool,
     shell: String,
+    home: Option<PathBuf>,
 }
 
 impl ServiceFixture {
@@ -53,6 +54,7 @@ impl ServiceFixture {
             config_error: None,
             inside_tmux: false,
             shell: Self::SHELL.to_string(),
+            home: Some(PathBuf::from(Self::HOME)),
         }
     }
 
@@ -118,6 +120,10 @@ impl ServiceFixture {
             host: Arc::new(host),
             ..self
         }
+    }
+
+    pub fn without_home(self) -> Self {
+        Self { home: None, ..self }
     }
 
     pub fn inside_tmux(self) -> Self {
@@ -296,7 +302,7 @@ impl ServiceFixture {
         };
         ServiceContext::new(loaded, Path::new(Self::REPO))
             .with_inside_tmux(self.inside_tmux)
-            .with_home(Some(Path::new(Self::HOME)))
+            .with_home(self.home.as_deref())
             .with_shell(&self.shell)
     }
 }

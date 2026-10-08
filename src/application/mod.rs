@@ -5,6 +5,7 @@ pub mod deletion_guards;
 pub mod diagnostic_paths;
 pub mod doctor;
 pub mod doctor_report;
+pub mod home_repo_search;
 pub mod pending;
 pub mod ports;
 pub mod reconciliation;

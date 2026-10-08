@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::text::Line;
 
+use super::repo_finder::{FinderChoice, RepoFinder};
 use super::text_field::{FieldKind, TextField};
 use crate::application::{AddRepoRequest, Pending, RepoAddition, SessionService};
 use crate::domain::{Repo, RepoName};
@@ -10,9 +11,9 @@ use crate::ui::text_fit::TextFit;
 use crate::ui::theme::Theme;
 
 pub struct AddRepoDialog {
-    path: TextField,
+    finder: RepoFinder,
     name: Option<TextField>,
-    typed_path: Option<PathBuf>,
+    chosen_path: Option<PathBuf>,
     work: Option<AddWork>,
     error: Option<String>,
 }
@@ -21,14 +22,25 @@ impl AddRepoDialog {
     const CURSOR: char = '█';
     const PATH_LABEL: &'static str = "Repo path: ";
     const NAME_LABEL: &'static str = "Name: ";
+    const NOTHING_CHOSEN: &'static str = "pick a repo or type its path";
+    const FINDER_HINTS: &'static str =
+        "Type to search · ↑ ↓ ctrl-j ctrl-k choose · Enter add · Esc back";
+    const NAMING_HINTS: &'static str = "Enter add · Esc back";
 
-    pub fn open() -> Self {
+    pub fn open(service: &SessionService) -> Self {
         Self {
-            path: TextField::new(FieldKind::Path),
+            finder: RepoFinder::open(service),
             name: None,
-            typed_path: None,
+            chosen_path: None,
             work: None,
             error: None,
+        }
+    }
+
+    pub fn hints(&self) -> &'static str {
+        match self.name {
+            Some(_) => Self::NAMING_HINTS,
+            None => Self::FINDER_HINTS,
         }
     }
 
@@ -44,20 +56,28 @@ impl AddRepoDialog {
             self.start(service);
             return true;
         }
-        self.active_field().edit(key)
+        match &mut self.name {
+            Some(name) => name.edit(key),
+            None => self.finder.handle_key(key),
+        }
     }
 
     pub fn paste(&mut self, text: &str) {
-        self.error = self.active_field().paste(text).err();
+        let pasted = match &mut self.name {
+            Some(name) => name.paste(text),
+            None => self.finder.paste(text),
+        };
+        self.error = pasted.err();
     }
 
     pub fn poll(&mut self, service: &SessionService) -> Option<Repo> {
+        self.finder.poll();
         match self.work.as_ref()?.poll()? {
             Finished::Read(Ok(path)) => {
                 self.work = Some(AddWork::Adding(
                     service.add_repo(AddRepoRequest::new(&path)),
                 ));
-                self.typed_path = Some(path);
+                self.chosen_path = Some(path);
                 None
             }
             Finished::Added(Ok(
@@ -79,29 +99,22 @@ impl AddRepoDialog {
         }
     }
 
-    pub fn lines(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
-        let naming = self.name.is_some();
-        let path_cursor = (!naming && self.work.is_none()).then_some(Self::CURSOR);
-        let room = width.saturating_sub(Self::PATH_LABEL.len());
-        let mut lines = vec![Line::from(format!(
-            "{}{}",
-            Self::PATH_LABEL,
-            self.path.visible(room, path_cursor)
-        ))];
-        if let Some(name) = &self.name {
-            let room = width.saturating_sub(Self::NAME_LABEL.len());
-            let cursor = self.work.is_none().then_some(Self::CURSOR);
-            lines.push(Line::from(format!(
-                "{}{}",
-                Self::NAME_LABEL,
-                name.visible(room, cursor)
-            )));
-        }
+    pub fn lines(&self, width: usize, room: usize, theme: &Theme) -> Vec<Line<'static>> {
+        let status = self.status_lines(width, theme);
+        let mut lines = match &self.name {
+            Some(name) => self.naming_lines(name, width),
+            None => self
+                .finder
+                .lines(width, room.saturating_sub(status.len()), theme),
+        };
+        lines.extend(status);
+        lines
+    }
+
+    fn status_lines(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
+        let mut lines = Vec::new();
         if let Some(work) = &self.work {
-            lines.push(Line::styled(
-                work.busy_message(self.path.value()),
-                theme.dim(),
-            ));
+            lines.push(Line::styled(work.busy_message(&self.target()), theme.dim()));
         }
         if let Some(error) = &self.error {
             lines.extend(TextFit::new(error).styled_lines(width, theme.error()));
@@ -109,17 +122,60 @@ impl AddRepoDialog {
         lines
     }
 
+    fn naming_lines(&self, name: &TextField, width: usize) -> Vec<Line<'static>> {
+        let path_room = width.saturating_sub(Self::PATH_LABEL.len());
+        let name_room = width.saturating_sub(Self::NAME_LABEL.len());
+        let cursor = self.work.is_none().then_some(Self::CURSOR);
+        let path = TextFit::new(&self.target()).left_truncated(path_room);
+        vec![
+            Line::from(format!("{}{path}", Self::PATH_LABEL)),
+            Line::from(format!(
+                "{}{}",
+                Self::NAME_LABEL,
+                name.visible(name_room, cursor)
+            )),
+        ]
+    }
+
+    fn target(&self) -> String {
+        match &self.chosen_path {
+            Some(path) => path.display().to_string(),
+            None => self.finder.query().to_string(),
+        }
+    }
+
     fn start(&mut self, service: &SessionService) {
         self.error = None;
-        let work = match (&self.name, &self.typed_path) {
+        self.work = match (&self.name, &self.chosen_path) {
             (Some(name), Some(path)) => {
-                let slug = RepoName::from_basename(name.value())
-                    .map_or_else(|_| name.value().to_string(), |slug| slug.to_string());
-                AddWork::Adding(service.add_repo(AddRepoRequest::new(path).named(&slug)))
+                let request = AddRepoRequest::new(path).named(&Self::slug(name));
+                Some(AddWork::Adding(service.add_repo(request)))
             }
-            _ => AddWork::Reading(service.read_typed_path(self.path.value())),
+            _ => self.work_for(self.finder.choice(), service),
         };
-        self.work = Some(work);
+    }
+
+    fn work_for(&mut self, choice: FinderChoice, service: &SessionService) -> Option<AddWork> {
+        match choice {
+            FinderChoice::Repo(path) => {
+                let adding = service.add_repo(AddRepoRequest::new(&path));
+                self.chosen_path = Some(path);
+                Some(AddWork::Adding(adding))
+            }
+            FinderChoice::TypedPath(typed) => {
+                self.chosen_path = None;
+                Some(AddWork::Reading(service.read_typed_path(&typed)))
+            }
+            FinderChoice::Nothing => {
+                self.error = Some(Self::NOTHING_CHOSEN.to_string());
+                None
+            }
+        }
+    }
+
+    fn slug(name: &TextField) -> String {
+        RepoName::from_basename(name.value())
+            .map_or_else(|_| name.value().to_string(), |slug| slug.to_string())
     }
 
     fn ask_for_name(&mut self, name: &str, taken_by: &Repo) {
@@ -129,13 +185,6 @@ impl AddRepoDialog {
         ));
         if self.name.is_none() {
             self.name = Some(TextField::new(FieldKind::Name).with_value(name));
-        }
-    }
-
-    fn active_field(&mut self) -> &mut TextField {
-        match &mut self.name {
-            Some(name) => name,
-            None => &mut self.path,
         }
     }
 }
@@ -154,10 +203,10 @@ impl AddWork {
         }
     }
 
-    fn busy_message(&self, typed: &str) -> String {
+    fn busy_message(&self, target: &str) -> String {
         match self {
-            Self::Reading(_) => format!("Checking {typed}…"),
-            Self::Adding(_) => format!("Checking {typed} with git and adding it…"),
+            Self::Reading(_) => format!("Checking {target}…"),
+            Self::Adding(_) => format!("Checking {target} with git and adding it…"),
         }
     }
 }
@@ -177,26 +226,43 @@ mod tests {
 
     use super::*;
     use crate::domain::{Config, RepoName};
-    use crate::test_support::{FakeHostProbe, FakeWorkspace, ServiceFixture};
+    use crate::test_support::{FakeHostProbe, FakeRepoScanner, FakeWorkspace, ServiceFixture};
 
     struct AddFixture;
 
     impl AddFixture {
         const NEW_PROJECT: &'static str = "/work/new-project";
+        const FOUND: &'static str = "/home/example/hobby/ringleader";
         const SETTLE_LIMIT: Duration = Duration::from_secs(2);
 
         fn fixture() -> ServiceFixture {
-            ServiceFixture::new().with_host(
-                FakeHostProbe::default()
-                    .with_directory(Path::new(Self::NEW_PROJECT))
-                    .with_directory(Path::new("/work/plain")),
-            )
+            let found = Repo::discovered(
+                RepoName::parse("ringleader").unwrap(),
+                Path::new(Self::FOUND),
+            );
+            ServiceFixture::new()
+                .with_host(
+                    FakeHostProbe::default()
+                        .with_directory(Path::new(Self::NEW_PROJECT))
+                        .with_directory(Path::new("/work/plain")),
+                )
+                .with_scanner(FakeRepoScanner::finding(vec![found]))
         }
 
         fn with_explicit(name: &str, path: &str) -> ServiceFixture {
             let repo = Repo::explicit(RepoName::parse(name).unwrap(), Path::new(path), None);
             let config: Config = ServiceFixture::config().with_repos(vec![repo]);
             Self::fixture().with_config(config)
+        }
+
+        fn opened(service: &SessionService) -> AddRepoDialog {
+            let mut dialog = AddRepoDialog::open(service);
+            let deadline = Instant::now() + Self::SETTLE_LIMIT;
+            while Instant::now() < deadline && Self::text(&dialog).contains("Searching") {
+                dialog.poll(service);
+                thread::sleep(Duration::from_millis(5));
+            }
+            dialog
         }
 
         fn submit(dialog: &mut AddRepoDialog, service: &SessionService, text: &str) {
@@ -223,7 +289,7 @@ mod tests {
 
         fn text(dialog: &AddRepoDialog) -> String {
             dialog
-                .lines(70, &crate::ui::theme::Theme)
+                .lines(70, 12, &crate::ui::theme::Theme)
                 .iter()
                 .map(|line| {
                     line.spans
@@ -237,10 +303,48 @@ mod tests {
     }
 
     #[test]
-    fn a_typed_repo_is_added_as_an_explicit_entry() {
+    fn a_found_repo_picked_from_the_finder_is_added_as_an_explicit_entry() {
         let fixture = AddFixture::fixture();
         let service = fixture.service();
-        let mut dialog = AddRepoDialog::open();
+        let mut dialog = AddFixture::opened(&service);
+
+        AddFixture::submit(&mut dialog, &service, "ring");
+        let added = AddFixture::settle(&mut dialog, &service).unwrap();
+
+        assert_eq!(added.path(), Path::new(AddFixture::FOUND));
+        assert_eq!(fixture.config_source().config().repos(), [added]);
+    }
+
+    #[test]
+    fn enter_with_no_repo_and_no_path_asks_for_one() {
+        let fixture = AddFixture::fixture().with_scanner(FakeRepoScanner::finding(Vec::new()));
+        let service = fixture.service();
+        let mut dialog = AddFixture::opened(&service);
+
+        AddFixture::press(&mut dialog, &service, KeyCode::Enter);
+
+        assert!(AddFixture::text(&dialog).contains("pick a repo or type its path"));
+    }
+
+    #[test]
+    fn the_hints_switch_to_the_name_prompt_when_a_name_is_taken() {
+        let fixture = AddFixture::with_explicit("new-project", "/elsewhere/new-project");
+        let service = fixture.service();
+        let mut dialog = AddFixture::opened(&service);
+        let while_finding = dialog.hints();
+
+        AddFixture::submit(&mut dialog, &service, AddFixture::NEW_PROJECT);
+        AddFixture::settle(&mut dialog, &service);
+
+        assert!(while_finding.starts_with("Type to search"));
+        assert_eq!(dialog.hints(), "Enter add · Esc back");
+    }
+
+    #[test]
+    fn a_typed_path_that_matches_no_found_repo_is_added() {
+        let fixture = AddFixture::fixture();
+        let service = fixture.service();
+        let mut dialog = AddFixture::opened(&service);
 
         AddFixture::submit(&mut dialog, &service, AddFixture::NEW_PROJECT);
         let added = AddFixture::settle(&mut dialog, &service).unwrap();
@@ -253,7 +357,7 @@ mod tests {
     fn the_dialog_shows_a_busy_message_while_it_checks() {
         let fixture = AddFixture::fixture();
         let service = fixture.service();
-        let mut dialog = AddRepoDialog::open();
+        let mut dialog = AddFixture::opened(&service);
 
         AddFixture::submit(&mut dialog, &service, AddFixture::NEW_PROJECT);
 
@@ -264,7 +368,7 @@ mod tests {
     fn an_already_configured_repo_returns_its_entry_without_a_write() {
         let fixture = AddFixture::with_explicit("custom-name", AddFixture::NEW_PROJECT);
         let service = fixture.service();
-        let mut dialog = AddRepoDialog::open();
+        let mut dialog = AddFixture::opened(&service);
 
         AddFixture::submit(&mut dialog, &service, AddFixture::NEW_PROJECT);
         let entry = AddFixture::settle(&mut dialog, &service).unwrap();
@@ -277,7 +381,7 @@ mod tests {
     fn a_taken_name_asks_for_another_prefilled_with_it() {
         let fixture = AddFixture::with_explicit("new-project", "/elsewhere/new-project");
         let service = fixture.service();
-        let mut dialog = AddRepoDialog::open();
+        let mut dialog = AddFixture::opened(&service);
 
         AddFixture::submit(&mut dialog, &service, AddFixture::NEW_PROJECT);
         let first = AddFixture::settle(&mut dialog, &service);
@@ -296,7 +400,7 @@ mod tests {
     fn only_a_free_name_is_saved() {
         let fixture = AddFixture::with_explicit("new-project", "/elsewhere/new-project");
         let service = fixture.service();
-        let mut dialog = AddRepoDialog::open();
+        let mut dialog = AddFixture::opened(&service);
         AddFixture::submit(&mut dialog, &service, AddFixture::NEW_PROJECT);
         AddFixture::settle(&mut dialog, &service);
 
@@ -314,7 +418,7 @@ mod tests {
     fn a_pasted_name_becomes_a_slug() {
         let fixture = AddFixture::with_explicit("new-project", "/elsewhere/new-project");
         let service = fixture.service();
-        let mut dialog = AddRepoDialog::open();
+        let mut dialog = AddFixture::opened(&service);
         AddFixture::submit(&mut dialog, &service, AddFixture::NEW_PROJECT);
         AddFixture::settle(&mut dialog, &service);
         for _ in "new-project".chars() {
@@ -332,7 +436,7 @@ mod tests {
     fn a_pasted_path_is_trimmed() {
         let fixture = AddFixture::fixture();
         let service = fixture.service();
-        let mut dialog = AddRepoDialog::open();
+        let mut dialog = AddFixture::opened(&service);
 
         dialog.paste("  /work/new-project\n");
         AddFixture::press(&mut dialog, &service, KeyCode::Enter);
@@ -345,7 +449,7 @@ mod tests {
         let fixture = AddFixture::fixture()
             .with_workspace(FakeWorkspace::default().with_invalid_repo(Path::new("/work/plain")));
         let service = fixture.service();
-        let mut dialog = AddRepoDialog::open();
+        let mut dialog = AddFixture::opened(&service);
 
         AddFixture::submit(&mut dialog, &service, "/work/plain");
 
@@ -357,7 +461,7 @@ mod tests {
     fn a_missing_path_is_refused() {
         let fixture = AddFixture::fixture();
         let service = fixture.service();
-        let mut dialog = AddRepoDialog::open();
+        let mut dialog = AddFixture::opened(&service);
 
         AddFixture::submit(&mut dialog, &service, "/nowhere");
 

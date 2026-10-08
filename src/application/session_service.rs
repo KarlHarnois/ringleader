@@ -92,6 +92,10 @@ impl SessionService {
         self.catalog.discover(scope_directory, self.config())
     }
 
+    pub fn find_home_repos(&self) -> Pending<RepoDiscovery> {
+        self.catalog.find_home_repos()
+    }
+
     pub fn read_typed_path(&self, input: &str) -> Pending<PathBuf> {
         self.catalog.read_typed_path(input)
     }

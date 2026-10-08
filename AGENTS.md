@@ -111,6 +111,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── reconciliation.rs     # Reconciliation, the reconciled entries and rows
     │   ├── session_access.rs     # SessionAccess: attach, open_shell, return binding
     │   ├── repo_catalog.rs       # RepoCatalog: discover, add, and remove repos, read typed paths
+    │   ├── home_repo_search.rs   # HomeRepoSearch, the scan of the home directory behind the repo finder
     │   ├── repo_overrides.rs     # RepoOverrides: the add_repo and remove_repo workers
     │   ├── pending.rs            # Pending, a worker result the TUI polls and the CLI waits on
     │   ├── doctor.rs             # Doctor
@@ -204,12 +205,14 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │       ├── new_session_dialog.rs    # NewSessionDialog
     │       ├── repo_picker.rs           # RepoPicker, the n dialog's repo list and its actions
     │       ├── picker_row.rs            # PickerRow, the text of one repo picker row
-    │       ├── repo_scan.rs             # RepoScan, one discover_repos run and its result
+    │       ├── repo_scan.rs             # RepoScan, one scope or home scan and its result
+    │       ├── repo_finder.rs           # RepoFinder, the fuzzy search over the repos under home
+    │       ├── repo_filter.rs           # RepoFilter, ranks repo paths against a fuzzy query
     │       ├── scope_input.rs           # ScopeInput, the typed path that changes the scope
     │       ├── agent_picker.rs          # AgentPicker, the n dialog's agent list
     │       ├── delete_session_dialog.rs # DeleteSessionDialog
     │       ├── rename_session_dialog.rs # RenameSessionDialog
-    │       └── add_repo_dialog.rs       # AddRepoDialog
+    │       └── add_repo_dialog.rs       # AddRepoDialog, the finder plus the name prompt for a taken name
     └── test_support/               # #[cfg(test)] doubles and fixtures shared by unit tests
         ├── mod.rs
         ├── tmux_test_server.rs      # TmuxTestServer: private socket, control-mode clients, kill-server on drop

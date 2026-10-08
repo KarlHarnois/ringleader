@@ -40,6 +40,13 @@ impl RepoPicker {
         self.form.is_some()
     }
 
+    pub fn hints(&self) -> Option<&'static str> {
+        match &self.form {
+            Some(PickerForm::AddRepo(dialog)) => Some(dialog.hints()),
+            _ => None,
+        }
+    }
+
     pub fn selected_repo(&self) -> Option<&Repo> {
         self.scan.repos().get(self.chosen?)
     }
@@ -90,7 +97,7 @@ impl RepoPicker {
                 self.move_cursor_to((self.cursor + 1).min(rows.saturating_sub(1)));
             }
             KeyCode::Enter if self.cursor + 2 == rows => {
-                self.form = Some(PickerForm::AddRepo(AddRepoDialog::open()));
+                self.form = Some(PickerForm::AddRepo(Box::new(AddRepoDialog::open(service))));
             }
             KeyCode::Enter if self.cursor + 1 == rows => {
                 self.form = Some(PickerForm::Scope(ScopeInput::default()));
@@ -107,6 +114,13 @@ impl RepoPicker {
     }
 
     pub fn lines(&self, width: usize, room: usize, theme: &Theme) -> Vec<Line<'static>> {
+        match &self.form {
+            Some(PickerForm::AddRepo(dialog)) => dialog.lines(width, room, theme),
+            _ => self.scope_lines(width, room, theme),
+        }
+    }
+
+    fn scope_lines(&self, width: usize, room: usize, theme: &Theme) -> Vec<Line<'static>> {
         let mut lines = vec![Line::from(self.scan.header())];
         let notices = self.scan.notices().into_iter();
         lines.extend(
@@ -135,8 +149,8 @@ impl RepoPicker {
             };
             lines.push(Line::styled(text, style));
         }
-        if let Some(form) = &self.form {
-            lines.extend(form.lines(width, theme));
+        if let Some(PickerForm::Scope(input)) = &self.form {
+            lines.extend(input.lines(width, theme));
         }
         lines
     }
@@ -175,7 +189,7 @@ impl RepoPicker {
 
 enum PickerForm {
     Scope(ScopeInput),
-    AddRepo(AddRepoDialog),
+    AddRepo(Box<AddRepoDialog>),
 }
 
 impl PickerForm {
@@ -190,13 +204,6 @@ impl PickerForm {
         match self {
             Self::Scope(input) => input.paste(text),
             Self::AddRepo(dialog) => dialog.paste(text),
-        }
-    }
-
-    fn lines(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
-        match self {
-            Self::Scope(input) => input.lines(width, theme),
-            Self::AddRepo(dialog) => dialog.lines(width, theme),
         }
     }
 }

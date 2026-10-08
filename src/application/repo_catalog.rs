@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use super::home_repo_search::HomeRepoSearch;
 use super::pending::Pending;
 use super::ports::{HostProbe, RepoScanner, Workspace};
 use super::repo_overrides::AddRepoRequest;
@@ -12,6 +13,7 @@ use crate::domain::{Config, Repo, RepoName, RepoScope, Session};
 
 pub struct RepoCatalog {
     overrides: RepoOverrides,
+    home_search: HomeRepoSearch,
     scanner: Arc<dyn RepoScanner>,
     workspace: Arc<dyn Workspace>,
     host: Arc<dyn HostProbe>,
@@ -23,6 +25,7 @@ impl RepoCatalog {
     pub fn new(ports: &ServicePorts, context: &ServiceContext) -> Self {
         Self {
             overrides: RepoOverrides::new(ports),
+            home_search: HomeRepoSearch::new(ports.repos().scanner(), context.home()),
             scanner: ports.repos().scanner(),
             workspace: ports.repos().workspace(),
             host: ports.repos().host(),
@@ -49,12 +52,12 @@ impl RepoCatalog {
                 .scan(&scope, depth)
                 .map_err(|error| ServiceError::Invalid(error.to_string()))?;
             let merged = RepoMerge::new(host.as_ref()).merge(&scope, outcome.repos(), &explicit);
-            Ok(RepoDiscovery {
-                scope,
-                repos: merged,
-                cut_short: outcome.cut_short(),
-            })
+            Ok(RepoDiscovery::new(scope, merged, outcome.cut_short()))
         })
+    }
+
+    pub fn find_home_repos(&self) -> Pending<RepoDiscovery> {
+        self.home_search.find()
     }
 
     pub fn add_repo(&self, request: AddRepoRequest, config: &Config) -> Pending<RepoAddition> {
@@ -100,6 +103,14 @@ pub struct RepoDiscovery {
 }
 
 impl RepoDiscovery {
+    pub(super) fn new(scope: RepoScope, repos: Vec<Repo>, cut_short: bool) -> Self {
+        Self {
+            scope,
+            repos,
+            cut_short,
+        }
+    }
+
     pub fn scope(&self) -> &RepoScope {
         &self.scope
     }

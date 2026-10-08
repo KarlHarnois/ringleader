@@ -1,23 +1,34 @@
+use std::fmt;
 use std::path::{Path, PathBuf};
 
 use crate::application::{Pending, RepoDiscovery, SessionService};
 use crate::domain::Repo;
 
 pub struct RepoScan {
-    requested_scope: PathBuf,
+    origin: ScanOrigin,
     state: ScanState,
 }
 
 impl RepoScan {
     pub fn start(service: &SessionService, scope: &Path) -> Self {
         Self {
-            requested_scope: scope.to_path_buf(),
+            origin: ScanOrigin::Scope(scope.to_path_buf()),
             state: ScanState::Scanning(service.discover_repos(scope)),
         }
     }
 
+    pub fn home(service: &SessionService) -> Self {
+        Self {
+            origin: ScanOrigin::Home,
+            state: ScanState::Scanning(service.find_home_repos()),
+        }
+    }
+
     pub fn again(&self, service: &SessionService) -> Self {
-        Self::start(service, &self.requested_scope)
+        match &self.origin {
+            ScanOrigin::Scope(scope) => Self::start(service, scope),
+            ScanOrigin::Home => Self::home(service),
+        }
     }
 
     pub fn finish_if_done(&mut self) -> bool {
@@ -38,18 +49,22 @@ impl RepoScan {
         matches!(self.state, ScanState::Scanning(_))
     }
 
-    pub fn repos(&self) -> &[Repo] {
+    pub fn found(&self) -> Option<&RepoDiscovery> {
         match &self.state {
-            ScanState::Found(found) => found.repos(),
-            _ => &[],
+            ScanState::Found(found) => Some(found),
+            _ => None,
         }
+    }
+
+    pub fn repos(&self) -> &[Repo] {
+        self.found().map_or(&[], RepoDiscovery::repos)
     }
 
     pub fn header(&self) -> String {
         match &self.state {
-            ScanState::Scanning(_) => format!("Scanning {}", self.requested_scope.display()),
+            ScanState::Scanning(_) => format!("Scanning {}", self.origin),
             ScanState::Found(found) => format!("Scope: {}", found.scope().root().display()),
-            ScanState::Failed(_) => format!("Scope: {}", self.requested_scope.display()),
+            ScanState::Failed(_) => format!("Scope: {}", self.origin),
         }
     }
 
@@ -68,6 +83,20 @@ impl RepoScan {
             )),
             ScanState::Failed(error) => Some(error.clone()),
             _ => None,
+        }
+    }
+}
+
+enum ScanOrigin {
+    Scope(PathBuf),
+    Home,
+}
+
+impl fmt::Display for ScanOrigin {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Scope(scope) => write!(formatter, "{}", scope.display()),
+            Self::Home => formatter.write_str("~"),
         }
     }
 }
