@@ -181,7 +181,7 @@ mod tests {
     fn the_field_shows_the_repo_ringleader_started_in() {
         let picker = PickerFixture::opened(&PickerFixture::fixture().service());
 
-        assert_eq!(picker.summary(), "example-project · /repos/example-project");
+        assert_eq!(picker.summary(), "example-project");
         assert_eq!(
             picker.selected_repo().unwrap().path(),
             Path::new(ServiceFixture::REPO)
@@ -230,7 +230,7 @@ mod tests {
         PickerFixture::press(&mut picker, &service, KeyCode::Enter);
 
         assert!(!picker.has_open_form());
-        assert_eq!(picker.summary(), "api-gateway · ~/work/api-gateway");
+        assert_eq!(picker.summary(), "api-gateway");
         assert_eq!(fixture.config_source().write_count(), 0);
     }
 

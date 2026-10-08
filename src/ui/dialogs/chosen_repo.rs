@@ -1,10 +1,8 @@
-use super::home_path::HomePath;
 use crate::application::{Pending, SessionService};
 use crate::domain::Repo;
 
 pub struct ChosenRepo {
     state: ChoiceState,
-    home: HomePath,
 }
 
 impl ChosenRepo {
@@ -14,7 +12,6 @@ impl ChosenRepo {
     pub fn open(service: &SessionService) -> Self {
         Self {
             state: ChoiceState::Finding(service.default_repo()),
-            home: HomePath::new(service.home_directory()),
         }
     }
 
@@ -40,9 +37,7 @@ impl ChosenRepo {
     pub fn text(&self) -> String {
         match &self.state {
             ChoiceState::Finding(_) => Self::FINDING.to_string(),
-            ChoiceState::Ready(Some(repo)) => {
-                format!("{} · {}", repo.name(), self.home.shown(repo.path()))
-            }
+            ChoiceState::Ready(Some(repo)) => repo.name().to_string(),
             ChoiceState::Ready(None) => Self::NONE.to_string(),
         }
     }

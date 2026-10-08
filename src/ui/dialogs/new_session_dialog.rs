@@ -300,10 +300,7 @@ mod tests {
     fn the_repo_field_shows_the_repo_ringleader_started_in() {
         let (dialog, _service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
 
-        assert!(
-            DialogFixture::text(&dialog)
-                .contains("Repo      example-project · /repos/example-project")
-        );
+        assert!(DialogFixture::text(&dialog).contains("Repo      example-project\n"));
     }
 
     #[test]
@@ -330,7 +327,7 @@ mod tests {
         let shown = DialogFixture::text(&dialog);
         let step = DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
 
-        assert!(shown.contains("Repo      api-gateway · ~/work/api-gateway"));
+        assert!(shown.contains("Repo      api-gateway\n"));
         assert_eq!(
             DialogFixture::submitted(step).repo().path(),
             Path::new(DialogFixture::FOUND)
