@@ -640,7 +640,7 @@ mod tests {
     }
 
     #[test]
-    fn n_then_enter_creates_the_session_selects_it_and_closes_the_dialog() {
+    fn n_then_ctrl_s_creates_the_session_selects_it_and_closes_the_dialog() {
         let fixture = AppFixture::two_waiting_sessions();
         let mut app = AppFixture::started(&fixture, 100, 28);
         AppFixture::press(&mut app, 'n');
@@ -649,7 +649,7 @@ mod tests {
             AppFixture::press(&mut app, character);
         }
 
-        let request = app.handle_event(&UiHarness::key(KeyCode::Enter));
+        let request = app.handle_event(&UiHarness::control('s'));
         let busy = AppFixture::status_line(&app, 100);
         let AppRequest::Block(operation) = request else {
             panic!("expected a blocking create, got {request:?}");
@@ -675,7 +675,7 @@ mod tests {
             AppFixture::press(&mut app, character);
         }
 
-        let AppRequest::Block(operation) = app.handle_event(&UiHarness::key(KeyCode::Enter)) else {
+        let AppRequest::Block(operation) = app.handle_event(&UiHarness::control('s')) else {
             panic!("expected a blocking create");
         };
         app.perform(operation);

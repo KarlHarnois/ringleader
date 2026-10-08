@@ -82,6 +82,13 @@ impl UiHarness {
     pub fn character(character: char) -> Event {
         Self::key(KeyCode::Char(character))
     }
+
+    pub fn control(character: char) -> Event {
+        Event::Key(KeyEvent::new(
+            KeyCode::Char(character),
+            KeyModifiers::CONTROL,
+        ))
+    }
 }
 
 #[derive(Clone, Default)]

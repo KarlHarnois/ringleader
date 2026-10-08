@@ -15,7 +15,7 @@ pub struct RepoPicker {
 
 impl RepoPicker {
     const FIELD_HINTS: &'static str =
-        "Type to find another repo · Tab next field · Enter create · Esc cancel";
+        "Type to find a repo · Enter next field · Ctrl-S create · Esc cancel";
 
     pub fn open(service: &SessionService) -> Self {
         Self {
@@ -45,24 +45,24 @@ impl RepoPicker {
         self.chosen.text()
     }
 
-    pub fn poll(&mut self) {
+    pub fn poll(&mut self) -> PickerStep {
         self.chosen.poll();
-        if let Some(repo) = self.finder.poll() {
-            self.choose(repo);
+        match self.finder.poll() {
+            Some(repo) => self.choose(repo),
+            None => PickerStep::Ignored,
         }
     }
 
-    pub fn handle_key(&mut self, key: &KeyEvent, service: &SessionService) -> bool {
+    pub fn handle_key(&mut self, key: &KeyEvent, service: &SessionService) -> PickerStep {
         if self.searching {
-            self.search_key(key, service);
-            return true;
+            return self.search_key(key, service);
         }
         if !Self::starts_search(key) {
-            return false;
+            return PickerStep::Ignored;
         }
         self.finder.begin(key);
         self.searching = true;
-        true
+        PickerStep::Handled
     }
 
     pub fn paste(&mut self, text: &str) -> Result<(), String> {
@@ -73,29 +73,38 @@ impl RepoPicker {
         self.finder.lines(width, room, theme)
     }
 
-    fn search_key(&mut self, key: &KeyEvent, service: &SessionService) {
+    fn search_key(&mut self, key: &KeyEvent, service: &SessionService) -> PickerStep {
         match key.code {
             KeyCode::Esc => self.searching = false,
             KeyCode::Enter => {
                 if let Some(repo) = self.finder.pick(service) {
-                    self.choose(repo);
+                    return self.choose(repo);
                 }
             }
             _ => {
                 self.finder.handle_key(key);
             }
         }
+        PickerStep::Handled
     }
 
-    fn choose(&mut self, repo: Repo) {
+    fn choose(&mut self, repo: Repo) -> PickerStep {
         self.chosen.set(repo);
         self.searching = false;
+        PickerStep::Picked
     }
 
     fn starts_search(key: &KeyEvent) -> bool {
         let typed_text = key.modifiers.difference(KeyModifiers::SHIFT).is_empty();
         matches!(key.code, KeyCode::Char(character) if typed_text && !character.is_whitespace())
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PickerStep {
+    Ignored,
+    Handled,
+    Picked,
 }
 
 #[cfg(test)]
@@ -145,13 +154,23 @@ mod tests {
             }
         }
 
+        fn poll_until_picked(picker: &mut RepoPicker) -> PickerStep {
+            let deadline = Instant::now() + Self::SETTLE_LIMIT;
+            let mut step = picker.poll();
+            while Instant::now() < deadline && step != PickerStep::Picked {
+                thread::sleep(Duration::from_millis(5));
+                step = picker.poll();
+            }
+            step
+        }
+
         fn type_text(picker: &mut RepoPicker, service: &SessionService, text: &str) {
             for character in text.chars() {
                 Self::press(picker, service, KeyCode::Char(character));
             }
         }
 
-        fn press(picker: &mut RepoPicker, service: &SessionService, code: KeyCode) -> bool {
+        fn press(picker: &mut RepoPicker, service: &SessionService, code: KeyCode) -> PickerStep {
             picker.handle_key(&KeyEvent::new(code, KeyModifiers::NONE), service)
         }
 
@@ -201,9 +220,9 @@ mod tests {
         let service = PickerFixture::fixture().service();
         let mut picker = PickerFixture::opened(&service);
 
-        let consumed = PickerFixture::press(&mut picker, &service, KeyCode::Char('r'));
+        let step = PickerFixture::press(&mut picker, &service, KeyCode::Char('r'));
 
-        assert!(consumed);
+        assert_eq!(step, PickerStep::Handled);
         assert!(picker.has_open_form());
         assert!(PickerFixture::search_text(&picker).starts_with("Find: r█"));
     }
@@ -213,10 +232,10 @@ mod tests {
         let service = PickerFixture::fixture().service();
         let mut picker = PickerFixture::opened(&service);
 
-        let consumed = [KeyCode::Tab, KeyCode::Enter, KeyCode::Char(' ')]
+        let steps = [KeyCode::Tab, KeyCode::Enter, KeyCode::Char(' ')]
             .map(|code| PickerFixture::press(&mut picker, &service, code));
 
-        assert_eq!(consumed, [false, false, false]);
+        assert_eq!(steps, [PickerStep::Ignored; 3]);
         assert!(!picker.has_open_form());
     }
 
@@ -227,8 +246,9 @@ mod tests {
         let mut picker = PickerFixture::opened(&service);
 
         PickerFixture::type_text(&mut picker, &service, "gate");
-        PickerFixture::press(&mut picker, &service, KeyCode::Enter);
+        let step = PickerFixture::press(&mut picker, &service, KeyCode::Enter);
 
+        assert_eq!(step, PickerStep::Picked);
         assert!(!picker.has_open_form());
         assert_eq!(picker.summary(), "api-gateway");
         assert_eq!(fixture.config_source().write_count(), 0);
@@ -255,9 +275,11 @@ mod tests {
         let mut picker = PickerFixture::opened(&service);
         PickerFixture::type_text(&mut picker, &service, PickerFixture::TYPED);
 
-        PickerFixture::press(&mut picker, &service, KeyCode::Enter);
-        PickerFixture::settle(&mut picker, |picker| !picker.has_open_form());
+        let at_once = PickerFixture::press(&mut picker, &service, KeyCode::Enter);
+        let checked = PickerFixture::poll_until_picked(&mut picker);
 
+        assert_eq!(at_once, PickerStep::Handled);
+        assert_eq!(checked, PickerStep::Picked);
         assert_eq!(
             picker.selected_repo().unwrap().path(),
             Path::new(PickerFixture::TYPED)
@@ -272,7 +294,7 @@ mod tests {
 
         PickerFixture::press(&mut picker, &service, KeyCode::Char('a'));
 
-        assert!(on_the_field.starts_with("Type to find another repo"));
+        assert!(on_the_field.starts_with("Type to find a repo · Enter next field"));
         assert!(picker.hints().ends_with("Enter pick · Esc back"));
     }
 }
