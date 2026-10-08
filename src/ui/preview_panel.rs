@@ -1,10 +1,10 @@
-use ansi_to_tui::IntoText;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Padding, Paragraph};
 
 use super::home_view::CenteredText;
+use super::preview_text::PreviewText;
 use super::text_fit::TextFit;
 use super::theme::Theme;
 use crate::domain::SessionSummary;
@@ -98,80 +98,6 @@ impl<'a> PreviewPanel<'a> {
 pub enum PreviewCapture {
     Text(String),
     Unavailable(String),
-}
-
-pub struct PreviewText<'a> {
-    raw: &'a str,
-}
-
-impl<'a> PreviewText<'a> {
-    const ESCAPE: char = '\u{1b}';
-    const BELL: char = '\u{7}';
-    const CONTROL_SEQUENCE: char = '[';
-    const OPERATING_SYSTEM_COMMAND: char = ']';
-    const STRING_TERMINATOR: char = '\\';
-
-    pub fn new(raw: &'a str) -> Self {
-        Self { raw }
-    }
-
-    pub fn plain(&self) -> String {
-        let mut plain = String::with_capacity(self.raw.len());
-        let mut characters = self.raw.chars();
-        while let Some(character) = characters.next() {
-            if character != Self::ESCAPE {
-                plain.push(character);
-                continue;
-            }
-            match characters.next() {
-                Some(Self::CONTROL_SEQUENCE) => {
-                    Self::skip_through(&mut characters, |next| ('@'..='~').contains(&next))
-                }
-                Some(Self::OPERATING_SYSTEM_COMMAND) => {
-                    Self::skip_through(&mut characters, |next| {
-                        next == Self::BELL || next == Self::STRING_TERMINATOR
-                    })
-                }
-                _ => {}
-            }
-        }
-        plain
-    }
-
-    pub fn bottom_lines(&self, room: usize) -> Vec<Line<'static>> {
-        let mut lines = self.styled_lines().unwrap_or_else(|| self.plain_lines());
-        while lines.last().is_some_and(Self::is_blank) {
-            lines.pop();
-        }
-        let shown = lines.split_off(lines.len().saturating_sub(room));
-        let padding = room.saturating_sub(shown.len());
-        std::iter::repeat_n(Line::default(), padding)
-            .chain(shown)
-            .collect()
-    }
-
-    fn styled_lines(&self) -> Option<Vec<Line<'static>>> {
-        self.raw.as_bytes().into_text().ok().map(|text| text.lines)
-    }
-
-    fn plain_lines(&self) -> Vec<Line<'static>> {
-        self.plain()
-            .lines()
-            .map(|row| Line::from(row.to_string()))
-            .collect()
-    }
-
-    fn is_blank(line: &Line) -> bool {
-        line.spans.iter().all(|span| span.content.trim().is_empty())
-    }
-
-    fn skip_through(characters: &mut impl Iterator<Item = char>, ends: impl Fn(char) -> bool) {
-        for next in characters.by_ref() {
-            if ends(next) {
-                return;
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -285,14 +211,6 @@ mod tests {
             (cell.symbol(), cell.fg),
             ("r", ratatui::style::Color::Green)
         );
-    }
-
-    #[test]
-    fn the_plain_text_fallback_drops_every_escape_sequence() {
-        let raw =
-            "\u{1b}[1;32mready\u{1b}[0m \u{1b}]8;;https://example.com\u{7}link\u{1b}]8;;\u{1b}\\";
-
-        assert_eq!(PreviewText::new(raw).plain(), "ready link");
     }
 
     #[test]

@@ -191,6 +191,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── session_table.rs        # SessionTable, the home screen's session list
     │   ├── table_columns.rs        # TableColumns, column widths and dropping
     │   ├── preview_panel.rs        # PreviewPanel, the Full tier's preview
+    │   ├── preview_text.rs         # PreviewText, the captured rows that fit the preview
     │   ├── help_view.rs            # HelpView
     │   ├── status_bar.rs           # StatusBar
     │   ├── theme.rs                # Theme
