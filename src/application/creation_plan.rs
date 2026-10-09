@@ -73,6 +73,7 @@ pub struct CreationPlan {
     agent: String,
     argv: Vec<String>,
     env_names: Vec<String>,
+    env_assignments: Vec<(String, String)>,
     removed_env_names: Vec<String>,
     size: SessionSize,
 }
@@ -94,6 +95,7 @@ impl CreationPlan {
             agent: agent.name().to_string(),
             argv: agent.launch_argv(&request.prompt),
             env_names: agent.env_names().to_vec(),
+            env_assignments: agent.env_assignments().to_vec(),
             removed_env_names: config.agent_env_union(),
             size: config.session_size(),
         })
@@ -133,7 +135,8 @@ impl CreationPlan {
     }
 
     pub fn spec(&self, start: &StartPoint) -> SessionSpec {
-        let launch = AgentLaunch::new(self.argv.clone(), &self.env_names, &self.worktree());
+        let launch = AgentLaunch::new(self.argv.clone(), &self.env_names, &self.worktree())
+            .with_env_assignments(&self.env_assignments);
         SessionSpec::new(&self.tmux_name(), self.metadata(start), launch)
             .sized(self.size)
             .removing_env_names(&self.removed_env_names)

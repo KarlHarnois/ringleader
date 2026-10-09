@@ -58,6 +58,7 @@ impl SessionRestart {
             agent.env_names(),
             session.worktree_path(),
         )
+        .with_env_assignments(agent.env_assignments())
     }
 
     fn check_worktree(&self, session: &Session) -> Result<(), ServiceError> {
@@ -164,6 +165,22 @@ mod tests {
 
         let launch = fixture.multiplexer().launches().pop().unwrap();
         assert_eq!(launch.argv(), ["claude", "--model", "opus"]);
+    }
+
+    #[test]
+    fn restart_keeps_the_agent_set_env() {
+        let assignments = [(
+            "EXAMPLE_ACCOUNT_DIR".to_string(),
+            "/accounts/example".to_string(),
+        )];
+        let agent = ServiceFixture::agent().with_env_assignments(&assignments);
+        let fixture =
+            RestartFixture::exited().with_config(ServiceFixture::config().with_agents(vec![agent]));
+
+        RestartFixture::restart(&fixture).unwrap();
+
+        let launch = fixture.multiplexer().launches().pop().unwrap();
+        assert_eq!(launch.env_assignments(), assignments);
     }
 
     #[test]

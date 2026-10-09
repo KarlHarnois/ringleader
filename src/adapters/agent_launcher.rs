@@ -253,17 +253,20 @@ mod tests {
             )
         }
 
-        fn handoff(&self, worktree: &Path) -> PathBuf {
+        fn agent_launch(worktree: &Path) -> AgentLaunch {
+            AgentLaunch::new(
+                vec![Self::env_program()],
+                &["EXAMPLE_API_KEY".to_string()],
+                worktree,
+            )
+        }
+
+        fn handoff(&self, launch: &AgentLaunch) -> PathBuf {
             let handoff = AgentHandoff::new(
                 &self.directory.path().join("handoff"),
                 &Self::creating_snapshot(),
             );
-            let launch = AgentLaunch::new(
-                vec![Self::env_program()],
-                &["EXAMPLE_API_KEY".to_string()],
-                worktree,
-            );
-            handoff.write(&launch).unwrap()
+            handoff.write(launch).unwrap()
         }
 
         fn launch(
@@ -271,8 +274,16 @@ mod tests {
             terminal: Option<&str>,
             worktree: &Path,
         ) -> (CapturingExec, LaunchError, PathBuf) {
+            self.run(terminal, &Self::agent_launch(worktree))
+        }
+
+        fn run(
+            &self,
+            terminal: Option<&str>,
+            launch: &AgentLaunch,
+        ) -> (CapturingExec, LaunchError, PathBuf) {
             let seam = CapturingExec::default();
-            let handoff = self.handoff(worktree);
+            let handoff = self.handoff(launch);
             let mut launcher =
                 AgentLauncher::new(&Self::pane_snapshot(terminal), Box::new(seam.clone()));
             let result = launcher.launch(&handoff);
@@ -299,6 +310,17 @@ mod tests {
         .map(|(name, value)| (name.to_string(), value.to_string()))
         .collect();
         assert_eq!(seam.environment(), expected);
+    }
+
+    #[test]
+    fn a_set_value_reaches_the_agent_in_place_of_the_inherited_one() {
+        let fixture = LauncherFixture::new();
+        let launch = LauncherFixture::agent_launch(&fixture.worktree())
+            .with_env_assignments(&[("HOME".to_string(), "/home/example-account".to_string())]);
+
+        let (seam, _, _) = fixture.run(None, &launch);
+
+        assert_eq!(seam.environment()["HOME"], "/home/example-account");
     }
 
     #[test]

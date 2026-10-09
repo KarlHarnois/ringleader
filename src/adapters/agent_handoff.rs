@@ -86,7 +86,23 @@ impl AgentHandoff {
     }
 
     fn handed_environment(&self, launch: &AgentLaunch) -> Vec<(OsString, OsString)> {
+        let assigned = Self::assigned_variables(launch);
+        let is_assigned = |name: &OsString| {
+            assigned
+                .iter()
+                .any(|(assigned_name, _)| assigned_name == name)
+        };
         let mut handed: Vec<(OsString, OsString)> = self
+            .inherited_variables(launch)
+            .into_iter()
+            .filter(|(name, _)| !is_assigned(name))
+            .collect();
+        handed.extend(assigned);
+        handed
+    }
+
+    fn inherited_variables(&self, launch: &AgentLaunch) -> Vec<(OsString, OsString)> {
+        let mut inherited: Vec<(OsString, OsString)> = self
             .environment
             .variables()
             .iter()
@@ -95,13 +111,21 @@ impl AgentHandoff {
             .collect();
         for name in launch.env_names() {
             match self.environment.get(name) {
-                Some(value) => handed.push((OsString::from(name), value.to_os_string())),
+                Some(value) => inherited.push((OsString::from(name), value.to_os_string())),
                 None => {
                     log::warn!("the agent variable {name} is not set, the agent starts without it")
                 }
             }
         }
-        handed
+        inherited
+    }
+
+    fn assigned_variables(launch: &AgentLaunch) -> Vec<(OsString, OsString)> {
+        launch
+            .env_assignments()
+            .iter()
+            .map(|(name, value)| (OsString::from(name), OsString::from(value)))
+            .collect()
     }
 
     fn next_path(&self) -> PathBuf {
@@ -199,6 +223,19 @@ mod tests {
             )
         }
 
+        fn launch_setting(name: &str, value: &str) -> AgentLaunch {
+            Self::launch(&[]).with_env_assignments(&[(name.to_string(), value.to_string())])
+        }
+
+        fn handed_environment(
+            &self,
+            pairs: &[(&str, &str)],
+            launch: &AgentLaunch,
+        ) -> Vec<(OsString, OsString)> {
+            let path = self.handoff(pairs).write(launch).unwrap();
+            AgentHandoff::take(&path).unwrap().environment()
+        }
+
         fn aged_file(&self, name: &str, age: Duration) -> PathBuf {
             fs::create_dir_all(self.handoff_directory()).unwrap();
             let path = self.handoff_directory().join(name);
@@ -227,6 +264,35 @@ mod tests {
                 ("PATH".into(), "/bin".into()),
                 ("API_KEY".into(), "secret".into())
             ]
+        );
+    }
+
+    #[test]
+    fn a_set_value_follows_the_inherited_ones() {
+        let fixture = HandoffFixture::new();
+        let launch = HandoffFixture::launch_setting("EXAMPLE_ACCOUNT_DIR", "/accounts/example");
+
+        let environment = fixture.handed_environment(&[("PATH", "/bin")], &launch);
+
+        assert_eq!(
+            environment,
+            [
+                ("PATH".into(), "/bin".into()),
+                ("EXAMPLE_ACCOUNT_DIR".into(), "/accounts/example".into())
+            ]
+        );
+    }
+
+    #[test]
+    fn a_set_value_replaces_an_inherited_one() {
+        let fixture = HandoffFixture::new();
+        let launch = HandoffFixture::launch_setting("HOME", "/home/example-account");
+
+        let environment = fixture.handed_environment(&[("HOME", "/home/example")], &launch);
+
+        assert_eq!(
+            environment,
+            [("HOME".into(), "/home/example-account".into())]
         );
     }
 

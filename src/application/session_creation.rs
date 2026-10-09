@@ -262,6 +262,22 @@ mod tests {
     }
 
     #[test]
+    fn create_launches_the_agent_with_its_set_env() {
+        let assignments = [(
+            "EXAMPLE_ACCOUNT_DIR".to_string(),
+            "/accounts/example".to_string(),
+        )];
+        let agent = ServiceFixture::agent().with_env_assignments(&assignments);
+        let fixture =
+            ServiceFixture::new().with_config(ServiceFixture::config().with_agents(vec![agent]));
+
+        CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap();
+
+        let launch = fixture.multiplexer().launches().pop().unwrap();
+        assert_eq!(launch.env_assignments(), assignments);
+    }
+
+    #[test]
     fn the_session_spec_carries_environment_names_and_never_values() {
         let fixture = ServiceFixture::new();
 

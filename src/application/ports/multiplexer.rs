@@ -97,6 +97,7 @@ impl SessionSpec {
 pub struct AgentLaunch {
     argv: Vec<String>,
     env_names: Vec<String>,
+    env_assignments: Vec<(String, String)>,
     worktree: PathBuf,
 }
 
@@ -105,7 +106,15 @@ impl AgentLaunch {
         Self {
             argv,
             env_names: env_names.to_vec(),
+            env_assignments: Vec::new(),
             worktree: worktree.to_path_buf(),
+        }
+    }
+
+    pub fn with_env_assignments(self, assignments: &[(String, String)]) -> Self {
+        Self {
+            env_assignments: assignments.to_vec(),
+            ..self
         }
     }
 
@@ -115,6 +124,10 @@ impl AgentLaunch {
 
     pub fn env_names(&self) -> &[String] {
         &self.env_names
+    }
+
+    pub fn env_assignments(&self) -> &[(String, String)] {
+        &self.env_assignments
     }
 
     pub fn worktree(&self) -> &Path {
