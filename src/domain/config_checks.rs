@@ -22,6 +22,7 @@ impl<'a> ConfigChecks<'a> {
         "SSH_CONNECTION",
         "WINDOWID",
     ];
+    const COMMAND_SEARCH_VARIABLE: &'static str = "PATH";
 
     pub fn new(draft: &'a ConfigDraft) -> Self {
         Self {
@@ -202,8 +203,14 @@ impl<'a> ConfigChecks<'a> {
     }
 
     fn assignment_refusal(agent: &Agent, name: &str, value: &str) -> Option<&'static str> {
-        if agent.env_names().iter().any(|listed| listed == name) {
+        if name == Self::COMMAND_SEARCH_VARIABLE {
+            Some("decides where the command is found, give the command an absolute path instead")
+        } else if agent.env_names().iter().any(|listed| listed == name) {
             Some("is also listed in env, keep it in one of the two")
+        } else if value.starts_with('$') {
+            Some(
+                "has a value starting with $, environment variables are not expanded, write the value out or start it with ~/",
+            )
         } else if value.contains('\0') {
             Some("has a value containing a NUL byte")
         } else {
@@ -339,6 +346,24 @@ mod tests {
     fn a_set_env_value_with_a_nul_byte_fails() {
         ChecksFixture::fails_on(
             ChecksFixture::agent_setting("EXAMPLE_ACCOUNT_DIR", "/accounts\0/example"),
+            "agents.set_env",
+        );
+    }
+
+    #[test]
+    fn a_set_env_value_starting_with_a_variable_fails() {
+        for value in ["$HOME/.example-account", "${HOME}/.example-account"] {
+            ChecksFixture::fails_on(
+                ChecksFixture::agent_setting("EXAMPLE_ACCOUNT_DIR", value),
+                "agents.set_env",
+            );
+        }
+    }
+
+    #[test]
+    fn setting_path_fails_because_the_command_lookup_would_disagree() {
+        ChecksFixture::fails_on(
+            ChecksFixture::agent_setting("PATH", "/opt/example/bin"),
             "agents.set_env",
         );
     }
