@@ -7,13 +7,9 @@ use super::session_name::{InvalidName, Slug};
 pub struct RepoName(Slug);
 
 impl RepoName {
-    pub fn from_basename(basename: &str) -> Result<Self, InvalidName> {
-        Slug::from_text(basename).map(Self)
-    }
-
     pub fn of_directory(path: &Path) -> Result<Self, InvalidName> {
         let basename = path.file_name().unwrap_or_default().to_string_lossy();
-        Self::from_basename(&basename)
+        Slug::from_text(&basename).map(Self)
     }
 
     pub fn parse(text: &str) -> Result<Self, InvalidName> {
@@ -36,13 +32,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn slugs_a_directory_basename() {
-        let name = RepoName::from_basename("Example_Project").unwrap();
-
-        assert_eq!(name.as_str(), "example-project");
-    }
-
-    #[test]
     fn names_a_directory_after_its_slugged_basename() {
         let name = RepoName::of_directory(Path::new("/work/Example_Project")).unwrap();
 
@@ -56,7 +45,7 @@ mod tests {
 
     #[test]
     fn rejects_a_basename_that_slugs_to_empty() {
-        assert!(RepoName::from_basename("...").is_err());
+        assert!(RepoName::of_directory(Path::new("/work/...")).is_err());
     }
 
     #[test]

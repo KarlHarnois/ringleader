@@ -206,8 +206,7 @@ impl ServiceFixture {
         let name = SessionName::new(name).unwrap();
         let naming = Self::naming();
         let repo_path = Path::new(repo_path);
-        let basename = repo_path.file_name().unwrap().to_string_lossy();
-        let repo_name = RepoName::from_basename(&basename).unwrap();
+        let repo_name = RepoName::of_directory(repo_path).unwrap();
         let metadata = SessionMetadata::new(
             SessionRepo::new(repo_name.clone(), repo_path),
             SessionWorktree::new(

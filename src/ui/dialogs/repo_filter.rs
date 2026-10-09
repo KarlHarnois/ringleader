@@ -77,8 +77,7 @@ mod tests {
 
         fn repo(path: &str) -> Repo {
             let path = Path::new(path);
-            let basename = path.file_name().unwrap().to_string_lossy();
-            Repo::discovered(RepoName::from_basename(&basename).unwrap(), path)
+            Repo::discovered(RepoName::of_directory(path).unwrap(), path)
         }
 
         fn ranked_paths(filter: &mut RepoFilter, query: &str) -> Vec<String> {
