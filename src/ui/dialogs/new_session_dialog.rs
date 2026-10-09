@@ -1,9 +1,11 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::style::Style;
 use ratatui::text::Line;
 
 use super::agent_picker::AgentPicker;
 use super::dialog::DialogStep;
 use super::dialog_labels::DialogLabels;
+use super::new_session_field::NewSessionField;
 use super::repo_picker::{PickerStep, RepoPicker};
 use super::text_field::{FieldKind, TextField};
 use crate::application::{CreateRequest, SessionService};
@@ -17,7 +19,7 @@ pub struct NewSessionDialog {
     repos: RepoPicker,
     agents: AgentPicker,
     prompt: TextField,
-    focus: Field,
+    focus: NewSessionField,
     error: Option<String>,
 }
 
@@ -33,7 +35,7 @@ impl NewSessionDialog {
             repos: RepoPicker::open(service),
             agents: AgentPicker::new(service.config().agents(), &service.config_path()),
             prompt: TextField::new(FieldKind::Prompt),
-            focus: Field::Name,
+            focus: NewSessionField::Name,
             error: None,
         }
     }
@@ -49,8 +51,7 @@ impl NewSessionDialog {
     }
 
     pub fn handle_key(&mut self, key: &KeyEvent, service: &SessionService) -> DialogStep {
-        let picker_has_focus = self.repos.has_open_form() || self.focus == Field::Repo;
-        if picker_has_focus && self.picker_took(key, service) {
+        if self.focus == NewSessionField::Repo && self.picker_took(key, service) {
             return DialogStep::Stay;
         }
         if Self::creates(key) {
@@ -59,22 +60,19 @@ impl NewSessionDialog {
         match key.code {
             KeyCode::Esc => return DialogStep::Close,
             KeyCode::Enter => return self.advance(),
-            KeyCode::Tab => self.focus = self.focus.step(1),
-            KeyCode::BackTab => self.focus = self.focus.step(Field::ORDER.len() - 1),
+            KeyCode::Tab => self.focus = self.focus.next(),
+            KeyCode::BackTab => self.focus = self.focus.previous(),
             _ => self.edit_focused(key),
         }
         DialogStep::Stay
     }
 
     pub fn paste(&mut self, text: &str) {
-        if self.repos.has_open_form() {
-            self.error = self.repos.paste(text).err();
-            return;
-        }
         let pasted = match self.focus {
-            Field::Name => self.name.paste(text),
-            Field::Prompt => self.prompt.paste(text),
-            Field::Repo | Field::Agent => Ok(()),
+            NewSessionField::Name => self.name.paste(text),
+            NewSessionField::Repo => self.repos.paste(text),
+            NewSessionField::Prompt => self.prompt.paste(text),
+            NewSessionField::Agent => Ok(()),
         };
         self.error = pasted.err();
     }
@@ -86,18 +84,17 @@ impl NewSessionDialog {
         labels: DialogLabels,
         theme: &Theme,
     ) -> Vec<Line<'static>> {
-        let room = height
-            .saturating_sub(Self::FIXED_LINES + self.agents.height(self.focus == Field::Agent));
-        let mut lines = vec![self.text_line(Field::Name, &self.name, labels, width)];
-        lines.extend(labels.labeled(
-            Field::Repo.label(),
-            self.repo_lines(width, room, labels, theme),
-        ));
-        lines.extend(labels.labeled(
-            Field::Agent.label(),
-            self.agents.lines(self.focus == Field::Agent, theme),
-        ));
-        lines.push(self.text_line(Field::Prompt, &self.prompt, labels, width));
+        let agents_expanded = self.focus == NewSessionField::Agent;
+        let room = height.saturating_sub(Self::FIXED_LINES + self.agents.height(agents_expanded));
+        let field_width = width.saturating_sub(labels.width());
+        let repo_lines = self
+            .repos
+            .lines(field_width, room, self.repo_style(theme), theme);
+        let agent_lines = self.agents.lines(agents_expanded, theme);
+        let mut lines = vec![self.text_line(NewSessionField::Name, &self.name, labels, width)];
+        lines.extend(labels.labeled(NewSessionField::Repo.label(), repo_lines));
+        lines.extend(labels.labeled(NewSessionField::Agent.label(), agent_lines));
+        lines.push(self.text_line(NewSessionField::Prompt, &self.prompt, labels, width));
         lines.push(Line::from(""));
         let error = self.error.as_deref().unwrap_or_default();
         lines.extend(TextFit::new(error).styled_lines(width, theme.error()));
@@ -105,28 +102,16 @@ impl NewSessionDialog {
         lines
     }
 
-    fn repo_lines(
-        &self,
-        width: usize,
-        room: usize,
-        labels: DialogLabels,
-        theme: &Theme,
-    ) -> Vec<Line<'static>> {
-        let width = width.saturating_sub(labels.width());
-        if self.repos.has_open_form() {
-            return self.repos.search_lines(width, room, theme);
-        }
-        let style = if self.focus == Field::Repo {
+    fn repo_style(&self, theme: &Theme) -> Style {
+        if self.focus == NewSessionField::Repo {
             theme.selected()
         } else {
             theme.base()
-        };
-        let summary = TextFit::new(&self.repos.summary()).right_truncated(width);
-        vec![Line::styled(summary, style)]
+        }
     }
 
     fn hints(&self) -> &'static str {
-        self.focus.hints().unwrap_or_else(|| self.repos.hints())
+        self.repos.hints().unwrap_or_else(|| self.focus.hints())
     }
 
     fn picker_took(&mut self, key: &KeyEvent, service: &SessionService) -> bool {
@@ -141,7 +126,7 @@ impl NewSessionDialog {
     }
 
     fn move_past_repo(&mut self) {
-        self.focus = Field::Repo.step(1);
+        self.focus = NewSessionField::Repo.next();
     }
 
     fn creates(key: &KeyEvent) -> bool {
@@ -152,13 +137,13 @@ impl NewSessionDialog {
         if self.focus.is_last() {
             return self.submit();
         }
-        self.focus = self.focus.step(1);
+        self.focus = self.focus.next();
         DialogStep::Stay
     }
 
     fn text_line(
         &self,
-        field: Field,
+        field: NewSessionField,
         text: &TextField,
         labels: DialogLabels,
         width: usize,
@@ -172,10 +157,10 @@ impl NewSessionDialog {
 
     fn edit_focused(&mut self, key: &KeyEvent) {
         match self.focus {
-            Field::Name => self.name.edit(key),
-            Field::Prompt => self.prompt.edit(key),
-            Field::Agent => self.agents.handle_key(key),
-            Field::Repo => false,
+            NewSessionField::Name => self.name.edit(key),
+            NewSessionField::Prompt => self.prompt.edit(key),
+            NewSessionField::Agent => self.agents.handle_key(key),
+            NewSessionField::Repo => false,
         };
     }
 
@@ -204,45 +189,6 @@ impl NewSessionDialog {
         Ok(CreateRequest::new(name, repo.clone())
             .with_agent(agent.name())
             .with_prompt(self.prompt.value()))
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Field {
-    Name,
-    Repo,
-    Agent,
-    Prompt,
-}
-
-impl Field {
-    const ORDER: [Field; 4] = [Field::Name, Field::Repo, Field::Agent, Field::Prompt];
-
-    fn step(self, offset: usize) -> Self {
-        let position = Self::ORDER.iter().position(|field| *field == self);
-        Self::ORDER[(position.unwrap_or(0) + offset) % Self::ORDER.len()]
-    }
-
-    fn is_last(self) -> bool {
-        Self::ORDER.last() == Some(&self)
-    }
-
-    fn hints(self) -> Option<&'static str> {
-        match self {
-            Field::Name => Some("Enter next field · Ctrl-S create · Esc cancel"),
-            Field::Repo => None,
-            Field::Agent => Some("↑ ↓ j k choose · Enter next field · Ctrl-S create · Esc cancel"),
-            Field::Prompt => Some("Enter create · Esc cancel"),
-        }
-    }
-
-    fn label(self) -> &'static str {
-        match self {
-            Field::Name => "Name",
-            Field::Repo => "Repo",
-            Field::Agent => "Agent",
-            Field::Prompt => "Prompt",
-        }
     }
 }
 

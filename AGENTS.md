@@ -206,6 +206,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │       ├── dialog_labels.rs         # DialogLabels, full or abbreviated field labels
     │       ├── text_field.rs            # TextField, typing and paste rules for name, prompt, and path fields
     │       ├── new_session_dialog.rs    # NewSessionDialog
+    │       ├── new_session_field.rs     # NewSessionField, the n dialog's fields in Tab order with their labels and hints
     │       ├── repo_picker.rs           # RepoPicker, the n dialog's Repo field and its search
     │       ├── chosen_repo.rs           # ChosenRepo, the default repo until the search picks another
     │       ├── repo_finder.rs           # RepoFinder, the fuzzy search over the repos under home

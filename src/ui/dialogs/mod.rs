@@ -6,6 +6,7 @@ pub mod dialog_labels;
 pub mod dialog_slot;
 pub mod home_path;
 pub mod new_session_dialog;
+pub mod new_session_field;
 pub mod rename_session_dialog;
 pub mod repo_filter;
 pub mod repo_finder;
