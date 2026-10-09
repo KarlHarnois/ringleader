@@ -5,41 +5,42 @@ use crate::domain::Repo;
 use crate::ui::text_fit::TextFit;
 use crate::ui::theme::Theme;
 
-pub struct TypedRepoCheck {
-    typed: String,
-    pending: Option<Pending<Repo>>,
-    error: Option<String>,
+pub enum TypedRepoCheck {
+    Checking {
+        typed: String,
+        pending: Pending<Repo>,
+    },
+    Refused(String),
 }
 
 impl TypedRepoCheck {
     pub fn start(service: &SessionService, typed: &str) -> Self {
-        Self {
+        Self::Checking {
             typed: typed.to_string(),
-            pending: Some(service.repo_at(typed)),
-            error: None,
+            pending: service.repo_at(typed),
         }
     }
 
     pub fn poll(&mut self) -> Option<Repo> {
-        let result = self.pending.as_ref()?.poll()?;
-        self.pending = None;
-        match result {
+        let Self::Checking { pending, .. } = self else {
+            return None;
+        };
+        match pending.poll()? {
             Ok(repo) => Some(repo),
             Err(error) => {
-                self.error = Some(error.to_string());
+                *self = Self::Refused(error.to_string());
                 None
             }
         }
     }
 
     pub fn lines(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
-        if self.pending.is_some() {
-            let checking = format!("Checking {}…", self.typed);
-            return TextFit::new(&checking).styled_lines(width, theme.dim());
-        }
-        match &self.error {
-            Some(error) => TextFit::new(error).styled_lines(width, theme.error()),
-            None => Vec::new(),
+        match self {
+            Self::Checking { typed, .. } => {
+                let checking = format!("Checking {typed}…");
+                TextFit::new(&checking).styled_lines(width, theme.dim())
+            }
+            Self::Refused(error) => TextFit::new(error).styled_lines(width, theme.error()),
         }
     }
 }

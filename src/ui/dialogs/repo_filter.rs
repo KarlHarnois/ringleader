@@ -32,10 +32,6 @@ impl RepoFilter {
         &self.shown_paths[index]
     }
 
-    pub fn count(&self) -> usize {
-        self.shown_paths.len()
-    }
-
     pub fn ranked(&mut self, query: &str) -> Vec<usize> {
         let pattern = Pattern::parse(query, CaseMatching::Smart, Normalization::Smart);
         let mut buffer = Vec::new();

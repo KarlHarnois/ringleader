@@ -45,8 +45,7 @@ impl RepoFinder {
     pub fn begin(&mut self, first_key: &KeyEvent) {
         self.query = TextField::new(FieldKind::Path);
         self.query.edit(first_key);
-        self.check = None;
-        self.rank();
+        self.query_changed();
     }
 
     pub fn poll(&mut self) -> Option<Repo> {
@@ -68,28 +67,23 @@ impl RepoFinder {
         }
         let edited = self.query.edit(key);
         if edited {
-            self.check = None;
-            self.rank();
+            self.query_changed();
         }
         edited
     }
 
     pub fn paste(&mut self, text: &str) -> Result<(), String> {
         self.query.paste(text)?;
-        self.check = None;
-        self.rank();
+        self.query_changed();
         Ok(())
     }
 
     pub fn pick(&mut self, service: &SessionService) -> Option<Repo> {
-        match self.choice() {
-            FinderChoice::Repo(repo) => Some(repo),
-            FinderChoice::TypedPath(typed) => {
-                self.check = Some(TypedRepoCheck::start(service, &typed));
-                None
-            }
-            FinderChoice::Nothing => None,
+        if let Some(&index) = self.matches.get(self.cursor) {
+            return Some(self.scan.repos()[index].clone());
         }
+        self.check = Some(TypedRepoCheck::start(service, self.typed_path()?));
+        None
     }
 
     pub fn lines(&self, width: usize, room: usize, theme: &Theme) -> Vec<Line<'static>> {
@@ -104,13 +98,10 @@ impl RepoFinder {
         lines
     }
 
-    fn choice(&self) -> FinderChoice {
+    fn typed_path(&self) -> Option<&str> {
         let query = self.query.value();
-        match self.matches.get(self.cursor) {
-            Some(&index) => FinderChoice::Repo(self.scan.repos()[index].clone()),
-            None if query.trim().is_empty() => FinderChoice::Nothing,
-            None => FinderChoice::TypedPath(query.to_string()),
-        }
+        let offers_typed_path = self.matches.is_empty() && !query.trim().is_empty();
+        offers_typed_path.then_some(query)
     }
 
     fn cursor_offset(key: &KeyEvent) -> Option<isize> {
@@ -127,6 +118,11 @@ impl RepoFinder {
     fn move_cursor(&mut self, offset: isize) {
         let last = self.matches.len().saturating_sub(1);
         self.cursor = self.cursor.saturating_add_signed(offset).min(last);
+    }
+
+    fn query_changed(&mut self) {
+        self.check = None;
+        self.rank();
     }
 
     fn rank(&mut self) {
@@ -152,11 +148,8 @@ impl RepoFinder {
     }
 
     fn count(&self) -> String {
-        format!(
-            "{}/{} repos under ~",
-            self.matches.len(),
-            self.filter.count()
-        )
+        let found = self.scan.repos().len();
+        format!("{}/{found} repos under ~", self.matches.len())
     }
 
     fn match_lines(&self, width: usize, rows: usize, theme: &Theme) -> Vec<Line<'static>> {
@@ -179,18 +172,11 @@ impl RepoFinder {
         if let Some(check) = &self.check {
             return check.lines(width, theme);
         }
-        let offers_typed_path = matches!(self.choice(), FinderChoice::TypedPath(_));
-        if self.scan.is_scanning() || !offers_typed_path {
+        if self.scan.is_scanning() || self.typed_path().is_none() {
             return Vec::new();
         }
         vec![Line::styled(Self::NO_MATCH, theme.dim())]
     }
-}
-
-enum FinderChoice {
-    Repo(Repo),
-    TypedPath(String),
-    Nothing,
 }
 
 #[cfg(test)]
