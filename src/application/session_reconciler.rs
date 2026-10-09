@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use super::ports::HostProbe;
 use super::reconciliation::Reconciliation;
 use super::worktree_containment::WorktreeContainment;
@@ -219,7 +217,8 @@ impl<'a> SessionReconciler<'a> {
         metadata: &SessionMetadata,
     ) -> bool {
         let same_branch_in_repo = entry.branch() == metadata.branch()
-            && self.canonical(entry.repo_path()) == self.canonical(metadata.repo_path());
+            && self.host.canonical_or_given(entry.repo_path())
+                == self.host.canonical_or_given(metadata.repo_path());
         entry.name() == name
             || entry.worktree_path() == metadata.worktree_path()
             || same_branch_in_repo
@@ -228,16 +227,10 @@ impl<'a> SessionReconciler<'a> {
     fn recorded_naming(&self) -> NamingScheme {
         let naming = self.config.naming();
         NamingScheme::new(
-            &self.canonical(naming.worktree_root()),
+            &self.host.canonical_or_given(naming.worktree_root()),
             naming.branch_prefix(),
             naming.tmux_prefix(),
         )
-    }
-
-    fn canonical(&self, path: &std::path::Path) -> PathBuf {
-        self.host
-            .canonicalize_lenient(path)
-            .unwrap_or_else(|_| path.to_path_buf())
     }
 
     fn valid_metadata<'o>(

@@ -29,36 +29,52 @@ impl<'a> RepoMerge<'a> {
     }
 
     pub fn resolved(&self, top_level: &Path, explicit: &[Repo]) -> Result<Repo, InvalidName> {
-        let top_level = self
-            .host
-            .canonicalize_lenient(top_level)
-            .unwrap_or_else(|_| top_level.to_path_buf());
-        let configured = explicit
-            .iter()
-            .map(|repo| self.canonical(repo))
-            .find(|repo| repo.path() == top_level);
-        match configured {
-            Some(repo) => Ok(repo),
+        let top_level = self.host.canonical_or_given(top_level);
+        match self.configured(&top_level, explicit) {
+            Some(repo) => Ok(self.canonical(repo)),
             None => Self::discovered(&top_level),
         }
     }
 
+    pub fn configured<'e>(&self, top_level: &Path, explicit: &'e [Repo]) -> Option<&'e Repo> {
+        explicit
+            .iter()
+            .find(|repo| self.host.canonical_or_given(repo.path()) == top_level)
+    }
+
     fn canonical(&self, repo: &Repo) -> Repo {
-        let canonical = self
-            .host
-            .canonicalize_lenient(repo.path())
-            .unwrap_or_else(|_| repo.path().to_path_buf());
-        repo.at_path(&canonical)
+        repo.at_path(&self.host.canonical_or_given(repo.path()))
     }
 
     fn discovered(top_level: &Path) -> Result<Repo, InvalidName> {
-        let basename = top_level
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_default();
         Ok(Repo::discovered(
-            RepoName::from_basename(&basename)?,
+            RepoName::of_directory(top_level)?,
             top_level,
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::FakeHostProbe;
+
+    #[test]
+    fn the_configured_entry_is_found_by_its_canonical_path_and_kept_as_written() {
+        let host = FakeHostProbe::default().with_canonical(
+            Path::new("/link/example-project"),
+            Path::new("/work/example-project"),
+        );
+        let entry = Repo::explicit(
+            RepoName::parse("pinned").unwrap(),
+            Path::new("/link/example-project"),
+            None,
+        );
+        let explicit = [entry.clone()];
+
+        let configured =
+            RepoMerge::new(&host).configured(Path::new("/work/example-project"), &explicit);
+
+        assert_eq!(configured, Some(&entry));
     }
 }

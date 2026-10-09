@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use super::pending::Pending;
 use super::ports::{ConfigSource, HostProbe, Workspace};
+use super::repo_merge::RepoMerge;
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
 use crate::domain::{BaseBranch, Config, Repo, RepoName, Session};
@@ -29,11 +30,7 @@ impl RepoOverrides {
         let explicit = config.repos().to_vec();
         Pending::start(move || {
             let top_level = workspace.validate_repo(&request.path)?;
-            let canonical = |repo: &Repo| {
-                host.canonicalize_lenient(repo.path())
-                    .unwrap_or_else(|_| repo.path().to_path_buf())
-            };
-            if let Some(entry) = explicit.iter().find(|entry| canonical(entry) == top_level) {
+            if let Some(entry) = RepoMerge::new(host.as_ref()).configured(&top_level, &explicit) {
                 return request.against_existing(entry);
             }
             let name = request.name_for(&top_level)?;
@@ -66,14 +63,10 @@ impl RepoOverrides {
                     config_source.path().display()
                 )));
             };
-            let canonical = |path: &Path| {
-                host.canonicalize_lenient(path)
-                    .unwrap_or_else(|_| path.to_path_buf())
-            };
-            let override_path = canonical(entry.path());
+            let override_path = host.canonical_or_given(entry.path());
             let users: Vec<String> = entries
                 .iter()
-                .filter(|session| canonical(session.repo_path()) == override_path)
+                .filter(|session| host.canonical_or_given(session.repo_path()) == override_path)
                 .map(|session| session.name().to_string())
                 .collect();
             if !users.is_empty() {
@@ -120,10 +113,7 @@ impl AddRepoRequest {
     fn name_for(&self, top_level: &Path) -> Result<RepoName, ServiceError> {
         match &self.name {
             Some(name) => Ok(RepoName::parse(name)?),
-            None => {
-                let basename = top_level.file_name().unwrap_or_default().to_string_lossy();
-                Ok(RepoName::from_basename(&basename)?)
-            }
+            None => Ok(RepoName::of_directory(top_level)?),
         }
     }
 
