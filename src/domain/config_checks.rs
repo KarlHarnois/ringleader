@@ -139,6 +139,9 @@ impl<'a> ConfigChecks<'a> {
             for name in agent.env_names() {
                 self.check_env_name(agent, name);
             }
+            for (name, value) in agent.env_assignments() {
+                self.check_env_assignment(agent, name, value);
+            }
         }
     }
 
@@ -172,6 +175,26 @@ impl<'a> ConfigChecks<'a> {
         if let Some(reason) = reason {
             self.fail(format!(
                 "agents.env: agent `{}` entry `{name}` {reason}",
+                agent.name()
+            ));
+        }
+    }
+
+    fn check_env_assignment(&mut self, agent: &Agent, name: &str, value: &str) {
+        let reason = if !Self::is_variable_name(name) {
+            Some("is not a plain variable name")
+        } else if Self::LAUNCHER_VARIABLES.contains(&name) {
+            Some("is set by the launcher from its own pane")
+        } else if agent.env_names().iter().any(|listed| listed == name) {
+            Some("is also listed in env, keep it in one of the two")
+        } else if value.contains('\0') {
+            Some("has a value containing a NUL byte")
+        } else {
+            None
+        };
+        if let Some(reason) = reason {
+            self.fail(format!(
+                "agents.set_env: agent `{}` entry `{name}` {reason}",
                 agent.name()
             ));
         }
@@ -214,6 +237,15 @@ mod tests {
             Self::draft().agent(
                 Agent::new("example-agent", "example-agent").with_env_names(&[entry.to_string()]),
             )
+        }
+
+        fn agent_setting(name: &str, value: &str) -> ConfigDraft {
+            Self::draft().agent(Self::example_agent_setting(name, value))
+        }
+
+        fn example_agent_setting(name: &str, value: &str) -> Agent {
+            Agent::new("example-agent", "example-agent")
+                .with_env_assignments(&[(name.to_string(), value.to_string())])
         }
     }
 
@@ -280,6 +312,41 @@ mod tests {
         ] {
             ChecksFixture::fails_on(ChecksFixture::agent_with_env(entry), "agents.env");
         }
+    }
+
+    #[test]
+    fn set_env_entries_that_are_not_plain_or_belong_to_the_launcher_fail() {
+        for name in ["AWS_*", "FOO=bar", "", "TERM", "GPG_TTY"] {
+            ChecksFixture::fails_on(
+                ChecksFixture::agent_setting(name, "/accounts/example"),
+                "agents.set_env",
+            );
+        }
+    }
+
+    #[test]
+    fn a_set_env_value_with_a_nul_byte_fails() {
+        ChecksFixture::fails_on(
+            ChecksFixture::agent_setting("EXAMPLE_ACCOUNT_DIR", "/accounts\0/example"),
+            "agents.set_env",
+        );
+    }
+
+    #[test]
+    fn a_name_both_passed_through_and_set_fails() {
+        let names = ["EXAMPLE_ACCOUNT_DIR".to_string()];
+        let agent =
+            ChecksFixture::example_agent_setting("EXAMPLE_ACCOUNT_DIR", "/accounts/example")
+                .with_env_names(&names);
+
+        ChecksFixture::fails_on(ChecksFixture::draft().agent(agent), "agents.set_env");
+    }
+
+    #[test]
+    fn set_env_may_override_a_baseline_variable() {
+        let draft = ChecksFixture::agent_setting("HOME", "/home/example-account");
+
+        assert!(ChecksFixture::failures(&draft).is_empty());
     }
 
     #[test]

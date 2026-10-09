@@ -44,6 +44,9 @@ command = "claude"
 # command is never split. Put flags in args.
 # args = ["--model", "opus"]
 env = ["ANTHROPIC_API_KEY"]
+# env copies these variables from Ringleader's environment. set_env sets fixed
+# values, for example the config directory of a second Claude account.
+# set_env = { CLAUDE_CONFIG_DIR = "~/.claude-work" }
 prompt_args = ["{prompt}"]
 
 [[agents]]
@@ -313,6 +316,27 @@ mod tests {
         let config = fixture.source().load().unwrap();
 
         assert_eq!(config.agents()[0].command(), "/home/example/bin/agent");
+    }
+
+    #[test]
+    fn an_agent_set_env_loads_in_name_order_with_tilde_values_expanded() {
+        let fixture = SourceFixture::with_text(concat!(
+            "[[agents]]\nname = \"a\"\ncommand = \"a\"\n",
+            "set_env = { EXAMPLE_MODE = \"plain\", EXAMPLE_ACCOUNT_DIR = \"~/accounts/example\" }\n",
+        ));
+
+        let config = fixture.source().load().unwrap();
+
+        assert_eq!(
+            config.agents()[0].env_assignments(),
+            [
+                (
+                    "EXAMPLE_ACCOUNT_DIR".to_string(),
+                    "/home/example/accounts/example".to_string()
+                ),
+                ("EXAMPLE_MODE".to_string(), "plain".to_string()),
+            ]
+        );
     }
 
     #[test]

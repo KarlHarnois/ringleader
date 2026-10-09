@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
@@ -106,6 +107,8 @@ struct RawAgent {
     #[serde(default)]
     env: Vec<String>,
     #[serde(default)]
+    set_env: BTreeMap<String, String>,
+    #[serde(default)]
     prompt_args: Vec<String>,
 }
 
@@ -114,7 +117,15 @@ impl RawAgent {
         Agent::new(&self.name, &home.command(&self.command))
             .with_args(&self.args)
             .with_env_names(&self.env)
+            .with_env_assignments(&self.expanded_assignments(home))
             .with_prompt_args(&self.prompt_args)
+    }
+
+    fn expanded_assignments(&self, home: &HomeExpansion) -> Vec<(String, String)> {
+        self.set_env
+            .iter()
+            .map(|(name, value)| (name.clone(), home.value(value)))
+            .collect()
     }
 }
 
@@ -137,6 +148,10 @@ impl<'a> HomeExpansion<'a> {
             },
             (None, _) => path.to_path_buf(),
         }
+    }
+
+    fn value(&self, value: &str) -> String {
+        self.path(Path::new(value)).to_string_lossy().into_owned()
     }
 
     fn command(&self, command: &str) -> String {

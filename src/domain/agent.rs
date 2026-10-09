@@ -4,6 +4,7 @@ pub struct Agent {
     command: String,
     args: Vec<String>,
     env_names: Vec<String>,
+    env_assignments: Vec<(String, String)>,
     prompt_args: Vec<String>,
 }
 
@@ -59,6 +60,7 @@ impl Agent {
             command: command.to_string(),
             args: Vec::new(),
             env_names: Vec::new(),
+            env_assignments: Vec::new(),
             prompt_args: Vec::new(),
         }
     }
@@ -80,6 +82,13 @@ impl Agent {
         Self { env_names, ..self }
     }
 
+    pub fn with_env_assignments(self, assignments: &[(String, String)]) -> Self {
+        Self {
+            env_assignments: assignments.to_vec(),
+            ..self
+        }
+    }
+
     pub fn with_prompt_args(self, template: &[String]) -> Self {
         Self {
             prompt_args: template.to_vec(),
@@ -97,6 +106,10 @@ impl Agent {
 
     pub fn env_names(&self) -> &[String] {
         &self.env_names
+    }
+
+    pub fn env_assignments(&self) -> &[(String, String)] {
+        &self.env_assignments
     }
 
     pub fn prompt_args(&self) -> &[String] {
