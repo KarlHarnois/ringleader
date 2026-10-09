@@ -161,17 +161,7 @@ impl<'a> ConfigChecks<'a> {
     }
 
     fn check_env_name(&mut self, agent: &Agent, name: &str) {
-        let reason = if !Self::is_variable_name(name) {
-            Some("is not a plain variable name")
-        } else if Agent::is_baseline_variable(name) {
-            Some("already reaches every agent through the baseline")
-        } else if Self::LAUNCHER_VARIABLES.contains(&name) {
-            Some("is set by the launcher from its own pane")
-        } else if Self::TMUX_UPDATED_VARIABLES.contains(&name) {
-            Some("is one tmux updates for every session, so the session would lose it")
-        } else {
-            None
-        };
+        let reason = Self::variable_name_refusal(name).or_else(|| Self::pass_through_refusal(name));
         if let Some(reason) = reason {
             self.fail(format!(
                 "agents.env: agent `{}` entry `{name}` {reason}",
@@ -181,22 +171,43 @@ impl<'a> ConfigChecks<'a> {
     }
 
     fn check_env_assignment(&mut self, agent: &Agent, name: &str, value: &str) {
-        let reason = if !Self::is_variable_name(name) {
-            Some("is not a plain variable name")
-        } else if Self::LAUNCHER_VARIABLES.contains(&name) {
-            Some("is set by the launcher from its own pane")
-        } else if agent.env_names().iter().any(|listed| listed == name) {
-            Some("is also listed in env, keep it in one of the two")
-        } else if value.contains('\0') {
-            Some("has a value containing a NUL byte")
-        } else {
-            None
-        };
+        let reason = Self::variable_name_refusal(name)
+            .or_else(|| Self::assignment_refusal(agent, name, value));
         if let Some(reason) = reason {
             self.fail(format!(
                 "agents.set_env: agent `{}` entry `{name}` {reason}",
                 agent.name()
             ));
+        }
+    }
+
+    fn variable_name_refusal(name: &str) -> Option<&'static str> {
+        if !Self::is_variable_name(name) {
+            Some("is not a plain variable name")
+        } else if Self::LAUNCHER_VARIABLES.contains(&name) {
+            Some("is set by the launcher from its own pane")
+        } else {
+            None
+        }
+    }
+
+    fn pass_through_refusal(name: &str) -> Option<&'static str> {
+        if Agent::is_baseline_variable(name) {
+            Some("already reaches every agent through the baseline")
+        } else if Self::TMUX_UPDATED_VARIABLES.contains(&name) {
+            Some("is one tmux updates for every session, so the session would lose it")
+        } else {
+            None
+        }
+    }
+
+    fn assignment_refusal(agent: &Agent, name: &str, value: &str) -> Option<&'static str> {
+        if agent.env_names().iter().any(|listed| listed == name) {
+            Some("is also listed in env, keep it in one of the two")
+        } else if value.contains('\0') {
+            Some("has a value containing a NUL byte")
+        } else {
+            None
         }
     }
 
