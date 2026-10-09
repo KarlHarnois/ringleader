@@ -31,7 +31,7 @@ impl<'a> RepoMerge<'a> {
     pub fn resolved(&self, top_level: &Path, explicit: &[Repo]) -> Result<Repo, InvalidName> {
         let top_level = self.host.canonical_or_given(top_level);
         match self.configured(&top_level, explicit) {
-            Some(repo) => Ok(self.canonical(repo)),
+            Some(repo) => Ok(repo.at_path(&top_level)),
             None => Self::discovered(&top_level),
         }
     }
