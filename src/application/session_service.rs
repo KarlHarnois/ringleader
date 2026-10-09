@@ -1,4 +1,3 @@
-use std::cmp::Reverse;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -85,12 +84,8 @@ impl SessionService {
         self.config.error()
     }
 
-    pub fn launch_directory(&self) -> &Path {
-        self.catalog.launch_directory()
-    }
-
-    pub fn discover_repos(&self, scope_directory: &Path) -> Pending<RepoDiscovery> {
-        self.catalog.discover(scope_directory, self.config())
+    pub fn discover_repos(&self) -> Pending<RepoDiscovery> {
+        self.catalog.discover(self.config())
     }
 
     pub fn find_repos(&self) -> Pending<RepoDiscovery> {
@@ -98,13 +93,7 @@ impl SessionService {
     }
 
     pub fn default_repo(&self) -> Pending<Option<Repo>> {
-        let mut newest_first: Vec<&Session> = self.entries.iter().collect();
-        newest_first.sort_by_key(|entry| Reverse(entry.created_at()));
-        let recently_used = newest_first
-            .iter()
-            .map(|entry| entry.repo_path().to_path_buf())
-            .collect();
-        self.catalog.default_repo(self.config(), recently_used)
+        self.catalog.default_repo(self.config(), &self.entries)
     }
 
     pub fn repo_at(&self, input: &str) -> Pending<Repo> {

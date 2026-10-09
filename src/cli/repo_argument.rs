@@ -16,7 +16,7 @@ impl<'a> RepoArgument<'a> {
         service: &SessionService,
         session: &CliSession,
     ) -> Result<Repo, CommandStop> {
-        let discovery = session.wait(&service.discover_repos(service.launch_directory()))?;
+        let discovery = session.wait(&service.discover_repos())?;
         if !self.is_path() {
             let matches: Vec<&Repo> = discovery
                 .repos()
