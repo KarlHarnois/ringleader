@@ -276,6 +276,21 @@ mod tests {
     }
 
     #[test]
+    fn discovery_scans_the_launch_directory_at_the_configured_depth() {
+        let fixture = ServiceFixture::new();
+
+        CatalogFixture::discover(&fixture);
+
+        assert_eq!(
+            fixture.scanner().scans(),
+            [(
+                PathBuf::from(ServiceFixture::REPO),
+                ServiceFixture::config().scan_depth()
+            )]
+        );
+    }
+
+    #[test]
     fn discovery_returns_while_a_scanner_still_blocks() {
         let fixture =
             ServiceFixture::new().with_scanner(FakeRepoScanner::finding(Vec::new()).blocked());
