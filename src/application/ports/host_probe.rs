@@ -9,6 +9,10 @@ pub trait HostProbe: Send + Sync {
     fn path_exists(&self, path: &Path) -> bool;
     fn is_file(&self, path: &Path) -> bool;
     fn canonicalize_lenient(&self, path: &Path) -> Result<PathBuf, HostProbeError>;
+    fn canonical_or_given(&self, path: &Path) -> PathBuf {
+        self.canonicalize_lenient(path)
+            .unwrap_or_else(|_| path.to_path_buf())
+    }
     fn processes_in(&self, path: &Path, excluded_sessions: &[u32]) -> Vec<ProcessInfo>;
     fn session_processes(&self, sessions: &[u32]) -> Vec<ProcessInfo>;
     fn terminate(&self, pids: &[u32]) -> Vec<ProcessInfo>;
@@ -48,4 +52,31 @@ impl fmt::Display for ProcessInfo {
 pub enum HostProbeError {
     #[error("{path} is not an absolute path")]
     RelativePath { path: PathBuf },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::FakeHostProbe;
+
+    #[test]
+    fn a_path_with_a_canonical_form_is_given_as_that_form() {
+        let host = FakeHostProbe::default()
+            .with_canonical(Path::new("/link/example"), Path::new("/work/example"));
+
+        assert_eq!(
+            host.canonical_or_given(Path::new("/link/example")),
+            PathBuf::from("/work/example")
+        );
+    }
+
+    #[test]
+    fn a_path_that_cannot_be_canonicalized_is_given_back() {
+        let host = FakeHostProbe::default();
+
+        assert_eq!(
+            host.canonical_or_given(Path::new("relative/example")),
+            PathBuf::from("relative/example")
+        );
+    }
 }

@@ -45,23 +45,19 @@ impl RepoCatalog {
         }
     }
 
-    pub fn launch_directory(&self) -> &Path {
-        &self.launch_directory
-    }
-
     pub fn home(&self) -> Option<&Path> {
         self.typed_paths.home()
     }
 
-    pub fn discover(&self, scope_directory: &Path, config: &Config) -> Pending<RepoDiscovery> {
+    pub fn discover(&self, config: &Config) -> Pending<RepoDiscovery> {
         let scanner = Arc::clone(&self.scanner);
         let host = Arc::clone(&self.host);
-        let scope_directory = scope_directory.to_path_buf();
+        let launch_directory = self.launch_directory.clone();
         let explicit = config.repos().to_vec();
         let depth = config.scan_depth();
         Pending::start(move || {
             let scope = scanner
-                .resolve_scope(&scope_directory)
+                .resolve_scope(&launch_directory)
                 .map_err(|error| ServiceError::Invalid(error.to_string()))?;
             let outcome = scanner
                 .scan(&scope, depth)
@@ -75,13 +71,8 @@ impl RepoCatalog {
         self.home_search.find(config.repos().to_vec())
     }
 
-    pub fn default_repo(
-        &self,
-        config: &Config,
-        recently_used: Vec<PathBuf>,
-    ) -> Pending<Option<Repo>> {
-        self.default_repo
-            .find(config.repos().to_vec(), recently_used)
+    pub fn default_repo(&self, config: &Config, sessions: &[Session]) -> Pending<Option<Repo>> {
+        self.default_repo.find(config.repos().to_vec(), sessions)
     }
 
     pub fn add_repo(&self, request: AddRepoRequest, config: &Config) -> Pending<RepoAddition> {
@@ -150,7 +141,7 @@ mod tests {
     use crate::application::pending::Pending;
     use crate::application::ports::ScanError;
     use crate::domain::{BaseBranch, RepoName};
-    use crate::test_support::{FakeMultiplexer, FakeRepoScanner, ServiceFixture};
+    use crate::test_support::{FakeRepoScanner, ServiceFixture};
 
     struct CatalogFixture;
 
@@ -169,8 +160,8 @@ mod tests {
             )
         }
 
-        fn discover(fixture: &ServiceFixture, scope: &str) -> RepoDiscovery {
-            let pending = fixture.service().discover_repos(Path::new(scope));
+        fn discover(fixture: &ServiceFixture) -> RepoDiscovery {
+            let pending = fixture.service().discover_repos();
             Self::settle(&pending).unwrap()
         }
 
@@ -196,7 +187,7 @@ mod tests {
             FakeRepoScanner::finding(Vec::new()).inside_repo(Path::new("/repos/example-project")),
         );
 
-        let discovery = CatalogFixture::discover(&fixture, "/repos/example-project/src");
+        let discovery = CatalogFixture::discover(&fixture);
 
         assert_eq!(
             CatalogFixture::paths(&discovery),
@@ -212,7 +203,7 @@ mod tests {
         )];
         let fixture = ServiceFixture::new().with_scanner(FakeRepoScanner::finding(scanned));
 
-        let discovery = CatalogFixture::discover(&fixture, "/work");
+        let discovery = CatalogFixture::discover(&fixture);
 
         assert_eq!(discovery.scope().enclosing_repo(), None);
         assert_eq!(
@@ -239,7 +230,7 @@ mod tests {
                 Path::new("/work/example-project"),
             ));
 
-        let discovery = CatalogFixture::discover(&fixture, "/work");
+        let discovery = CatalogFixture::discover(&fixture);
 
         assert_eq!(discovery.repos().len(), 1);
         assert_eq!(discovery.repos()[0].name().as_str(), "pinned");
@@ -256,7 +247,7 @@ mod tests {
             .with_config(config)
             .with_scanner(FakeRepoScanner::finding(Vec::new()));
 
-        let discovery = CatalogFixture::discover(&fixture, "/work");
+        let discovery = CatalogFixture::discover(&fixture);
 
         assert_eq!(
             CatalogFixture::paths(&discovery),
@@ -272,7 +263,7 @@ mod tests {
         ];
         let fixture = ServiceFixture::new().with_scanner(FakeRepoScanner::finding(scanned));
 
-        let discovery = CatalogFixture::discover(&fixture, "/work");
+        let discovery = CatalogFixture::discover(&fixture);
 
         assert_eq!(
             CatalogFixture::paths(&discovery),
@@ -284,11 +275,26 @@ mod tests {
     }
 
     #[test]
+    fn discovery_scans_the_launch_directory_at_the_configured_depth() {
+        let fixture = ServiceFixture::new();
+
+        CatalogFixture::discover(&fixture);
+
+        assert_eq!(
+            fixture.scanner().scans(),
+            [(
+                PathBuf::from(ServiceFixture::REPO),
+                ServiceFixture::config().scan_depth()
+            )]
+        );
+    }
+
+    #[test]
     fn discovery_returns_while_a_scanner_still_blocks() {
         let fixture =
             ServiceFixture::new().with_scanner(FakeRepoScanner::finding(Vec::new()).blocked());
 
-        let pending = fixture.service().discover_repos(Path::new("/work"));
+        let pending = fixture.service().discover_repos();
 
         assert!(pending.poll().is_none());
         fixture.scanner().release();
@@ -300,7 +306,7 @@ mod tests {
         let fixture =
             ServiceFixture::new().with_scanner(FakeRepoScanner::finding(Vec::new()).cut_short());
 
-        let discovery = CatalogFixture::discover(&fixture, "/work");
+        let discovery = CatalogFixture::discover(&fixture);
 
         assert!(discovery.notices()[0].contains("cut short"));
     }
@@ -314,7 +320,7 @@ mod tests {
             }),
         );
 
-        let pending = fixture.service().discover_repos(Path::new("/work"));
+        let pending = fixture.service().discover_repos();
 
         assert!(CatalogFixture::settle(&pending).is_err());
     }
@@ -324,19 +330,5 @@ mod tests {
         let pending: Pending<()> = Pending::start(|| panic!("the scan worker failed"));
 
         assert!(CatalogFixture::settle(&pending).is_err());
-    }
-
-    #[test]
-    fn sessions_are_listed_whatever_the_scope() {
-        let elsewhere = ServiceFixture::session("fix-auth");
-        let fixture = ServiceFixture::new()
-            .with_sessions(std::slice::from_ref(&elsewhere))
-            .with_multiplexer(FakeMultiplexer::new());
-        let mut service = fixture.service();
-        CatalogFixture::settle(&service.discover_repos(Path::new("/unrelated"))).unwrap();
-
-        let rows = service.observe(false).unwrap();
-
-        assert_eq!(rows.len(), 1);
     }
 }

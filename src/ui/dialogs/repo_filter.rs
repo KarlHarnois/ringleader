@@ -32,10 +32,6 @@ impl RepoFilter {
         &self.shown_paths[index]
     }
 
-    pub fn count(&self) -> usize {
-        self.shown_paths.len()
-    }
-
     pub fn ranked(&mut self, query: &str) -> Vec<usize> {
         let pattern = Pattern::parse(query, CaseMatching::Smart, Normalization::Smart);
         let mut buffer = Vec::new();
@@ -81,8 +77,7 @@ mod tests {
 
         fn repo(path: &str) -> Repo {
             let path = Path::new(path);
-            let basename = path.file_name().unwrap().to_string_lossy();
-            Repo::discovered(RepoName::from_basename(&basename).unwrap(), path)
+            Repo::discovered(RepoName::of_directory(path).unwrap(), path)
         }
 
         fn ranked_paths(filter: &mut RepoFilter, query: &str) -> Vec<String> {

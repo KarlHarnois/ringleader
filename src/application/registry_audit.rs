@@ -141,18 +141,13 @@ impl RegistryAudit {
     }
 
     fn report_orphans(&self, entries: &[Session], config: &Config, report: &mut DoctorReport) {
-        let canonical = |path: &Path| {
-            self.host
-                .canonicalize_lenient(path)
-                .unwrap_or_else(|_| path.to_path_buf())
-        };
         let claimed: BTreeSet<PathBuf> = entries
             .iter()
-            .map(|entry| canonical(entry.worktree_path()))
+            .map(|entry| self.host.canonical_or_given(entry.worktree_path()))
             .collect();
         let root = config.naming().worktree_root();
         for directory in self.workspace.list_worktree_dirs(root).unwrap_or_default() {
-            if !claimed.contains(&canonical(&directory)) {
+            if !claimed.contains(&self.host.canonical_or_given(&directory)) {
                 report.warning(format!(
                     "orphaned worktree {}, no session claims it",
                     directory.display()

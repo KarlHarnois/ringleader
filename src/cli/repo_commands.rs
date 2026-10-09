@@ -57,9 +57,7 @@ impl<'a> RepoCommands<'a> {
     }
 
     pub fn list(&mut self) -> Result<u8, CommandStop> {
-        let discovery = self
-            .session
-            .wait(&self.service.discover_repos(self.service.launch_directory()))?;
+        let discovery = self.session.wait(&self.service.discover_repos())?;
         for repo in discovery.repos() {
             let marker = if repo.is_explicit() {
                 "  [[repos]]"

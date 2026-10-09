@@ -116,9 +116,8 @@ impl DirectoryRepoScanner {
                 RepoKind::LinkedWorktree(_) | RepoKind::Submodule(_) => return None,
             },
         };
-        let basename = top_level.file_name()?.to_string_lossy().into_owned();
         Some(Repo::discovered(
-            RepoName::from_basename(&basename).ok()?,
+            RepoName::of_directory(&top_level).ok()?,
             &top_level,
         ))
     }

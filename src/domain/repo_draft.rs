@@ -37,7 +37,7 @@ impl RepoDraft {
     fn repo_name(&self) -> Option<RepoName> {
         match &self.name {
             Some(name) => RepoName::parse(name).ok(),
-            None => RepoName::from_basename(&self.path.file_name()?.to_string_lossy()).ok(),
+            None => RepoName::of_directory(&self.path).ok(),
         }
     }
 

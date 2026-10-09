@@ -1,10 +1,12 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::style::Style;
 use ratatui::text::Line;
 
 use super::chosen_repo::ChosenRepo;
 use super::repo_finder::RepoFinder;
 use crate::application::SessionService;
 use crate::domain::Repo;
+use crate::ui::text_fit::TextFit;
 use crate::ui::theme::Theme;
 
 pub struct RepoPicker {
@@ -14,9 +16,6 @@ pub struct RepoPicker {
 }
 
 impl RepoPicker {
-    const FIELD_HINTS: &'static str =
-        "Type to find a repo · Enter next field · Ctrl-S create · Esc cancel";
-
     pub fn open(service: &SessionService) -> Self {
         Self {
             chosen: ChosenRepo::open(service),
@@ -25,24 +24,12 @@ impl RepoPicker {
         }
     }
 
-    pub fn has_open_form(&self) -> bool {
-        self.searching
-    }
-
-    pub fn hints(&self) -> &'static str {
-        if self.searching {
-            self.finder.hints()
-        } else {
-            Self::FIELD_HINTS
-        }
+    pub fn hints(&self) -> Option<&'static str> {
+        self.searching.then(|| self.finder.hints())
     }
 
     pub fn selected_repo(&self) -> Option<&Repo> {
         self.chosen.repo()
-    }
-
-    pub fn summary(&self) -> String {
-        self.chosen.text()
     }
 
     pub fn poll(&mut self) -> PickerStep {
@@ -66,11 +53,25 @@ impl RepoPicker {
     }
 
     pub fn paste(&mut self, text: &str) -> Result<(), String> {
-        self.finder.paste(text)
+        if self.searching {
+            self.finder.paste(text)
+        } else {
+            Ok(())
+        }
     }
 
-    pub fn search_lines(&self, width: usize, room: usize, theme: &Theme) -> Vec<Line<'static>> {
-        self.finder.lines(width, room, theme)
+    pub fn lines(
+        &self,
+        width: usize,
+        room: usize,
+        summary_style: Style,
+        theme: &Theme,
+    ) -> Vec<Line<'static>> {
+        if self.searching {
+            return self.finder.lines(width, room, theme);
+        }
+        let summary = TextFit::new(&self.chosen.text()).right_truncated(width);
+        vec![Line::styled(summary, summary_style)]
     }
 
     fn search_key(&mut self, key: &KeyEvent, service: &SessionService) -> PickerStep {
@@ -140,8 +141,7 @@ mod tests {
         fn opened(service: &SessionService) -> RepoPicker {
             let mut picker = RepoPicker::open(service);
             Self::settle(&mut picker, |picker| {
-                !picker.summary().starts_with("Finding")
-                    && !Self::search_text(picker).contains("Searching")
+                !Self::text(picker).starts_with("Finding")
             });
             picker
         }
@@ -174,9 +174,13 @@ mod tests {
             picker.handle_key(&KeyEvent::new(code, KeyModifiers::NONE), service)
         }
 
-        fn search_text(picker: &RepoPicker) -> String {
+        fn is_searching(picker: &RepoPicker) -> bool {
+            picker.hints().is_some()
+        }
+
+        fn text(picker: &RepoPicker) -> String {
             picker
-                .search_lines(60, 10, &Theme)
+                .lines(60, 10, Theme.base(), &Theme)
                 .iter()
                 .map(|line| {
                     line.spans
@@ -193,14 +197,17 @@ mod tests {
     fn the_field_says_it_is_finding_the_default_until_it_resolves() {
         let picker = RepoPicker::open(&PickerFixture::fixture().service());
 
-        assert_eq!(picker.summary(), "Finding the repo you started in…");
+        assert_eq!(
+            PickerFixture::text(&picker),
+            "Finding the repo you started in…"
+        );
     }
 
     #[test]
     fn the_field_shows_the_repo_ringleader_started_in() {
         let picker = PickerFixture::opened(&PickerFixture::fixture().service());
 
-        assert_eq!(picker.summary(), "example-project");
+        assert_eq!(PickerFixture::text(&picker), "example-project");
         assert_eq!(
             picker.selected_repo().unwrap().path(),
             Path::new(ServiceFixture::REPO)
@@ -211,7 +218,7 @@ mod tests {
     fn without_a_default_the_field_asks_for_a_search() {
         let picker = PickerFixture::opened(&ServiceFixture::new().service());
 
-        assert_eq!(picker.summary(), "none, type to find one");
+        assert_eq!(PickerFixture::text(&picker), "none, type to find one");
         assert_eq!(picker.selected_repo(), None);
     }
 
@@ -223,8 +230,8 @@ mod tests {
         let step = PickerFixture::press(&mut picker, &service, KeyCode::Char('r'));
 
         assert_eq!(step, PickerStep::Handled);
-        assert!(picker.has_open_form());
-        assert!(PickerFixture::search_text(&picker).starts_with("Find: r█"));
+        assert!(PickerFixture::is_searching(&picker));
+        assert!(PickerFixture::text(&picker).starts_with("Find: r█"));
     }
 
     #[test]
@@ -236,7 +243,7 @@ mod tests {
             .map(|code| PickerFixture::press(&mut picker, &service, code));
 
         assert_eq!(steps, [PickerStep::Ignored; 3]);
-        assert!(!picker.has_open_form());
+        assert!(!PickerFixture::is_searching(&picker));
     }
 
     #[test]
@@ -246,11 +253,14 @@ mod tests {
         let mut picker = PickerFixture::opened(&service);
 
         PickerFixture::type_text(&mut picker, &service, "gate");
+        PickerFixture::settle(&mut picker, |picker| {
+            PickerFixture::text(picker).contains("1/1 repos under ~")
+        });
         let step = PickerFixture::press(&mut picker, &service, KeyCode::Enter);
 
         assert_eq!(step, PickerStep::Picked);
-        assert!(!picker.has_open_form());
-        assert_eq!(picker.summary(), "api-gateway");
+        assert!(!PickerFixture::is_searching(&picker));
+        assert_eq!(PickerFixture::text(&picker), "api-gateway");
         assert_eq!(fixture.config_source().write_count(), 0);
     }
 
@@ -262,7 +272,7 @@ mod tests {
 
         PickerFixture::press(&mut picker, &service, KeyCode::Esc);
 
-        assert!(!picker.has_open_form());
+        assert!(!PickerFixture::is_searching(&picker));
         assert_eq!(
             picker.selected_repo().unwrap().path(),
             Path::new(ServiceFixture::REPO)
@@ -294,7 +304,11 @@ mod tests {
 
         PickerFixture::press(&mut picker, &service, KeyCode::Char('a'));
 
-        assert!(on_the_field.starts_with("Type to find a repo · Enter next field"));
-        assert!(picker.hints().ends_with("Enter pick · Esc back"));
+        assert_eq!(on_the_field, None);
+        assert!(
+            picker
+                .hints()
+                .is_some_and(|hints| hints.ends_with("Enter pick · Esc back"))
+        );
     }
 }

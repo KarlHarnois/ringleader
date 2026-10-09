@@ -145,10 +145,7 @@ impl Doctor {
     }
 
     fn check_config_writable(&self, config_path: &Path, report: &mut DoctorReport) {
-        let canonical = self
-            .host
-            .canonicalize_lenient(config_path)
-            .unwrap_or_else(|_| config_path.to_path_buf());
+        let canonical = self.host.canonical_or_given(config_path);
         if canonical.starts_with(Self::NIX_STORE) {
             report.warning(format!(
                 "config {} is Nix-managed, Ringleader cannot write it",

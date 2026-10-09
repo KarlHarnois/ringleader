@@ -1,10 +1,11 @@
+use std::cmp::Reverse;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::pending::Pending;
 use super::ports::{HostProbe, RepoScanner};
 use super::repo_merge::RepoMerge;
-use crate::domain::Repo;
+use crate::domain::{Repo, Session};
 
 pub struct DefaultRepo {
     scanner: Arc<dyn RepoScanner>,
@@ -25,10 +26,11 @@ impl DefaultRepo {
         }
     }
 
-    pub fn find(&self, explicit: Vec<Repo>, recently_used: Vec<PathBuf>) -> Pending<Option<Repo>> {
+    pub fn find(&self, explicit: Vec<Repo>, sessions: &[Session]) -> Pending<Option<Repo>> {
         let scanner = Arc::clone(&self.scanner);
         let host = Arc::clone(&self.host);
         let launch_directory = self.launch_directory.clone();
+        let recently_used = Self::repo_paths_newest_first(sessions);
         Pending::start(move || {
             let launch_repo = scanner
                 .resolve_scope(&launch_directory)
@@ -41,6 +43,15 @@ impl DefaultRepo {
             let merge = RepoMerge::new(host.as_ref());
             Ok(chosen.and_then(|top_level| merge.resolved(&top_level, &explicit).ok()))
         })
+    }
+
+    fn repo_paths_newest_first(sessions: &[Session]) -> Vec<PathBuf> {
+        let mut newest_first: Vec<&Session> = sessions.iter().collect();
+        newest_first.sort_by_key(|session| Reverse(session.created_at()));
+        newest_first
+            .iter()
+            .map(|session| session.repo_path().to_path_buf())
+            .collect()
     }
 }
 
