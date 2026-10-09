@@ -72,8 +72,7 @@ impl RepoCatalog {
     }
 
     pub fn default_repo(&self, config: &Config, sessions: &[Session]) -> Pending<Option<Repo>> {
-        self.default_repo
-            .find(config.repos().to_vec(), sessions.to_vec())
+        self.default_repo.find(config.repos().to_vec(), sessions)
     }
 
     pub fn add_repo(&self, request: AddRepoRequest, config: &Config) -> Pending<RepoAddition> {

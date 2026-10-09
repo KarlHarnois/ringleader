@@ -26,29 +26,32 @@ impl DefaultRepo {
         }
     }
 
-    pub fn find(&self, explicit: Vec<Repo>, sessions: Vec<Session>) -> Pending<Option<Repo>> {
+    pub fn find(&self, explicit: Vec<Repo>, sessions: &[Session]) -> Pending<Option<Repo>> {
         let scanner = Arc::clone(&self.scanner);
         let host = Arc::clone(&self.host);
         let launch_directory = self.launch_directory.clone();
-        let newest_first = Self::newest_first(sessions);
+        let recently_used = Self::repo_paths_newest_first(sessions);
         Pending::start(move || {
             let launch_repo = scanner
                 .resolve_scope(&launch_directory)
                 .ok()
                 .and_then(|scope| scope.enclosing_repo().map(Path::to_path_buf));
-            let mut still_present = newest_first
-                .iter()
-                .map(Session::repo_path)
+            let mut still_present = recently_used
+                .into_iter()
                 .filter(|path| host.path_exists(path));
-            let chosen = launch_repo.or_else(|| still_present.next().map(Path::to_path_buf));
+            let chosen = launch_repo.or_else(|| still_present.next());
             let merge = RepoMerge::new(host.as_ref());
             Ok(chosen.and_then(|top_level| merge.resolved(&top_level, &explicit).ok()))
         })
     }
 
-    fn newest_first(mut sessions: Vec<Session>) -> Vec<Session> {
-        sessions.sort_by_key(|session| Reverse(session.created_at()));
-        sessions
+    fn repo_paths_newest_first(sessions: &[Session]) -> Vec<PathBuf> {
+        let mut newest_first: Vec<&Session> = sessions.iter().collect();
+        newest_first.sort_by_key(|session| Reverse(session.created_at()));
+        newest_first
+            .iter()
+            .map(|session| session.repo_path().to_path_buf())
+            .collect()
     }
 }
 
