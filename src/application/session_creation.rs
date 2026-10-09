@@ -278,7 +278,7 @@ mod tests {
     }
 
     #[test]
-    fn the_session_spec_carries_environment_names_and_never_values() {
+    fn the_session_spec_carries_inherited_names_and_never_their_values() {
         let fixture = ServiceFixture::new();
 
         CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap();
@@ -286,6 +286,7 @@ mod tests {
         let spec = fixture.multiplexer().specs().pop().unwrap();
         assert_eq!(spec.launch().env_names(), ["ANTHROPIC_API_KEY"]);
         assert_eq!(spec.removed_env_names(), ["ANTHROPIC_API_KEY"]);
+        assert!(spec.launch().env_assignments().is_empty());
     }
 
     #[test]
