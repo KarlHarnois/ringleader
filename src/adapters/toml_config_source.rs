@@ -45,7 +45,8 @@ command = "claude"
 # args = ["--model", "opus"]
 env = ["ANTHROPIC_API_KEY"]
 # env copies these variables from Ringleader's environment. set_env sets fixed
-# values, for example the config directory of a second Claude account.
+# values, for example the config directory of a second Claude account. Values
+# are used as written: only a leading ~/ expands. Keep secrets in env.
 # set_env = { CLAUDE_CONFIG_DIR = "~/.claude-work" }
 prompt_args = ["{prompt}"]
 

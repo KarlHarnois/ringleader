@@ -28,7 +28,7 @@ Ctrl-Q returns from a session to the TUI. Outside tmux it detaches the client, a
 
 ## Agent environment
 
-An agent starts with a fixed baseline of variables such as `PATH` and `HOME`. Its `env` list copies more variables from the environment Ringleader runs in, and its `set_env` table sets fixed values, where a value starting with `~/` expands to your home. To run Claude Code under two accounts, add one agent per account and pick it when you create a session:
+An agent starts with a fixed baseline of variables such as `PATH` and `HOME`. Its `env` list copies more variables from the environment Ringleader runs in, and its `set_env` table sets fixed values. A `set_env` value is used as written, except that a leading `~/` expands to your home. Variables such as `$HOME` are not expanded. The values sit in plain text in the config, so pass secrets through `env` instead. To run Claude Code under two accounts, add one agent per account and pick it when you create a session:
 
 ```toml
 [[agents]]
