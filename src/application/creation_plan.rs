@@ -70,10 +70,8 @@ pub struct CreationPlan {
     repo: Repo,
     base_branch: Option<BaseBranch>,
     naming: NamingScheme,
-    agent: String,
+    agent: Agent,
     argv: Vec<String>,
-    env_names: Vec<String>,
-    env_assignments: Vec<(String, String)>,
     removed_env_names: Vec<String>,
     size: SessionSize,
 }
@@ -92,10 +90,8 @@ impl CreationPlan {
                 .clone()
                 .or_else(|| request.repo.base_branch().cloned()),
             naming: config.naming().clone(),
-            agent: agent.name().to_string(),
+            agent: agent.clone(),
             argv: agent.launch_argv(&request.prompt),
-            env_names: agent.env_names().to_vec(),
-            env_assignments: agent.env_assignments().to_vec(),
             removed_env_names: config.agent_env_union(),
             size: config.session_size(),
         })
@@ -135,8 +131,7 @@ impl CreationPlan {
     }
 
     pub fn spec(&self, start: &StartPoint) -> SessionSpec {
-        let launch = AgentLaunch::new(self.argv.clone(), &self.env_names, &self.worktree())
-            .with_env_assignments(&self.env_assignments);
+        let launch = AgentLaunch::for_agent(&self.agent, self.argv.clone(), &self.worktree());
         SessionSpec::new(&self.tmux_name(), self.metadata(start), launch)
             .sized(self.size)
             .removing_env_names(&self.removed_env_names)
@@ -152,7 +147,7 @@ impl CreationPlan {
         SessionMetadata::new(
             SessionRepo::new(self.repo.name().clone(), self.repo.path()),
             SessionWorktree::new(&self.worktree(), &self.branch(), start.base_commit()),
-            &self.agent,
+            self.agent.name(),
         )
     }
 }

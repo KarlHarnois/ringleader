@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
-use crate::domain::{SessionMetadata, SessionObservation, SessionSize};
+use crate::domain::{Agent, SessionMetadata, SessionObservation, SessionSize};
 
 pub trait Multiplexer {
     fn create_session(&self, spec: &SessionSpec) -> Result<PathBuf, MultiplexerError>;
@@ -109,6 +109,10 @@ impl AgentLaunch {
             env_assignments: Vec::new(),
             worktree: worktree.to_path_buf(),
         }
+    }
+
+    pub fn for_agent(agent: &Agent, argv: Vec<String>, worktree: &Path) -> Self {
+        Self::new(argv, agent.env_names(), worktree).with_env_assignments(agent.env_assignments())
     }
 
     pub fn with_env_assignments(self, assignments: &[(String, String)]) -> Self {

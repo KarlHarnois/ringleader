@@ -53,12 +53,7 @@ impl SessionRestart {
     }
 
     fn launch(agent: &Agent, session: &Session) -> AgentLaunch {
-        AgentLaunch::new(
-            agent.restart_argv(),
-            agent.env_names(),
-            session.worktree_path(),
-        )
-        .with_env_assignments(agent.env_assignments())
+        AgentLaunch::for_agent(agent, agent.restart_argv(), session.worktree_path())
     }
 
     fn check_worktree(&self, session: &Session) -> Result<(), ServiceError> {
