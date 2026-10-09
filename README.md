@@ -26,6 +26,18 @@ Run `ringleader` with no arguments in a directory that holds your repos. It open
 
 Ctrl-Q returns from a session to the TUI. Outside tmux it detaches the client, and inside tmux it switches back to the TUI's pane. Open extra shells with `t` instead of splitting the agent window.
 
+## Agent environment
+
+An agent starts with a fixed baseline of variables such as `PATH` and `HOME`. Its `env` list copies more variables from the environment Ringleader runs in, and its `set_env` table sets fixed values, where a value starting with `~/` expands to your home. To run Claude Code under two accounts, add one agent per account and pick it when you create a session:
+
+```toml
+[[agents]]
+name = "claude-work"
+command = "claude"
+set_env = { CLAUDE_CONFIG_DIR = "~/.claude-work" }
+prompt_args = ["{prompt}"]
+```
+
 ## Keys
 
 | Key | Action |
