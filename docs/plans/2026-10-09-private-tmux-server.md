@@ -191,6 +191,9 @@ Where the implementation departs from the text above:
 - `TmuxTestServer` starts every test server with the rendered config, not only the tests of the generated config, because the post-create check in `create_session` needs a `detach-client` binding.
 - The `kill-session` notes in the restart, rename, and delete results come from `SessionService::earlier_server`, which the CLI and the TUI query before the command, instead of from new outcome types.
 - A changed user file from D9 does not change the hash, so it reaches a running server only when the server next starts. The README says so.
+- A reapply whose `source-file` exits 1 still counts as applied when the server then holds the current hash, because tmux runs every line of the render after a failing line in the user file. tmux's error goes to the log. A reapply that leaves the old hash still fails.
+- Rename records the entry on the private socket, as restart does. Without that, an entry from an earlier server kept its old socket under the new tmux name, and every hand command named a session that does not exist there.
+- The naming drift row warns only when `worktree_root` or `branch_prefix` differ from the config. An entry recorded under an earlier `tmux_prefix` gets an info line, since no setting can clear it.
 
 ## 5. What goes away
 
