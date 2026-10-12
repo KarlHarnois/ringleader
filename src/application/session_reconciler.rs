@@ -1,27 +1,28 @@
-use super::metadata_check::MetadataCheck;
 use super::ports::HostProbe;
 use super::reconciliation::Reconciliation;
-use super::unregistered_placement::UnregisteredPlacement;
+use super::worktree_containment::WorktreeContainment;
 use crate::domain::{
-    Config, PairMismatch, Session, SessionClassifier, SessionName, SessionObservation,
-    SessionState, SessionSummary, UnmanagedSession,
+    Config, NamingScheme, PairMismatch, Registration, Session, SessionClassifier, SessionMetadata,
+    SessionName, SessionObservation, SessionState, SessionSummary, UnmanagedSession,
 };
 
 pub struct SessionReconciler<'a> {
     config: &'a Config,
+    host: &'a dyn HostProbe,
     classifier: SessionClassifier,
-    check: MetadataCheck<'a>,
-    placement: UnregisteredPlacement<'a>,
+    containment: WorktreeContainment<'a>,
     now: u64,
 }
 
 impl<'a> SessionReconciler<'a> {
+    const EXACT_LABEL: &'static str = "=";
+
     pub fn new(config: &'a Config, host: &'a dyn HostProbe, now: u64) -> Self {
         Self {
             config,
+            host,
             classifier: SessionClassifier::new(config.activity_idle_seconds()),
-            check: MetadataCheck::new(host),
-            placement: UnregisteredPlacement::new(config, host),
+            containment: WorktreeContainment::new(host),
             now,
         }
     }
@@ -45,7 +46,11 @@ impl<'a> SessionReconciler<'a> {
                 reconciliation.add_row(self.managed_row(rekeyed.clone(), &observations[found]));
                 reconciliation.rekey(index, rekeyed);
             } else {
-                reconciliation.add_row(self.stopped_row(entry));
+                reconciliation.add_row(SessionSummary::managed(
+                    entry.clone(),
+                    SessionState::Stopped,
+                    false,
+                ));
             }
         }
         for (index, observation) in observations.iter().enumerate() {
@@ -55,10 +60,6 @@ impl<'a> SessionReconciler<'a> {
         }
         reconciliation.record_observations(observations);
         reconciliation
-    }
-
-    fn stopped_row(&self, entry: &Session) -> SessionSummary {
-        SessionSummary::managed(entry.clone(), SessionState::Stopped, false)
     }
 
     fn paired_row(&self, entry: &Session, observation: &SessionObservation) -> SessionSummary {
@@ -82,7 +83,7 @@ impl<'a> SessionReconciler<'a> {
         entry: &Session,
         observation: &SessionObservation,
     ) -> Option<PairMismatch> {
-        let Some(metadata) = self.check.valid_metadata(observation, entry.naming()) else {
+        let Some(metadata) = self.valid_metadata(observation, entry.naming()) else {
             return Some(PairMismatch::NoValidMetadata);
         };
         if metadata.worktree_path() != entry.worktree_path() {
@@ -103,7 +104,7 @@ impl<'a> SessionReconciler<'a> {
         observations: &[SessionObservation],
     ) -> Option<(usize, Session)> {
         let claimants: Vec<usize> = (0..observations.len())
-            .filter(|&index| self.check.claims_entry(&observations[index], entry))
+            .filter(|&index| self.claims_entry(&observations[index], entry))
             .collect();
         let [found] = claimants.as_slice() else {
             return None;
@@ -146,25 +147,106 @@ impl<'a> SessionReconciler<'a> {
         SessionName::from_slug(stripped).ok()
     }
 
+    fn claims_entry(&self, observation: &SessionObservation, entry: &Session) -> bool {
+        observation.tmux_name() != entry.tmux_name()
+            && self
+                .valid_metadata(observation, entry.naming())
+                .is_some_and(|metadata| metadata.worktree_path() == entry.worktree_path())
+    }
+
     fn place_unregistered(
         &self,
         reconciliation: &mut Reconciliation,
         observation: &SessionObservation,
         entries: &[Session],
     ) {
-        match self
-            .placement
-            .adoption(reconciliation.entries(), observation)
-        {
+        match self.adoption(reconciliation.entries(), observation) {
             Some(adopted) => {
                 let row = self.managed_row(adopted.clone(), observation);
                 reconciliation.adopt(adopted, row);
             }
             None => reconciliation.add_row(SessionSummary::unmanaged(UnmanagedSession::new(
-                &self.placement.unmanaged_label(observation, entries),
+                &self.unmanaged_label(observation, entries),
                 observation.clone(),
             ))),
         }
+    }
+
+    fn unmanaged_label(&self, observation: &SessionObservation, entries: &[Session]) -> String {
+        let tmux_name = observation.tmux_name();
+        self.config
+            .naming()
+            .strip_tmux_prefix(tmux_name)
+            .or_else(|| self.recorded_prefix_label(observation, entries))
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("{}{tmux_name}", Self::EXACT_LABEL))
+    }
+
+    fn recorded_prefix_label<'o>(
+        &self,
+        observation: &'o SessionObservation,
+        entries: &[Session],
+    ) -> Option<&'o str> {
+        entries
+            .iter()
+            .filter(|entry| self.claims_entry(observation, entry))
+            .find_map(|entry| entry.naming().strip_tmux_prefix(observation.tmux_name()))
+    }
+
+    fn adoption(&self, entries: &[Session], observation: &SessionObservation) -> Option<Session> {
+        let stripped = self
+            .config
+            .naming()
+            .strip_tmux_prefix(observation.tmux_name())?;
+        let name = SessionName::from_slug(stripped).ok()?;
+        let metadata = self.valid_metadata(observation, self.config.naming())?;
+        if entries
+            .iter()
+            .any(|entry| self.blocks_adoption(entry, &name, metadata))
+        {
+            return None;
+        }
+        let registration = Registration::new(
+            observation.tmux().clone(),
+            self.recorded_naming(),
+            observation.created_at(),
+        );
+        Some(Session::new(name, metadata.clone(), registration))
+    }
+
+    fn blocks_adoption(
+        &self,
+        entry: &Session,
+        name: &SessionName,
+        metadata: &SessionMetadata,
+    ) -> bool {
+        let same_branch_in_repo = entry.branch() == metadata.branch()
+            && self.host.canonical_or_given(entry.repo_path())
+                == self.host.canonical_or_given(metadata.repo_path());
+        entry.name() == name
+            || entry.worktree_path() == metadata.worktree_path()
+            || same_branch_in_repo
+    }
+
+    fn recorded_naming(&self) -> NamingScheme {
+        let naming = self.config.naming();
+        NamingScheme::new(
+            &self.host.canonical_or_given(naming.worktree_root()),
+            naming.tmux_prefix(),
+        )
+    }
+
+    fn valid_metadata<'o>(
+        &self,
+        observation: &'o SessionObservation,
+        naming: &NamingScheme,
+    ) -> Option<&'o SessionMetadata> {
+        observation.metadata().filter(|metadata| {
+            metadata.has_absolute_paths()
+                && self
+                    .containment
+                    .contains(naming.worktree_root(), metadata.worktree_path())
+        })
     }
 }
 
