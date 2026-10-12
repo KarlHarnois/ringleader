@@ -6,6 +6,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use super::delete_session_dialog::DeleteSessionDialog;
 use super::dialog_labels::DialogLabels;
+use super::home_path::HomePath;
 use super::new_session_dialog::NewSessionDialog;
 use super::rename_session_dialog::RenameSessionDialog;
 use crate::adapters::app_log::AppLog;
@@ -56,11 +57,10 @@ impl Dialog {
     fn help(service: &SessionService) -> Self {
         let log_path = service.state_directory().join(AppLog::FILE_NAME);
         let tmux_prefix = service.config().naming().tmux_prefix();
-        Self::Help(Box::new(HelpView::new(
-            &service.config_path(),
-            &log_path,
-            tmux_prefix,
-        )))
+        let home = HomePath::new(service.home_directory());
+        Self::Help(Box::new(
+            HelpView::new(&service.config_path(), &log_path, tmux_prefix).with_home(home),
+        ))
     }
 
     pub fn poll(&mut self) {

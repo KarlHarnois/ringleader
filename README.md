@@ -36,7 +36,9 @@ While the repository is private, `git+https` authenticates through your git cred
 
 Run `ringleader` with no arguments in a directory that holds your repos. It opens the TUI and writes a commented config to `~/.config/ringleader/config.toml`, with Claude Code and opencode as agents. Press `n` to create a session, pick a repo and an agent, and optionally give an initial prompt.
 
-Ctrl-Q returns from a session to the TUI. Outside tmux it detaches the client, and inside tmux it switches back to the TUI's pane. Open extra shells with `t` instead of splitting the agent window.
+Ctrl-Q returns from a session to the TUI. Outside tmux it detaches the client, and inside tmux it switches back to the TUI's pane. It works only in sessions whose name starts with `tmux_prefix`. A terminal emulator started in the foreground of a tmux pane counts as inside tmux, so run `env -u TMUX -u TMUX_PANE ringleader` to force outside mode. Open extra shells with `t` instead of splitting the agent window, because output in a split pane counts as agent activity.
+
+Set `bell_on_waiting = true` to ring the terminal bell when an agent finishes working and waits for input. It stays quiet for an agent whose window a client is showing, and for an agent that exits. An attach from outside tmux suspends the TUI, so the bell rings only when Ringleader runs inside tmux or while the TUI shows.
 
 ## Agent environment
 
@@ -58,9 +60,9 @@ prompt_args = ["{prompt}"]
 | `d` | delete the selected session |
 | `R` | rename the selected session |
 | `Enter` | attach to the selected session |
-| `t` | open a shell in the session's worktree |
+| `t` | open a shell in the selected session's worktree |
 | `s` | restart an exited or stopped session |
-| `r` | reload the config and the registry |
+| `r` | reload the config and the registry and refresh diffs |
 | `↑` `↓` `j` `k` `h` `l` | move the selection |
 | `?` | help |
 | `q` | quit, the sessions keep running |

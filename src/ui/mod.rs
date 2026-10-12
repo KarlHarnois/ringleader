@@ -9,6 +9,7 @@ pub mod event_loop;
 pub mod help_view;
 pub mod home_state;
 pub mod home_view;
+pub mod legend;
 pub mod preview_feed;
 pub mod preview_panel;
 pub mod preview_text;

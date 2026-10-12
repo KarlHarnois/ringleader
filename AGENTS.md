@@ -202,6 +202,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── preview_panel.rs        # PreviewPanel, the Full tier's preview
     │   ├── preview_text.rs         # PreviewText, the captured rows that fit the preview
     │   ├── help_view.rs            # HelpView
+    │   ├── legend.rs               # Legend, the help's symbols and their meanings, wrapped under a label
     │   ├── status_bar.rs           # StatusBar
     │   ├── theme.rs                # Theme
     │   └── dialogs/
