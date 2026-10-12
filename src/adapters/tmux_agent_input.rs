@@ -17,21 +17,32 @@ impl<'a> TmuxAgentInput<'a> {
     const CURSOR_FORMAT: &'static str =
         "ringleader-cursor #{pane_dead} #{pane_in_mode} #{cursor_flag} #{cursor_x} #{cursor_y}";
     const POLL_INTERVAL: Duration = Duration::from_millis(100);
+    const LINE_SETTLE: Duration = Duration::from_millis(300);
+    const NEXT_LINE_PATIENCE: Duration = Duration::from_secs(2);
 
     pub fn new(tmux: &'a TmuxCommand, patience: Duration) -> Self {
         Self { tmux, patience }
     }
 
     pub fn type_when_ready(&self, pane: &str, lines: &[String]) -> Result<(), InputError> {
-        self.wait_for_prompt(pane)?;
-        for line in lines {
-            self.type_line(pane, line)?;
+        let Some((first, rest)) = lines.split_first() else {
+            return Ok(());
+        };
+        self.type_at_prompt(pane, first, self.patience)?;
+        for line in rest {
+            thread::sleep(Self::LINE_SETTLE);
+            self.type_at_prompt(pane, line, Self::NEXT_LINE_PATIENCE)?;
         }
         Ok(())
     }
 
-    fn wait_for_prompt(&self, pane: &str) -> Result<(), InputError> {
-        let deadline = Instant::now() + self.patience;
+    fn type_at_prompt(&self, pane: &str, line: &str, patience: Duration) -> Result<(), InputError> {
+        self.wait_for_prompt(pane, patience)?;
+        Ok(self.type_line(pane, line)?)
+    }
+
+    fn wait_for_prompt(&self, pane: &str, patience: Duration) -> Result<(), InputError> {
+        let deadline = Instant::now() + patience;
         loop {
             let cursor = self.cursor(pane)?;
             if self.is_at_prompt(pane, &cursor)? {
@@ -155,6 +166,10 @@ mod tests {
         const SHORT_PATIENCE: Duration = Duration::from_millis(300);
         const LONG_PATIENCE: Duration = Duration::from_secs(5);
         const AT_PROMPT: &'static str = "printf '> '; exec cat";
+        const REDRAWS_PROMPT: &'static str =
+            "printf '> '; while read -r line; do printf 'got %s\\n> ' \"$line\"; done";
+        const DIALOG_AFTER_A_LINE: &'static str =
+            "printf '> '; read -r line; printf '\\033[?25l[dialog] '; exec cat";
         const PLACEHOLDER: &'static str = "printf '> Try this\\r\\033[2C'; exec cat";
         const DRAFT: &'static str = "printf '> delete the old'; exec cat";
         const DRAFT_SECOND_LINE: &'static str = "printf '> first line\\n  '; exec cat";
@@ -239,7 +254,7 @@ mod tests {
 
     #[test]
     fn each_line_is_typed_in_order() {
-        let fixture = InputFixture::running(InputFixture::AT_PROMPT);
+        let fixture = InputFixture::running(InputFixture::REDRAWS_PROMPT);
 
         fixture
             .type_lines(&["first line", "second line"], InputFixture::LONG_PATIENCE)
@@ -249,6 +264,17 @@ mod tests {
         let screen = fixture.screen();
         let first = screen.find("first line").unwrap();
         assert!(first < screen.find("second line").unwrap());
+    }
+
+    #[test]
+    fn a_line_is_not_typed_into_a_dialog_the_previous_line_opened() {
+        let fixture = InputFixture::running(InputFixture::DIALOG_AFTER_A_LINE);
+
+        let typed = fixture.type_lines(&["/first", "second"], InputFixture::LONG_PATIENCE);
+
+        assert_eq!(typed, Err(InputError::NotReady));
+        assert!(fixture.shows("[dialog]"));
+        assert!(!fixture.screen().contains("second"));
     }
 
     #[test]
