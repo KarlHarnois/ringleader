@@ -76,6 +76,13 @@ mod tests {
         fn shows_logo(rows: &[String]) -> bool {
             rows.iter().any(|row| row.contains(EmptyState::LOGO[1]))
         }
+
+        fn drawn_rows(rows: &[String]) -> Vec<&str> {
+            rows.iter()
+                .map(|row| row.trim())
+                .filter(|row| !row.is_empty())
+                .collect()
+        }
     }
 
     #[test]
@@ -115,15 +122,13 @@ mod tests {
     fn an_area_narrower_than_the_logo_shows_only_the_message() {
         let rows = ScreenFixture::rows(61, 8);
 
-        assert!(!ScreenFixture::shows_logo(&rows));
-        assert!(rows.concat().contains("No sessions yet."));
+        assert_eq!(ScreenFixture::drawn_rows(&rows), EmptyState::MESSAGE);
     }
 
     #[test]
     fn an_area_too_short_for_the_logo_and_message_shows_only_the_message() {
         let rows = ScreenFixture::rows(80, 7);
 
-        assert!(!ScreenFixture::shows_logo(&rows));
-        assert!(rows.concat().contains("Press n to create one."));
+        assert_eq!(ScreenFixture::drawn_rows(&rows), EmptyState::MESSAGE);
     }
 }
