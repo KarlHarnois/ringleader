@@ -1,6 +1,6 @@
 # Plan: Run every Ringleader session on a private tmux server
 
-> Status: active. Draft for the project owner's review. Section 2 lists the choices that still need the owner's answer. Until they are answered, the recommendation in each row is the working assumption.
+> Status: active. On 2026-10-12 the owner accepted the recommendation in every row of section 2. The real-terminal checks of milestone 0 remain.
 
 This plan supersedes the v1 decisions about the user's tmux server, the Ctrl-Q return binding, and the inside-tmux and outside-tmux split. Those are in `docs/plans/v1-bootstrap.md` sections 2, 5, 6, 8, and 16. The v1 plan stays as a historical record. Follow `AGENTS.md` for everything this plan does not change.
 
@@ -22,7 +22,9 @@ The goal: Ringleader behaves the same whether it runs inside tmux or outside, an
 - One attach flow in every context. The TUI suspends, runs `tmux attach-session` as a foreground child with `TMUX` and `TMUX_PANE` removed, and resumes when the child exits. Inside the user's tmux the client is nested. The return key, bound in the generated config, detaches it.
 - Ringleader never reads or writes the user's tmux server. No code path runs `bind-key`, `unbind-key`, or `list-keys` against any server other than the private one.
 
-### Awaiting the owner's answer
+### Accepted by the owner
+
+The owner accepted each recommendation on 2026-10-12. The alternatives stay as a record of what was weighed.
 
 | # | Question | Recommendation | Alternative |
 |---|---|---|---|
@@ -165,7 +167,7 @@ bind-key -T root 'C-q' detach-client
 
 One commit per milestone, after every command under "Commands" in `AGENTS.md` passes. The crate is a binary with no library target, so every new item needs a production caller in the commit that adds it, and every removal takes its last caller with it. Each commit also updates the help text, README, and `AGENTS.md` passages it makes false.
 
-0. **Real-terminal checks.** Run the list at the end of section 7 and record the results there. Settle D12 and D13, and decide whether `history-limit` and `focus-events` need values in section 3.2. No code.
+0. **Real-terminal checks.** Run the list at the end of section 7 and record the results there. Confirm D12 and D13 on real terminals, and decide whether `history-limit` and `focus-events` need values in section 3.2. No code.
 1. **Remove the inside bell** (D10): `ring_bell`, the `list-clients` parser and fixture, the port method, the fake support, and the inside branch of `Bell`. It is independent of the rest and goes away under any outcome.
 2. **Switch to the private server.** This is the largest commit, and its parts cannot land apart. A private server combined with the inside-tmux `switch-client` path breaks the inside case. Once attach drops `prepare_return`, the return binding has no caller, and its startup repair would keep acting on the user's server. Every new type below has its first production caller here. It contains:
    - `ReturnKey`, the `return_key` key and template line, `TmuxServerConfig` with its golden fixture (without the D7 and D9 lines), `XdgPaths::tmux_socket` and `tmux_config`, and `DiagnosticPaths`, shown by help's Files section.
@@ -183,7 +185,7 @@ When every milestone is in, flip the status header to `completed`.
 
 ### Implementation status
 
-As of 2026-10-11, milestones 1 to 7 are in, one commit each, and the recommendation in each D row is what they implement. Milestone 0 is partly done: the tmux 3.2 check and the capture of the agents' keyboard requests ran, and section 7 records the results and the two fixes they led to. The rest needs the owner's real terminals and logged-in agents. Until it runs, D12, D13, and the defaults for `history-limit` and `focus-events` stay working assumptions.
+As of 2026-10-11, milestones 1 to 7 are in, one commit each, and they implement the accepted recommendation in each D row. Milestone 0 is partly done: the tmux 3.2 check and the capture of the agents' keyboard requests ran, and section 7 records the results and the two fixes they led to. The rest needs the owner's real terminals and logged-in agents. Until it runs, the D12 and D13 checks and the defaults for `history-limit` and `focus-events` stay unconfirmed. If an agent turns out to need csi-u, D12 already says what to render.
 
 Where the implementation departs from the text above:
 
