@@ -16,7 +16,7 @@ pub struct TextField {
 }
 
 impl TextField {
-    const LINE_BREAK_MODIFIER: KeyModifiers = KeyModifiers::ALT;
+    const LINE_BREAK_KEY: char = 'j';
     const LINE_BREAK_IN_PATH: &'static str = "a path cannot contain a line break";
 
     pub fn new(kind: FieldKind) -> Self {
@@ -45,10 +45,6 @@ impl TextField {
     pub fn edit(&mut self, key: &KeyEvent) -> bool {
         let typed_text = key.modifiers.difference(KeyModifiers::SHIFT).is_empty();
         match key.code {
-            KeyCode::Enter if self.accepts_line_break(key) => {
-                self.value.push('\n');
-                true
-            }
             KeyCode::Char(character) if typed_text && !character.is_control() => {
                 self.value.push(character);
                 true
@@ -57,16 +53,18 @@ impl TextField {
                 self.delete_word();
                 true
             }
+            KeyCode::Char(Self::LINE_BREAK_KEY)
+                if self.takes_line_breaks() && key.modifiers == KeyModifiers::CONTROL =>
+            {
+                self.value.push('\n');
+                true
+            }
             KeyCode::Backspace => {
                 self.value.pop();
                 true
             }
             _ => false,
         }
-    }
-
-    pub fn accepts_line_break(&self, key: &KeyEvent) -> bool {
-        self.kind == FieldKind::Prompt && key.modifiers == Self::LINE_BREAK_MODIFIER
     }
 
     pub fn paste(&mut self, text: &str) -> Result<(), String> {
@@ -81,6 +79,10 @@ impl TextField {
         };
         self.value.push_str(&pasted);
         Ok(())
+    }
+
+    fn takes_line_breaks(&self) -> bool {
+        self.kind == FieldKind::Prompt
     }
 
     fn wrapped(&self, width: usize, cursor: Option<char>) -> Vec<String> {
@@ -134,8 +136,8 @@ mod tests {
             KeyEvent::new(code, KeyModifiers::NONE)
         }
 
-        fn alt_enter() -> KeyEvent {
-            KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT)
+        fn control_j() -> KeyEvent {
+            KeyEvent::new(KeyCode::Char('j'), KeyModifiers::CONTROL)
         }
 
         fn after_control_w(kind: FieldKind, text: &str) -> (bool, String) {
@@ -270,20 +272,20 @@ mod tests {
     }
 
     #[test]
-    fn alt_enter_adds_a_line_break_to_a_prompt() {
+    fn control_j_adds_a_line_break_to_a_prompt() {
         let mut field = FieldFixture::holding(FieldKind::Prompt, "one");
 
-        field.edit(&FieldFixture::alt_enter());
+        field.edit(&FieldFixture::control_j());
 
         assert_eq!(field.value(), "one\n");
         assert_eq!(field.visible_rows(10, 4, Some('█')), ["one", "█"]);
     }
 
     #[test]
-    fn alt_enter_is_ignored_by_a_name_field() {
+    fn control_j_is_ignored_by_a_name_field() {
         let mut field = FieldFixture::holding(FieldKind::Name, "fix-auth");
 
-        let consumed = field.edit(&FieldFixture::alt_enter());
+        let consumed = field.edit(&FieldFixture::control_j());
 
         assert!(!consumed);
         assert_eq!(field.value(), "fix-auth");

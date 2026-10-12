@@ -60,7 +60,6 @@ impl NewSessionDialog {
         }
         match key.code {
             KeyCode::Esc => return DialogStep::Close,
-            KeyCode::Enter if self.prompt_takes_line_break(key) => self.edit_focused(key),
             KeyCode::Enter => return self.advance(),
             KeyCode::Tab => self.focus = self.focus.next(),
             KeyCode::BackTab => self.focus = self.focus.previous(),
@@ -151,10 +150,6 @@ impl NewSessionDialog {
 
     fn creates(key: &KeyEvent) -> bool {
         key.code == KeyCode::Char(Self::CREATE_KEY) && key.modifiers == KeyModifiers::CONTROL
-    }
-
-    fn prompt_takes_line_break(&self, key: &KeyEvent) -> bool {
-        self.focus == NewSessionField::Prompt && self.prompt.accepts_line_break(key)
     }
 
     fn advance(&mut self) -> DialogStep {
@@ -250,7 +245,7 @@ mod tests {
         const TYPED: &'static str = "/srv/tools";
         const AGENT_HINTS: &'static str =
             "↑ ↓ j k choose · Enter next field · Ctrl-S create · Esc cancel";
-        const PROMPT_HINTS: &'static str = "Alt-Enter new line · Enter create · Esc cancel";
+        const PROMPT_HINTS: &'static str = "Ctrl-J new line · Enter create · Esc cancel";
         const SEARCH_HINTS: &'static str =
             "Type to search · ↑ ↓ ctrl-j ctrl-k choose · Enter pick · Esc back";
         const SEVEN_LINE_PROMPT: &'static str = "one\ntwo\nthree\nfour\nfive\nsix\nseven";
@@ -340,10 +335,6 @@ mod tests {
 
         fn create(dialog: &mut NewSessionDialog, service: &SessionService) -> DialogStep {
             Self::control(dialog, service, 's')
-        }
-
-        fn alt_enter(dialog: &mut NewSessionDialog, service: &SessionService) -> DialogStep {
-            dialog.handle_key(&KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT), service)
         }
 
         fn in_prompt(fixture: &ServiceFixture) -> (NewSessionDialog, SessionService) {
@@ -620,11 +611,11 @@ mod tests {
     }
 
     #[test]
-    fn alt_enter_in_the_prompt_adds_a_line_break_then_enter_creates() {
+    fn control_j_in_the_prompt_adds_a_line_break_then_enter_creates() {
         let (mut dialog, service) = DialogFixture::in_prompt(&DialogFixture::launched_in_repo());
 
         DialogFixture::type_text(&mut dialog, &service, "one");
-        DialogFixture::alt_enter(&mut dialog, &service);
+        DialogFixture::control(&mut dialog, &service, 'j');
         DialogFixture::type_text(&mut dialog, &service, "two");
         let step = DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
 
