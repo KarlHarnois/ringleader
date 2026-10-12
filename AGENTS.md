@@ -126,7 +126,6 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── tool_version.rs       # ToolVersion, the major and minor numbers of a tmux or git version
     │   ├── doctor_report.rs      # DoctorReport, the doctor's info, warning, and problem lines
     │   ├── registry_audit.rs     # RegistryAudit, the doctor's checks of each registry entry
-    │   ├── stopped_entry_audit.rs # StoppedEntryAudit, the doctor's checks of a stopped entry: the tmux server processes in its worktree and claims on it
     │   ├── orphan_audit.rs       # OrphanAudit, the doctor's search for worktrees and marked branches no session claims
     │   ├── server_audit.rs       # ServerAudit, the doctor's checks of Ringleader's tmux server and the return key
     │   └── ports/

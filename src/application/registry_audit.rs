@@ -1,29 +1,31 @@
 use std::sync::Arc;
 
 use super::branch_ownership::BranchOwnership;
+use super::busy_worktree::BusyWorktree;
 use super::doctor_report::DoctorReport;
 use super::orphan_audit::OrphanAudit;
-use super::ports::Workspace;
+use super::ports::{HostProbe, Multiplexer, Workspace};
 use super::reconciliation::Reconciliation;
 use super::service_ports::ServicePorts;
-use super::stopped_entry_audit::StoppedEntryAudit;
 use super::worktree_inspection::WorktreeInspection;
 use crate::domain::{Config, Session, SessionState};
 
 pub struct RegistryAudit {
     inspection: WorktreeInspection,
-    stopped: StoppedEntryAudit,
     orphans: OrphanAudit,
     workspace: Arc<dyn Workspace>,
+    multiplexer: Arc<dyn Multiplexer>,
+    host: Arc<dyn HostProbe>,
 }
 
 impl RegistryAudit {
     pub fn new(ports: &ServicePorts) -> Self {
         Self {
             inspection: WorktreeInspection::new(ports),
-            stopped: StoppedEntryAudit::new(ports),
             orphans: OrphanAudit::new(ports),
             workspace: ports.repos().workspace(),
+            multiplexer: ports.tmux().multiplexer(),
+            host: ports.repos().host(),
         }
     }
 
@@ -86,7 +88,27 @@ impl RegistryAudit {
             ));
         }
         if state == SessionState::Stopped {
-            self.stopped.audit(session, reconciliation, report);
+            self.audit_stopped(session, reconciliation, report);
+        }
+    }
+
+    fn audit_stopped(
+        &self,
+        session: &Session,
+        reconciliation: &Reconciliation,
+        report: &mut DoctorReport,
+    ) {
+        let socket = self.multiplexer.socket();
+        if let Some(finding) = BusyWorktree::new(self.host.as_ref(), &socket).finding(session) {
+            report.warning(finding);
+        }
+        if let Some(claimant) = reconciliation.claimant_of(session) {
+            report.problem(format!(
+                "session {}: tmux session {} claims its worktree {}",
+                session.name(),
+                claimant.tmux_name(),
+                session.worktree_path().display()
+            ));
         }
     }
 
