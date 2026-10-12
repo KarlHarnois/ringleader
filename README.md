@@ -50,16 +50,6 @@ set_env = { CLAUDE_CONFIG_DIR = "~/.claude-work" }
 prompt_args = ["{prompt}"]
 ```
 
-## Agent input
-
-`{name}` in an agent's `args` becomes the session name. Ringleader types each `startup_input` line into the agent every time it starts, and each `rename_input` line after a rename, followed by Enter. It types each line only once the agent shows an empty prompt, and a later line waits up to 2 seconds for the prompt to come back. After a start the first line waits up to 10 seconds, and create and restart return only once it types or gives up. An agent that opens on a dialog, such as Claude's workspace trust check, gets no startup input that time. After a rename it skips the input if the agent is in a dialog, holds an unsent draft, or its pane is in copy mode. The first-run config names and colors Claude sessions:
-
-```toml
-args = ["--name", "{name}"]
-startup_input = ["/color"]
-rename_input = ["/rename {name}"]
-```
-
 ## Keys
 
 | Key | Action |
