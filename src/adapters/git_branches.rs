@@ -2,7 +2,7 @@ use std::path::Path;
 
 use super::git_invocation::GitInvocation;
 use super::git_runner::GitRunner;
-use crate::application::ports::WorkspaceError;
+use crate::application::ports::{BranchMarker, WorkspaceError};
 
 pub struct GitBranches<'a> {
     git: &'a GitRunner,
@@ -54,6 +54,23 @@ impl<'a> GitBranches<'a> {
             .writing()
             .args(["-m", old, new]);
         self.git.run_checked(&rename).map(drop)
+    }
+
+    pub fn mark_managed(&self, repo: &Path, branch: &str) -> Result<(), WorkspaceError> {
+        let key = BranchMarker::new(branch).key();
+        let mark = GitInvocation::in_repo(repo, "config").writing().args([
+            "--local",
+            &key,
+            BranchMarker::VALUE,
+        ]);
+        self.git.run_checked(&mark).map(drop)
+    }
+
+    pub fn is_managed(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError> {
+        let key = BranchMarker::new(branch).key();
+        let read = GitInvocation::in_repo(repo, "config").args(["--local", "--get", &key]);
+        let value = self.git.lookup(&read)?;
+        Ok(value.is_some_and(|found| found.first_line() == BranchMarker::VALUE))
     }
 
     pub fn list(&self, repo: &Path, prefix: &str) -> Result<Vec<String>, WorkspaceError> {

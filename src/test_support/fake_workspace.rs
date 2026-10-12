@@ -16,6 +16,7 @@ pub struct FakeWorkspace {
 struct WorkspaceState {
     worktrees: Vec<(PathBuf, WorktreeEntry)>,
     branches: Vec<FakeBranch>,
+    markers: Vec<(PathBuf, String)>,
     dirty: HashMap<PathBuf, DirtyState>,
     unmerged: HashMap<String, VecDeque<UnmergedCommits>>,
     diffs: HashMap<PathBuf, DiffStat>,
@@ -43,17 +44,28 @@ enum FailedCreateLeftover {
 }
 
 impl FakeWorkspace {
-    pub const STATE_CHANGING: [&'static str; 5] = [
+    pub const STATE_CHANGING: [&'static str; 6] = [
         "create_worktree",
         "remove_worktree",
         "unlock_worktree",
         "delete_branch",
         "rename_branch",
+        "mark_branch_managed",
     ];
     pub const DEFAULT_START: &'static str = "0123456789abcdef0123456789abcdef01234567";
 
     pub fn with_branch(self, repo: &Path, branch: &str, tip: &str) -> Self {
         self.edit(|state| state.add_branch(repo, branch, tip));
+        self
+    }
+
+    pub fn with_marker(self, repo: &Path, branch: &str) -> Self {
+        self.edit(|state| state.add_marker(repo, branch));
+        self
+    }
+
+    pub fn starting_orphan(self) -> Self {
+        self.edit(|state| state.start_point = Some(Ok(StartPoint::Orphan)));
         self
     }
 
@@ -141,6 +153,10 @@ impl FakeWorkspace {
             .is_some()
     }
 
+    pub fn has_marker(&self, repo: &Path, branch: &str) -> bool {
+        self.state.lock().unwrap().is_marked(repo, branch)
+    }
+
     pub fn lists_worktree(&self, repo: &Path, worktree: &Path) -> bool {
         self.state
             .lock()
@@ -171,6 +187,18 @@ impl WorkspaceState {
             name: name.to_string(),
             tip: tip.to_string(),
         });
+    }
+
+    fn add_marker(&mut self, repo: &Path, branch: &str) {
+        if !self.is_marked(repo, branch) {
+            self.markers.push((repo.to_path_buf(), branch.to_string()));
+        }
+    }
+
+    fn is_marked(&self, repo: &Path, branch: &str) -> bool {
+        self.markers
+            .iter()
+            .any(|(owner, name)| owner == repo && name == branch)
     }
 
     fn add_worktree(&mut self, repo: &Path, worktree: &Path, branch: &str, start: &StartPoint) {
@@ -326,6 +354,9 @@ impl Workspace for FakeWorkspace {
             state
                 .branches
                 .retain(|found| !(found.repo == repo && found.name == branch));
+            state
+                .markers
+                .retain(|(owner, name)| !(owner == repo && name == branch));
             Ok(())
         })
     }
@@ -348,6 +379,9 @@ impl Workspace for FakeWorkspace {
                     *entry = entry.clone().on_branch(new);
                 }
             }
+            for (_, name) in state.markers.iter_mut().filter(|(_, name)| name == old) {
+                *name = new.to_string();
+            }
         });
         Ok(())
     }
@@ -361,6 +395,17 @@ impl Workspace for FakeWorkspace {
                 .any(|(owner, entry)| owner == repo && entry.branch() == Some(branch));
             named_by_worktree || state.find_branch(repo, branch).is_some()
         }))
+    }
+
+    fn mark_branch_managed(&self, repo: &Path, branch: &str) -> Result<(), WorkspaceError> {
+        self.call("mark_branch_managed", branch.to_string())?;
+        self.edit(|state| state.add_marker(repo, branch));
+        Ok(())
+    }
+
+    fn is_branch_managed(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError> {
+        self.call("is_branch_managed", branch.to_string())?;
+        Ok(self.edit(|state| state.is_marked(repo, branch)))
     }
 
     fn list_branches(&self, repo: &Path, prefix: &str) -> Result<Vec<String>, WorkspaceError> {

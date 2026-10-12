@@ -151,6 +151,14 @@ impl Workspace for GitWorkspace {
         Ok(entries.iter().any(|entry| entry.branch() == Some(branch)))
     }
 
+    fn mark_branch_managed(&self, repo: &Path, branch: &str) -> Result<(), WorkspaceError> {
+        GitBranches::new(&self.git).mark_managed(repo, branch)
+    }
+
+    fn is_branch_managed(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError> {
+        GitBranches::new(&self.git).is_managed(repo, branch)
+    }
+
     fn list_branches(&self, repo: &Path, prefix: &str) -> Result<Vec<String>, WorkspaceError> {
         GitBranches::new(&self.git).list(repo, prefix)
     }
@@ -250,6 +258,7 @@ mod tests {
     use crate::test_support::GitTestRepo;
 
     const BRANCH: &str = "ringleader/fix-auth";
+    const RENAMED: &str = "ringleader/fix-login";
 
     struct WorktreeFixture;
 
@@ -266,6 +275,22 @@ mod tests {
                 .create_worktree(fixture.path(), &target, BRANCH, &start)
                 .unwrap();
             target
+        }
+
+        fn marked(fixture: &GitTestRepo) -> PathBuf {
+            let worktree = Self::created(fixture);
+            fixture
+                .workspace()
+                .mark_branch_managed(fixture.path(), BRANCH)
+                .unwrap();
+            worktree
+        }
+
+        fn is_managed(fixture: &GitTestRepo, branch: &str) -> bool {
+            fixture
+                .workspace()
+                .is_branch_managed(fixture.path(), branch)
+                .unwrap()
         }
 
         fn unmerged(fixture: &GitTestRepo, worktree: &Path) -> UnmergedCommits {
@@ -1050,13 +1075,114 @@ mod tests {
 
         fixture
             .workspace()
-            .rename_branch(&worktree, BRANCH, "ringleader/fix-login")
+            .rename_branch(&worktree, BRANCH, RENAMED)
             .unwrap();
 
         assert_eq!(
             fixture.git(&worktree, &["branch", "--show-current"]),
-            "ringleader/fix-login"
+            RENAMED
         );
+    }
+
+    #[test]
+    fn marking_a_branch_sets_its_config_entry() {
+        let fixture = GitTestRepo::new();
+
+        WorktreeFixture::marked(&fixture);
+
+        let key = format!("branch.{BRANCH}.ringleaderManaged");
+        assert_eq!(
+            fixture.git(fixture.path(), &["config", "--get", &key]),
+            "true"
+        );
+    }
+
+    #[test]
+    fn a_marked_branch_is_managed() {
+        let fixture = GitTestRepo::new();
+
+        WorktreeFixture::marked(&fixture);
+
+        assert!(WorktreeFixture::is_managed(&fixture, BRANCH));
+    }
+
+    #[test]
+    fn an_unmarked_branch_is_not_managed() {
+        let fixture = GitTestRepo::new();
+        WorktreeFixture::created(&fixture);
+
+        assert!(!WorktreeFixture::is_managed(&fixture, BRANCH));
+    }
+
+    #[test]
+    fn a_marker_with_another_value_is_not_managed() {
+        let fixture = GitTestRepo::new();
+        WorktreeFixture::created(&fixture);
+        let key = format!("branch.{BRANCH}.ringleaderManaged");
+        fixture.git(fixture.path(), &["config", &key, "false"]);
+
+        assert!(!WorktreeFixture::is_managed(&fixture, BRANCH));
+    }
+
+    #[test]
+    fn deleting_a_marked_branch_removes_its_marker() {
+        let fixture = GitTestRepo::new();
+        let worktree = WorktreeFixture::marked(&fixture);
+        let tip = fixture.git(&worktree, &["rev-parse", "HEAD"]);
+        let workspace = fixture.workspace();
+        workspace
+            .remove_worktree(fixture.path(), &worktree)
+            .unwrap();
+
+        workspace
+            .delete_branch(fixture.path(), BRANCH, Some(&tip))
+            .unwrap();
+
+        assert!(!WorktreeFixture::is_managed(&fixture, BRANCH));
+    }
+
+    #[test]
+    fn renaming_a_marked_branch_carries_its_marker() {
+        let fixture = GitTestRepo::new();
+        let worktree = WorktreeFixture::marked(&fixture);
+
+        fixture
+            .workspace()
+            .rename_branch(&worktree, BRANCH, RENAMED)
+            .unwrap();
+
+        assert!(WorktreeFixture::is_managed(&fixture, RENAMED));
+        assert!(!WorktreeFixture::is_managed(&fixture, BRANCH));
+    }
+
+    #[test]
+    fn renaming_a_marked_unborn_branch_carries_its_marker() {
+        let fixture = GitTestRepo::unborn();
+        let worktree = WorktreeFixture::marked(&fixture);
+
+        fixture
+            .workspace()
+            .rename_branch(&worktree, BRANCH, RENAMED)
+            .unwrap();
+
+        assert!(WorktreeFixture::is_managed(&fixture, RENAMED));
+        assert!(!WorktreeFixture::is_managed(&fixture, BRANCH));
+    }
+
+    #[test]
+    fn deleting_a_marked_orphan_without_a_tip_removes_its_marker() {
+        let fixture = GitTestRepo::unborn();
+        let worktree = WorktreeFixture::marked(&fixture);
+        let workspace = fixture.workspace();
+        workspace
+            .remove_worktree(fixture.path(), &worktree)
+            .unwrap();
+
+        workspace
+            .delete_branch(fixture.path(), BRANCH, None)
+            .unwrap();
+
+        assert!(!WorktreeFixture::is_managed(&fixture, BRANCH));
     }
 
     #[test]

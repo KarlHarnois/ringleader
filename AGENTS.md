@@ -126,6 +126,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │       ├── mod.rs
     │       ├── session_registry.rs   # SessionRegistry trait
     │       ├── workspace.rs          # Workspace trait
+    │       ├── branch_marker.rs      # BranchMarker, the git config entry that marks a branch Ringleader created
     │       ├── dirty_state.rs        # DirtyState, the uncommitted files and nested repos of a worktree
     │       ├── unmerged_commits.rs   # UnmergedCommits, commits on no other ref with the tip and HEAD
     │       ├── multiplexer.rs        # Multiplexer trait
