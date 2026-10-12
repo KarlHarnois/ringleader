@@ -258,7 +258,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
 - Only the TUI installs the Ctrl-Q return binding. The CLI never touches tmux key bindings.
 - Blocking TUI operations (create, delete, rename, restart, and the delete measurement) run behind a busy message, and the event loop drops the key and paste events queued while they ran.
 - Logs go to `$XDG_STATE_HOME/ringleader/app.log` through `env_logger`, never to the terminal.
-- An agent's `startup_input` is typed after create and restart, waiting up to 10 seconds for its prompt. Its `rename_input` is typed after a rename only when the agent is at its prompt at that moment. An agent is at its prompt when its pane shows the cursor and the text before the cursor on its row is a bare prompt marker, with no letters or digits. Claude hides the cursor in its trust and permission dialogs, an agent still starting has drawn no marker, and an unsent draft puts its text before the cursor. A skipped or failed typing is logged and never fails the use case.
+- An agent's `startup_input` is typed after create and restart, waiting up to 10 seconds for its prompt. Its `rename_input` is typed after a rename only when the agent is at its prompt at that moment. An agent is at its prompt when its pane is out of copy mode, shows the cursor, and the text before the cursor on its row is a bare prompt marker, with no letters or digits. Copy mode would take the keys instead of the agent. Claude hides the cursor in its trust and permission dialogs, an agent still starting has drawn no marker, and an unsent draft puts its text before the cursor. A skipped or failed typing is logged and never fails the use case.
 
 ## CLI exit codes
 

@@ -15,7 +15,7 @@ pub struct TmuxAgentInput<'a> {
 impl<'a> TmuxAgentInput<'a> {
     const CURSOR_LABEL: &'static str = "ringleader-cursor";
     const CURSOR_FORMAT: &'static str =
-        "ringleader-cursor #{pane_dead} #{cursor_flag} #{cursor_x} #{cursor_y}";
+        "ringleader-cursor #{pane_dead} #{pane_in_mode} #{cursor_flag} #{cursor_x} #{cursor_y}";
     const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
     pub fn new(tmux: &'a TmuxCommand, patience: Duration) -> Self {
@@ -107,6 +107,7 @@ impl From<TmuxError> for InputError {
 
 struct AgentCursor {
     pane_dead: bool,
+    in_mode: bool,
     shown: bool,
     column: usize,
     row: usize,
@@ -116,11 +117,13 @@ impl AgentCursor {
     const ON: &'static str = "1";
 
     fn parse(values: &str) -> Option<Self> {
-        let [pane_dead, shown, column, row] = values.split(' ').collect::<Vec<_>>()[..] else {
+        let [pane_dead, in_mode, shown, column, row] = values.split(' ').collect::<Vec<_>>()[..]
+        else {
             return None;
         };
         Some(Self {
             pane_dead: pane_dead == Self::ON,
+            in_mode: in_mode == Self::ON,
             shown: shown == Self::ON,
             column: column.parse().ok()?,
             row: row.parse().ok()?,
@@ -128,7 +131,7 @@ impl AgentCursor {
     }
 
     fn takes_keys(&self) -> bool {
-        !self.pane_dead && self.shown
+        !self.pane_dead && !self.in_mode && self.shown
     }
 
     fn follows_a_bare_prompt_marker(&self, row: &str) -> bool {
@@ -179,6 +182,10 @@ mod tests {
             let lines: Vec<String> = lines.iter().map(|line| line.to_string()).collect();
             let pane = self.server.pane_of(Self::TARGET);
             TmuxAgentInput::new(&tmux, patience).type_when_ready(&pane, &lines)
+        }
+
+        fn enter_copy_mode(&self) {
+            self.server.text(&["copy-mode", "-t", Self::TARGET]);
         }
 
         fn shows(&self, text: &str) -> bool {
@@ -258,6 +265,17 @@ mod tests {
     #[test]
     fn an_agent_with_a_hidden_cursor_is_not_ready() {
         let fixture = InputFixture::running(InputFixture::HIDDEN_CURSOR);
+
+        let typed = fixture.type_lines(&["hello demo"], InputFixture::SHORT_PATIENCE);
+
+        assert_eq!(typed, Err(InputError::NotReady));
+        assert!(!fixture.screen().contains("hello demo"));
+    }
+
+    #[test]
+    fn a_pane_in_copy_mode_is_not_ready() {
+        let fixture = InputFixture::running(InputFixture::AT_PROMPT);
+        fixture.enter_copy_mode();
 
         let typed = fixture.type_lines(&["hello demo"], InputFixture::SHORT_PATIENCE);
 
