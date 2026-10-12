@@ -1,17 +1,17 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::style::Style;
-use ratatui::text::Line;
+use ratatui::Frame;
+use ratatui::layout::Rect;
 
 use super::agent_picker::AgentPicker;
 use super::dialog::DialogStep;
 use super::dialog_labels::DialogLabels;
 use super::new_session_field::NewSessionField;
+use super::new_session_view::NewSessionView;
 use super::repo_picker::{PickerStep, RepoPicker};
 use super::text_field::{FieldKind, TextField};
 use crate::application::{CreateRequest, SessionService};
 use crate::ui::app::AppRequest;
 use crate::ui::blocking_operation::BlockingOperation;
-use crate::ui::text_fit::TextFit;
 use crate::ui::theme::Theme;
 
 pub struct NewSessionDialog {
@@ -26,8 +26,6 @@ pub struct NewSessionDialog {
 impl NewSessionDialog {
     pub const TITLE: &'static str = " New session ";
     const CREATE_KEY: char = 's';
-    const CURSOR: char = '█';
-    const FIXED_LINES: usize = 7;
 
     pub fn open(service: &SessionService) -> Self {
         Self {
@@ -77,41 +75,11 @@ impl NewSessionDialog {
         self.error = pasted.err();
     }
 
-    pub fn lines(
-        &self,
-        width: usize,
-        height: usize,
-        labels: DialogLabels,
-        theme: &Theme,
-    ) -> Vec<Line<'static>> {
-        let agents_expanded = self.focus == NewSessionField::Agent;
-        let room = height.saturating_sub(Self::FIXED_LINES + self.agents.height(agents_expanded));
-        let field_width = width.saturating_sub(labels.width());
-        let repo_lines = self
-            .repos
-            .lines(field_width, room, self.repo_style(theme), theme);
-        let agent_lines = self.agents.lines(agents_expanded, theme);
-        let mut lines = vec![self.text_line(NewSessionField::Name, &self.name, labels, width)];
-        lines.extend(labels.labeled(NewSessionField::Repo.label(), repo_lines));
-        lines.extend(labels.labeled(NewSessionField::Agent.label(), agent_lines));
-        lines.push(self.text_line(NewSessionField::Prompt, &self.prompt, labels, width));
-        lines.push(Line::from(""));
-        let error = self.error.as_deref().unwrap_or_default();
-        lines.extend(TextFit::new(error).styled_lines(width, theme.error()));
-        lines.push(Line::styled(self.hints(), theme.dim()));
-        lines
-    }
-
-    fn repo_style(&self, theme: &Theme) -> Style {
-        if self.focus == NewSessionField::Repo {
-            theme.selected()
-        } else {
-            theme.base()
-        }
-    }
-
-    fn hints(&self) -> &'static str {
-        self.repos.hints().unwrap_or_else(|| self.focus.hints())
+    pub fn render(&self, frame: &mut Frame, area: Rect, labels: DialogLabels, theme: &Theme) {
+        NewSessionView::new(&self.name, &self.repos, &self.agents, &self.prompt)
+            .focused_on(self.focus)
+            .with_error(self.error.as_deref())
+            .render(frame, area, labels, theme);
     }
 
     fn picker_took(&mut self, key: &KeyEvent, service: &SessionService) -> bool {
@@ -139,20 +107,6 @@ impl NewSessionDialog {
         }
         self.focus = self.focus.next();
         DialogStep::Stay
-    }
-
-    fn text_line(
-        &self,
-        field: NewSessionField,
-        text: &TextField,
-        labels: DialogLabels,
-        width: usize,
-    ) -> Line<'static> {
-        let cursor = (self.focus == field).then_some(Self::CURSOR);
-        let shown = text.visible(width.saturating_sub(labels.width()), cursor);
-        labels
-            .labeled(field.label(), vec![Line::from(shown)])
-            .remove(0)
     }
 
     fn edit_focused(&mut self, key: &KeyEvent) {
@@ -199,6 +153,9 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use crossterm::event::KeyModifiers;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use ratatui::buffer::Buffer;
 
     use super::*;
     use crate::domain::{Agent, Repo, RepoName};
@@ -208,6 +165,8 @@ mod tests {
 
     impl DialogFixture {
         const SETTLE_LIMIT: Duration = Duration::from_secs(2);
+        const WIDTH: u16 = 70;
+        const HEIGHT: u16 = 20;
 
         const FOUND: &'static str = "/home/example/work/api-gateway";
         const TYPED: &'static str = "/srv/tools";
@@ -232,17 +191,27 @@ mod tests {
         }
 
         fn text(dialog: &NewSessionDialog) -> String {
-            dialog
-                .lines(70, 20, DialogLabels::full(), &Theme)
-                .iter()
-                .map(|line| {
-                    line.spans
-                        .iter()
-                        .map(|span| span.content.as_ref())
-                        .collect::<String>()
+            Self::rows(&Self::screen(dialog))
+        }
+
+        fn screen(dialog: &NewSessionDialog) -> Buffer {
+            let mut terminal = Terminal::new(TestBackend::new(Self::WIDTH, Self::HEIGHT)).unwrap();
+            terminal
+                .draw(|frame| dialog.render(frame, frame.area(), DialogLabels::full(), &Theme))
+                .unwrap();
+            terminal.backend().buffer().clone()
+        }
+
+        fn rows(screen: &Buffer) -> String {
+            let area = screen.area;
+            let rows: Vec<String> = (area.top()..area.bottom())
+                .map(|row| {
+                    let cells = (area.left()..area.right()).map(|column| &screen[(column, row)]);
+                    let symbols: String = cells.map(|cell| cell.symbol()).collect();
+                    symbols.trim_end().to_string()
                 })
-                .collect::<Vec<_>>()
-                .join("\n")
+                .collect();
+            rows.join("\n").trim_end().to_string()
         }
 
         fn flat_text(dialog: &NewSessionDialog) -> String {

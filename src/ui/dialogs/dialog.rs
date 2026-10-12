@@ -114,7 +114,7 @@ impl Dialog {
         frame.render_widget(block, area);
         let (width, height) = (usize::from(inner.width), usize::from(inner.height));
         let lines = match self {
-            Self::NewSession(dialog) => dialog.lines(width, height, labels, theme),
+            Self::NewSession(dialog) => return dialog.render(frame, inner, labels, theme),
             Self::Delete(dialog) => dialog.lines(width, labels, theme),
             Self::Rename(dialog) => dialog.lines(width, labels, theme),
             Self::Help(help) => help.lines(width, height, theme),
