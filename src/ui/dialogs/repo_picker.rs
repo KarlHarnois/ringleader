@@ -74,6 +74,11 @@ impl RepoPicker {
         vec![Line::styled(summary, summary_style)]
     }
 
+    pub fn fewest_rows(&self, width: usize, theme: &Theme) -> usize {
+        let no_spare_rows = 0;
+        self.lines(width, no_spare_rows, theme.base(), theme).len()
+    }
+
     fn search_key(&mut self, key: &KeyEvent, service: &SessionService) -> PickerStep {
         match key.code {
             KeyCode::Esc => self.searching = false,

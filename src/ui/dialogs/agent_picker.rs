@@ -37,6 +37,10 @@ impl AgentPicker {
         }
     }
 
+    pub fn rows_through_selected(&self) -> usize {
+        self.selected + 1
+    }
+
     pub fn handle_key(&mut self, key: &KeyEvent) -> bool {
         let last = self.agents.len().saturating_sub(1);
         match key.code {
