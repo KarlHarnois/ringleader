@@ -251,8 +251,9 @@ mod tests {
         const SEVEN_LINE_PROMPT: &'static str = "one\ntwo\nthree\nfour\nfive\nsix\nseven";
         const FULL_HEIGHT: usize = 20;
         const SHORT_HEIGHT: usize = 12;
-        const ONE_ROW_FIELDS: usize = 3;
-        const NO_SPARE_ROWS_HEIGHT: usize = NewSessionDialog::FIXED_LINES + Self::ONE_ROW_FIELDS;
+        const REPO_AGENT_AND_ERROR_ROWS: usize = 3;
+        const NO_PROMPT_ROOM_HEIGHT: usize =
+            NewSessionDialog::FIXED_LINES + Self::REPO_AGENT_AND_ERROR_ROWS;
 
         fn launched_in_repo() -> ServiceFixture {
             let found = Repo::discovered(
@@ -626,12 +627,12 @@ mod tests {
     }
 
     #[test]
-    fn a_dialog_with_no_spare_rows_still_shows_one_prompt_row() {
+    fn a_dialog_with_no_room_for_the_prompt_still_shows_one_prompt_row() {
         let (mut dialog, _service) = DialogFixture::in_prompt(&DialogFixture::launched_in_repo());
 
         dialog.paste("one\ntwo\nthree");
 
-        let text = DialogFixture::text_at(&dialog, DialogFixture::NO_SPARE_ROWS_HEIGHT);
+        let text = DialogFixture::text_at(&dialog, DialogFixture::NO_PROMPT_ROOM_HEIGHT);
         assert!(text.contains("Prompt    three█\n\n"));
     }
 
