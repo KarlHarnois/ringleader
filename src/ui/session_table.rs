@@ -1,10 +1,11 @@
 use ratatui::Frame;
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
-use super::home_view::{CenteredText, LayoutTier};
+use super::empty_state::EmptyState;
+use super::home_view::LayoutTier;
 use super::table_columns::TableColumns;
 use super::theme::Theme;
 use crate::domain::{DiffStat, SessionState, SessionSummary};
@@ -48,9 +49,8 @@ impl<'a> SessionTable<'a> {
         if self.shows_header() {
             lines.push(Line::styled(columns.header(), self.theme.emphasis()));
         }
-        if self.rows.is_empty() && !self.tier.shows_preview() {
-            frame.render_widget(Paragraph::new(lines), inner);
-            CenteredText::new(&CenteredText::EMPTY_STATE).render(frame, inner);
+        if !self.has_rows() {
+            Self::render_empty(lines, frame, inner);
             return;
         }
         let room = usize::from(inner.height).saturating_sub(lines.len());
@@ -59,6 +59,18 @@ impl<'a> SessionTable<'a> {
                 .map(|row| self.row_line(row, &columns)),
         );
         frame.render_widget(Paragraph::new(lines), inner);
+    }
+
+    pub fn has_rows(&self) -> bool {
+        !self.rows.is_empty()
+    }
+
+    fn render_empty(header: Vec<Line>, frame: &mut Frame, inner: Rect) {
+        let header_height = u16::try_from(header.len()).unwrap_or(u16::MAX);
+        let [header_area, body] =
+            Layout::vertical([Constraint::Length(header_height), Constraint::Fill(1)]).areas(inner);
+        frame.render_widget(Paragraph::new(header), header_area);
+        EmptyState.render(frame, body);
     }
 
     fn shows_header(&self) -> bool {
@@ -373,5 +385,16 @@ mod tests {
             .unwrap();
 
         assert!(TableFixture::line(&terminal, 1).starts_with("│● fix-auth"));
+    }
+
+    #[test]
+    fn the_empty_state_never_draws_over_the_header() {
+        let mut terminal = Terminal::new(TestBackend::new(64, 10)).unwrap();
+
+        terminal
+            .draw(|frame| SessionTable::new(&[], None, 0, Theme).render(frame, frame.area()))
+            .unwrap();
+
+        assert!(TableFixture::line(&terminal, 1).starts_with("│  Name"));
     }
 }
