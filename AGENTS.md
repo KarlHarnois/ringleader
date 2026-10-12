@@ -38,6 +38,27 @@ nix flake check
 
 These are the commands `.github/workflows/ci.yml` runs. A change is done when all of them pass.
 
+## Architecture
+
+Ringleader follows hexagonal architecture, also called ports and adapters. The core holds the domain and the use cases and knows nothing about tmux, git, the filesystem, or the terminal. It reaches them through traits it owns, and adapters outside the core implement those traits.
+
+Dependencies point inward only. An inner layer never imports an outer one.
+
+- `domain` holds the entities, value types, and pure rules. It imports nothing else from the crate, and never imports `crossterm`, `ratatui`, or `std::process`.
+- `application` holds the use cases and the ports, and imports only `domain`. It never shells out, never touches the filesystem directly, and never reads the system clock. Ports are traits in `application/ports/`, named after the role they play for the use cases, such as `Workspace` and `Multiplexer`, with their error types in the same file.
+- `adapters` holds the driven adapters, which implement the ports with git, tmux, files, `/proc`, and signals. They import `application` and `domain`, never `ui` or `cli`. Each is named after its technology and the port it implements, such as `GitWorkspace` and `TmuxMultiplexer`.
+- `ui` and `cli` are the driving adapters. They import `application` and `domain`, never `adapters`, and call the `SessionService` facade only. `SessionLifecycle`, `SessionMonitor`, `SessionAccess`, `RepoCatalog`, and `Doctor` are composed by the facade and are not called from `ui` or `cli`.
+- `main.rs` is the composition root and the only production code that imports every layer. It builds the concrete adapters and injects them into the core as trait objects.
+- `src/test_support/` may import any layer, because it fakes the ports and drives the outer layers under test.
+
+A new capability that reaches outside the process goes through a port:
+
+1. Define the trait and its error type in a new file under `application/ports/`, named after the role, and re-export both from `ports/mod.rs`.
+2. Implement it in `adapters/`, named after the technology and the role.
+3. Add a hand-written fake in `src/test_support/` and wire it into `ServiceFixture`.
+4. Inject the port through constructors as an `Arc<dyn Trait>`. A port the use cases need joins a bundle in `ServicePorts`. A port only the TUI or the CLI needs, like `ReturnBinding`, goes to the constructor of the type that uses it.
+5. Build the adapter in `CompositionRoot` and pass it in.
+
 ## Layout
 
 ```
@@ -246,9 +267,6 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
 
 ## Layout rules
 
-- `domain` never imports `crossterm`, `ratatui`, `std::process`, or any adapter.
-- `application` defines traits and use cases, never shells out, never touches the filesystem directly, and never reads the system clock. Ports are traits in `application/ports/`, and adapters implement them.
-- `ui` calls the `SessionService` facade only. `SessionLifecycle`, `SessionMonitor`, `SessionAccess`, `RepoCatalog`, and `Doctor` are composed by the facade and are not called from `ui` or `cli.rs`.
 - One primary type per file, named after it in snake case. Supporting types owned by the primary type live in the same file. Unit tests live inline. `mod.rs` declares and re-exports only. The tree in this file is the file contract: every listed file exists and holds its one type, and primary types are never merged into one file. Source files target under 200 lines excluding tests, and the files under `src/test_support/` count as tests. When one outgrows that, extract its largest behavior-bearing type into its own file. A file may stay over the target when its primary type is the only behavior-bearing type left in it. The types the next rule places in `cli.rs` and `app.rs` stay there even when that keeps the file over the target. Never split one type's own behavior across new collaborators only to meet the target. A commit that adds a file under `src/` that the tree does not list, or moves, renames, or removes a listed file, updates the tree in this file in the same commit.
 - `cli.rs` owns the clap argument structs (`ListArgs`, `NewArgs`, and so on) as support types of `Cli`. They get no files of their own. The binding guard and the exit notice are support types of `App` in `app.rs`.
 - Prefer a separate file for a type that is used across modules, carries behavior or invariants, and changes for its own reasons. Merging files later is mechanical, and splitting a file that grew is disruptive. The reverse also holds: do not invent files for types that need none.
