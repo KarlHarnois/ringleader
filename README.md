@@ -30,7 +30,7 @@ To inspect the sessions with tmux itself, run `tmux -S "$XDG_RUNTIME_DIR/ringlea
 
 ## Upgrading
 
-Earlier versions ran sessions on your own tmux server. Those sessions stay there and list as stopped, and `ringleader doctor` names the server each one runs on. End each one there, then run `ringleader restart <name>` to start it again on Ringleader's own server.
+Earlier versions ran sessions on your own tmux server. Those sessions stay there and list as stopped, and `ringleader doctor` names the server each one runs on. End each one there, then run `ringleader restart <name>` to start it again on Ringleader's own server. The `tmux_prefix` setting no longer does anything: new sessions are always named `ringleader-<name>`.
 
 ## Agent environment
 

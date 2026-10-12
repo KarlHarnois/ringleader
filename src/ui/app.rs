@@ -307,9 +307,9 @@ mod tests {
             }
         }
 
-        fn config_with_prefix(tmux_prefix: &str) -> Config {
+        fn config_with_branch_prefix(branch_prefix: &str) -> Config {
             let draft = ConfigDraft::new(Path::new(ServiceFixture::WORKTREE_ROOT))
-                .tmux_prefix(tmux_prefix)
+                .branch_prefix(branch_prefix)
                 .agent(ServiceFixture::agent());
             Config::new(&draft).unwrap()
         }
@@ -480,11 +480,11 @@ mod tests {
         let mut app = AppFixture::started(&fixture, 100, 28);
         fixture
             .config_source()
-            .replace(AppFixture::config_with_prefix("agents-"));
+            .replace(AppFixture::config_with_branch_prefix("agents/"));
 
         AppFixture::press(&mut app, 'r');
 
-        assert_eq!(app.service.config().naming().tmux_prefix(), "agents-");
+        assert_eq!(app.service.config().naming().branch_prefix(), "agents/");
         assert_eq!(
             AppFixture::status_line(&app, 100),
             " Reloaded the config and the registry."

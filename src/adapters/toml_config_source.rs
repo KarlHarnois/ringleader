@@ -20,7 +20,6 @@ impl TomlConfigSource {
 # Defaults to $XDG_DATA_HOME/ringleader/worktrees.
 # worktree_root = "~/.local/share/ringleader/worktrees"
 branch_prefix = "ringleader/"
-tmux_prefix = "ringleader-"
 # The key that detaches from a session back to Ringleader. Sessions have no
 # prefix key, so this is the only way back. Inside your own tmux, it must not be
 # bound in your tmux's root table.
@@ -290,12 +289,21 @@ mod tests {
 
     #[test]
     fn unparsable_text_is_a_parse_error() {
-        let fixture = SourceFixture::with_text("tmux_prefix = ");
+        let fixture = SourceFixture::with_text("branch_prefix = ");
 
         assert!(matches!(
             fixture.source().load(),
             Err(ConfigError::Parse { .. })
         ));
+    }
+
+    #[test]
+    fn an_old_tmux_prefix_line_loads_and_changes_nothing() {
+        let fixture = SourceFixture::with_text("tmux_prefix = \"agents-\"\n");
+
+        let config = fixture.source().load().unwrap();
+
+        assert_eq!(config.naming().tmux_prefix(), "ringleader-");
     }
 
     #[test]
@@ -453,7 +461,7 @@ mod tests {
 
     #[test]
     fn an_unparsable_config_is_never_rewritten() {
-        let fixture = SourceFixture::with_text("tmux_prefix = ");
+        let fixture = SourceFixture::with_text("branch_prefix = ");
 
         assert!(
             fixture
@@ -463,7 +471,7 @@ mod tests {
         );
         assert_eq!(
             fs::read_to_string(fixture.path()).unwrap(),
-            "tmux_prefix = "
+            "branch_prefix = "
         );
     }
 

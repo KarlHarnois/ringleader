@@ -41,7 +41,7 @@ impl Config {
 
     pub fn defaults(worktree_root: &Path) -> Self {
         Self {
-            naming: NamingScheme::new(worktree_root, "ringleader/", "ringleader-"),
+            naming: NamingScheme::new(worktree_root, "ringleader/", NamingScheme::TMUX_PREFIX),
             return_key: ReturnKey::default(),
             intervals: RefreshIntervals::default(),
             activity_idle_seconds: 3,
@@ -61,11 +61,6 @@ impl Config {
     #[cfg(test)]
     pub fn with_repos(self, repos: Vec<Repo>) -> Self {
         Self { repos, ..self }
-    }
-
-    #[cfg(test)]
-    pub fn with_naming(self, naming: NamingScheme) -> Self {
-        Self { naming, ..self }
     }
 
     pub fn naming(&self) -> &NamingScheme {

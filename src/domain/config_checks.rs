@@ -33,7 +33,6 @@ impl<'a> ConfigChecks<'a> {
     }
 
     pub fn failures(mut self) -> Vec<String> {
-        self.check_prefix("tmux_prefix", self.draft.raw_tmux_prefix(), '-');
         self.check_prefix("branch_prefix", self.draft.raw_branch_prefix(), '/');
         self.check_absolute("worktree_root", self.draft.raw_worktree_root());
         self.check_return_key();
@@ -311,16 +310,6 @@ mod tests {
     }
 
     #[test]
-    fn a_tmux_prefix_of_two_dashes_fails() {
-        ChecksFixture::fails_on(ChecksFixture::draft().tmux_prefix("--"), "tmux_prefix");
-    }
-
-    #[test]
-    fn a_tmux_prefix_starting_with_a_dash_fails() {
-        ChecksFixture::fails_on(ChecksFixture::draft().tmux_prefix("-x-"), "tmux_prefix");
-    }
-
-    #[test]
     fn a_branch_prefix_starting_with_a_dash_fails() {
         ChecksFixture::fails_on(
             ChecksFixture::draft().branch_prefix("-rl/"),
@@ -490,7 +479,9 @@ mod tests {
 
     #[test]
     fn two_bad_values_are_both_reported() {
-        let draft = ChecksFixture::draft().tmux_prefix("--").session_size("0x0");
+        let draft = ChecksFixture::draft()
+            .branch_prefix("//")
+            .session_size("0x0");
 
         assert_eq!(ChecksFixture::failures(&draft).len(), 2);
     }

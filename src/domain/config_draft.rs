@@ -13,7 +13,6 @@ use super::return_key::ReturnKey;
 pub struct ConfigDraft {
     worktree_root: PathBuf,
     branch_prefix: String,
-    tmux_prefix: String,
     return_key: String,
     state_poll_ms: u64,
     preview_refresh_ms: u64,
@@ -31,7 +30,6 @@ impl ConfigDraft {
         Self {
             worktree_root: default_worktree_root.to_path_buf(),
             branch_prefix: "ringleader/".to_string(),
-            tmux_prefix: "ringleader-".to_string(),
             return_key: ReturnKey::DEFAULT.to_string(),
             state_poll_ms: 1000,
             preview_refresh_ms: 750,
@@ -55,13 +53,6 @@ impl ConfigDraft {
     pub fn branch_prefix(self, branch_prefix: &str) -> Self {
         Self {
             branch_prefix: branch_prefix.to_string(),
-            ..self
-        }
-    }
-
-    pub fn tmux_prefix(self, tmux_prefix: &str) -> Self {
-        Self {
-            tmux_prefix: tmux_prefix.to_string(),
             ..self
         }
     }
@@ -141,10 +132,6 @@ impl ConfigDraft {
         &self.branch_prefix
     }
 
-    pub(super) fn raw_tmux_prefix(&self) -> &str {
-        &self.tmux_prefix
-    }
-
     pub(super) fn raw_return_key(&self) -> &str {
         &self.return_key
     }
@@ -170,7 +157,11 @@ impl ConfigDraft {
     }
 
     pub(super) fn naming(&self) -> NamingScheme {
-        NamingScheme::new(&self.worktree_root, &self.branch_prefix, &self.tmux_prefix)
+        NamingScheme::new(
+            &self.worktree_root,
+            &self.branch_prefix,
+            NamingScheme::TMUX_PREFIX,
+        )
     }
 
     pub(super) fn intervals(&self) -> RefreshIntervals {

@@ -11,6 +11,8 @@ pub struct NamingScheme {
 }
 
 impl NamingScheme {
+    pub const TMUX_PREFIX: &'static str = "ringleader-";
+
     pub fn new(worktree_root: &Path, branch_prefix: &str, tmux_prefix: &str) -> Self {
         Self {
             worktree_root: worktree_root.to_path_buf(),

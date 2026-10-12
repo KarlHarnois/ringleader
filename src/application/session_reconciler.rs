@@ -19,6 +19,8 @@ pub struct SessionReconciler<'a> {
 }
 
 impl<'a> SessionReconciler<'a> {
+    const EXACT_LABEL: &'static str = "=";
+
     pub fn new(config: &'a Config, host: &'a dyn HostProbe, now: u64) -> Self {
         Self {
             config,
@@ -175,24 +177,26 @@ impl<'a> SessionReconciler<'a> {
         observation: &SessionObservation,
         entries: &[Session],
     ) {
-        let label = self
-            .config
-            .naming()
-            .strip_tmux_prefix(observation.tmux_name())
-            .or_else(|| self.recorded_prefix_label(observation, entries));
-        let Some(label) = label else {
-            return;
-        };
         match self.adoption(reconciliation.entries(), observation) {
             Some(adopted) => {
                 let row = self.managed_row(adopted.clone(), observation);
                 reconciliation.adopt(adopted, row);
             }
             None => reconciliation.add_row(SessionSummary::unmanaged(UnmanagedSession::new(
-                label,
+                &self.unmanaged_label(observation, entries),
                 observation.clone(),
             ))),
         }
+    }
+
+    fn unmanaged_label(&self, observation: &SessionObservation, entries: &[Session]) -> String {
+        let tmux_name = observation.tmux_name();
+        self.config
+            .naming()
+            .strip_tmux_prefix(tmux_name)
+            .or_else(|| self.recorded_prefix_label(observation, entries))
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("{}{tmux_name}", Self::EXACT_LABEL))
     }
 
     fn recorded_prefix_label<'o>(
@@ -282,6 +286,16 @@ mod tests {
             let mut rows = Self::observe(fixture);
             assert_eq!(rows.len(), 1);
             rows.pop().unwrap()
+        }
+
+        fn named(tmux_name: &str) -> SessionObservation {
+            SessionObservation::new(
+                crate::domain::TmuxAddress::new(
+                    tmux_name,
+                    std::path::Path::new(FakeMultiplexer::SOCKET),
+                ),
+                0,
+            )
         }
     }
 
@@ -387,16 +401,73 @@ mod tests {
     }
 
     #[test]
-    fn a_live_session_without_the_prefix_is_not_listed() {
-        let stranger = ServiceFixture::session("mystery");
-        let observation = SessionObservation::new(
-            crate::domain::TmuxAddress::new("work", stranger.socket_path()),
-            0,
-        );
-        let fixture =
-            ServiceFixture::new().with_multiplexer(FakeMultiplexer::new().with_live(observation));
+    fn a_live_session_without_the_prefix_lists_as_unmanaged_under_its_exact_name() {
+        let fixture = ServiceFixture::new()
+            .with_multiplexer(FakeMultiplexer::new().with_live(ObserveFixture::named("work")));
 
-        assert!(ObserveFixture::observe(&fixture).is_empty());
+        let row = ObserveFixture::only_row(&fixture);
+
+        assert_eq!(row.name(), "=work");
+        assert_eq!(row.state(), SessionState::Unmanaged);
+    }
+
+    #[test]
+    fn a_prefixed_name_that_is_no_slug_lists_as_unmanaged() {
+        let fixture = ServiceFixture::new().with_multiplexer(
+            FakeMultiplexer::new().with_live(ObserveFixture::named("ringleader-Bad_Name")),
+        );
+
+        assert_eq!(
+            ObserveFixture::only_row(&fixture).state(),
+            SessionState::Unmanaged
+        );
+    }
+
+    #[test]
+    fn delete_refuses_both_kinds_of_unregistered_session() {
+        let fixture = ServiceFixture::new().with_multiplexer(
+            FakeMultiplexer::new()
+                .with_live(ObserveFixture::named("work"))
+                .with_live(ObserveFixture::named("ringleader-Bad_Name")),
+        );
+        let mut service = fixture.service();
+
+        for name in ["=work", "Bad_Name"] {
+            let error = service.delete_impact(name).unwrap_err();
+
+            assert_eq!(error.exit_code(), 3, "{name}");
+        }
+        assert!(fixture.multiplexer().state_changing_calls().is_empty());
+    }
+
+    #[test]
+    fn an_unregistered_namesake_lists_beside_the_managed_session_and_attach_picks_the_managed_one()
+    {
+        let session = ServiceFixture::session("fix-auth");
+        let fixture = ServiceFixture::new()
+            .with_sessions(std::slice::from_ref(&session))
+            .with_multiplexer(
+                FakeMultiplexer::new()
+                    .with_live(ServiceFixture::waiting(&session))
+                    .with_live(ObserveFixture::named("fix-auth")),
+            );
+        let mut service = fixture.service();
+
+        let names: Vec<String> = service
+            .observe(false)
+            .unwrap()
+            .iter()
+            .map(|row| row.name().to_string())
+            .collect();
+        service.attach("fix-auth").unwrap();
+
+        assert_eq!(names, ["fix-auth", "=fix-auth"]);
+        assert_eq!(
+            fixture.multiplexer().attached(),
+            [crate::application::ports::AttachTarget::Agent(
+                "ringleader-fix-auth".to_string()
+            )]
+        );
     }
 
     #[test]

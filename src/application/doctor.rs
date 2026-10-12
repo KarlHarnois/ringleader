@@ -470,17 +470,24 @@ mod tests {
     }
 
     #[test]
-    fn a_changed_naming_is_a_warning() {
-        let config = ServiceFixture::config().with_naming(crate::domain::NamingScheme::new(
+    fn an_entry_recorded_under_another_tmux_prefix_is_a_warning() {
+        let session = DoctorFixture::session();
+        let naming = crate::domain::NamingScheme::new(
             Path::new(ServiceFixture::WORKTREE_ROOT),
             "ringleader/",
-            "rl-",
-        ));
-        let fixture = DoctorFixture::healthy().with_config(config);
+            "agents-",
+        );
+        let tmux = crate::domain::TmuxAddress::new("agents-fix-auth", session.socket_path());
+        let recorded = Session::new(
+            session.name().clone(),
+            session.metadata().clone(),
+            crate::domain::Registration::new(tmux, naming, ServiceFixture::CREATED_AT),
+        );
+        let fixture = DoctorFixture::healthy().with_sessions(&[recorded]);
 
         assert!(DoctorFixture::has_warning(
             &fixture,
-            "tmux_prefix ringleader-, which differ from the config"
+            "tmux_prefix agents-, which differ from the config"
         ));
     }
 
