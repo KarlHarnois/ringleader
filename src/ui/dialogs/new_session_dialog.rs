@@ -360,6 +360,15 @@ mod tests {
             }
         }
 
+        fn type_lines(dialog: &mut NewSessionDialog, service: &SessionService, lines: &[&str]) {
+            for (index, line) in lines.iter().enumerate() {
+                if index > 0 {
+                    Self::control(dialog, service, 'j');
+                }
+                Self::type_text(dialog, service, line);
+            }
+        }
+
         fn search(dialog: &mut NewSessionDialog, service: &SessionService, query: &str) {
             Self::press(dialog, service, KeyCode::Tab);
             Self::type_text(dialog, service, query);
@@ -663,6 +672,61 @@ mod tests {
         let step = DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
 
         assert_eq!(DialogFixture::submitted(step).prompt(), "one\ntwo");
+    }
+
+    #[test]
+    fn control_u_at_the_end_of_a_prompt_line_clears_only_that_line() {
+        let (mut dialog, service) =
+            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
+        DialogFixture::type_lines(&mut dialog, &service, &["first line", "second"]);
+
+        DialogFixture::control(&mut dialog, &service, 'u');
+
+        let step = DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
+        assert_eq!(DialogFixture::submitted(step).prompt(), "first line\n");
+    }
+
+    #[test]
+    fn control_u_in_the_middle_of_a_prompt_line_keeps_the_text_after_the_cursor() {
+        let (mut dialog, service) =
+            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
+        DialogFixture::type_lines(&mut dialog, &service, &["first line", "fix the tests"]);
+        for _ in 0.."tests".len() {
+            DialogFixture::press(&mut dialog, &service, KeyCode::Left);
+        }
+
+        DialogFixture::control(&mut dialog, &service, 'u');
+
+        let step = DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
+        assert_eq!(DialogFixture::submitted(step).prompt(), "first line\ntests");
+    }
+
+    #[test]
+    fn control_u_at_the_start_of_a_prompt_line_joins_it_to_the_line_above() {
+        let (mut dialog, service) =
+            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
+        DialogFixture::type_lines(&mut dialog, &service, &["first line", "second"]);
+        DialogFixture::press(&mut dialog, &service, KeyCode::Home);
+
+        DialogFixture::control(&mut dialog, &service, 'u');
+
+        let step = DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
+        assert_eq!(DialogFixture::submitted(step).prompt(), "first linesecond");
+    }
+
+    #[test]
+    fn control_w_in_the_prompt_deletes_the_last_word_of_its_line() {
+        let (mut dialog, service) =
+            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
+        DialogFixture::type_lines(&mut dialog, &service, &["first line", "fix the tests"]);
+
+        DialogFixture::control(&mut dialog, &service, 'w');
+
+        let step = DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
+        assert_eq!(
+            DialogFixture::submitted(step).prompt(),
+            "first line\nfix the "
+        );
     }
 
     #[test]

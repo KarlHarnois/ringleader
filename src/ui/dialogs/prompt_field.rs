@@ -32,6 +32,7 @@ impl Default for PromptField {
 impl PromptField {
     const MOST_ROWS: usize = 6;
     const LINE_BREAK_KEY: char = 'j';
+    const DELETE_TO_LINE_START_KEY: char = 'u';
     const CURSOR_COLUMN_WIDTH: u16 = 1;
     const PROBE_HEIGHT: u16 = 1;
 
@@ -41,9 +42,12 @@ impl PromptField {
 
     pub fn edit(&mut self, key: &KeyEvent) -> bool {
         let editor = self.editor.get_mut();
-        if Self::breaks_line(key) {
+        if Self::is_control(key, Self::LINE_BREAK_KEY) {
             editor.insert_newline();
             return true;
+        }
+        if Self::is_control(key, Self::DELETE_TO_LINE_START_KEY) {
+            return editor.delete_line_by_head();
         }
         editor.input(*key)
     }
@@ -67,8 +71,8 @@ impl PromptField {
         self.paint_cursor(frame.buffer_mut(), field, self.cursor_style(style));
     }
 
-    fn breaks_line(key: &KeyEvent) -> bool {
-        key.code == KeyCode::Char(Self::LINE_BREAK_KEY) && key.modifiers == KeyModifiers::CONTROL
+    fn is_control(key: &KeyEvent, character: char) -> bool {
+        key.code == KeyCode::Char(character) && key.modifiers == KeyModifiers::CONTROL
     }
 
     fn render_text(&self, frame: &mut Frame, text: Rect, selection_style: Style) {
