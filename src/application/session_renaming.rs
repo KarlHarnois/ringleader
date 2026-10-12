@@ -339,8 +339,22 @@ mod tests {
             .rename_session("fix-auth", "fix-login")
             .unwrap_err();
 
-        assert!(error.to_string().ends_with(&command));
+        assert!(error.to_string().contains(&command));
         assert!(fixture.workspace().state_changing_calls().is_empty());
+    }
+
+    #[test]
+    fn an_unmarked_branch_refusal_says_the_session_keeps_its_name() {
+        let fixture = RenameFixture::unmarked("fix-auth");
+
+        let error = fixture
+            .service()
+            .rename_session("fix-auth", "fix-login")
+            .unwrap_err();
+
+        assert!(error.to_string().ends_with(
+            "otherwise the session keeps its name, since rename moves the branch with it"
+        ));
     }
 
     #[test]

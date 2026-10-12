@@ -65,7 +65,11 @@ impl BranchMutation {
             BranchMutation::Delete => {
                 format!("{marking}, or delete with --forget to drop only the session")
             }
-            BranchMutation::Rename => marking,
+            BranchMutation::Rename => {
+                format!(
+                    "{marking}, otherwise the session keeps its name, since rename moves the branch with it"
+                )
+            }
         }
     }
 }
