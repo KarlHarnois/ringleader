@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use super::durable_file::DurableFile;
 use super::host_path::HostPath;
+use crate::application::DiagnosticPaths;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerFiles {
@@ -14,8 +15,6 @@ pub struct ServerFiles {
 }
 
 impl ServerFiles {
-    const DIRECTORY_MODE: u32 = 0o700;
-
     pub fn new(socket: &Path, config: &Path) -> Self {
         Self {
             socket: socket.to_path_buf(),
@@ -47,7 +46,7 @@ impl ServerFiles {
         let socket_directory = self.socket.parent().unwrap_or(Path::new("/"));
         DirBuilder::new()
             .recursive(true)
-            .mode(Self::DIRECTORY_MODE)
+            .mode(DiagnosticPaths::PRIVATE_DIRECTORY_MODE)
             .create(socket_directory)?;
         if let Some(config_directory) = self.config.parent() {
             fs::create_dir_all(config_directory)?;

@@ -17,7 +17,6 @@ pub struct ServerAudit {
 
 impl ServerAudit {
     pub const MINIMUM_TMUX: (u32, u32) = (3, 2);
-    const PRIVATE_MODE: u32 = 0o700;
 
     pub fn new(ports: &ServicePorts, paths: &DiagnosticPaths) -> Self {
         Self {
@@ -67,7 +66,7 @@ impl ServerAudit {
         let Some(access) = self.host.directory_access(directory) else {
             return;
         };
-        if access.mode() != Self::PRIVATE_MODE {
+        if access.mode() != DiagnosticPaths::PRIVATE_DIRECTORY_MODE {
             report.problem(format!(
                 "{} has mode {:o}, but Ringleader's tmux directory must have mode 700; run chmod 700 {}",
                 directory.display(),

@@ -13,7 +13,8 @@ pub struct DiagnosticPaths {
 
 impl DiagnosticPaths {
     const SOCKET_PATH_LIMIT: usize = 100;
-    const TMUX_FIELD_SEPARATOR: char = ',';
+    pub const TMUX_FIELD_SEPARATOR: char = ',';
+    pub const PRIVATE_DIRECTORY_MODE: u32 = 0o700;
     const UNSOURCEABLE_CHARACTERS: [char; 5] = ['\'', '[', '*', '?', '\\'];
 
     pub fn new(tmux_program: &str, git_program: &str, state_directory: &Path) -> Self {

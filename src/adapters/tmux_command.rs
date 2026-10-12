@@ -8,6 +8,7 @@ use super::server_files::ServerFiles;
 use super::tmux_error::TmuxError;
 use super::tmux_output::TmuxOutput;
 use super::tmux_sequence::TmuxSequence;
+use crate::application::DiagnosticPaths;
 
 #[derive(Debug, Clone)]
 pub struct TmuxCommand {
@@ -154,7 +155,6 @@ struct CallerIdentity {
 impl CallerIdentity {
     const TMUX: &'static str = "TMUX";
     const TMUX_PANE: &'static str = "TMUX_PANE";
-    const FIELD_SEPARATOR: char = ',';
 
     fn variables() -> Vec<String> {
         vec![Self::TMUX.to_string(), Self::TMUX_PANE.to_string()]
@@ -171,7 +171,7 @@ impl CallerIdentity {
 
     fn socket(&self) -> Option<PathBuf> {
         let value = self.tmux.as_ref()?.to_string_lossy().into_owned();
-        let socket = value.split(Self::FIELD_SEPARATOR).next()?;
+        let socket = value.split(DiagnosticPaths::TMUX_FIELD_SEPARATOR).next()?;
         (!socket.is_empty()).then(|| PathBuf::from(socket))
     }
 
