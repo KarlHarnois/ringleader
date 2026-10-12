@@ -477,13 +477,28 @@ mod tests {
     }
 
     #[test]
-    fn an_upstream_of_the_same_name_publishes_the_branch() {
-        let fixture = GitTestRepo::new();
-        WorktreeFixture::created(&fixture);
+    fn a_rewritten_branch_that_tracks_its_pushed_copy_is_published() {
+        let origin = GitTestRepo::new();
+        let clone = WorktreeFixture::clone_with_branch(&origin);
+        let worktree = origin.sibling("wt");
+        origin.commit(&worktree, "work.txt");
+        origin.git(&worktree, &["push", "-q", "-u", "origin", BRANCH]);
 
-        WorktreeFixture::track(&fixture, "origin", BRANCH);
+        origin.git(&worktree, &["commit", "-q", "--amend", "-m", "Rewritten"]);
 
-        assert!(WorktreeFixture::is_published(&fixture, fixture.path()));
+        assert!(WorktreeFixture::is_published(&origin, &clone));
+    }
+
+    #[test]
+    fn an_upstream_whose_remote_branch_was_pruned_does_not_publish_the_branch() {
+        let origin = GitTestRepo::new();
+        let clone = WorktreeFixture::clone_with_branch(&origin);
+        origin.git(&clone, &["push", "-q", "-u", "origin", BRANCH]);
+        origin.git(origin.path(), &["branch", "-q", "-D", BRANCH]);
+
+        origin.git(&clone, &["fetch", "-q", "--prune", "origin"]);
+
+        assert!(!WorktreeFixture::is_published(&origin, &clone));
     }
 
     #[test]

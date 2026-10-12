@@ -12,7 +12,6 @@ pub struct GitBranches<'a> {
 impl<'a> GitBranches<'a> {
     const BRANCH_REFS: &'static str = "refs/heads";
     const REMOTE_REFS: &'static str = "refs/remotes";
-    const LOCAL_REMOTE: &'static str = ".";
 
     pub fn new(git: &'a GitRunner) -> Self {
         Self { git }
@@ -100,7 +99,14 @@ impl<'a> GitBranches<'a> {
         if !self.has_ref(repo, branch)? {
             return Ok(false);
         }
-        Ok(self.tracks_a_remote_copy(repo, branch)? || self.has_remote_copy(repo, branch)?)
+        let upstream_ref = self.upstream_ref(repo, branch)?;
+        for remote_ref in self.remote_copies(repo, branch)? {
+            let tracked = upstream_ref.as_ref() == Some(&remote_ref);
+            if tracked || self.branch_contains(repo, branch, &remote_ref)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     fn list_marked(&self, repo: &Path) -> Result<Vec<String>, WorkspaceError> {
@@ -122,12 +128,14 @@ impl<'a> GitBranches<'a> {
             .collect())
     }
 
-    fn tracks_a_remote_copy(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError> {
+    fn upstream_ref(&self, repo: &Path, branch: &str) -> Result<Option<String>, WorkspaceError> {
         let section = BranchSection::new(branch);
-        let remote = self.read_local_config(repo, &section.upstream_remote_key())?;
         let merge = self.read_local_config(repo, &section.upstream_merge_key())?;
-        let tracks_a_remote = remote.is_some_and(|name| name != Self::LOCAL_REMOTE);
-        Ok(tracks_a_remote && merge == Some(Self::branch_ref(branch)))
+        if merge != Some(Self::branch_ref(branch)) {
+            return Ok(None);
+        }
+        let remote = self.read_local_config(repo, &section.upstream_remote_key())?;
+        Ok(remote.map(|name| Self::remote_branch_ref(&name, branch)))
     }
 
     fn read_local_config(&self, repo: &Path, key: &str) -> Result<Option<String>, WorkspaceError> {
@@ -136,18 +144,18 @@ impl<'a> GitBranches<'a> {
         Ok(value.map(|found| found.first_line().to_string()))
     }
 
-    fn has_remote_copy(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError> {
+    fn remote_copies(&self, repo: &Path, branch: &str) -> Result<Vec<String>, WorkspaceError> {
         let remotes = self
             .git
             .run_checked(&GitInvocation::in_repo(repo, "remote"))?;
+        let mut copies = Vec::new();
         for remote in remotes.lines() {
             let remote_ref = Self::remote_branch_ref(remote, branch);
-            let exists = self.git.resolve(repo, &remote_ref)?.is_some();
-            if exists && self.branch_contains(repo, branch, &remote_ref)? {
-                return Ok(true);
+            if self.git.resolve(repo, &remote_ref)?.is_some() {
+                copies.push(remote_ref);
             }
         }
-        Ok(false)
+        Ok(copies)
     }
 
     fn branch_contains(
