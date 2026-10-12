@@ -55,7 +55,9 @@ impl SessionRenaming {
         } else {
             session.naming().branch_name(&name)
         };
-        Ok(session.renamed(name, &branch))
+        Ok(session
+            .renamed(name, &branch)
+            .on_socket(&self.multiplexer.socket()))
     }
 
     fn check_rename_availability(
@@ -401,6 +403,30 @@ mod tests {
                 .contains("processes still run in its worktree")
         );
         assert!(fixture.workspace().state_changing_calls().is_empty());
+    }
+
+    #[test]
+    fn a_renamed_earlier_server_entry_moves_to_the_private_server() {
+        let session = ServiceFixture::on_earlier_server(&ServiceFixture::session("fix-auth"));
+        let fixture = RenameFixture::stopped("fix-auth")
+            .with_registry(FakeSessionRegistry::with_sessions(vec![session]));
+        let mut service = fixture.service();
+
+        service
+            .rename_session("fix-auth", "fix-login", false)
+            .unwrap();
+
+        let stored = &fixture.registry().sessions()[0];
+        assert_eq!(stored.tmux_name(), "ringleader-fix-login");
+        assert_eq!(stored.socket_path(), Path::new(FakeMultiplexer::SOCKET));
+        assert_eq!(service.earlier_server("fix-login"), None);
+        assert!(
+            fixture
+                .multiplexer()
+                .calls()
+                .iter()
+                .all(|call| !call.contains(FakeMultiplexer::EARLIER_SOCKET))
+        );
     }
 
     #[test]
