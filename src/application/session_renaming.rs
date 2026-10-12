@@ -98,7 +98,7 @@ impl SessionRenaming {
             .is_branch_published(session.repo_path(), branch)?;
         if published {
             return Err(ServiceError::Conflict(format!(
-                "branch {branch} has been pushed, refusing to rename it, since the remote branch and any pull request keep the name {branch}"
+                "branch {branch} has been pushed, refusing to rename it, since the remote branch and any pull request keep the name {branch}; if that remote branch was deleted, run git fetch --all --prune in the repo and retry"
             )));
         }
         Ok(())
@@ -358,6 +358,7 @@ mod tests {
                 .to_string()
                 .contains("branch fix-auth has been pushed")
         );
+        assert!(error.to_string().contains("git fetch --all --prune"));
         assert!(fixture.workspace().state_changing_calls().is_empty());
     }
 
