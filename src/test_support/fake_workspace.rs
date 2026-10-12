@@ -64,6 +64,15 @@ impl FakeWorkspace {
         self
     }
 
+    pub fn without_marker(self, repo: &Path, branch: &str) -> Self {
+        self.edit(|state| {
+            state
+                .markers
+                .retain(|(owner, name)| !(owner == repo && name == branch))
+        });
+        self
+    }
+
     pub fn starting_orphan(self) -> Self {
         self.edit(|state| state.start_point = Some(Ok(StartPoint::Orphan)));
         self

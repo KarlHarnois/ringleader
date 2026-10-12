@@ -1,3 +1,5 @@
+use std::path::Path;
+
 pub struct BranchMarker<'a> {
     branch: &'a str,
 }
@@ -34,6 +36,15 @@ impl<'a> BranchMarker<'a> {
     pub fn key(&self) -> String {
         format!("{}.{}.{}", Self::SECTION, self.branch, Self::VARIABLE)
     }
+
+    pub fn marking_command(&self, repo: &Path) -> String {
+        format!(
+            "git -C {} config {} {}",
+            repo.display(),
+            self.key(),
+            Self::VALUE
+        )
+    }
 }
 
 #[cfg(test)]
@@ -45,6 +56,16 @@ mod tests {
         assert_eq!(
             BranchMarker::new("fix-auth").key(),
             "branch.fix-auth.ringleaderManaged"
+        );
+    }
+
+    #[test]
+    fn the_marking_command_sets_the_key_in_the_repo() {
+        let command = BranchMarker::new("fix-auth").marking_command(Path::new("/repos/example"));
+
+        assert_eq!(
+            command,
+            "git -C /repos/example config branch.fix-auth.ringleaderManaged true"
         );
     }
 

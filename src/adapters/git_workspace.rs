@@ -254,6 +254,7 @@ mod tests {
 
     use super::*;
     use crate::adapters::bounded_command::Deadlines;
+    use crate::application::ports::BranchMarker;
     use crate::domain::SessionName;
     use crate::test_support::GitTestRepo;
 
@@ -1095,6 +1096,20 @@ mod tests {
             fixture.git(fixture.path(), &["config", "--get", &key]),
             "true"
         );
+    }
+
+    #[test]
+    fn the_printed_marking_command_marks_the_branch() {
+        let fixture = GitTestRepo::new();
+        WorktreeFixture::created(&fixture);
+        let command = BranchMarker::new(BRANCH).marking_command(fixture.path());
+        let words: Vec<&str> = command.split(' ').collect();
+        let (program, args) = words.split_first().unwrap();
+
+        fixture.git(fixture.root(), args);
+
+        assert_eq!(*program, "git");
+        assert!(WorktreeFixture::is_managed(&fixture, BRANCH));
     }
 
     #[test]

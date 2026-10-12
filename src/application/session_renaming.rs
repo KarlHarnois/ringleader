@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use super::branch_ownership::{BranchMutation, BranchOwnership};
 use super::ports::{HostProbe, Multiplexer, SessionRegistry, Workspace};
 use super::reconciliation::{ManagedRow, Reconciliation};
 use super::service_error::ServiceError;
@@ -8,6 +9,7 @@ use super::service_ports::ServicePorts;
 use crate::domain::{Session, SessionName};
 
 pub struct SessionRenaming {
+    ownership: BranchOwnership,
     workspace: Arc<dyn Workspace>,
     multiplexer: Arc<dyn Multiplexer>,
     host: Arc<dyn HostProbe>,
@@ -17,6 +19,7 @@ pub struct SessionRenaming {
 impl SessionRenaming {
     pub fn new(ports: &ServicePorts) -> Self {
         Self {
+            ownership: BranchOwnership::new(ports),
             workspace: ports.repos().workspace(),
             multiplexer: ports.tmux().multiplexer(),
             host: ports.repos().host(),
@@ -33,6 +36,10 @@ impl SessionRenaming {
     ) -> Result<Session, ServiceError> {
         let renamed = self.renamed_session(row.session(), new, keep_branch)?;
         self.check_rename_availability(row, &renamed, reconciliation, keep_branch)?;
+        if !keep_branch {
+            self.ownership
+                .refuse_unmarked(row.session(), BranchMutation::Rename)?;
+        }
         let renaming = BranchRenaming::new(self, row.session(), &renamed);
         renaming.apply()?;
         if row.is_live() {
@@ -179,7 +186,7 @@ mod tests {
     use std::path::Path;
 
     use super::*;
-    use crate::application::ports::MultiplexerError;
+    use crate::application::ports::{BranchMarker, MultiplexerError};
     use crate::test_support::{FakeMultiplexer, FakeSessionRegistry, ServiceFixture};
 
     struct RenameFixture;
@@ -201,6 +208,14 @@ mod tests {
                 .with_workspace(ServiceFixture::workspace_for(&references))
                 .with_host(ServiceFixture::host_for(&references))
                 .with_multiplexer(multiplexer)
+        }
+
+        fn unmarked(name: &str) -> ServiceFixture {
+            let session = ServiceFixture::session(name);
+            let repo = Path::new(ServiceFixture::REPO);
+            Self::stopped(name).with_workspace(
+                ServiceFixture::workspace_for(&[&session]).without_marker(repo, session.branch()),
+            )
         }
 
         fn stopped(name: &str) -> ServiceFixture {
@@ -229,6 +244,50 @@ mod tests {
         );
         assert_eq!(fixture.multiplexer().live_names(), ["ringleader-fix-login"]);
         assert_eq!(fixture.registry().sessions(), vec![renamed]);
+    }
+
+    #[test]
+    fn rename_moves_the_marker_with_the_branch() {
+        let fixture = RenameFixture::live(&["fix-auth"]);
+
+        let renamed = fixture
+            .service()
+            .rename_session("fix-auth", "fix-login", false)
+            .unwrap();
+
+        let repo = Path::new(ServiceFixture::REPO);
+        let original = ServiceFixture::session("fix-auth");
+        assert!(fixture.workspace().has_marker(repo, renamed.branch()));
+        assert!(!fixture.workspace().has_marker(repo, original.branch()));
+    }
+
+    #[test]
+    fn rename_refuses_an_unmarked_branch_with_the_marking_command() {
+        let fixture = RenameFixture::unmarked("fix-auth");
+        let session = ServiceFixture::session("fix-auth");
+        let command =
+            BranchMarker::new(session.branch()).marking_command(Path::new(ServiceFixture::REPO));
+
+        let error = fixture
+            .service()
+            .rename_session("fix-auth", "fix-login", false)
+            .unwrap_err();
+
+        assert!(error.to_string().contains(&command));
+        assert!(error.to_string().contains("--keep-branch"));
+        assert!(fixture.workspace().state_changing_calls().is_empty());
+    }
+
+    #[test]
+    fn rename_with_keep_branch_renames_a_session_on_an_unmarked_branch() {
+        let fixture = RenameFixture::unmarked("fix-auth");
+
+        let renamed = fixture
+            .service()
+            .rename_session("fix-auth", "fix-login", true)
+            .unwrap();
+
+        assert_eq!(renamed.name().as_str(), "fix-login");
     }
 
     #[test]

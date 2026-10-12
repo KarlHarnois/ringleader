@@ -488,11 +488,10 @@ mod tests {
             .with_workspace(ServiceFixture::workspace_for(&[&entry]))
             .with_host(ServiceFixture::host_for(&[&entry]))
             .with_multiplexer(FakeMultiplexer::new().with_live(renamed));
-        let workspace = ServiceFixture::workspace_for(&[&entry]).with_branch(
-            std::path::Path::new(ServiceFixture::REPO),
-            "ringleader/fix-login",
-            ServiceFixture::TIP,
-        );
+        let repo = std::path::Path::new(ServiceFixture::REPO);
+        let workspace = ServiceFixture::workspace_for(&[&entry])
+            .with_branch(repo, "ringleader/fix-login", ServiceFixture::TIP)
+            .with_marker(repo, "ringleader/fix-login");
         let fixture = fixture.with_workspace(workspace);
 
         fixture

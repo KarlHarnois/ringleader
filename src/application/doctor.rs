@@ -410,6 +410,19 @@ mod tests {
     }
 
     #[test]
+    fn an_unmarked_registry_branch_is_a_warning_with_the_marking_command() {
+        let session = DoctorFixture::session();
+        let repo = Path::new(ServiceFixture::REPO);
+        let fixture = DoctorFixture::healthy().with_workspace(
+            ServiceFixture::workspace_for(&[&session]).without_marker(repo, session.branch()),
+        );
+        let command =
+            crate::application::ports::BranchMarker::new(session.branch()).marking_command(repo);
+
+        assert!(DoctorFixture::has_warning(&fixture, &command));
+    }
+
+    #[test]
     fn a_leftover_worktree_directory_is_a_problem_with_advice() {
         let fixture =
             DoctorFixture::healthy().with_workspace(FakeWorkspace::default().with_branch(

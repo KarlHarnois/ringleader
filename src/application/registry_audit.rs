@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use super::branch_ownership::BranchOwnership;
 use super::doctor_report::DoctorReport;
 use super::orphan_audit::OrphanAudit;
 use super::ports::{Multiplexer, Workspace};
@@ -68,7 +69,7 @@ impl RegistryAudit {
             .workspace
             .branch_exists(session.repo_path(), session.branch())
         {
-            Ok(true) => {}
+            Ok(true) => self.audit_marker(session, report),
             Ok(false) => report.problem(format!(
                 "session {name}: branch {} is missing",
                 session.branch()
@@ -85,6 +86,20 @@ impl RegistryAudit {
         }
         if state == SessionState::Stopped {
             self.audit_stopped(session, reconciliation, report);
+        }
+    }
+
+    fn audit_marker(&self, session: &Session, report: &mut DoctorReport) {
+        if let Ok(false) = self
+            .workspace
+            .is_branch_managed(session.repo_path(), session.branch())
+        {
+            report.warning(format!(
+                "session {}: branch {} has no Ringleader marker, so delete and rename refuse it; {}",
+                session.name(),
+                session.branch(),
+                BranchOwnership::marking_advice(session)
+            ));
         }
     }
 

@@ -204,7 +204,7 @@ mod tests {
     use super::*;
     use crate::application::deletion_guards::BranchPresence;
     use crate::application::ports::{
-        DirtyState, MultiplexerError, UnmergedCommits, WorkspaceError,
+        BranchMarker, DirtyState, MultiplexerError, UnmergedCommits, WorkspaceError, WorktreeEntry,
     };
     use crate::application::session_service::SessionService;
     use crate::domain::{AgentPane, NamingScheme, Registration, TmuxAddress};
@@ -245,6 +245,16 @@ mod tests {
                 .with_registry(FakeSessionRegistry::with_sessions(vec![session.clone()]))
                 .with_workspace(ServiceFixture::workspace_for(&[&session]))
                 .with_host(ServiceFixture::host_for(&[&session]))
+        }
+
+        fn unmarked_workspace() -> FakeWorkspace {
+            let session = Self::session();
+            ServiceFixture::workspace_for(&[&session])
+                .without_marker(Self::repo(), session.branch())
+        }
+
+        fn marking_command() -> String {
+            BranchMarker::new(Self::session().branch()).marking_command(Self::repo())
         }
 
         fn dirty_workspace(files: u64) -> FakeWorkspace {
@@ -667,11 +677,13 @@ mod tests {
     #[test]
     fn deleting_an_orphan_session_without_commits_returns_no_sha() {
         let session = DeleteFixture::session();
-        let workspace = FakeWorkspace::default().with_worktree(
-            DeleteFixture::repo(),
-            crate::application::ports::WorktreeEntry::new(session.worktree_path())
-                .on_branch(session.branch()),
-        );
+        let workspace = FakeWorkspace::default()
+            .with_worktree(
+                DeleteFixture::repo(),
+                crate::application::ports::WorktreeEntry::new(session.worktree_path())
+                    .on_branch(session.branch()),
+            )
+            .with_marker(DeleteFixture::repo(), session.branch());
         let fixture = DeleteFixture::live_fixture().with_workspace(workspace);
 
         let outcome = DeleteFixture::force(&mut fixture.service()).unwrap();
@@ -712,6 +724,61 @@ mod tests {
     }
 
     #[test]
+    fn delete_refuses_an_unmarked_branch_with_the_marking_command() {
+        let fixture =
+            DeleteFixture::live_fixture().with_workspace(DeleteFixture::unmarked_workspace());
+
+        let error = DeleteFixture::force(&mut fixture.service()).unwrap_err();
+
+        assert_eq!(error.exit_code(), ServiceError::CONFLICT_EXIT);
+        assert!(
+            error
+                .to_string()
+                .contains(&DeleteFixture::marking_command())
+        );
+    }
+
+    #[test]
+    fn a_refused_unmarked_delete_changes_nothing() {
+        let fixture =
+            DeleteFixture::live_fixture().with_workspace(DeleteFixture::unmarked_workspace());
+
+        DeleteFixture::force(&mut fixture.service()).unwrap_err();
+
+        assert!(fixture.workspace().state_changing_calls().is_empty());
+        assert_eq!(fixture.multiplexer().live_names(), ["ringleader-fix-auth"]);
+        DeleteFixture::assert_everything_kept(&fixture);
+    }
+
+    #[test]
+    fn delete_refuses_an_unmarked_unborn_branch() {
+        let session = DeleteFixture::session();
+        let workspace = FakeWorkspace::default().with_worktree(
+            DeleteFixture::repo(),
+            WorktreeEntry::new(session.worktree_path()).on_branch(session.branch()),
+        );
+        let fixture = DeleteFixture::live_fixture().with_workspace(workspace);
+
+        let error = DeleteFixture::force(&mut fixture.service()).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains(&DeleteFixture::marking_command())
+        );
+    }
+
+    #[test]
+    fn measuring_a_delete_refuses_an_unmarked_branch() {
+        let fixture =
+            DeleteFixture::live_fixture().with_workspace(DeleteFixture::unmarked_workspace());
+
+        let error = fixture.service().delete_impact("fix-auth").unwrap_err();
+
+        assert!(error.to_string().contains("has no Ringleader marker"));
+    }
+
+    #[test]
     fn a_locked_worktree_refuses_the_delete_and_leaves_the_session_running() {
         let session = DeleteFixture::session();
         let workspace = FakeWorkspace::default()
@@ -722,7 +789,8 @@ mod tests {
                     .at_head(ServiceFixture::TIP)
                     .locked(),
             )
-            .with_branch(DeleteFixture::repo(), session.branch(), ServiceFixture::TIP);
+            .with_branch(DeleteFixture::repo(), session.branch(), ServiceFixture::TIP)
+            .with_marker(DeleteFixture::repo(), session.branch());
         let fixture = DeleteFixture::live_fixture().with_workspace(workspace);
 
         let error = DeleteFixture::force(&mut fixture.service()).unwrap_err();
