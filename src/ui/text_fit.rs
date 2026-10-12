@@ -52,14 +52,22 @@ impl<'a> TextFit<'a> {
                 current.push(' ');
             }
             current.push_str(word);
-            while current.chars().count() > width {
-                let rest: String = current.chars().skip(width).collect();
-                lines.push(current.chars().take(width).collect());
-                current = rest;
+            if current.chars().count() > width {
+                let mut pieces = Self::chunked(&current, width);
+                current = pieces.pop().unwrap_or_default();
+                lines.extend(pieces);
             }
         }
         lines.push(current);
         lines
+    }
+
+    fn chunked(text: &str, width: usize) -> Vec<String> {
+        let characters: Vec<char> = text.chars().collect();
+        characters
+            .chunks(width)
+            .map(|chunk| chunk.iter().collect())
+            .collect()
     }
 
     fn length(&self) -> usize {
