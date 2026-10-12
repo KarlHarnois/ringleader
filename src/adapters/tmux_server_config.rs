@@ -10,7 +10,8 @@ pub struct TmuxServerConfig {
 
 impl TmuxServerConfig {
     const RESET: &'static str = "set -su terminal-features";
-    const SETTINGS: [&'static str; 15] = [
+    const SETTINGS: [&'static str; 16] = [
+        "set -g key-table root",
         "set -g prefix None",
         "set -g prefix2 None",
         "set -g status off",
@@ -139,6 +140,10 @@ mod tests {
         fn detaches_when_typed(key: &str, typed_bytes: &[&str]) -> bool {
             let inner = TmuxTestServer::with_config(&Self::render(key));
             inner.start_session("holder");
+            Self::nested_client_detaches(&inner, "=holder:", typed_bytes)
+        }
+
+        fn nested_client_detaches(inner: &TmuxTestServer, target: &str, typed: &[&str]) -> bool {
             let outer = TmuxTestServer::new();
             let socket = inner.socket().display().to_string();
             let config = inner.config().display().to_string();
@@ -160,13 +165,13 @@ mod tests {
                 &config,
                 "attach-session",
                 "-t",
-                "=holder:",
+                target,
             ]);
-            let attached = inner.wait_for(|| Self::clients(&inner) == 1);
+            let attached = inner.wait_for(|| Self::clients(inner) == 1);
             let mut typing = vec!["send-keys", "-t", "=outer:", "-H"];
-            typing.extend(typed_bytes);
+            typing.extend(typed);
             outer.text(&typing);
-            attached && inner.wait_for(|| Self::clients(&inner) == 0)
+            attached && inner.wait_for(|| Self::clients(inner) == 0)
         }
 
         fn clients(server: &TmuxTestServer) -> usize {
@@ -252,6 +257,21 @@ mod tests {
 
         assert_eq!(ConfigFixture::option(&server, "history-limit"), "5000");
         assert_eq!(ConfigFixture::option(&server, "status"), "off");
+    }
+
+    #[test]
+    fn a_key_table_in_the_user_file_leaves_the_return_key_working() {
+        let server = TmuxTestServer::new();
+        let user_file = server.directory().join("user.conf");
+        fs::write(&user_file, "set -g key-table off\n").unwrap();
+
+        ConfigFixture::created_sourcing(&server, Some(&user_file));
+
+        assert!(ConfigFixture::nested_client_detaches(
+            &server,
+            "=ringleader-fix-auth:",
+            &["11"]
+        ));
     }
 
     #[test]
