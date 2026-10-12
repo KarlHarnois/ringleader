@@ -27,7 +27,7 @@ impl NewSessionDialog {
     pub const TITLE: &'static str = " New session ";
     const CREATE_KEY: char = 's';
     const CURSOR: char = '█';
-    const FIXED_LINES: usize = 6;
+    const FIXED_LINES: usize = 3;
     const PROMPT_ROWS: usize = 6;
 
     pub fn open(service: &SessionService) -> Self {
@@ -87,23 +87,39 @@ impl NewSessionDialog {
         theme: &Theme,
     ) -> Vec<Line<'static>> {
         let agents_expanded = self.focus == NewSessionField::Agent;
-        let fixed_rows = Self::FIXED_LINES + self.agents.height(agents_expanded);
+        let error_lines = self.error_lines(width, theme);
+        let fixed_rows =
+            Self::FIXED_LINES + self.agents.height(agents_expanded) + error_lines.len();
         let field_width = width.saturating_sub(labels.width());
-        let prompt_lines = self.prompt_lines(field_width, height.saturating_sub(fixed_rows));
-        let room = height.saturating_sub(fixed_rows + prompt_lines.len());
-        let repo_lines = self
-            .repos
-            .lines(field_width, room, self.repo_style(theme), theme);
+        let free_rows = height.saturating_sub(fixed_rows);
+        let (repo_lines, prompt_lines) = self.repo_and_prompt_lines(field_width, free_rows, theme);
         let agent_lines = self.agents.lines(agents_expanded, theme);
         let mut lines = vec![self.text_line(NewSessionField::Name, &self.name, labels, width)];
         lines.extend(labels.labeled(NewSessionField::Repo.label(), repo_lines));
         lines.extend(labels.labeled(NewSessionField::Agent.label(), agent_lines));
         lines.extend(labels.labeled(NewSessionField::Prompt.label(), prompt_lines));
         lines.push(Line::from(""));
-        let error = self.error.as_deref().unwrap_or_default();
-        lines.extend(TextFit::new(error).styled_lines(width, theme.error()));
+        lines.extend(error_lines);
         lines.push(Line::styled(self.hints(), theme.dim()));
         lines
+    }
+
+    fn error_lines(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
+        let error = self.error.as_deref().unwrap_or_default();
+        TextFit::new(error).styled_lines(width, theme.error())
+    }
+
+    fn repo_and_prompt_lines(
+        &self,
+        width: usize,
+        free_rows: usize,
+        theme: &Theme,
+    ) -> (Vec<Line<'static>>, Vec<Line<'static>>) {
+        let repo_floor = self.repos.min_height(width, theme);
+        let prompt_lines = self.prompt_lines(width, free_rows.saturating_sub(repo_floor));
+        let room = free_rows.saturating_sub(prompt_lines.len());
+        let repo_lines = self.repos.lines(width, room, self.repo_style(theme), theme);
+        (repo_lines, prompt_lines)
     }
 
     fn repo_style(&self, theme: &Theme) -> Style {
@@ -233,6 +249,9 @@ mod tests {
         const AGENT_HINTS: &'static str =
             "↑ ↓ j k choose · Enter next field · Ctrl-S create · Esc cancel";
         const PROMPT_HINTS: &'static str = "Alt-Enter new line · Enter create · Esc cancel";
+        const SEARCH_HINTS: &'static str =
+            "Type to search · ↑ ↓ ctrl-j ctrl-k choose · Enter pick · Esc back";
+        const SEVEN_LINE_PROMPT: &'static str = "one\ntwo\nthree\nfour\nfive\nsix\nseven";
         const FULL_HEIGHT: usize = 20;
 
         fn launched_in_repo() -> ServiceFixture {
@@ -268,6 +287,11 @@ mod tests {
                 })
                 .collect::<Vec<_>>()
                 .join("\n")
+        }
+
+        fn shown_at(dialog: &NewSessionDialog, height: usize) -> String {
+            let text = Self::text_at(dialog, height);
+            text.lines().take(height).collect::<Vec<_>>().join("\n")
         }
 
         fn flat_text(dialog: &NewSessionDialog) -> String {
@@ -473,10 +497,7 @@ mod tests {
             on_the_field
                 .ends_with("Type to find a repo · Enter next field · Ctrl-S create · Esc cancel")
         );
-        assert!(
-            DialogFixture::text(&dialog)
-                .ends_with("Type to search · ↑ ↓ ctrl-j ctrl-k choose · Enter pick · Esc back")
-        );
+        assert!(DialogFixture::text(&dialog).ends_with(DialogFixture::SEARCH_HINTS));
     }
 
     #[test]
@@ -596,12 +617,37 @@ mod tests {
     }
 
     #[test]
-    fn a_short_dialog_keeps_the_prompt_on_one_row() {
+    fn a_dialog_with_no_spare_rows_keeps_the_prompt_on_one_row() {
         let (mut dialog, _service) = DialogFixture::in_prompt(&DialogFixture::launched_in_repo());
 
         dialog.paste("one\ntwo\nthree");
 
-        assert!(DialogFixture::text_at(&dialog, 8).contains("Prompt    three█\n\n"));
+        assert!(DialogFixture::text_at(&dialog, 7).contains("Prompt    three█\n\n"));
+    }
+
+    #[test]
+    fn a_repo_search_under_a_tall_prompt_keeps_the_hints_in_view() {
+        let (mut dialog, service) = DialogFixture::in_prompt(&DialogFixture::launched_in_repo());
+        dialog.paste(DialogFixture::SEVEN_LINE_PROMPT);
+        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
+
+        DialogFixture::search(&mut dialog, &service, "gate");
+        DialogFixture::settle(&mut dialog, |text| text.contains("1/1 repos under ~"));
+
+        assert!(DialogFixture::shown_at(&dialog, 12).ends_with(DialogFixture::SEARCH_HINTS));
+    }
+
+    #[test]
+    fn a_wrapped_error_under_a_tall_prompt_keeps_the_hints_in_view() {
+        let (mut dialog, _service) = DialogFixture::in_prompt(&DialogFixture::launched_in_repo());
+        dialog.paste(DialogFixture::SEVEN_LINE_PROMPT);
+
+        dialog.fail(format!(
+            "git worktree add failed: {}",
+            "fatal: invalid reference ".repeat(6)
+        ));
+
+        assert!(DialogFixture::shown_at(&dialog, 12).ends_with(DialogFixture::PROMPT_HINTS));
     }
 
     #[test]
