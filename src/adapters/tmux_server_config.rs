@@ -10,6 +10,7 @@ pub struct TmuxServerConfig {
 
 impl TmuxServerConfig {
     const RESET: &'static str = "set -su terminal-features";
+    const RETURN_TABLES: [&'static str; 3] = ["root", "copy-mode", "copy-mode-vi"];
     const SETTINGS: [&'static str; 16] = [
         "set -g key-table root",
         "set -g prefix None",
@@ -49,22 +50,24 @@ impl TmuxServerConfig {
     }
 
     pub fn reapply_script(previous_key: Option<&ReturnKey>) -> TmuxSequence {
-        let sequence = match previous_key {
-            Some(key) => {
-                TmuxSequence::new().command(["unbind-key", "-q", "-T", "root", &key.to_string()])
-            }
-            None => TmuxSequence::new(),
-        };
-        sequence.command(["source-file", "-"])
+        let unbound = previous_key.map_or_else(TmuxSequence::new, Self::unbinding);
+        unbound.command(["source-file", "-"])
     }
 
     pub fn render(&self) -> String {
         let hash_line = format!("set -g {} '{}'", Self::HASH_OPTION, self.hash());
-        Self::joined(&[self.leading_lines(), vec![hash_line, self.return_binding()]].concat())
+        Self::joined(
+            &[
+                self.leading_lines(),
+                vec![hash_line],
+                self.return_bindings(),
+            ]
+            .concat(),
+        )
     }
 
     pub fn hash(&self) -> String {
-        let hashed = [self.leading_lines(), vec![self.return_binding()]].concat();
+        let hashed = [self.leading_lines(), self.return_bindings()].concat();
         format!("{:016x}", Self::fnv1a(Self::joined(&hashed).as_bytes()))
     }
 
@@ -94,11 +97,21 @@ impl TmuxServerConfig {
         })
     }
 
-    fn return_binding(&self) -> String {
-        format!(
-            "bind-key -T root {} detach-client",
-            self.return_key.tmux_spelling()
-        )
+    fn unbinding(key: &ReturnKey) -> TmuxSequence {
+        let key = key.to_string();
+        Self::RETURN_TABLES
+            .iter()
+            .fold(TmuxSequence::new(), |sequence, table| {
+                sequence.command(["unbind-key", "-q", "-T", table, &key])
+            })
+    }
+
+    fn return_bindings(&self) -> Vec<String> {
+        let key = self.return_key.tmux_spelling();
+        Self::RETURN_TABLES
+            .iter()
+            .map(|table| format!("bind-key -T {table} {key} detach-client"))
+            .collect()
     }
 }
 
@@ -362,6 +375,20 @@ mod tests {
             ("M-x", &["1b", "78"]),
         ] {
             assert!(ConfigFixture::detaches_when_typed(key, typed), "{key}");
+        }
+    }
+
+    #[test]
+    fn the_return_key_detaches_a_pane_in_either_copy_mode() {
+        for mode_keys in ["emacs", "vi"] {
+            let inner = TmuxTestServer::with_config(&ConfigFixture::render("M-x"));
+            inner.start_session("holder");
+            inner.text(&["set-option", "-g", "mode-keys", mode_keys]);
+            inner.text(&["copy-mode", "-t", "=holder:"]);
+
+            let detached = ConfigFixture::nested_client_detaches(&inner, "=holder:", &["1b", "78"]);
+
+            assert!(detached, "{mode_keys}");
         }
     }
 

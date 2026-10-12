@@ -170,8 +170,12 @@ mod tests {
         }
 
         fn detach_keys(server: &TmuxTestServer) -> Vec<String> {
+            Self::detach_keys_in(server, "root")
+        }
+
+        fn detach_keys_in(server: &TmuxTestServer, table: &str) -> Vec<String> {
             server
-                .text(&["list-keys", "-T", "root"])
+                .text(&["list-keys", "-T", table])
                 .lines()
                 .filter(|line| line.ends_with(" detach-client"))
                 .filter_map(|line| line.split_whitespace().nth(3))
@@ -266,6 +270,7 @@ mod tests {
         assert!(!before.is_current());
         assert!(after.is_current());
         assert_eq!(ServerFixture::detach_keys(&server), ["M-x"]);
+        assert_eq!(ServerFixture::detach_keys_in(&server, "copy-mode"), ["M-x"]);
         assert!(written.contains("bind-key -T root 'M-x' detach-client"));
         assert_eq!(
             server.text(&["show-options", "-g", "-v", "@ringleader_config"]),
