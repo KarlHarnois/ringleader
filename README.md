@@ -42,6 +42,8 @@ Your own `~/.tmux.conf` never loads on Ringleader's server. Put preferences such
 
 Earlier versions ran sessions on your own tmux server. Those sessions stay there and list as stopped, and `ringleader doctor` names the server each one runs on. End each one there, then run `ringleader restart <name>` to start it again on Ringleader's own server. The `tmux_prefix` setting no longer does anything: new sessions are always named `ringleader-<name>`.
 
+Sessions an earlier version ran without recording them do not show anywhere now. To find them, run `tmux ls -F '#{session_name}' | grep '^ringleader-'` from your own tmux, with your old `tmux_prefix` in place of `ringleader-` if you had changed it.
+
 ## Agent environment
 
 An agent starts with a fixed baseline of variables such as `PATH` and `HOME`. Its `env` list copies more variables from the environment Ringleader runs in, and its `set_env` table sets fixed values. A `set_env` value is used as written, except that a leading `~/` expands to your home. Variables such as `$HOME` are not expanded. The values sit in plain text in the config, so pass secrets through `env` instead. To run Claude Code under two accounts, add one agent per account and pick it when you create a session:
