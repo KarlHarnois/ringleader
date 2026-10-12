@@ -46,10 +46,6 @@ impl NamingScheme {
     pub fn strip_tmux_prefix<'a>(&self, tmux_name: &'a str) -> Option<&'a str> {
         tmux_name.strip_prefix(self.tmux_prefix.as_str())
     }
-
-    pub fn owns_branch(&self, branch: &str) -> bool {
-        branch.starts_with(&self.branch_prefix)
-    }
 }
 
 #[cfg(test)]

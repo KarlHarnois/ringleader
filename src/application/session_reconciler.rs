@@ -240,7 +240,6 @@ impl<'a> SessionReconciler<'a> {
     ) -> Option<&'o SessionMetadata> {
         observation.metadata().filter(|metadata| {
             metadata.has_absolute_paths()
-                && naming.owns_branch(metadata.branch())
                 && self
                     .containment
                     .contains(naming.worktree_root(), metadata.worktree_path())
@@ -257,6 +256,8 @@ mod tests {
     struct ObserveFixture;
 
     impl ObserveFixture {
+        const FOREIGN_BRANCH: &str = "feature/mystery";
+
         fn observe(fixture: &ServiceFixture) -> Vec<SessionSummary> {
             fixture.service().observe(true).unwrap()
         }
@@ -265,6 +266,22 @@ mod tests {
             let mut rows = Self::observe(fixture);
             assert_eq!(rows.len(), 1);
             rows.pop().unwrap()
+        }
+
+        fn on_foreign_branch() -> ServiceFixture {
+            let stranger = ServiceFixture::session("mystery");
+            let foreign = stranger.metadata().with_branch(Self::FOREIGN_BRANCH);
+            let observation = ServiceFixture::waiting(&stranger)
+                .without_metadata()
+                .with_metadata(foreign);
+            let workspace = ServiceFixture::workspace_for(&[]).with_branch(
+                std::path::Path::new(ServiceFixture::REPO),
+                Self::FOREIGN_BRANCH,
+                ServiceFixture::TIP,
+            );
+            ServiceFixture::new()
+                .with_workspace(workspace)
+                .with_multiplexer(FakeMultiplexer::new().with_live(observation))
         }
     }
 
@@ -354,18 +371,44 @@ mod tests {
     }
 
     #[test]
-    fn metadata_with_a_foreign_branch_is_unmanaged() {
-        let stranger = ServiceFixture::session("mystery");
-        let foreign = stranger.metadata().with_branch("feature/mystery");
-        let observation = ServiceFixture::waiting(&stranger)
-            .without_metadata()
-            .with_metadata(foreign);
-        let fixture =
-            ServiceFixture::new().with_multiplexer(FakeMultiplexer::new().with_live(observation));
+    fn metadata_with_a_foreign_branch_is_adopted() {
+        let fixture = ObserveFixture::on_foreign_branch();
 
         assert_eq!(
             ObserveFixture::only_row(&fixture).state(),
-            SessionState::Unmanaged
+            SessionState::Waiting
+        );
+    }
+
+    #[test]
+    fn an_adopted_session_on_a_foreign_branch_refuses_delete() {
+        let fixture = ObserveFixture::on_foreign_branch();
+
+        let error = fixture
+            .service()
+            .delete_session("mystery", &crate::application::DeleteConfirmation::force())
+            .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("feature/mystery has no Ringleader marker")
+        );
+    }
+
+    #[test]
+    fn an_adopted_session_on_a_foreign_branch_refuses_rename() {
+        let fixture = ObserveFixture::on_foreign_branch();
+
+        let error = fixture
+            .service()
+            .rename_session("mystery", "riddle", false)
+            .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("feature/mystery has no Ringleader marker")
         );
     }
 
