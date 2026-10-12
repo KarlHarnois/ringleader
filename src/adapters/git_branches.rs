@@ -16,14 +16,11 @@ impl<'a> GitBranches<'a> {
     }
 
     pub fn has_ref(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError> {
-        Ok(self
-            .git
-            .resolve(repo, &format!("refs/heads/{branch}"))?
-            .is_some())
+        Ok(self.git.resolve(repo, &Self::branch_ref(branch))?.is_some())
     }
 
     pub fn first_under(&self, repo: &Path, branch: &str) -> Result<Option<String>, WorkspaceError> {
-        let directory = format!("{}/{branch}/", Self::BRANCH_REFS);
+        let directory = format!("{}/", Self::branch_ref(branch));
         let list = GitInvocation::in_repo(repo, "for-each-ref").args([
             "--count=1",
             "--format=%(refname:lstrip=2)",
@@ -42,7 +39,7 @@ impl<'a> GitBranches<'a> {
         if let Some(tip) = expected_tip {
             let update = GitInvocation::in_repo(repo, "update-ref").writing().args([
                 "-d",
-                &format!("refs/heads/{branch}"),
+                &Self::branch_ref(branch),
                 tip,
             ]);
             self.git.run_checked(&update)?;
@@ -115,6 +112,10 @@ impl<'a> GitBranches<'a> {
             .filter_map(|(key, _)| BranchMarker::from_key(key))
             .map(|marker| marker.branch().to_string())
             .collect())
+    }
+
+    fn branch_ref(branch: &str) -> String {
+        format!("{}/{branch}", Self::BRANCH_REFS)
     }
 
     fn list_existing(&self, repo: &Path) -> Result<Vec<String>, WorkspaceError> {
