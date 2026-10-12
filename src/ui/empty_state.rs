@@ -25,6 +25,11 @@ impl EmptyState {
         }
     }
 
+    #[cfg(test)]
+    pub fn logo_bottom_row() -> &'static str {
+        Self::LOGO[Self::LOGO.len() - 1]
+    }
+
     fn logo_above_message() -> Vec<Line<'static>> {
         Self::logo_rows_of_one_width()
             .chain([Line::default()])

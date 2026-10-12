@@ -141,13 +141,12 @@ mod tests {
     use super::*;
     use crate::domain::{SessionState, SessionSummary};
     use crate::test_support::ServiceFixture;
+    use crate::ui::empty_state::EmptyState;
     use crate::ui::theme::Theme;
 
     struct ViewFixture;
 
     impl ViewFixture {
-        const LOGO_BOTTOM_ROW: &str = r"/_/ |_/___/_/ |_/\____/";
-
         fn rows() -> Vec<SessionSummary> {
             vec![SessionSummary::managed(
                 ServiceFixture::session("fix-auth"),
@@ -255,7 +254,7 @@ mod tests {
     fn the_smallest_full_tier_without_sessions_shows_the_logo() {
         let screen = ViewFixture::render(&[], 80, 24);
 
-        assert!(screen.contains(ViewFixture::LOGO_BOTTOM_ROW));
+        assert!(screen.contains(EmptyState::logo_bottom_row()));
     }
 
     #[test]
@@ -269,7 +268,7 @@ mod tests {
     fn the_logo_in_the_compact_tier_leaves_the_table_header_visible() {
         let screen = ViewFixture::render(&[], 64, 12);
 
-        assert!(screen.contains(ViewFixture::LOGO_BOTTOM_ROW));
+        assert!(screen.contains(EmptyState::logo_bottom_row()));
         assert!(screen.contains("  Name"));
     }
 }
