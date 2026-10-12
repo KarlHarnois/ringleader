@@ -148,7 +148,7 @@ bind-key -T root 'C-q' detach-client
 
 ### 3.8 Config, help, README, and AGENTS.md
 
-- **Config.** Add `return_key`, default `C-q`, through `RawConfig`, `ConfigDraft`, `ConfigChecks`, `Config`, and the first-run template. It is a new domain type, `ReturnKey` in `src/domain/return_key.rs`. It accepts optional `C-`, `M-`, and `S-` modifiers followed by one printable non-space ASCII character or a named key such as `F1` to `F12`, `Escape`, or `Home`. It rejects empty values, whitespace, quotes, `\`, and newlines. It gives the single-quoted tmux spelling for the config and a display form for help and the README.
+- **Config.** Add `return_key`, default `C-q`, through `RawConfig`, `ConfigDraft`, `ConfigChecks`, `Config`, and the first-run template. It is a new domain type, `ReturnKey` in `src/domain/return_key.rs`. It accepts optional `C-`, `M-`, and `S-` modifiers followed by one printable non-space ASCII character or a named key such as `F1` to `F12`, `Escape`, or `Home`. It rejects empty values, whitespace, quotes, `\`, newlines, and `C-` followed by `$`, `%`, `&`, `*`, `{`, `|`, `}`, or `~`, which tmux 3.2a cannot bind (section 7). It gives the single-quoted tmux spelling for the config and a display form for help and the README.
 - **Help.** `HelpView::new` takes the return key, the socket path, and the config path instead of `tmux_prefix`. The return section says the return key detaches back to the TUI from any session. It also says sessions have no prefix key and the mouse is on, and that inside your own tmux the session opens nested, so your tmux must not bind the return key. The prefix sentence and the `env -u TMUX -u TMUX_PANE ringleader` sentence go. The bell sentence becomes "the bell rings only while this screen shows". The Files section adds the socket and the config path.
 - **README.** Replace the Ctrl-Q paragraph with the return key paragraph above. Add a short upgrade note: sessions from earlier versions stay on your own tmux server, `ringleader doctor` lists them, end each there and run `ringleader restart <name>`, and `tmux_prefix` no longer does anything. Add the hand command to inspect the private server.
 - **AGENTS.md.** In the same commit as the behavior each rule describes:
@@ -182,7 +182,7 @@ When every milestone is in, flip the status header to `completed`.
 
 ### Implementation status
 
-As of 2026-10-11, milestones 1 to 7 are in, one commit each, and the recommendation in each D row is what they implement. Milestone 0 is still open, because it needs the owner's real terminals, Claude Code, and opencode. Until it runs, D12, D13, and the defaults for `history-limit` and `focus-events` stay working assumptions.
+As of 2026-10-11, milestones 1 to 7 are in, one commit each, and the recommendation in each D row is what they implement. Milestone 0 is partly done: the tmux 3.2 check and the capture of the agents' keyboard requests ran, and section 7 records the results and the two fixes they led to. The rest needs the owner's real terminals and logged-in agents. Until it runs, D12, D13, and the defaults for `history-limit` and `focus-events` stay working assumptions.
 
 Where the implementation departs from the text above:
 
@@ -216,12 +216,12 @@ That is 1,103 lines in deleted source files and about 830 more from files that s
 
 ## 6. Tests the milestones must add
 
-- **Config and paths (milestone 2).** `return_key` defaults to `C-q`. `C-q`, `M-x`, `F12`, `~`, `}`, and `C-}` pass. Empty, `C-`, a quote, `\`, a space, and a newline each fail with `return_key` named. The template loads. The socket lands under `XDG_RUNTIME_DIR`, falls back to the state directory when the variable is unset or relative, and a path of 100 bytes or more, or with a comma, is refused with the path named.
+- **Config and paths (milestone 2).** `return_key` defaults to `C-q`. `C-q`, `M-x`, `F12`, `~`, `}`, and `M-}` pass. Empty, `C-`, a quote, `\`, a space, a newline, and `C-}` each fail with `return_key` named. The template loads. The socket lands under `XDG_RUNTIME_DIR`, falls back to the state directory when the variable is unset or relative, and a path of 100 bytes or more, or with a comma, is refused with the path named.
 - **Generated config (milestone 2).**
   - The render matches the golden fixture.
   - A `TmuxTestServer` started with it reports `prefix` None and `status` off, and sourcing the file again on that running server returns 0.
-  - Each key class (`C-q`, `M-x`, `F12`, `~`, `}`, `C-}`) loads through `-f` at server start and through `source-file -` on a running server, and `list-keys -T root` shows it bound to `detach-client`.
-  - Every single printable character that `ReturnKey` accepts binds to `detach-client` through `source-file -` on one running server. A character that fails is added to `ReturnKey`'s reject list.
+  - Each key class (`C-q`, `M-x`, `F12`, `~`, `}`, `M-}`) loads through `-f` at server start and through `source-file -` on a running server, and `list-keys -T root` shows it bound to `detach-client`.
+  - Every printable character that `ReturnKey` accepts, alone and after `C-` and `M-`, binds to `detach-client` through `source-file -` on one running server. A character that fails is added to `ReturnKey`'s reject list.
   - Keys are pressed through a client with `send-keys -K -c <client>`, never with `send-keys -t <pane>`, which skips the key tables (section 7, check 3b).
   - The return key on a control-mode client exits the client from an agent window, from a `t` shell window, and from a session without metadata.
   - `C-b` reaches the pane.
@@ -304,6 +304,26 @@ Milestone 0 runs these in real terminals, because the pseudo-terminal only prove
 - **Resize.** Resizing the real terminal during a nested attach.
 - **Redraw.** How the TUI redraws after the attach child prints `[detached ...]` or `[exited]`.
 - **tmux 3.2.** The whole config on tmux 3.2, the minimum supported version.
+
+### Milestone 0 results
+
+The implementing agent ran two of the items above on 2026-10-11, on throwaway servers only.
+
+**tmux 3.2a**, taken from nixos-21.11:
+
+- The generated config loads with no errors at server start, and sourcing it again on the running server returns 0. The D7 reapply through `source-file -` works.
+- The full test suite passes on 3.2a except the four tests that press keys with `send-keys -K`, which tmux added in 3.3. A run of the real binary covered the same ground instead. In a plain pane and nested inside an outer 3.2a server, Ctrl-Q detaches and the attach exits 0, the TUI attaches and returns, a `t` shell refuses with exit 3, and the outer server's `list-keys` output and session list stay unchanged.
+- tmux 3.2a cannot bind `C-$`, `C-%`, `C-&`, `C-*`, `C-{`, `C-|`, `C-}`, or `C-~`, and reports `unknown key`. `ReturnKey` now refuses them. Every named key `ReturnKey` accepts binds, and so does every other accepted character, alone or after `C-` or `M-`.
+- tmux 3.2a treats `C-A` and `C-a` as one key, where 3.6a keeps them apart. Both bind.
+- `#{server_sessions}` does not exist on 3.2a, so doctor now counts the sessions with `list-sessions`.
+
+**Agent keyboard requests.** Each agent ran under `script`, which logs every byte the agent writes, in a pane of a 3.6a server started with the generated config. The environment was clean and the home a throwaway, so Claude Code stopped at its first-run screen.
+
+- Claude Code 2.1.296 sends `CSI <u`, `CSI >5u` (kitty flags 1 and 4), and `CSI >4;2m` (modifyOtherKeys 2) at startup, without waiting for answers. It then queries `CSI ?u`, XTVERSION, and DA1, and turns on bracketed paste and focus events.
+- opencode 1.19.0 queries `CSI ?u` and XTVERSION, gets no kitty answer from tmux, and sends `CSI >4;1m` (modifyOtherKeys 1). It never pushes kitty flags. It also turns on bracketed paste and SGR mouse tracking (1000, 1002, 1003, 1006), and wraps some requests in `DCS tmux;` passthrough, which tmux drops.
+- Neither agent depends on the kitty protocol inside tmux. Both ask for modifyOtherKeys, which tmux honors, so D12's choice to leave `extended-keys-format` out stands unless an agent rejects one of the Shift+Enter forms.
+
+Still open: whether each agent turns `CSI 27;2;13~` and `CSI 13;2u` into a newline, which needs a logged-in prompt, and every other item in the list above. Because opencode turns on mouse tracking, tmux's default wheel binding hands the wheel to opencode instead of entering copy mode. The mouse check should confirm what right-click does in opencode with `MouseDown3Pane` unbound (D13).
 
 ## 8. Accepted limits
 
