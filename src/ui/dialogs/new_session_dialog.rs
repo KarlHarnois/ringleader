@@ -746,6 +746,62 @@ mod tests {
     }
 
     #[test]
+    fn deleting_the_last_line_of_a_scrolled_prompt_brings_back_its_first_line() {
+        let (mut dialog, service) =
+            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
+        dialog.paste(DialogFixture::SEVEN_LINES);
+        let scrolled = DialogFixture::text_with_cursor(&dialog);
+
+        for _ in 0.."\nseven".len() {
+            DialogFixture::press(&mut dialog, &service, KeyCode::Backspace);
+        }
+
+        assert!(scrolled.contains("Agent     claude\nPrompt    two\n"));
+        assert!(DialogFixture::text_with_cursor(&dialog).contains(
+            "Prompt    one\n          two\n          three\n          four\n          five\n          six█\n\n"
+        ));
+    }
+
+    #[test]
+    fn bringing_back_the_first_line_leaves_the_cursor_at_the_end_of_a_full_row() {
+        let (mut dialog, service) =
+            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
+        let text_width = usize::from(DialogFixture::WIDTH) - DialogLabels::full().width() - 1;
+        let full_row = "x".repeat(text_width);
+        dialog.paste(&format!("one\ntwo\nthree\nfour\nfive\n{full_row}\nseven"));
+        let scrolled = DialogFixture::text_with_cursor(&dialog);
+        for _ in 0.."\nseven".len() {
+            DialogFixture::press(&mut dialog, &service, KeyCode::Backspace);
+        }
+        let restored = DialogFixture::text_with_cursor(&dialog);
+
+        DialogFixture::type_text(&mut dialog, &service, "!");
+        let step = DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
+
+        assert!(scrolled.contains("Prompt    two\n"));
+        assert!(restored.contains("Prompt    one\n"));
+        assert!(
+            DialogFixture::submitted(step)
+                .prompt()
+                .ends_with(&format!("{full_row}!"))
+        );
+    }
+
+    #[test]
+    fn a_prompt_given_back_its_rows_shows_its_first_lines_again() {
+        let (mut dialog, _service) =
+            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
+        let one_prompt_row = 5;
+        dialog.paste("one\ntwo\nthree");
+        let squeezed = DialogFixture::text_at(&dialog, one_prompt_row);
+
+        let roomy = DialogFixture::text_with_cursor(&dialog);
+
+        assert!(squeezed.contains("Prompt    three\n"));
+        assert!(roomy.contains("Prompt    one\n          two\n          three█\n"));
+    }
+
+    #[test]
     fn typing_on_an_earlier_line_edits_it_in_place() {
         let (mut dialog, service) =
             DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
