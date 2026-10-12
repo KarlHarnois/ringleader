@@ -79,6 +79,9 @@ impl ServerAudit {
         let socket = self.paths.tmux_socket().display();
         match self.multiplexer.server_state() {
             Ok(Some(state)) => Self::report_running(&state, client_version, report),
+            Ok(None) if self.multiplexer.socket_lost() => report.warning(format!(
+                "Ringleader's tmux server runs without its socket {socket}, which was likely removed while it ran. Run ringleader again, or press r in a running TUI, to recreate it, and do not end its sessions"
+            )),
             Ok(None) => {
                 report.info("Ringleader's tmux server is not running, the next session starts it")
             }
@@ -257,6 +260,26 @@ mod tests {
             .with_multiplexer(FakeMultiplexer::new().with_versions("3.6a", None));
 
         assert!(AuditFixture::line_with(&fixture, "info:", "is not running"));
+    }
+
+    #[test]
+    fn a_server_without_its_socket_is_a_warning_and_not_a_stopped_server() {
+        let fixture = ServiceFixture::new().with_multiplexer(
+            FakeMultiplexer::new()
+                .with_versions("3.6a", None)
+                .with_lost_socket(),
+        );
+
+        assert!(AuditFixture::line_with(
+            &fixture,
+            "warning:",
+            "runs without its socket"
+        ));
+        assert!(!AuditFixture::line_with(
+            &fixture,
+            "info:",
+            "is not running"
+        ));
     }
 
     #[test]

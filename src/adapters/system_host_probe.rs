@@ -159,15 +159,8 @@ impl HostProbe for SystemHostProbe {
             .filter_map(|pid| LiveProcess::read(*pid))
             .collect();
         for process in &targets {
-            let Ok(pid) = libc::pid_t::try_from(process.pid()) else {
-                continue;
-            };
-            // SAFETY: kill only sends signals to a pid read from /proc a moment ago; it
-            // touches no memory, and a recycled pid at worst receives SIGTERM and SIGCONT.
-            unsafe {
-                libc::kill(pid, libc::SIGTERM);
-                libc::kill(pid, libc::SIGCONT);
-            }
+            let _ = process.signal(libc::SIGTERM);
+            let _ = process.signal(libc::SIGCONT);
         }
         let deadline = Instant::now() + Self::TERMINATE_LIMIT;
         loop {

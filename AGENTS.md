@@ -166,7 +166,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── submodule_commits.rs  # SubmoduleCommits, the submodule walk of unmerged_commits
     │   ├── system_clock.rs       # SystemClock, reads `SystemTime`
     │   ├── system_host_probe.rs  # SystemHostProbe
-    │   ├── live_process.rs       # LiveProcess, one /proc entry
+    │   ├── live_process.rs       # LiveProcess, one /proc entry, whether it is the tmux server of a socket, and signals to it
     │   ├── metadata_json.rs      # MetadataJson, the @ringleader_meta JSON each session carries
     │   ├── signal_flags.rs       # SignalFlags, the SIGHUP, SIGINT, SIGTERM, and SIGQUIT flags
     │   ├── durable_file.rs       # DurableFile, synced temp file renamed over the target

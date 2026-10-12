@@ -383,6 +383,10 @@ impl Multiplexer for FakeMultiplexer {
         }))
     }
 
+    fn socket_lost(&self) -> bool {
+        self.edit(|state| state.socket_lost)
+    }
+
     fn restore_socket(&self) -> Result<bool, MultiplexerError> {
         self.call("restore_socket", "")?;
         Ok(self.edit(|state| std::mem::take(&mut state.socket_lost)))

@@ -36,6 +36,7 @@ pub trait Multiplexer {
         &self,
         return_key: &ReturnKey,
     ) -> Result<Option<ServerConfig>, MultiplexerError>;
+    fn socket_lost(&self) -> bool;
     fn restore_socket(&self) -> Result<bool, MultiplexerError>;
     fn apply_config(&self, return_key: &ReturnKey) -> Result<(), MultiplexerError>;
     fn version(&self) -> Result<String, MultiplexerError>;
@@ -173,9 +174,9 @@ pub enum MultiplexerError {
     )]
     NoReturnBinding { socket: String, config: String },
     #[error(
-        "Ringleader's tmux server runs without its socket {socket}, and SIGUSR1 did not bring it back"
+        "Ringleader's tmux server runs without its socket {socket}, and recreating it failed: {detail}"
     )]
-    SocketNotRestored { socket: String },
+    SocketNotRestored { socket: String, detail: String },
     #[error("cannot prepare the tmux server files: {detail}")]
     ServerFiles { detail: String },
     #[error("cannot find the agent pane of tmux session {tmux_name}")]

@@ -155,16 +155,22 @@ impl App {
 
     fn reload(&mut self) {
         let outcome = self.service.reload();
+        let restored = self.service.restore_server_socket();
         self.home.refresh_now();
         self.observe();
+        let reloaded = match &restored {
+            Ok(Some(note)) => format!("{} Also {note}.", Self::RELOADED),
+            _ => Self::RELOADED.to_string(),
+        };
         let outcome = outcome
             .map_err(|error| format!("{}: {error}", Self::RELOAD_FAILED))
+            .and_then(|()| restored.map(|_| ()).map_err(|error| error.to_string()))
             .and_then(|()| {
                 self.service
                     .reapply_server_config()
                     .map_err(|error| error.to_string())
             });
-        self.status.outcome(outcome, Self::RELOADED.to_string());
+        self.status.outcome(outcome, reloaded);
     }
 
     fn report_failure(&mut self, error: ServiceError) {
@@ -513,6 +519,20 @@ mod tests {
         assert_eq!(request, AppRequest::Continue);
         assert!(
             AppFixture::status_line(&app, 200).starts_with(" config error, running read-only:")
+        );
+    }
+
+    #[test]
+    fn r_recreates_a_lost_server_socket_and_says_so() {
+        let fixture =
+            ServiceFixture::new().with_multiplexer(FakeMultiplexer::new().with_lost_socket());
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press(&mut app, 'r');
+
+        assert!(
+            AppFixture::flattened_screen(&app, 100, 28)
+                .contains("Reloaded the config and the registry. Also recreated the socket")
         );
     }
 

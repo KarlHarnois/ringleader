@@ -54,6 +54,7 @@ impl TmuxMultiplexer {
         prepared: &PreparedLaunch,
     ) -> Result<PathBuf, MultiplexerError> {
         let server = PrivateServer::new(&self.tmux);
+        server.restore_socket()?;
         server.write_files(spec.return_key())?;
         let sequence = TmuxScripts::create_session(spec, prepared.words());
         let output = self.tmux.create(&sequence, spec.removed_env_names())?;
@@ -322,6 +323,10 @@ impl Multiplexer for TmuxMultiplexer {
         return_key: &ReturnKey,
     ) -> Result<Option<ServerConfig>, MultiplexerError> {
         PrivateServer::new(&self.tmux).config(return_key)
+    }
+
+    fn socket_lost(&self) -> bool {
+        PrivateServer::new(&self.tmux).socket_lost()
     }
 
     fn restore_socket(&self) -> Result<bool, MultiplexerError> {
@@ -1175,6 +1180,23 @@ mod tests {
         });
 
         assert!(captured);
+    }
+
+    #[test]
+    fn creating_after_the_socket_was_removed_reuses_the_running_server() {
+        let fixture = MultiplexerFixture::with_holder();
+        let first_server = fixture.server.server_pid();
+        fs::remove_file(fixture.server.socket()).unwrap();
+
+        fixture.create("fix-auth").unwrap();
+
+        assert_eq!(fixture.server.server_pid(), first_server);
+        assert!(
+            fixture
+                .server
+                .text(&["list-sessions", "-F", "#{session_name}"])
+                .contains("holder")
+        );
     }
 
     #[test]

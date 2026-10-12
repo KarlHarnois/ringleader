@@ -1,3 +1,6 @@
+use std::fs;
+use std::io;
+use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -42,40 +45,71 @@ impl<'a> PrivateServer<'a> {
         })
     }
 
+    pub fn socket_lost(&self) -> bool {
+        !self.servers_without_socket().is_empty()
+    }
+
     pub fn restore_socket(&self) -> Result<bool, MultiplexerError> {
-        let files = self.tmux.server();
-        if files.socket().exists() {
-            return Ok(false);
-        }
-        let servers = LiveProcess::tmux_servers_on(files.socket());
+        let servers = self.servers_without_socket();
         if servers.is_empty() {
             return Ok(false);
         }
-        files
+        self.tmux
+            .server()
             .prepare_socket_directory()
             .map_err(|error| MultiplexerError::ServerFiles {
                 detail: error.to_string(),
             })?;
-        for server in &servers {
-            server.signal(libc::SIGUSR1);
+        let failures: Vec<String> = servers
+            .iter()
+            .filter_map(|server| {
+                let error = server.signal(libc::SIGUSR1).err()?;
+                Some(format!(
+                    "SIGUSR1 to tmux server {} failed: {error}",
+                    server.pid()
+                ))
+            })
+            .collect();
+        if failures.len() == servers.len() {
+            return Err(self.socket_not_restored(&failures.join("; ")));
         }
         match self.socket_returns() {
             true => Ok(true),
-            false => Err(MultiplexerError::SocketNotRestored {
-                socket: files.socket().display().to_string(),
-            }),
+            false => Err(self.socket_not_restored(&format!(
+                "the server did not recreate it within {} seconds",
+                Self::RESTORE_LIMIT.as_secs()
+            ))),
+        }
+    }
+
+    fn servers_without_socket(&self) -> Vec<LiveProcess> {
+        let socket = self.tmux.server().socket();
+        match Self::is_missing(socket) {
+            true => LiveProcess::tmux_servers_on(socket),
+            false => Vec::new(),
         }
     }
 
     fn socket_returns(&self) -> bool {
         let deadline = Instant::now() + Self::RESTORE_LIMIT;
-        while !self.tmux.server().socket().exists() {
+        while Self::is_missing(self.tmux.server().socket()) {
             if Instant::now() >= deadline {
                 return false;
             }
             thread::sleep(Self::RESTORE_POLL);
         }
         true
+    }
+
+    fn is_missing(path: &Path) -> bool {
+        fs::symlink_metadata(path).is_err_and(|error| error.kind() == io::ErrorKind::NotFound)
+    }
+
+    fn socket_not_restored(&self, detail: &str) -> MultiplexerError {
+        MultiplexerError::SocketNotRestored {
+            socket: self.tmux.server().socket().display().to_string(),
+            detail: detail.to_string(),
+        }
     }
 
     pub fn state(&self) -> Result<Option<ServerState>, MultiplexerError> {
@@ -271,6 +305,22 @@ mod tests {
                 .text(&["list-sessions", "-F", "#{session_name}"])
                 .contains("holder")
         );
+    }
+
+    #[test]
+    fn a_removed_socket_directory_comes_back_private() {
+        let server = TmuxTestServer::with_session("holder");
+        let tmux = server.command();
+        fs::remove_dir_all(server.directory()).unwrap();
+
+        let restored = PrivateServer::new(&tmux).restore_socket().unwrap();
+
+        let mode = fs::metadata(server.directory())
+            .unwrap()
+            .permissions()
+            .mode();
+        assert!(restored);
+        assert_eq!(mode & 0o777, 0o700);
     }
 
     #[test]
