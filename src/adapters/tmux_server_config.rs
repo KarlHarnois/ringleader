@@ -73,11 +73,7 @@ impl TmuxServerConfig {
 
     fn leading_lines(&self) -> Vec<String> {
         let mut lines = vec![Self::RESET.to_string()];
-        lines.extend(
-            self.user_file
-                .as_ref()
-                .map(|file| format!("source-file -q '{}'", file.display())),
-        );
+        lines.extend(self.user_file_lines());
         lines.extend(Self::SETTINGS.iter().map(|line| line.to_string()));
         lines.push(format!(
             "set -g {} {}",
@@ -85,6 +81,15 @@ impl TmuxServerConfig {
             self.return_key.tmux_spelling()
         ));
         lines
+    }
+
+    fn user_file_lines(&self) -> Vec<String> {
+        let Some(user_file) = &self.user_file else {
+            return Vec::new();
+        };
+        let bound_before_a_blocking_user_file = self.return_bindings();
+        let source = format!("source-file -q '{}'", user_file.display());
+        [bound_before_a_blocking_user_file, vec![source]].concat()
     }
 
     fn joined(lines: &[String]) -> String {
@@ -258,6 +263,16 @@ mod tests {
             .render();
 
         assert_eq!(render, GOLDEN);
+    }
+
+    #[test]
+    fn a_render_without_a_user_file_binds_each_table_once() {
+        let render = TmuxServerConfig::new(&ReturnKey::default()).render();
+
+        let bindings = render
+            .lines()
+            .filter(|line| line.ends_with(" detach-client"));
+        assert_eq!(bindings.count(), TmuxServerConfig::RETURN_TABLES.len());
     }
 
     #[test]

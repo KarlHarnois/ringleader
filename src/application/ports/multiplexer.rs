@@ -166,6 +166,10 @@ pub enum MultiplexerError {
     #[error("tmux {subcommand} timed out after {seconds} seconds")]
     TimedOut { subcommand: String, seconds: u64 },
     #[error(
+        "tmux source-file timed out after {seconds} seconds, likely on a command in {user_file} that blocks, such as run-shell without -b"
+    )]
+    SourceTimedOut { seconds: u64, user_file: String },
+    #[error(
         "the tmux server at {socket} binds no key to detach-client, so its sessions could not be left; check {config} and the load errors that tmux -S {socket} show-messages prints"
     )]
     NoReturnBinding { socket: String, config: String },
@@ -179,6 +183,9 @@ pub enum MultiplexerError {
 
 impl MultiplexerError {
     pub fn is_timeout(&self) -> bool {
-        matches!(self, MultiplexerError::TimedOut { .. })
+        matches!(
+            self,
+            MultiplexerError::TimedOut { .. } | MultiplexerError::SourceTimedOut { .. }
+        )
     }
 }

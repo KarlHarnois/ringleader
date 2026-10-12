@@ -142,7 +142,7 @@ impl TmuxCommand {
     }
 
     fn label(sequence: &TmuxSequence) -> String {
-        format!("tmux {}", sequence.first_subcommand())
+        sequence.first_subcommand()
     }
 }
 

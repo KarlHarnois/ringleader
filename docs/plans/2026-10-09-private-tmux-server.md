@@ -210,6 +210,7 @@ Where the implementation departs from the text above:
 - Doctor's lost socket warning from section 3.7 needs both a missing socket file and such a process, so an open editor no longer triggers it.
 - The generated config binds the return key in `copy-mode` and `copy-mode-vi` as well as `root`, and a reapply unbinds the previous key in all three. In copy mode tmux looks a key up in the mode's table first, and those tables already bind keys `ReturnKey` accepts, such as `M-x`.
 - Doctor compares only the access bits of the socket directory, since Linux copies a parent's setgid bit to new subdirectories and `chmod 700` keeps it.
+- When a user file is sourced, the render binds the return key in all three tables before the `source-file -q` line as well as at the end. A reapply unbinds the previous key and sources the render in one tmux call, and a command in the user file that blocks past the 10 second deadline gets that call killed partway through. The early bindings keep a way out in that case, and the error names the user file.
 
 ## 5. What goes away
 

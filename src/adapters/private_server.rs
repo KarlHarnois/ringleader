@@ -65,7 +65,8 @@ impl<'a> PrivateServer<'a> {
         let sequence = TmuxServerConfig::reapply_script(previous_key);
         let output = self
             .tmux
-            .change_with_input(&sequence, render.render().as_bytes())?;
+            .change_with_input(&sequence, render.render().as_bytes())
+            .map_err(|error| self.reapply_error(error))?;
         if output.succeeded() {
             return Ok(());
         }
@@ -77,6 +78,18 @@ impl<'a> PrivateServer<'a> {
             return Ok(());
         }
         Err(TmuxError::failed("source-file", &output).into())
+    }
+
+    fn reapply_error(&self, error: TmuxError) -> MultiplexerError {
+        match (error, self.tmux.server().user_config()) {
+            (TmuxError::TimedOut { seconds, .. }, Some(user_file)) => {
+                MultiplexerError::SourceTimedOut {
+                    seconds,
+                    user_file: user_file.display().to_string(),
+                }
+            }
+            (error, _) => error.into(),
+        }
     }
 
     fn render_for(&self, return_key: &ReturnKey) -> TmuxServerConfig {
@@ -155,9 +168,11 @@ mod tests {
     use std::ffi::OsStr;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
+    use std::time::Duration;
 
     use super::*;
+    use crate::adapters::Deadlines;
     use crate::adapters::server_files::ServerFiles;
     use crate::adapters::tmux_sequence::TmuxSequence;
     use crate::test_support::TmuxTestServer;
@@ -165,6 +180,9 @@ mod tests {
     struct ServerFixture;
 
     impl ServerFixture {
+        const BLOCKING_LINE: &'static str = "run-shell 'sleep 3'\n";
+        const SHORT_DEADLINE: Duration = Duration::from_secs(1);
+
         fn alt_x() -> ReturnKey {
             ReturnKey::parse("M-x").unwrap()
         }
@@ -183,9 +201,13 @@ mod tests {
                 .collect()
         }
 
-        fn started_sourcing(server: &TmuxTestServer, user_file: &Path) -> TmuxCommand {
+        fn sourcing(server: &TmuxTestServer, user_file: &Path) -> TmuxCommand {
             let files = ServerFiles::new(server.socket(), server.config()).sourcing(user_file);
-            let tmux = TmuxCommand::new(OsStr::new("tmux"), &files, &server.environment());
+            TmuxCommand::new(OsStr::new("tmux"), &files, &server.environment())
+        }
+
+        fn started_sourcing(server: &TmuxTestServer, user_file: &Path) -> TmuxCommand {
+            let tmux = Self::sourcing(server, user_file);
             PrivateServer::new(&tmux)
                 .write_files(&ReturnKey::default())
                 .unwrap();
@@ -193,6 +215,16 @@ mod tests {
                 TmuxSequence::new().command(["new-session", "-d", "-s", "holder", "sleep", "30"]);
             tmux.create(&start, &[]).unwrap();
             tmux
+        }
+
+        fn blocked_reapply(server: &TmuxTestServer) -> (Result<(), MultiplexerError>, PathBuf) {
+            let user_file = server.directory().join("user.conf");
+            fs::write(&user_file, "").unwrap();
+            Self::started_sourcing(server, &user_file);
+            fs::write(&user_file, Self::BLOCKING_LINE).unwrap();
+            let tmux = Self::sourcing(server, &user_file)
+                .with_deadlines(Deadlines::uniform(Self::SHORT_DEADLINE));
+            (PrivateServer::new(&tmux).apply(&Self::alt_x()), user_file)
         }
     }
 
@@ -290,5 +322,32 @@ mod tests {
 
         let running = private.config(&ServerFixture::alt_x()).unwrap().unwrap();
         assert!(running.is_current());
+    }
+
+    #[test]
+    fn a_user_file_that_blocks_a_reapply_leaves_the_new_return_key_bound() {
+        let server = TmuxTestServer::new();
+
+        let (applied, _) = ServerFixture::blocked_reapply(&server);
+
+        assert!(applied.is_err());
+        for table in ["root", "copy-mode", "copy-mode-vi"] {
+            assert_eq!(
+                ServerFixture::detach_keys_in(&server, table),
+                ["M-x"],
+                "{table}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_reapply_blocked_by_the_user_file_names_that_file() {
+        let server = TmuxTestServer::new();
+
+        let (applied, user_file) = ServerFixture::blocked_reapply(&server);
+
+        let error = applied.unwrap_err();
+        assert!(error.is_timeout());
+        assert!(error.to_string().contains(&user_file.display().to_string()));
     }
 }
