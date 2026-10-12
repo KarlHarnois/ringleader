@@ -46,7 +46,7 @@ Dependencies point inward only. An inner layer never imports an outer one.
 
 - `domain` holds the entities, value types, and pure rules. It imports nothing else from the crate, and never imports `crossterm`, `ratatui`, or `std::process`.
 - `application` holds the use cases and the ports, and imports only `domain`. It never shells out, never touches the filesystem directly, and never reads the system clock. Ports are traits in `application/ports/`, named after the role they play for the use cases, such as `Workspace` and `Multiplexer`, with their error types in the same file.
-- `adapters` holds the driven adapters, which implement the ports with git, tmux, files, and `/proc`. They import `application` and `domain`, never `ui` or `cli`. Each is named after its technology and the port it implements, such as `GitWorkspace` and `TmuxMultiplexer`.
+- `adapters` holds the driven adapters, which implement the ports with git, tmux, files, and `/proc`, and the process-level types `CompositionRoot` uses directly, such as `ProcessEnvironment`, `XdgPaths`, and `AgentLauncher`. They import `application` and `domain`, never `ui` or `cli`. Each port adapter is named after its technology and the port it implements, such as `GitWorkspace` and `TmuxMultiplexer`.
 - `ui` and `cli` are the driving adapters. They import `application` and `domain`, never `adapters`. They reach the use cases only through the `SessionService` facade, which composes `SessionLifecycle`, `SessionMonitor`, `SessionAccess`, `RepoCatalog`, and `Doctor`, so `ui` and `cli` never call those directly. A port handed to a `ui` or `cli` type, like `Lock`, is called by that type.
 - `main.rs` is the composition root and the only production code that imports every layer. The Wiring section says what it builds.
 - `src/test_support/` may import any layer, because it fakes the ports and drives the outer layers under test. Inline `#[cfg(test)]` modules follow their layer's rule, except that any of them may also import `src/test_support/`.
@@ -61,7 +61,7 @@ A new capability that reaches outside the process goes through a port when the u
 4. Inject the port as a trait object. A port the use cases need joins a bundle in `ServicePorts` as an `Arc<dyn Trait>`. Any other port, like `Lock`, is handed by `CompositionRoot` to the type that uses it.
 5. Build the adapter in `CompositionRoot` and pass it in.
 
-A capability only one driving adapter needs, as part of how it talks to the user, stays in that adapter instead. The TUI owns `InputSource`, `ScreenMode`, and `ShellRunner` this way: each is a trait in `ui` with its real implementation beside it and its fake wired into `UiHarness`.
+A seam only one adapter needs stays in that adapter instead, as a trait beside its real implementation, with its fake in that adapter's tests or harness. The TUI owns `InputSource`, `ScreenMode`, and `ShellRunner` this way, with their fakes in `UiHarness`, and `AgentLauncher` owns `ExecSeam`.
 
 ## Layout
 
