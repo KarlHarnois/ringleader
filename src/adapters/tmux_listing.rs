@@ -18,7 +18,6 @@ impl<'a> TmuxListing<'a> {
     pub const WINDOW_FORMAT: &'static str = "ringleader-window #{window_id} #{@ringleader_shell}";
     pub const AGENT_FORMAT: &'static str = "ringleader-agent #{pane_id} #{@ringleader_agent}";
     pub const PANE_PID_FORMAT: &'static str = "ringleader-pane-pid #{pane_dead} #{pane_pid}";
-    pub const CLAIM_FORMAT: &'static str = "ringleader-claim\t#{session_name}\t#{@ringleader_meta}";
     pub const TTY_FORMAT: &'static str = "ringleader-tty #{pane_tty}";
     const TAGGED: &'static str = "1";
     const KEY_BINDING: &'static str = "bind-key";
@@ -80,15 +79,6 @@ impl<'a> TmuxListing<'a> {
             .filter(|(dead, _)| *dead == "0")
             .filter_map(|(_, pid)| pid.parse().ok())
             .collect()
-    }
-
-    pub fn holds_claim(&self, tmux_name: &str, worktree: &Path) -> bool {
-        self.output.labeled("ringleader-claim").any(|row| {
-            let (session, metadata) = row.split_once('\t').unwrap_or((row, ""));
-            let claims_worktree = MetadataJson::decode(metadata)
-                .is_some_and(|metadata| metadata.worktree_path() == worktree);
-            session == tmux_name || claims_worktree
-        })
     }
 
     fn observe_session(rows: &[PaneRow], session: &str) -> SessionObservation {

@@ -136,6 +136,9 @@ impl<'a> StatusNote<'a> {
         {
             return Some(advice);
         }
+        if let Some(earlier) = self.row.earlier_server() {
+            return Some(earlier.refusal(self.row.name()));
+        }
         if self.row.state() == SessionState::Unmanaged {
             return Some(format!(
                 "{tmux_name} has no valid Ringleader metadata, so it can only be attached."
@@ -153,7 +156,7 @@ mod tests {
     use ratatui::backend::TestBackend;
 
     use super::*;
-    use crate::domain::{PairMismatch, UnmanagedSession};
+    use crate::domain::{EarlierServer, PairMismatch, UnmanagedSession};
     use crate::test_support::{FakeMultiplexer, ServiceFixture};
 
     struct BarFixture;
@@ -174,7 +177,7 @@ mod tests {
 
         fn note_for(row: &SessionSummary) -> String {
             let note = StatusNote::new(row).text();
-            Self::render(StatusBar::new(Theme).with_note(note), 200)
+            Self::render(StatusBar::new(Theme).with_note(note), 300)
         }
     }
 
@@ -227,6 +230,21 @@ mod tests {
         assert!(note.contains(&format!(
             "end it with tmux -S {} kill-session -t '=ringleader-fix-auth:'",
             Path::new(FakeMultiplexer::SOCKET).display()
+        )));
+    }
+
+    #[test]
+    fn a_selected_entry_on_an_earlier_server_names_that_server() {
+        let session = ServiceFixture::on_earlier_server(&ServiceFixture::session("fix-auth"));
+        let earlier = EarlierServer::of(&session, Path::new(FakeMultiplexer::SOCKET));
+        let row = SessionSummary::managed(session, SessionState::Stopped, false)
+            .with_earlier_server(earlier);
+
+        let note = BarFixture::note_for(&row);
+
+        assert!(note.contains(&format!(
+            "fix-auth runs on the tmux server at {}",
+            FakeMultiplexer::EARLIER_SOCKET
         )));
     }
 

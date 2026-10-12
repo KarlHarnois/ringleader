@@ -4,7 +4,7 @@ use std::sync::Arc;
 use super::creation_plan::CreateRequest;
 use super::delete_impact::{DeleteConfirmation, DeleteImpact};
 use super::delete_outcome::DeleteOutcome;
-use super::ports::{HostProbe, Multiplexer};
+use super::ports::{HostProbe, Multiplexer, ProcessInfo};
 use super::reconciliation::{ManagedRow, Reconciliation};
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
@@ -13,7 +13,7 @@ use super::session_deletion::SessionDeletion;
 use super::session_renaming::SessionRenaming;
 use super::session_restart::SessionRestart;
 use super::worktree_containment::WorktreeContainment;
-use crate::domain::{Config, Session, SessionState};
+use crate::domain::{Config, EarlierServer, Session, SessionState};
 
 pub struct SessionLifecycle {
     multiplexer: Arc<dyn Multiplexer>,
@@ -76,7 +76,7 @@ impl SessionLifecycle {
         config: &Config,
         config_path: &Path,
     ) -> Result<Session, ServiceError> {
-        let row = self.managed_target(reconciliation, name)?;
+        let row = self.quiet_target(reconciliation, name)?;
         self.restart
             .restart(&row, reconciliation, config, config_path)
     }
@@ -88,7 +88,7 @@ impl SessionLifecycle {
         new: &str,
         keep_branch: bool,
     ) -> Result<Session, ServiceError> {
-        let row = self.managed_target(reconciliation, old)?;
+        let row = self.quiet_target(reconciliation, old)?;
         self.renaming.rename(&row, new, keep_branch, reconciliation)
     }
 
@@ -119,6 +119,18 @@ impl SessionLifecycle {
         )))
     }
 
+    fn quiet_target<'r>(
+        &self,
+        reconciliation: &'r Reconciliation,
+        name: &str,
+    ) -> Result<ManagedRow<'r>, ServiceError> {
+        let row = self.managed_target(reconciliation, name)?;
+        if row.state() == SessionState::Stopped {
+            self.refuse_busy_worktree(row.session())?;
+        }
+        Ok(row)
+    }
+
     fn managed_target<'r>(
         &self,
         reconciliation: &'r Reconciliation,
@@ -126,27 +138,39 @@ impl SessionLifecycle {
     ) -> Result<ManagedRow<'r>, ServiceError> {
         let row = reconciliation.managed(name)?;
         if row.state() == SessionState::Stopped {
-            self.refuse_if_live_elsewhere(row.session(), reconciliation)?;
+            self.refuse_if_claimed(row.session(), reconciliation)?;
         }
         Ok(row)
     }
 
-    fn refuse_if_live_elsewhere(
+    fn refuse_busy_worktree(&self, session: &Session) -> Result<(), ServiceError> {
+        let processes = self.host.processes_in(session.worktree_path(), &[]);
+        if processes.is_empty() {
+            return Ok(());
+        }
+        let busy = format!(
+            "session {} is stopped, but processes still run in its worktree {}: {}. End them first.",
+            session.name(),
+            session.worktree_path().display(),
+            Self::listed(&processes)
+        );
+        let earlier = EarlierServer::of(session, &self.multiplexer.socket());
+        Err(ServiceError::Conflict(match earlier {
+            Some(earlier) => format!("{busy} {}", earlier.refusal(session.name().as_str())),
+            None => busy,
+        }))
+    }
+
+    fn listed(processes: &[ProcessInfo]) -> String {
+        let listed: Vec<String> = processes.iter().map(ToString::to_string).collect();
+        listed.join(", ")
+    }
+
+    fn refuse_if_claimed(
         &self,
         session: &Session,
         reconciliation: &Reconciliation,
     ) -> Result<(), ServiceError> {
-        let socket = session.socket_path();
-        if self
-            .multiplexer
-            .has_session_on(socket, session.tmux_name(), session.worktree_path())?
-        {
-            return Err(ServiceError::Conflict(format!(
-                "session {} is still live on the tmux server at {}",
-                session.name(),
-                socket.display()
-            )));
-        }
         match reconciliation.claimant_of(session) {
             Some(claimant) => Err(ServiceError::Conflict(format!(
                 "tmux session {} claims the worktree {} of session {}",

@@ -1,9 +1,12 @@
+use std::path::{Path, PathBuf};
+
 use super::ports::HostProbe;
 use super::reconciliation::Reconciliation;
 use super::worktree_containment::WorktreeContainment;
 use crate::domain::{
-    Config, NamingScheme, PairMismatch, Registration, Session, SessionClassifier, SessionMetadata,
-    SessionName, SessionObservation, SessionState, SessionSummary, UnmanagedSession,
+    Config, EarlierServer, NamingScheme, PairMismatch, Registration, Session, SessionClassifier,
+    SessionMetadata, SessionName, SessionObservation, SessionState, SessionSummary,
+    UnmanagedSession,
 };
 
 pub struct SessionReconciler<'a> {
@@ -12,6 +15,7 @@ pub struct SessionReconciler<'a> {
     classifier: SessionClassifier,
     containment: WorktreeContainment<'a>,
     now: u64,
+    private_socket: Option<PathBuf>,
 }
 
 impl<'a> SessionReconciler<'a> {
@@ -22,6 +26,14 @@ impl<'a> SessionReconciler<'a> {
             classifier: SessionClassifier::new(config.activity_idle_seconds()),
             containment: WorktreeContainment::new(host),
             now,
+            private_socket: None,
+        }
+    }
+
+    pub fn serving(self, private_socket: &Path) -> Self {
+        Self {
+            private_socket: Some(private_socket.to_path_buf()),
+            ..self
         }
     }
 
@@ -44,11 +56,7 @@ impl<'a> SessionReconciler<'a> {
                 reconciliation.add_row(self.managed_row(rekeyed.clone(), &observations[found]));
                 reconciliation.rekey(index, rekeyed);
             } else {
-                reconciliation.add_row(SessionSummary::managed(
-                    entry.clone(),
-                    SessionState::Stopped,
-                    false,
-                ));
+                reconciliation.add_row(self.stopped_row(entry));
             }
         }
         for (index, observation) in observations.iter().enumerate() {
@@ -58,6 +66,15 @@ impl<'a> SessionReconciler<'a> {
         }
         reconciliation.record_observations(observations);
         reconciliation
+    }
+
+    fn stopped_row(&self, entry: &Session) -> SessionSummary {
+        let earlier_server = self
+            .private_socket
+            .as_ref()
+            .and_then(|socket| EarlierServer::of(entry, socket));
+        SessionSummary::managed(entry.clone(), SessionState::Stopped, false)
+            .with_earlier_server(earlier_server)
     }
 
     fn paired_row(&self, entry: &Session, observation: &SessionObservation) -> SessionSummary {

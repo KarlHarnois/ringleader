@@ -5,15 +5,10 @@ use thiserror::Error;
 use crate::domain::{Agent, ReturnKey, SessionMetadata, SessionObservation, SessionSize};
 
 pub trait Multiplexer {
+    fn socket(&self) -> PathBuf;
     fn create_session(&self, spec: &SessionSpec) -> Result<PathBuf, MultiplexerError>;
     fn kill_session(&self, tmux_name: &str) -> Result<(), MultiplexerError>;
     fn pane_pids(&self, tmux_name: &str) -> Result<Vec<u32>, MultiplexerError>;
-    fn has_session_on(
-        &self,
-        socket: &Path,
-        tmux_name: &str,
-        worktree: &Path,
-    ) -> Result<bool, MultiplexerError>;
     fn caller_session(&self) -> Result<Option<String>, MultiplexerError>;
     fn caller_in_own_pane(&self) -> Result<bool, MultiplexerError>;
     fn observe_all(&self) -> Result<Vec<SessionObservation>, MultiplexerError>;

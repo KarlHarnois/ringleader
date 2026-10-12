@@ -18,7 +18,7 @@ use super::service_ports::ServicePorts;
 use super::session_access::{SessionAccess, ShellOutcome};
 use super::session_lifecycle::SessionLifecycle;
 use super::session_monitor::SessionMonitor;
-use crate::domain::{Config, DiffStat, Repo, Session, SessionSummary};
+use crate::domain::{Config, DiffStat, EarlierServer, Repo, Session, SessionSummary};
 
 pub struct SessionService {
     config: LoadedConfig,
@@ -149,6 +149,10 @@ impl SessionService {
 
     pub fn preview(&self, tmux_name: &str) -> Result<String, ServiceError> {
         self.monitor.preview(tmux_name)
+    }
+
+    pub fn earlier_server(&self, name: &str) -> Option<EarlierServer> {
+        self.monitor.earlier_server(self.entry(name)?)
     }
 
     pub fn create_session(&mut self, request: &CreateRequest) -> Result<Session, ServiceError> {

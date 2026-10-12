@@ -221,6 +221,7 @@ impl Doctor {
         };
         let now = self.clock.now_epoch_seconds();
         let reconciliation = SessionReconciler::new(config, self.host.as_ref(), now)
+            .serving(&self.multiplexer.socket())
             .reconcile(&entries, observations);
         self.audit.audit(&reconciliation, valid_config, report);
     }
@@ -503,20 +504,41 @@ mod tests {
     }
 
     #[test]
-    fn a_stopped_entry_live_on_its_recorded_socket_names_the_socket() {
-        let session = DoctorFixture::session();
-        let fixture = DoctorFixture::healthy().with_multiplexer(
-            FakeMultiplexer::new().with_session_on_socket(
-                session.socket_path(),
-                session.tmux_name(),
-                session.worktree_path(),
-            ),
-        );
+    fn an_entry_on_an_earlier_server_is_a_warning_with_the_hand_commands() {
+        let session = ServiceFixture::on_earlier_server(&DoctorFixture::session());
+        let fixture = DoctorFixture::healthy().with_sessions(&[session]);
 
-        assert!(DoctorFixture::has_problem(
+        let lines = DoctorFixture::lines(&fixture);
+
+        let warning = lines
+            .iter()
+            .find(|line| line.contains(FakeMultiplexer::EARLIER_SOCKET))
+            .unwrap();
+        assert!(warning.starts_with("warning:"));
+        assert!(warning.contains("no process runs in its worktree"));
+        assert!(warning.contains("kill-session -t '=ringleader-fix-auth:'"));
+    }
+
+    #[test]
+    fn an_entry_on_an_earlier_server_names_the_processes_in_its_worktree() {
+        let session = ServiceFixture::on_earlier_server(&DoctorFixture::session());
+        let fixture = DoctorFixture::healthy()
+            .with_sessions(std::slice::from_ref(&session))
+            .with_host(ServiceFixture::with_worktree_process(&session));
+
+        assert!(DoctorFixture::has_warning(
             &fixture,
-            FakeMultiplexer::SOCKET
+            "processes still run in its worktree: 4000042 (claude)"
         ));
+    }
+
+    #[test]
+    fn a_stopped_private_entry_with_processes_in_its_worktree_gets_the_socket_fix() {
+        let fixture = DoctorFixture::healthy().with_host(ServiceFixture::with_worktree_process(
+            &DoctorFixture::session(),
+        ));
+
+        assert!(DoctorFixture::has_warning(&fixture, "send SIGUSR1"));
     }
 
     #[test]

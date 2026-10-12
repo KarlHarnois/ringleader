@@ -192,6 +192,10 @@ impl TmuxMultiplexer {
 }
 
 impl Multiplexer for TmuxMultiplexer {
+    fn socket(&self) -> PathBuf {
+        self.tmux.server().socket().to_path_buf()
+    }
+
     fn create_session(&self, spec: &SessionSpec) -> Result<PathBuf, MultiplexerError> {
         let prepared = self.prepare(spec.launch())?;
         Self::discarding_on_failure(&prepared, self.start_session(spec, &prepared))
@@ -214,23 +218,6 @@ impl Multiplexer for TmuxMultiplexer {
             return Err(TmuxError::failed("list-panes", &output).into());
         }
         Ok(TmuxListing::new(&output).live_pane_pids())
-    }
-
-    fn has_session_on(
-        &self,
-        socket: &Path,
-        tmux_name: &str,
-        worktree: &Path,
-    ) -> Result<bool, MultiplexerError> {
-        let list = TmuxScripts::all_panes(TmuxListing::CLAIM_FORMAT);
-        let output = self.tmux.on_socket(socket).query(&list)?;
-        if output.has("ringleader-claim") {
-            return Ok(TmuxListing::new(&output).holds_claim(tmux_name, worktree));
-        }
-        if output.succeeded() || output.reports_no_sessions() {
-            return Ok(false);
-        }
-        Err(TmuxError::failed("list-panes", &output).into())
     }
 
     fn caller_in_own_pane(&self) -> Result<bool, MultiplexerError> {
@@ -964,44 +951,6 @@ mod tests {
             fixture.observation("ringleader-b").metadata(),
             Some(&fixture.metadata("b"))
         );
-    }
-
-    #[test]
-    fn a_session_renamed_by_hand_is_still_live_on_its_socket() {
-        let fixture = MultiplexerFixture::new();
-        fixture.create("fix-auth").unwrap();
-        fixture
-            .server
-            .text(&["rename-session", "-t", "=ringleader-fix-auth:", "my-work"]);
-
-        let live = fixture
-            .server
-            .multiplexer()
-            .has_session_on(
-                fixture.server.socket(),
-                "ringleader-fix-auth",
-                &fixture.worktree("fix-auth"),
-            )
-            .unwrap();
-
-        assert!(live);
-    }
-
-    #[test]
-    fn an_absent_server_holds_no_session() {
-        let fixture = MultiplexerFixture::new();
-
-        let live = fixture
-            .server
-            .multiplexer()
-            .has_session_on(
-                fixture.server.socket(),
-                "ringleader-fix-auth",
-                Path::new("/nowhere"),
-            )
-            .unwrap();
-
-        assert!(!live);
     }
 
     #[test]

@@ -40,6 +40,7 @@ impl ServiceFixture {
     pub const TIP: &'static str = "feedfacefeedfacefeedfacefeedfacefeedface";
     pub const IDLE_SECONDS: u64 = 3;
     pub const SHELL: &'static str = "/bin/example-shell";
+    pub const WORKTREE_PROCESS: u32 = 4_000_042;
 
     pub fn new() -> Self {
         Self {
@@ -213,6 +214,19 @@ impl ServiceFixture {
             Path::new(FakeMultiplexer::SOCKET),
         );
         Session::new(name, metadata, Registration::new(tmux, naming, created_at))
+    }
+
+    pub fn on_earlier_server(session: &Session) -> Session {
+        session.on_socket(Path::new(FakeMultiplexer::EARLIER_SOCKET))
+    }
+
+    pub fn with_worktree_process(session: &Session) -> FakeHostProbe {
+        Self::host_for(&[session]).with_process(
+            Self::WORKTREE_PROCESS,
+            "claude",
+            session.worktree_path(),
+            Self::WORKTREE_PROCESS,
+        )
     }
 
     pub fn waiting(session: &Session) -> SessionObservation {

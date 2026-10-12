@@ -1,6 +1,7 @@
 use crate::application::{
     CreateRequest, DeleteConfirmation, DeleteImpact, ServiceError, SessionService,
 };
+use crate::domain::EarlierServer;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BlockingOperation {
@@ -31,10 +32,7 @@ impl BlockingOperation {
 
     pub fn run(self, service: &mut SessionService) -> OperationOutcome {
         match self {
-            Self::Restart(name) => match service.restart_session(&name) {
-                Ok(()) => OperationOutcome::done(format!("Restarted {name}."), Some(name)),
-                Err(error) => OperationOutcome::Failed(error),
-            },
+            Self::Restart(name) => Self::restart(service, name),
             Self::Create(request) => match service.create_session(&request) {
                 Ok(session) => OperationOutcome::done(
                     format!("Created {} on branch {}.", session.name(), session.branch()),
@@ -48,17 +46,41 @@ impl BlockingOperation {
                 old,
                 new,
                 keep_branch,
-            } => match service.rename_session(&old, &new, keep_branch) {
-                Ok(session) => OperationOutcome::done(
-                    format!(
-                        "Renamed {old} to {}, branch {}.",
-                        session.name(),
-                        session.branch()
-                    ),
+            } => Self::rename(service, &old, &new, keep_branch),
+        }
+    }
+
+    fn restart(service: &mut SessionService, name: String) -> OperationOutcome {
+        let earlier = service.earlier_server(&name);
+        match service.restart_session(&name) {
+            Ok(()) => OperationOutcome::done(
+                Self::noted(format!("Restarted {name}."), earlier),
+                Some(name),
+            ),
+            Err(error) => OperationOutcome::Failed(error),
+        }
+    }
+
+    fn rename(
+        service: &mut SessionService,
+        old: &str,
+        new: &str,
+        keep_branch: bool,
+    ) -> OperationOutcome {
+        let earlier = service.earlier_server(old);
+        match service.rename_session(old, new, keep_branch) {
+            Ok(session) => {
+                let renamed = format!(
+                    "Renamed {old} to {}, branch {}.",
+                    session.name(),
+                    session.branch()
+                );
+                OperationOutcome::done(
+                    Self::noted(renamed, earlier),
                     Some(session.name().to_string()),
-                ),
-                Err(error) => OperationOutcome::Failed(error),
-            },
+                )
+            }
+            Err(error) => OperationOutcome::Failed(error),
         }
     }
 
@@ -77,14 +99,24 @@ impl BlockingOperation {
     }
 
     fn delete(service: &mut SessionService, name: String, seen: DeleteImpact) -> OperationOutcome {
+        let earlier = service.earlier_server(&name);
         match service.delete_session(&name, &DeleteConfirmation::confirmed(seen)) {
-            Ok(outcome) => OperationOutcome::done(outcome.summary(&name), None),
+            Ok(outcome) => {
+                OperationOutcome::done(Self::noted(outcome.summary(&name), earlier), None)
+            }
             Err(ServiceError::GuardsChanged { impact, .. }) => OperationOutcome::ConfirmDelete {
                 name,
                 impact: *impact,
                 changed: true,
             },
             Err(error) => OperationOutcome::Failed(error),
+        }
+    }
+
+    fn noted(message: String, earlier: Option<EarlierServer>) -> String {
+        match earlier {
+            Some(earlier) => format!("{message} {}", earlier.cleanup_note()),
+            None => message,
         }
     }
 }

@@ -220,6 +220,19 @@ mod tests {
     }
 
     #[test]
+    fn entries_recorded_on_the_users_tmux_server_load_with_their_sockets() {
+        let fixture = RegistryFixture::with_contents(FIXTURE);
+
+        let sessions = fixture.registry().load().unwrap();
+
+        assert!(
+            sessions
+                .iter()
+                .all(|session| session.socket_path() == Path::new("/tmp/tmux-1000/default"))
+        );
+    }
+
+    #[test]
     fn a_saved_registry_loads_back_unchanged() {
         let fixture = RegistryFixture::new();
         let sessions = vec![

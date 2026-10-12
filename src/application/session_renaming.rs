@@ -384,22 +384,38 @@ mod tests {
     }
 
     #[test]
-    fn rename_refuses_a_stopped_session_live_on_another_socket() {
+    fn rename_refuses_a_stopped_session_while_processes_run_in_its_worktree() {
         let session = ServiceFixture::session("fix-auth");
-        let fixture = RenameFixture::stopped("fix-auth").with_multiplexer(
-            FakeMultiplexer::new().with_session_on_socket(
-                session.socket_path(),
-                session.tmux_name(),
-                session.worktree_path(),
-            ),
-        );
+        let fixture = RenameFixture::stopped("fix-auth")
+            .with_host(ServiceFixture::with_worktree_process(&session));
 
         let error = fixture
             .service()
             .rename_session("fix-auth", "fix-login", false)
             .unwrap_err();
 
-        assert!(error.to_string().contains(FakeMultiplexer::SOCKET));
+        assert_eq!(error.exit_code(), 3);
+        assert!(
+            error
+                .to_string()
+                .contains("processes still run in its worktree")
+        );
+        assert!(fixture.workspace().state_changing_calls().is_empty());
+    }
+
+    #[test]
+    fn rename_refuses_an_earlier_server_entry_while_processes_run_in_its_worktree() {
+        let session = ServiceFixture::on_earlier_server(&ServiceFixture::session("fix-auth"));
+        let fixture = RenameFixture::stopped("fix-auth")
+            .with_registry(FakeSessionRegistry::with_sessions(vec![session.clone()]))
+            .with_host(ServiceFixture::with_worktree_process(&session));
+
+        let error = fixture
+            .service()
+            .rename_session("fix-auth", "fix-login", false)
+            .unwrap_err();
+
+        assert!(error.to_string().contains(FakeMultiplexer::EARLIER_SOCKET));
         assert!(fixture.workspace().state_changing_calls().is_empty());
     }
 

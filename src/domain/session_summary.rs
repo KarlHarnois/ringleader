@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use super::diff_stat::DiffStat;
+use super::earlier_server::EarlierServer;
 use super::session::Session;
 use super::session_metadata::SessionMetadata;
 use super::session_observation::SessionObservation;
@@ -12,6 +13,7 @@ pub struct SessionSummary {
     state: SessionState,
     attached: bool,
     diff: Option<DiffStat>,
+    earlier_server: Option<EarlierServer>,
 }
 
 impl SessionSummary {
@@ -21,6 +23,7 @@ impl SessionSummary {
             state,
             attached,
             diff: None,
+            earlier_server: None,
         }
     }
 
@@ -31,6 +34,14 @@ impl SessionSummary {
             state: SessionState::Unmanaged,
             attached,
             diff: None,
+            earlier_server: None,
+        }
+    }
+
+    pub fn with_earlier_server(self, earlier_server: Option<EarlierServer>) -> Self {
+        Self {
+            earlier_server,
+            ..self
         }
     }
 
@@ -87,6 +98,10 @@ impl SessionSummary {
 
     pub fn diff(&self) -> Option<DiffStat> {
         self.diff
+    }
+
+    pub fn earlier_server(&self) -> Option<&EarlierServer> {
+        self.earlier_server.as_ref()
     }
 }
 

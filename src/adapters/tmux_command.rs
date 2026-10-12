@@ -52,13 +52,6 @@ impl TmuxCommand {
         &self.server
     }
 
-    pub fn on_socket(&self, socket: &Path) -> Self {
-        Self {
-            server: ServerFiles::new(socket, &self.server.config),
-            ..self.clone()
-        }
-    }
-
     pub fn caller_pane(&self) -> Option<String> {
         let socket = self.caller.socket()?;
         self.caller

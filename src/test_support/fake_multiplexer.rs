@@ -20,7 +20,6 @@ struct MultiplexerState {
     specs: Vec<SessionSpec>,
     launches: Vec<AgentLaunch>,
     pane_pids: HashMap<String, Vec<u32>>,
-    sessions_on_other_sockets: Vec<(PathBuf, String, PathBuf)>,
     caller: Option<String>,
     caller_in_own_pane: bool,
     captures: HashMap<String, String>,
@@ -34,7 +33,8 @@ struct MultiplexerState {
 }
 
 impl FakeMultiplexer {
-    pub const SOCKET: &'static str = "/tmp/tmux-1000/default";
+    pub const SOCKET: &'static str = "/run/user/1000/ringleader/tmux/tmux.sock";
+    pub const EARLIER_SOCKET: &'static str = "/tmp/tmux-1000/default";
     pub const STATE_CHANGING: [&'static str; 5] = [
         "create_session",
         "kill_session",
@@ -52,7 +52,6 @@ impl FakeMultiplexer {
                 specs: Vec::new(),
                 launches: Vec::new(),
                 pane_pids: HashMap::new(),
-                sessions_on_other_sockets: Vec::new(),
                 caller: None,
                 caller_in_own_pane: false,
                 captures: HashMap::new(),
@@ -74,16 +73,6 @@ impl FakeMultiplexer {
 
     pub fn with_pane_pids(self, tmux_name: &str, pids: &[u32]) -> Self {
         self.edit(|state| state.pane_pids.insert(tmux_name.to_string(), pids.to_vec()));
-        self
-    }
-
-    pub fn with_session_on_socket(self, socket: &Path, tmux_name: &str, worktree: &Path) -> Self {
-        let entry = (
-            socket.to_path_buf(),
-            tmux_name.to_string(),
-            worktree.to_path_buf(),
-        );
-        self.edit(|state| state.sessions_on_other_sockets.push(entry));
         self
     }
 
@@ -210,15 +199,13 @@ impl MultiplexerState {
     fn find_live(&self, tmux_name: &str) -> Option<&SessionObservation> {
         self.live.iter().find(|live| live.tmux_name() == tmux_name)
     }
-
-    fn other_socket_holds(&self, socket: &Path, tmux_name: &str, worktree: &Path) -> bool {
-        self.sessions_on_other_sockets
-            .iter()
-            .any(|(on, name, claim)| on == socket && (name == tmux_name || claim == worktree))
-    }
 }
 
 impl Multiplexer for FakeMultiplexer {
+    fn socket(&self) -> PathBuf {
+        self.edit(|state| state.socket.clone())
+    }
+
     fn create_session(&self, spec: &SessionSpec) -> Result<PathBuf, MultiplexerError> {
         let result = self.call("create_session", spec.tmux_name());
         self.edit(|state| {
@@ -240,16 +227,6 @@ impl Multiplexer for FakeMultiplexer {
     fn pane_pids(&self, tmux_name: &str) -> Result<Vec<u32>, MultiplexerError> {
         self.call("pane_pids", tmux_name)?;
         Ok(self.edit(|state| state.pane_pids.get(tmux_name).cloned().unwrap_or_default()))
-    }
-
-    fn has_session_on(
-        &self,
-        socket: &Path,
-        tmux_name: &str,
-        worktree: &Path,
-    ) -> Result<bool, MultiplexerError> {
-        self.call("has_session_on", &socket.display().to_string())?;
-        Ok(self.edit(|state| state.other_socket_holds(socket, tmux_name, worktree)))
     }
 
     fn caller_session(&self) -> Result<Option<String>, MultiplexerError> {

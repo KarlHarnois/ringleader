@@ -31,6 +31,9 @@ impl SessionAccess {
     }
 
     pub fn attach(&self, row: &SessionSummary) -> Result<(), ServiceError> {
+        if let Some(earlier) = row.earlier_server() {
+            return Err(ServiceError::Conflict(earlier.refusal(row.name())));
+        }
         if row.state() == SessionState::Stopped {
             return Err(ServiceError::Conflict(format!(
                 "session {} is stopped, restart it first",
@@ -167,6 +170,21 @@ mod tests {
                 .to_string()
                 .contains("run Ringleader from another terminal")
         );
+        assert!(fixture.multiplexer().attached().is_empty());
+    }
+
+    #[test]
+    fn attach_to_an_entry_on_an_earlier_server_gives_the_hand_commands() {
+        let session = ServiceFixture::on_earlier_server(&ServiceFixture::session("fix-auth"));
+        let fixture = ServiceFixture::new().with_sessions(&[session]);
+
+        let error = fixture.service().attach("fix-auth").unwrap_err();
+
+        assert_eq!(error.exit_code(), 3);
+        assert!(error.to_string().contains(&format!(
+            "tmux -S {} attach -t '=ringleader-fix-auth:'",
+            FakeMultiplexer::EARLIER_SOCKET
+        )));
         assert!(fixture.multiplexer().attached().is_empty());
     }
 

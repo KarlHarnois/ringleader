@@ -748,36 +748,32 @@ mod tests {
     }
 
     #[test]
-    fn a_stopped_session_live_on_another_socket_refuses_delete() {
-        let session = DeleteFixture::session();
-        let fixture = DeleteFixture::stopped_fixture().with_multiplexer(
-            FakeMultiplexer::new().with_session_on_socket(
-                session.socket_path(),
-                session.tmux_name(),
-                session.worktree_path(),
-            ),
+    fn a_stopped_entry_on_an_earlier_server_deletes_without_a_tmux_call_there() {
+        let session = ServiceFixture::on_earlier_server(&DeleteFixture::session());
+        let fixture = DeleteFixture::stopped_fixture()
+            .with_registry(FakeSessionRegistry::with_sessions(vec![session]));
+
+        DeleteFixture::force(&mut fixture.service()).unwrap();
+
+        assert!(fixture.registry().sessions().is_empty());
+        assert!(
+            fixture
+                .multiplexer()
+                .calls()
+                .iter()
+                .all(|call| !call.contains(FakeMultiplexer::EARLIER_SOCKET))
         );
-
-        let error = DeleteFixture::force(&mut fixture.service()).unwrap_err();
-
-        assert!(error.to_string().contains(FakeMultiplexer::SOCKET));
-        DeleteFixture::assert_everything_kept(&fixture);
     }
 
     #[test]
-    fn a_stopped_entry_whose_session_was_renamed_by_hand_on_its_socket_refuses_delete() {
+    fn processes_in_a_stopped_worktree_are_counted_instead_of_refusing_the_delete() {
         let session = DeleteFixture::session();
-        let fixture = DeleteFixture::stopped_fixture().with_multiplexer(
-            FakeMultiplexer::new().with_session_on_socket(
-                session.socket_path(),
-                "renamed-by-hand",
-                session.worktree_path(),
-            ),
-        );
+        let fixture = DeleteFixture::stopped_fixture()
+            .with_host(ServiceFixture::with_worktree_process(&session));
 
-        let error = DeleteFixture::force(&mut fixture.service()).unwrap_err();
+        let impact = fixture.service().delete_impact("fix-auth").unwrap();
 
-        assert_eq!(error.exit_code(), 3);
+        assert_eq!(impact.processes().len(), 1);
     }
 
     #[test]

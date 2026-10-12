@@ -76,6 +76,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── session_observation.rs # SessionObservation
     │   ├── session_classifier.rs # SessionClassifier, the pure state classifier
     │   ├── diff_stat.rs          # DiffStat
+    │   ├── earlier_server.rs     # EarlierServer, the tmux server an entry ran on before the private one, and its hand commands
     │   ├── session_summary.rs    # SessionSummary
     │   ├── agent.rs              # Agent
     │   ├── repo.rs               # Repo
@@ -252,7 +253,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
 - `main.rs` holds `fn main` and `CompositionRoot`, whose methods build the adapters, the `SessionService`, and the TUI or the CLI run. Argument parsing and dispatch stay in `Cli`.
 - `ringleader` with no subcommand opens the TUI. Any subcommand runs the CLI and never starts the TUI. The hidden `__exec-agent` path loads no config, opens no log, and takes no lock.
 - The TUI takes the lifetime lock, and the mutating commands (`new`, `delete`, `rename`, `restart`, `repo add`, `repo remove`) take the write lock. `list`, `doctor`, `attach`, `repo list`, and `__exec-agent` take no lock.
-- Key bindings come only from the generated config of the private tmux server, which `create_session` writes. Only a lock holder calls `create_session`, so only one process ever writes that config. Every tmux call passes `-S` and `-f`, and every call except the read-only liveness check of a Stopped entry on its recorded socket goes to the private server. The TUI and the CLI attach through the same foreground child.
+- Key bindings come only from the generated config of the private tmux server, which `create_session` writes. Only a lock holder calls `create_session`, so only one process ever writes that config. Every tmux call passes `-S <private socket>` and `-f`, so Ringleader never reads or writes the user's tmux server. An entry recorded on another socket is checked only through `/proc`. The TUI and the CLI attach through the same foreground child.
 - Blocking TUI operations (create, delete, rename, restart, and the delete measurement) run behind a busy message, and the event loop drops the key and paste events queued while they ran.
 - Logs go to `$XDG_STATE_HOME/ringleader/app.log` through `env_logger`, never to the terminal.
 
