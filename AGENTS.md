@@ -160,12 +160,12 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── live_process.rs       # LiveProcess, one /proc entry
     │   ├── signal_flags.rs       # SignalFlags, the SIGHUP, SIGINT, SIGTERM, and SIGQUIT flags
     │   ├── durable_file.rs       # DurableFile, synced temp file renamed over the target
-    │   ├── tmux_command.rs       # TmuxCommand, socket and config args, `-u` and `-N`, child environment, labeled output, exact targets, `#` and `;` escaping, CallerProcess
+    │   ├── tmux_command.rs       # TmuxCommand, socket and config args, `-u` and `-N`, child environment, labeled output, `#` and `;` escaping, CallerProcess
     │   ├── caller_process.rs     # CallerProcess, the parent chain is_inside_client reads from /proc
     │   ├── tmux_error.rs         # TmuxError
     │   ├── tmux_sequence.rs      # TmuxSequence, `;`-separated commands with `#` and `;` escaping
     │   ├── tmux_output.rs        # TmuxOutput, labeled lines and the zero-session errors
-    │   ├── tmux_scripts.rs       # TmuxScripts, every tmux command sequence the multiplexer sends
+    │   ├── tmux_scripts.rs       # TmuxScripts, every tmux command sequence the multiplexer sends, exact targets, start directories
     │   ├── tmux_launch.rs        # TmuxLaunch, ringleader-created and ringleader-done handling, rollback, tag move
     │   ├── tmux_listing.rs       # TmuxListing, parses list-panes, list-windows, and list-clients rows and @ringleader_meta
     │   ├── tmux_multiplexer.rs   # TmuxMultiplexer
@@ -245,6 +245,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
 - Other support types, such as a parser result, a doctor finding, a session spec, or a dialog's in-progress state, live in their primary type's file and get no tree entry.
 - No code below `main` calls `std::env::current_exe`, reads the process environment (including `$TMUX`, `$TMUX_PANE`, `$HOME`, and `$SHELL`) or the process cwd, resolves XDG paths, or asks which terminal standard input is. `main` reads them once and injects them, with environment values in the `ProcessEnvironment` snapshot. `ProcessEnvironment::capture` reads the terminal name of standard input with `libc::ttyname_r` on descriptor 0, in the type's only `unsafe` block.
 - Every `unsafe` block carries one `// SAFETY:` comment that states why the call is sound, and is confined to one adapter method.
+- Every tmux target is exact: `=<session>:` from `TmuxScripts::exact`, a window id, or a pane id. Never pass a bare `-t <name>`, because tmux resolves a name with no exact match by prefix, so `fix` would reach `fix-auth`. Every `new-session`, `new-window`, and `respawn-window` passes the worktree through `TmuxScripts::start_in`, because without `-c` tmux starts the pane in the caller's directory and still exits 0.
 
 ## Wiring
 
