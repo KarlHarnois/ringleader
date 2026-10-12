@@ -19,7 +19,7 @@ impl SystemHostProbe {
     const TERMINATE_LIMIT: Duration = Duration::from_secs(5);
     const TERMINATE_POLL: Duration = Duration::from_millis(50);
     const EXECUTABLE_BITS: u32 = 0o111;
-    const PERMISSION_BITS: u32 = 0o7777;
+    const ACCESS_BITS: u32 = 0o777;
     const DELETED_SUFFIX: &'static str = " (deleted)";
 
     pub fn new(environment: &ProcessEnvironment) -> Self {
@@ -99,7 +99,7 @@ impl HostProbe for SystemHostProbe {
         let metadata = fs::metadata(path)
             .ok()
             .filter(|metadata| metadata.is_dir())?;
-        let mode = metadata.permissions().mode() & Self::PERMISSION_BITS;
+        let mode = metadata.permissions().mode() & Self::ACCESS_BITS;
         Some(DirectoryAccess::new(
             mode,
             metadata.uid() == Self::user_id(),
@@ -251,6 +251,18 @@ mod tests {
             .unwrap();
 
         assert_eq!(access, DirectoryAccess::new(0o750, true));
+    }
+
+    #[test]
+    fn a_sticky_bit_is_left_out_of_the_reported_mode() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o1700)).unwrap();
+
+        let access = ProbeFixture::probe()
+            .directory_access(directory.path())
+            .unwrap();
+
+        assert_eq!(access.mode(), 0o700);
     }
 
     #[test]
