@@ -42,7 +42,7 @@ impl<'a> TextFit<'a> {
         let width = width.max(1);
         let mut lines: Vec<String> = Vec::new();
         let mut current = String::new();
-        for word in self.text.split(' ') {
+        for word in self.indented_words() {
             let needed =
                 current.chars().count() + usize::from(!current.is_empty()) + word.chars().count();
             if needed > width && !current.is_empty() {
@@ -51,7 +51,7 @@ impl<'a> TextFit<'a> {
             if !current.is_empty() {
                 current.push(' ');
             }
-            current.push_str(word);
+            current.push_str(&word);
             if current.chars().count() > width {
                 let mut pieces = Self::chunked(&current, width);
                 current = pieces.pop().unwrap_or_default();
@@ -60,6 +60,16 @@ impl<'a> TextFit<'a> {
         }
         lines.push(current);
         lines
+    }
+
+    fn indented_words(&self) -> Vec<String> {
+        let body = self.text.trim_start_matches(' ');
+        let indent = &self.text[..self.text.len() - body.len()];
+        let mut words: Vec<String> = body.split(' ').map(str::to_string).collect();
+        if let Some(first) = words.first_mut() {
+            first.insert_str(0, indent);
+        }
+        words
     }
 
     fn chunked(text: &str, width: usize) -> Vec<String> {
@@ -102,6 +112,14 @@ mod tests {
                 "worktree, add its main",
                 "repository"
             ]
+        );
+    }
+
+    #[test]
+    fn leading_spaces_stay_at_the_start_of_the_first_row() {
+        assert_eq!(
+            TextFit::new("  - run: cargo test").wrapped(12),
+            ["  - run:", "cargo test"]
         );
     }
 

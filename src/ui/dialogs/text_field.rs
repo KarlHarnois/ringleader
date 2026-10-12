@@ -258,6 +258,16 @@ mod tests {
     }
 
     #[test]
+    fn a_prompt_keeps_the_indent_of_each_line() {
+        let field = FieldFixture::holding(FieldKind::Prompt, "steps:\n  - run: cargo test");
+
+        assert_eq!(
+            field.visible_rows(30, 4, Some('█')),
+            ["steps:", "  - run: cargo test█"]
+        );
+    }
+
+    #[test]
     fn a_line_break_starts_a_new_row_and_the_cursor_follows_the_text() {
         let field = FieldFixture::holding(FieldKind::Prompt, "one\ntwo");
 
