@@ -265,10 +265,9 @@ mod tests {
     }
 
     #[test]
-    fn the_logo_in_the_compact_tier_leaves_the_table_header_visible() {
+    fn the_compact_tier_without_sessions_shows_the_logo_from_sixty_four_columns() {
         let screen = ViewFixture::render(&[], 64, 12);
 
         assert!(screen.contains(EmptyState::logo_bottom_row()));
-        assert!(screen.contains("  Name"));
     }
 }

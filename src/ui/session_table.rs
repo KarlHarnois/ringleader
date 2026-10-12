@@ -386,4 +386,15 @@ mod tests {
 
         assert!(TableFixture::line(&terminal, 1).starts_with("│● fix-auth"));
     }
+
+    #[test]
+    fn the_empty_state_never_draws_over_the_header() {
+        let mut terminal = Terminal::new(TestBackend::new(64, 10)).unwrap();
+
+        terminal
+            .draw(|frame| SessionTable::new(&[], None, 0, Theme).render(frame, frame.area()))
+            .unwrap();
+
+        assert!(TableFixture::line(&terminal, 1).starts_with("│  Name"));
+    }
 }
