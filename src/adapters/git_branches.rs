@@ -11,6 +11,7 @@ pub struct GitBranches<'a> {
 impl<'a> GitBranches<'a> {
     const BRANCH_REFS: &'static str = "refs/heads";
     const REMOTE_REFS: &'static str = "refs/remotes";
+    const LOCAL_REMOTE: &'static str = ".";
 
     pub fn new(git: &'a GitRunner) -> Self {
         Self { git }
@@ -78,10 +79,8 @@ impl<'a> GitBranches<'a> {
     }
 
     pub fn is_managed(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError> {
-        let key = BranchMarker::new(branch).key();
-        let read = GitInvocation::in_repo(repo, "config").args(["--local", "--get", &key]);
-        let value = self.git.lookup(&read)?;
-        Ok(value.is_some_and(|found| found.first_line() == BranchMarker::VALUE))
+        let value = self.read_local_config(repo, &BranchMarker::new(branch).key())?;
+        Ok(value.as_deref() == Some(BranchMarker::VALUE))
     }
 
     pub fn list_managed(&self, repo: &Path) -> Result<Vec<String>, WorkspaceError> {
@@ -97,7 +96,7 @@ impl<'a> GitBranches<'a> {
     }
 
     pub fn is_published(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError> {
-        Ok(self.has_upstream(repo, branch)? || self.has_remote_copy(repo, branch)?)
+        Ok(self.tracks_a_remote_copy(repo, branch)? || self.has_remote_copy(repo, branch)?)
     }
 
     fn list_marked(&self, repo: &Path) -> Result<Vec<String>, WorkspaceError> {
@@ -119,10 +118,18 @@ impl<'a> GitBranches<'a> {
             .collect())
     }
 
-    fn has_upstream(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError> {
-        let key = BranchSection::new(branch).upstream_remote_key();
-        let read = GitInvocation::in_repo(repo, "config").args(["--local", "--get", &key]);
-        Ok(self.git.lookup(&read)?.is_some())
+    fn tracks_a_remote_copy(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError> {
+        let section = BranchSection::new(branch);
+        let remote = self.read_local_config(repo, &section.upstream_remote_key())?;
+        let merge = self.read_local_config(repo, &section.upstream_merge_key())?;
+        let tracks_a_remote = remote.is_some_and(|name| name != Self::LOCAL_REMOTE);
+        Ok(tracks_a_remote && merge == Some(Self::branch_ref(branch)))
+    }
+
+    fn read_local_config(&self, repo: &Path, key: &str) -> Result<Option<String>, WorkspaceError> {
+        let read = GitInvocation::in_repo(repo, "config").args(["--local", "--get", key]);
+        let value = self.git.lookup(&read)?;
+        Ok(value.map(|found| found.first_line().to_string()))
     }
 
     fn has_remote_copy(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError> {
@@ -177,6 +184,10 @@ impl<'a> BranchSection<'a> {
 
     fn upstream_remote_key(&self) -> String {
         format!("{}.remote", self.name())
+    }
+
+    fn upstream_merge_key(&self) -> String {
+        format!("{}.merge", self.name())
     }
 
     fn key_pattern(&self) -> String {
