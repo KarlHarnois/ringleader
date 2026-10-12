@@ -84,10 +84,22 @@ impl TextField {
     }
 
     fn wrapped(&self, width: usize, cursor: Option<char>) -> Vec<String> {
-        self.with_cursor(cursor)
+        let mut rows: Vec<String> = self
+            .value
             .split('\n')
             .flat_map(|line| TextFit::new(line).wrapped(width))
-            .collect()
+            .collect();
+        if let Some(cursor) = cursor {
+            Self::append_cursor(&mut rows, width, cursor);
+        }
+        rows
+    }
+
+    fn append_cursor(rows: &mut Vec<String>, width: usize, cursor: char) {
+        match rows.last_mut() {
+            Some(last) if last.chars().count() < width => last.push(cursor),
+            _ => rows.push(cursor.to_string()),
+        }
     }
 
     fn with_cursor(&self, cursor: Option<char>) -> String {
@@ -234,6 +246,13 @@ mod tests {
             field.visible_rows(8, 4, None),
             ["refactor", "-the-rec", "onciler"]
         );
+    }
+
+    #[test]
+    fn a_word_that_fills_its_row_stays_put_and_the_cursor_takes_the_next_row() {
+        let field = FieldFixture::holding(FieldKind::Prompt, "fix the login");
+
+        assert_eq!(field.visible_rows(13, 4, Some('█')), ["fix the login", "█"]);
     }
 
     #[test]
