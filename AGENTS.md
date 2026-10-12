@@ -1,6 +1,6 @@
 # Ringleader agent guide
 
-This file is the living reference for agents working in this repository. `docs/plans/v1-bootstrap.md` is the v1 plan, kept as a historical record, and `docs/plans/v1-implementation-log.md` records the decisions made while implementing it. Neither replaces this file.
+This file is the living reference for agents working in this repository.
 
 ## Ground rules
 
@@ -52,10 +52,6 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
 ├── .github/workflows/ci.yml
 ├── README.md               # human readers, terse
 ├── AGENTS.md               # agent repo documentation, living
-├── docs/
-│   └── plans/
-│       ├── v1-bootstrap.md  # v1 plan, historical record
-│       └── v1-implementation-log.md  # decisions made while implementing the v1 plan
 ├── tests/fixtures/         # fake config, registry, tmux and git output
 └── src/
     ├── main.rs             # fn main and CompositionRoot
