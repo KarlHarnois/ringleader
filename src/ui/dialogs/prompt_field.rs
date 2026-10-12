@@ -7,7 +7,7 @@ use ratatui::layout::{Constraint, Layout, Position, Rect};
 use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::widgets::{Clear, Paragraph, Widget};
-use ratatui_textarea::{CursorMove, TextArea, WrapMode};
+use ratatui_textarea::{CursorMove, DataCursor, TextArea, WrapMode};
 
 use super::dialog_labels::DialogLabels;
 use super::new_session_field::NewSessionField;
@@ -94,7 +94,18 @@ impl PromptField {
     fn scroll_back(editor: &mut TextArea<'static>, rows: u16) {
         let cursor = editor.cursor();
         editor.scroll((-i16::try_from(rows).unwrap_or(i16::MAX), 0));
-        if editor.cursor() != cursor {
+        Self::put_cursor_back(editor, cursor);
+    }
+
+    fn put_cursor_back(editor: &mut TextArea<'static>, cursor: DataCursor) {
+        let DataCursor(row, column) = cursor;
+        let line_end = editor.lines()[row].chars().count();
+        if column == line_end {
+            editor.move_cursor(CursorMove::End);
+            return;
+        }
+        let DataCursor(_, pulled_back_to) = editor.cursor();
+        for _ in pulled_back_to..column {
             editor.move_cursor(CursorMove::Forward);
         }
     }

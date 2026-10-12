@@ -818,6 +818,53 @@ mod tests {
     }
 
     #[test]
+    fn bringing_back_the_first_line_keeps_the_cursor_after_an_emoji_ending_a_line() {
+        let (mut dialog, service) =
+            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
+        let heart_line = "love \u{2764}\u{fe0f}";
+        dialog.paste(&format!("one\ntwo\nthree\nfour\nfive\n{heart_line}\nseven"));
+        let scrolled = DialogFixture::text(&dialog);
+        for _ in 0.."\nseven".len() {
+            DialogFixture::press(&mut dialog, &service, KeyCode::Backspace);
+        }
+        let restored = DialogFixture::text(&dialog);
+
+        DialogFixture::type_text(&mut dialog, &service, "!");
+        let step = DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
+
+        assert!(scrolled.contains("Prompt    two\n"));
+        assert!(restored.contains("Prompt    one\n"));
+        assert!(
+            DialogFixture::submitted(step)
+                .prompt()
+                .ends_with(&format!("\n{heart_line}!"))
+        );
+    }
+
+    #[test]
+    fn bringing_back_the_first_line_keeps_the_cursor_after_combining_marks_mid_line() {
+        let (mut dialog, service) =
+            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
+        let accented = "cafe\u{301}\u{302}";
+        dialog.paste(&format!("one\ntwo\nthree\nfour\nfive\n{accented}\nseven"));
+        let scrolled = DialogFixture::text(&dialog);
+        DialogFixture::press(&mut dialog, &service, KeyCode::Home);
+        DialogFixture::press(&mut dialog, &service, KeyCode::Backspace);
+        let restored = DialogFixture::text(&dialog);
+
+        DialogFixture::type_text(&mut dialog, &service, "!");
+        let step = DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
+
+        assert!(scrolled.contains("Prompt    two\n"));
+        assert!(restored.contains("Prompt    one\n"));
+        assert!(
+            DialogFixture::submitted(step)
+                .prompt()
+                .ends_with(&format!("\n{accented}!seven"))
+        );
+    }
+
+    #[test]
     fn typing_after_a_pasted_line_longer_than_u16_lands_at_its_end() {
         let (mut dialog, service) =
             DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
