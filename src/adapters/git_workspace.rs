@@ -1238,6 +1238,21 @@ mod tests {
     }
 
     #[test]
+    fn listing_managed_branches_skips_a_marker_with_another_value() {
+        let fixture = GitTestRepo::new();
+        WorktreeFixture::created(&fixture);
+        let key = format!("branch.{BRANCH}.ringleaderManaged");
+        fixture.git(fixture.path(), &["config", &key, "false"]);
+
+        let branches = fixture
+            .workspace()
+            .list_managed_branches(fixture.path())
+            .unwrap();
+
+        assert!(branches.is_empty());
+    }
+
+    #[test]
     fn listing_managed_branches_without_markers_is_empty() {
         let fixture = GitTestRepo::new();
         WorktreeFixture::created(&fixture);
