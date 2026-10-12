@@ -195,7 +195,9 @@ mod tests {
         RestartFixture::restart(&fixture).unwrap();
 
         assert_eq!(
-            fixture.multiplexer().typed_into("ringleader-fix-auth"),
+            fixture
+                .multiplexer()
+                .typed_when_ready("ringleader-fix-auth"),
             ["/color"]
         );
     }
@@ -207,7 +209,9 @@ mod tests {
         RestartFixture::restart(&fixture).unwrap();
 
         assert_eq!(
-            fixture.multiplexer().typed_into("ringleader-fix-auth"),
+            fixture
+                .multiplexer()
+                .typed_when_ready("ringleader-fix-auth"),
             ["/color"]
         );
     }

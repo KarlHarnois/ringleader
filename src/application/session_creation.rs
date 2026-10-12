@@ -282,7 +282,9 @@ mod tests {
         CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap();
 
         assert_eq!(
-            fixture.multiplexer().typed_into("ringleader-fix-auth"),
+            fixture
+                .multiplexer()
+                .typed_when_ready("ringleader-fix-auth"),
             ["/color"]
         );
     }

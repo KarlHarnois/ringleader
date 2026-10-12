@@ -254,7 +254,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            fixture.multiplexer().typed_into("ringleader-fix-login"),
+            fixture.multiplexer().typed_if_ready("ringleader-fix-login"),
             ["/rename fix-login"]
         );
     }
@@ -274,7 +274,7 @@ mod tests {
         assert!(
             fixture
                 .multiplexer()
-                .typed_into("ringleader-fix-login")
+                .typed_if_ready("ringleader-fix-login")
                 .is_empty()
         );
     }
