@@ -60,6 +60,7 @@ impl NewSessionDialog {
         }
         match key.code {
             KeyCode::Esc => return DialogStep::Close,
+            KeyCode::Enter if self.ignores_modified_enter(key) => {}
             KeyCode::Enter => return self.advance(),
             KeyCode::Tab => self.focus = self.focus.next(),
             KeyCode::BackTab => self.focus = self.focus.previous(),
@@ -150,6 +151,10 @@ impl NewSessionDialog {
 
     fn creates(key: &KeyEvent) -> bool {
         key.code == KeyCode::Char(Self::CREATE_KEY) && key.modifiers == KeyModifiers::CONTROL
+    }
+
+    fn ignores_modified_enter(&self, key: &KeyEvent) -> bool {
+        self.focus == NewSessionField::Prompt && !key.modifiers.is_empty()
     }
 
     fn advance(&mut self) -> DialogStep {
@@ -612,6 +617,18 @@ mod tests {
         assert!(DialogFixture::text(&dialog).contains(
             "Prompt    fix the flaky login test that times out on the first run\n          after a cold start█"
         ));
+    }
+
+    #[test]
+    fn shift_or_alt_enter_in_the_prompt_creates_nothing() {
+        let (mut dialog, service) = DialogFixture::in_prompt(&DialogFixture::launched_in_repo());
+        DialogFixture::type_text(&mut dialog, &service, "fix the flaky");
+
+        let steps = [KeyModifiers::SHIFT, KeyModifiers::ALT].map(|modifiers| {
+            dialog.handle_key(&KeyEvent::new(KeyCode::Enter, modifiers), &service)
+        });
+
+        assert_eq!(steps, [DialogStep::Stay, DialogStep::Stay]);
     }
 
     #[test]
