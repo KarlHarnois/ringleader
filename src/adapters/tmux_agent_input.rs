@@ -34,7 +34,7 @@ impl<'a> TmuxAgentInput<'a> {
         let deadline = Instant::now() + self.patience;
         loop {
             let cursor = self.cursor(pane)?;
-            if cursor.is_at_prompt() {
+            if self.is_at_prompt(pane, &cursor)? {
                 return Ok(());
             }
             if cursor.pane_dead || Instant::now() >= deadline {
@@ -42,6 +42,14 @@ impl<'a> TmuxAgentInput<'a> {
             }
             thread::sleep(Self::POLL_INTERVAL);
         }
+    }
+
+    fn is_at_prompt(&self, pane: &str, cursor: &AgentCursor) -> Result<bool, TmuxError> {
+        if !cursor.takes_keys() {
+            return Ok(false);
+        }
+        let row = self.cursor_row(pane, cursor)?;
+        Ok(cursor.follows_a_bare_prompt_marker(&row))
     }
 
     fn cursor(&self, pane: &str) -> Result<AgentCursor, TmuxError> {
@@ -52,6 +60,17 @@ impl<'a> TmuxAgentInput<'a> {
             .first(Self::CURSOR_LABEL)
             .and_then(AgentCursor::parse)
             .ok_or_else(|| TmuxError::failed("display-message", &output))
+    }
+
+    fn cursor_row(&self, pane: &str, cursor: &AgentCursor) -> Result<String, TmuxError> {
+        let output = self
+            .tmux
+            .query(&TmuxScripts::capture_row(pane, cursor.row))?;
+        if !output.succeeded() {
+            return Err(TmuxError::failed("capture-pane", &output));
+        }
+        let row = output.stdout().lines().next().unwrap_or_default();
+        Ok(row.to_string())
     }
 
     fn type_line(&self, pane: &str, line: &str) -> Result<(), TmuxError> {
@@ -89,12 +108,12 @@ impl From<TmuxError> for InputError {
 struct AgentCursor {
     pane_dead: bool,
     shown: bool,
-    left_home: bool,
+    column: usize,
+    row: usize,
 }
 
 impl AgentCursor {
     const ON: &'static str = "1";
-    const HOME: &'static str = "0";
 
     fn parse(values: &str) -> Option<Self> {
         let [pane_dead, shown, column, row] = values.split(' ').collect::<Vec<_>>()[..] else {
@@ -103,12 +122,19 @@ impl AgentCursor {
         Some(Self {
             pane_dead: pane_dead == Self::ON,
             shown: shown == Self::ON,
-            left_home: column != Self::HOME || row != Self::HOME,
+            column: column.parse().ok()?,
+            row: row.parse().ok()?,
         })
     }
 
-    fn is_at_prompt(&self) -> bool {
-        !self.pane_dead && self.shown && self.left_home
+    fn takes_keys(&self) -> bool {
+        !self.pane_dead && self.shown
+    }
+
+    fn follows_a_bare_prompt_marker(&self, row: &str) -> bool {
+        let before_cursor: String = row.chars().take(self.column).collect();
+        let marker = before_cursor.trim();
+        !marker.is_empty() && !marker.chars().any(char::is_alphanumeric)
     }
 }
 
@@ -126,6 +152,9 @@ mod tests {
         const SHORT_PATIENCE: Duration = Duration::from_millis(300);
         const LONG_PATIENCE: Duration = Duration::from_secs(5);
         const AT_PROMPT: &'static str = "printf '> '; exec cat";
+        const PLACEHOLDER: &'static str = "printf '> Try this\\r\\033[2C'; exec cat";
+        const DRAFT: &'static str = "printf '> delete the old'; exec cat";
+        const DRAFT_SECOND_LINE: &'static str = "printf '> first line\\n  '; exec cat";
         const LATE_PROMPT: &'static str = "sleep 0.5; printf '> '; exec cat";
         const HIDDEN_CURSOR: &'static str = "printf '\\033[?25l> '; exec cat";
         const NOTHING_DRAWN: &'static str = "exec cat";
@@ -182,6 +211,16 @@ mod tests {
     }
 
     #[test]
+    fn placeholder_text_after_the_cursor_leaves_the_prompt_ready() {
+        let fixture = InputFixture::running(InputFixture::PLACEHOLDER);
+
+        let typed = fixture.type_lines(&["hello demo"], InputFixture::LONG_PATIENCE);
+
+        assert_eq!(typed, Ok(()));
+        assert!(fixture.shows("hello demo"));
+    }
+
+    #[test]
     fn typing_waits_for_an_agent_that_reaches_its_prompt_late() {
         let fixture = InputFixture::running(InputFixture::LATE_PROMPT);
 
@@ -219,6 +258,26 @@ mod tests {
     #[test]
     fn an_agent_with_a_hidden_cursor_is_not_ready() {
         let fixture = InputFixture::running(InputFixture::HIDDEN_CURSOR);
+
+        let typed = fixture.type_lines(&["hello demo"], InputFixture::SHORT_PATIENCE);
+
+        assert_eq!(typed, Err(InputError::NotReady));
+        assert!(!fixture.screen().contains("hello demo"));
+    }
+
+    #[test]
+    fn an_unsent_draft_keeps_the_agent_from_being_ready() {
+        let fixture = InputFixture::running(InputFixture::DRAFT);
+
+        let typed = fixture.type_lines(&["hello demo"], InputFixture::SHORT_PATIENCE);
+
+        assert_eq!(typed, Err(InputError::NotReady));
+        assert!(!fixture.screen().contains("hello demo"));
+    }
+
+    #[test]
+    fn a_cursor_on_the_second_line_of_a_draft_is_not_ready() {
+        let fixture = InputFixture::running(InputFixture::DRAFT_SECOND_LINE);
 
         let typed = fixture.type_lines(&["hello demo"], InputFixture::SHORT_PATIENCE);
 

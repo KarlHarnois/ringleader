@@ -161,6 +161,11 @@ impl TmuxScripts {
             .command(["display-message", "-p", "-t", pane, TmuxLaunch::DONE_LABEL])
     }
 
+    pub fn capture_row(pane: &str, row: usize) -> TmuxSequence {
+        let row = row.to_string();
+        TmuxSequence::new().command(["capture-pane", "-p", "-t", pane, "-S", &row, "-E", &row])
+    }
+
     pub fn capture(pane: &str) -> TmuxSequence {
         TmuxSequence::new().command(["capture-pane", "-e", "-p", "-t", pane])
     }
