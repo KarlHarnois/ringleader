@@ -231,6 +231,18 @@ mod tests {
             (dialog, service)
         }
 
+        fn on_agent_list(agent_count: usize) -> (NewSessionDialog, SessionService) {
+            let agents = (1..=agent_count)
+                .map(|number| Agent::new(&format!("agent-{number}"), "sh"))
+                .collect();
+            let fixture =
+                Self::launched_in_repo().with_config(ServiceFixture::config().with_agents(agents));
+            let (mut dialog, service) = Self::opened(&fixture);
+            Self::press(&mut dialog, &service, KeyCode::Tab);
+            Self::press(&mut dialog, &service, KeyCode::Tab);
+            (dialog, service)
+        }
+
         fn text(dialog: &NewSessionDialog) -> String {
             Self::text_at(dialog, Self::FULL_HEIGHT)
         }
@@ -881,15 +893,8 @@ mod tests {
     }
 
     #[test]
-    fn a_short_dialog_keeps_the_selected_agent_in_view() {
-        let agents = (1..=5)
-            .map(|number| Agent::new(&format!("agent-{number}"), "sh"))
-            .collect();
-        let fixture = DialogFixture::launched_in_repo()
-            .with_config(ServiceFixture::config().with_agents(agents));
-        let (mut dialog, service) = DialogFixture::opened(&fixture);
-        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
-        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
+    fn a_short_dialog_keeps_the_last_agent_in_view_once_it_is_selected() {
+        let (mut dialog, service) = DialogFixture::on_agent_list(5);
 
         for _ in 0..4 {
             DialogFixture::press(&mut dialog, &service, KeyCode::Char('j'));
@@ -897,6 +902,16 @@ mod tests {
 
         let shown = DialogFixture::text_at(&dialog, DialogFixture::COMPACT_HEIGHT);
         assert!(shown.contains("agent-4 · no prompt\n          agent-5 · no prompt\nPrompt"));
+        assert!(shown.ends_with(DialogFixture::AGENT_HINTS));
+    }
+
+    #[test]
+    fn a_short_dialog_keeps_the_first_agent_in_view_while_it_is_selected() {
+        let (dialog, _service) = DialogFixture::on_agent_list(7);
+
+        let shown = DialogFixture::text_at(&dialog, DialogFixture::COMPACT_HEIGHT);
+
+        assert!(shown.contains("Agent     agent-1 · no prompt\n"));
         assert!(shown.ends_with(DialogFixture::AGENT_HINTS));
     }
 

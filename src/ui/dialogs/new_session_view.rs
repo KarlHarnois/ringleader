@@ -104,10 +104,11 @@ impl<'a> NewSessionView<'a> {
 
     fn rows_through_focus(&self, upper_rows: usize) -> usize {
         let agent_rows = self.agents.height(self.agents_expanded());
+        let rows_above_agents = upper_rows.saturating_sub(agent_rows);
         match self.focus {
             NewSessionField::Name => Self::NAME_ROWS,
-            NewSessionField::Repo => upper_rows.saturating_sub(agent_rows),
-            NewSessionField::Agent => upper_rows,
+            NewSessionField::Repo => rows_above_agents,
+            NewSessionField::Agent => rows_above_agents + self.agents.rows_through_selected(),
             NewSessionField::Prompt => 0,
         }
     }
