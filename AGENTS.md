@@ -49,7 +49,7 @@ Dependencies point inward only. An inner layer never imports an outer one.
 - `adapters` holds the driven adapters, which implement the ports with git, tmux, files, and `/proc`. They import `application` and `domain`, never `ui` or `cli`. Each is named after its technology and the port it implements, such as `GitWorkspace` and `TmuxMultiplexer`.
 - `ui` and `cli` are the driving adapters. They import `application` and `domain`, never `adapters`. They reach the use cases only through the `SessionService` facade, which composes `SessionLifecycle`, `SessionMonitor`, `SessionAccess`, `RepoCatalog`, and `Doctor`, so `ui` and `cli` never call those directly. A port handed to a `ui` or `cli` type, like `Lock`, is called by that type.
 - `main.rs` is the composition root and the only production code that imports every layer. It builds the concrete adapters and injects them into the core as trait objects.
-- `src/test_support/` may import any layer, because it fakes the ports and drives the outer layers under test.
+- `src/test_support/` may import any layer, because it fakes the ports and drives the outer layers under test. Inline `#[cfg(test)]` modules follow their layer's rule, except that any of them may also import `src/test_support/`.
 
 The code breaks the `ui` and `cli` rule in four places today: `SignalFlags` in `ui/event_loop.rs`, `cli/cli_session.rs`, and a test in `cli/session_commands.rs`, and `AppLog` in `ui/dialogs/dialog.rs`. They are violations to fix, not precedent to copy.
 
