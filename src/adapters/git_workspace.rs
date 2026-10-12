@@ -426,6 +426,31 @@ mod tests {
     }
 
     #[test]
+    fn the_ladder_skips_an_origin_head_that_names_a_deleted_branch() {
+        let origin = GitTestRepo::new();
+        origin.git(
+            origin.path(),
+            &["branch", "-m", GitTestRepo::BRANCH, "master"],
+        );
+        let clone = WorktreeFixture::clone_of(&origin, "clone");
+        origin.git(
+            origin.path(),
+            &["branch", "-m", "master", GitTestRepo::BRANCH],
+        );
+        origin.commit(origin.path(), "renamed.md");
+        origin.git(&clone, &["fetch", "-q", "--prune", "origin"]);
+        origin.git(&clone, &["checkout", "-q", GitTestRepo::BRANCH]);
+        let local_main = origin.commit(&clone, "unpushed.md");
+
+        let start = origin
+            .workspace()
+            .resolve_start_point(&clone, None)
+            .unwrap();
+
+        assert_eq!(start, StartPoint::Commit(local_main));
+    }
+
+    #[test]
     fn an_unborn_head_resolves_to_an_orphan_worktree() {
         let fixture = GitTestRepo::unborn();
         let workspace = fixture.workspace();

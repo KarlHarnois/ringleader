@@ -70,13 +70,21 @@ impl<'a> StartPointResolver<'a> {
     }
 
     fn origin_default_candidates(&self, repo: &Path) -> Result<Vec<String>, WorkspaceError> {
-        let origin_head =
-            GitInvocation::in_repo(repo, "symbolic-ref").args(["-q", Self::ORIGIN_HEAD]);
-        let Some(origin_default) = self.git.resolved_from(&origin_head)? else {
+        let Some(origin_default) = self.existing_origin_default(repo)? else {
             return Ok(Vec::new());
         };
         let local_default = Self::local_counterpart(&origin_default);
         Ok(local_default.into_iter().chain([origin_default]).collect())
+    }
+
+    fn existing_origin_default(&self, repo: &Path) -> Result<Option<String>, WorkspaceError> {
+        let origin_head =
+            GitInvocation::in_repo(repo, "symbolic-ref").args(["-q", Self::ORIGIN_HEAD]);
+        let Some(origin_default) = self.git.resolved_from(&origin_head)? else {
+            return Ok(None);
+        };
+        let exists = self.commit_of(repo, &origin_default)?.is_some();
+        Ok(exists.then_some(origin_default))
     }
 
     fn local_counterpart(origin_ref: &str) -> Option<String> {
@@ -92,10 +100,14 @@ impl<'a> StartPointResolver<'a> {
         candidates: impl IntoIterator<Item = String>,
     ) -> Result<Option<String>, WorkspaceError> {
         for candidate in candidates {
-            if let Some(sha) = self.git.resolve(repo, &format!("{candidate}^{{commit}}"))? {
+            if let Some(sha) = self.commit_of(repo, &candidate)? {
                 return Ok(Some(sha));
             }
         }
         Ok(None)
+    }
+
+    fn commit_of(&self, repo: &Path, reference: &str) -> Result<Option<String>, WorkspaceError> {
+        self.git.resolve(repo, &format!("{reference}^{{commit}}"))
     }
 }
