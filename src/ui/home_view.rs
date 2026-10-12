@@ -28,14 +28,14 @@ impl<'a> HomeView<'a> {
         let area = frame.area();
         let tier = LayoutTier::for_size(area.width, area.height);
         if tier == LayoutTier::TooSmall {
-            CenteredText::new(&[Self::TOO_SMALL]).render(frame, area);
+            CenteredText::new([Self::TOO_SMALL]).render(frame, area);
             return;
         }
         let [main, status] =
             Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(area);
         self.status.render(frame, status);
         let table = self.table.for_tier(tier);
-        if tier.shows_preview() {
+        if tier.shows_preview() && table.has_rows() {
             Self::render_side_by_side(table, self.preview, frame, main);
             return;
         }
@@ -103,17 +103,22 @@ impl LayoutTier {
 }
 
 pub struct CenteredText<'a> {
-    lines: &'a [&'a str],
+    lines: Vec<Line<'a>>,
 }
 
 impl<'a> CenteredText<'a> {
-    pub const EMPTY_STATE: [&'static str; 2] = ["No sessions yet.", "Press n to create one."];
-
-    pub fn new(lines: &'a [&'a str]) -> Self {
-        Self { lines }
+    pub fn new<L: Into<Line<'a>>>(lines: impl IntoIterator<Item = L>) -> Self {
+        Self {
+            lines: lines.into_iter().map(Into::into).collect(),
+        }
     }
 
-    pub fn render(&self, frame: &mut Frame, area: Rect) {
+    pub fn fits(&self, area: Rect) -> bool {
+        let widest = self.lines.iter().map(Line::width).max().unwrap_or_default();
+        widest <= usize::from(area.width) && self.lines.len() <= usize::from(area.height)
+    }
+
+    pub fn render(self, frame: &mut Frame, area: Rect) {
         let height = u16::try_from(self.lines.len()).unwrap_or(u16::MAX);
         let [_, middle, _] = Layout::vertical([
             Constraint::Fill(1),
@@ -121,8 +126,10 @@ impl<'a> CenteredText<'a> {
             Constraint::Fill(1),
         ])
         .areas(area);
-        let lines: Vec<Line> = self.lines.iter().map(|line| Line::from(*line)).collect();
-        frame.render_widget(Paragraph::new(lines).alignment(Alignment::Center), middle);
+        frame.render_widget(
+            Paragraph::new(self.lines).alignment(Alignment::Center),
+            middle,
+        );
     }
 }
 
@@ -139,6 +146,8 @@ mod tests {
     struct ViewFixture;
 
     impl ViewFixture {
+        const LOGO_BOTTOM_ROW: &str = r"/_/ |_/___/_/ |_/\____/";
+
         fn rows() -> Vec<SessionSummary> {
             vec![SessionSummary::managed(
                 ServiceFixture::session("fix-auth"),
@@ -236,9 +245,31 @@ mod tests {
     }
 
     #[test]
+    fn the_full_tier_without_sessions_gives_the_table_the_whole_width() {
+        let screen = ViewFixture::render(&[], 100, 28);
+
+        assert!(!screen.contains("Preview"));
+    }
+
+    #[test]
+    fn the_smallest_full_tier_without_sessions_shows_the_logo() {
+        let screen = ViewFixture::render(&[], 80, 24);
+
+        assert!(screen.contains(ViewFixture::LOGO_BOTTOM_ROW));
+    }
+
+    #[test]
     fn the_compact_tier_without_sessions_shows_the_empty_state_in_the_table() {
         let screen = ViewFixture::render(&[], 60, 12);
 
         assert!(screen.contains("No sessions yet."));
+    }
+
+    #[test]
+    fn the_logo_in_the_compact_tier_leaves_the_table_header_visible() {
+        let screen = ViewFixture::render(&[], 64, 12);
+
+        assert!(screen.contains(ViewFixture::LOGO_BOTTOM_ROW));
+        assert!(screen.contains("  Name"));
     }
 }

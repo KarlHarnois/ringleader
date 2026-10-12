@@ -4,6 +4,7 @@ pub mod bell;
 pub mod blocking_operation;
 pub mod dialogs;
 pub mod diff_queue;
+pub mod empty_state;
 pub mod event_loop;
 pub mod help_view;
 pub mod home_state;

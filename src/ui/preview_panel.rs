@@ -3,7 +3,7 @@ use ratatui::layout::Rect;
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Padding, Paragraph};
 
-use super::home_view::CenteredText;
+use super::empty_state::EmptyState;
 use super::preview_text::PreviewText;
 use super::text_fit::TextFit;
 use super::theme::Theme;
@@ -40,7 +40,7 @@ impl<'a> PreviewPanel<'a> {
         frame.render_widget(block, area);
         match self.row {
             Some(row) => self.render_row(row, frame, inner),
-            None => CenteredText::new(&CenteredText::EMPTY_STATE).render(frame, inner),
+            None => EmptyState.render(frame, inner),
         }
     }
 
