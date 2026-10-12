@@ -148,7 +148,17 @@ impl AgentCursor {
     fn follows_a_bare_prompt_marker(&self, row: &str) -> bool {
         let before_cursor: String = row.chars().take(self.column).collect();
         let marker = before_cursor.trim();
-        !marker.is_empty() && !marker.chars().any(char::is_alphanumeric)
+        !marker.is_empty()
+            && !marker.chars().any(char::is_alphanumeric)
+            && self.follows_a_blank(row)
+    }
+
+    fn follows_a_blank(&self, row: &str) -> bool {
+        let cell_before_cursor = self
+            .column
+            .checked_sub(1)
+            .and_then(|cell| row.chars().nth(cell));
+        cell_before_cursor.is_none_or(char::is_whitespace)
     }
 }
 
@@ -172,6 +182,7 @@ mod tests {
             "printf '> '; read -r line; printf '\\033[?25l[dialog] '; exec cat";
         const PLACEHOLDER: &'static str = "printf '> Try this\\r\\033[2C'; exec cat";
         const DRAFT: &'static str = "printf '> delete the old'; exec cat";
+        const SYMBOL_DRAFT: &'static str = "printf '> /'; exec cat";
         const DRAFT_SECOND_LINE: &'static str = "printf '> first line\\n  '; exec cat";
         const LATE_PROMPT: &'static str = "sleep 0.5; printf '> '; exec cat";
         const HIDDEN_CURSOR: &'static str = "printf '\\033[?25l> '; exec cat";
@@ -312,6 +323,16 @@ mod tests {
     #[test]
     fn an_unsent_draft_keeps_the_agent_from_being_ready() {
         let fixture = InputFixture::running(InputFixture::DRAFT);
+
+        let typed = fixture.type_lines(&["hello demo"], InputFixture::SHORT_PATIENCE);
+
+        assert_eq!(typed, Err(InputError::NotReady));
+        assert!(!fixture.screen().contains("hello demo"));
+    }
+
+    #[test]
+    fn a_draft_of_symbols_keeps_the_agent_from_being_ready() {
+        let fixture = InputFixture::running(InputFixture::SYMBOL_DRAFT);
 
         let typed = fixture.type_lines(&["hello demo"], InputFixture::SHORT_PATIENCE);
 
