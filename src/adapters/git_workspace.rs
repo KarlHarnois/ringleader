@@ -409,7 +409,7 @@ mod tests {
     }
 
     #[test]
-    fn the_ladder_prefers_the_origin_default_branch_over_a_stale_local_master() {
+    fn the_ladder_tries_the_origin_default_branch_before_local_master() {
         let origin = GitTestRepo::new();
         let clone = WorktreeFixture::clone_of(&origin, "clone");
         origin.git(&clone, &["branch", "-m", GitTestRepo::BRANCH, "master"]);
