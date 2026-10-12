@@ -335,7 +335,7 @@ mod tests {
     use crate::adapters::Deadlines;
     use crate::adapters::process_environment::ProcessEnvironment;
     use crate::adapters::tmux_sequence::TmuxSequence;
-    use crate::domain::{RepoName, SessionRepo, SessionWorktree};
+    use crate::domain::{RepoName, ReturnKey, SessionRepo, SessionWorktree};
     use crate::test_support::TmuxTestServer;
 
     const HOOKED: &str = "run-shell \"echo hooked; exit 1\"";
@@ -481,6 +481,27 @@ mod tests {
             multiplexer.caller_in_own_pane().unwrap();
             multiplexer.server_state().unwrap();
             multiplexer.version().unwrap();
+            multiplexer
+                .apply_config(&ReturnKey::parse("M-x").unwrap())
+                .unwrap();
+            let agent = fixture.tagged_panes("ringleader-fix-auth").pop().unwrap();
+            fixture
+                .server
+                .text(&["respawn-pane", "-k", "-t", &agent, "true"]);
+            fixture
+                .server
+                .wait_for(|| fixture.observation("ringleader-fix-auth").pane_dead());
+            multiplexer
+                .respawn_agent("ringleader-fix-auth", &fixture.launch("fix-auth"))
+                .unwrap();
+            multiplexer
+                .rename_session(
+                    "ringleader-fix-auth",
+                    "ringleader-renamed",
+                    &fixture.metadata("fix-auth"),
+                )
+                .unwrap();
+            multiplexer.kill_session("ringleader-renamed").unwrap();
         }
     }
 
