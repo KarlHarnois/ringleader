@@ -240,7 +240,7 @@ mod tests {
         assert!(
             fixture
                 .workspace()
-                .has_branch(Path::new(ServiceFixture::REPO), "ringleader/fix-login")
+                .has_branch(Path::new(ServiceFixture::REPO), "fix-login")
         );
         assert_eq!(fixture.multiplexer().live_names(), ["ringleader-fix-login"]);
         assert_eq!(fixture.registry().sessions(), vec![renamed]);
@@ -299,7 +299,7 @@ mod tests {
             .rename_session("fix-auth", "fix-login", true)
             .unwrap();
 
-        assert_eq!(renamed.branch(), "ringleader/fix-auth");
+        assert_eq!(renamed.branch(), "fix-auth");
         assert!(
             fixture
                 .workspace()
@@ -326,8 +326,8 @@ mod tests {
             .unwrap_err();
 
         let repo = Path::new(ServiceFixture::REPO);
-        assert!(fixture.workspace().has_branch(repo, "ringleader/fix-auth"));
-        assert!(!fixture.workspace().has_branch(repo, "ringleader/fix-login"));
+        assert!(fixture.workspace().has_branch(repo, "fix-auth"));
+        assert!(!fixture.workspace().has_branch(repo, "fix-login"));
     }
 
     #[test]
@@ -349,7 +349,7 @@ mod tests {
         assert!(
             fixture
                 .workspace()
-                .has_branch(Path::new(ServiceFixture::REPO), "ringleader/fix-login")
+                .has_branch(Path::new(ServiceFixture::REPO), "fix-login")
         );
         assert_eq!(fixture.registry().save_count(), 0);
     }
@@ -384,7 +384,7 @@ mod tests {
         assert!(
             fixture
                 .workspace()
-                .has_branch(Path::new(ServiceFixture::REPO), "ringleader/fix-auth")
+                .has_branch(Path::new(ServiceFixture::REPO), "fix-auth")
         );
     }
 

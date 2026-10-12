@@ -405,7 +405,7 @@ mod tests {
         assert!(DoctorFixture::has_problem(&fixture, "is missing"));
         assert!(DoctorFixture::has_problem(
             &fixture,
-            "branch ringleader/fix-auth is missing"
+            "branch fix-auth is missing"
         ));
     }
 
@@ -427,7 +427,7 @@ mod tests {
         let fixture =
             DoctorFixture::healthy().with_workspace(FakeWorkspace::default().with_branch(
                 Path::new(ServiceFixture::REPO),
-                "ringleader/fix-auth",
+                "fix-auth",
                 ServiceFixture::TIP,
             ));
 
@@ -450,7 +450,6 @@ mod tests {
     fn a_changed_naming_is_a_warning_about_ctrl_q() {
         let config = ServiceFixture::config().with_naming(crate::domain::NamingScheme::new(
             Path::new(ServiceFixture::WORKTREE_ROOT),
-            "ringleader/",
             "rl-",
         ));
         let fixture = DoctorFixture::healthy().with_config(config);

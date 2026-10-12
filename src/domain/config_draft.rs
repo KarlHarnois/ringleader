@@ -11,7 +11,6 @@ use super::repo_draft::RepoDraft;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfigDraft {
     worktree_root: PathBuf,
-    branch_prefix: String,
     tmux_prefix: String,
     state_poll_ms: u64,
     preview_refresh_ms: u64,
@@ -28,7 +27,6 @@ impl ConfigDraft {
     pub fn new(default_worktree_root: &Path) -> Self {
         Self {
             worktree_root: default_worktree_root.to_path_buf(),
-            branch_prefix: "ringleader/".to_string(),
             tmux_prefix: "ringleader-".to_string(),
             state_poll_ms: 1000,
             preview_refresh_ms: 750,
@@ -45,13 +43,6 @@ impl ConfigDraft {
     pub fn worktree_root(self, worktree_root: &Path) -> Self {
         Self {
             worktree_root: worktree_root.to_path_buf(),
-            ..self
-        }
-    }
-
-    pub fn branch_prefix(self, branch_prefix: &str) -> Self {
-        Self {
-            branch_prefix: branch_prefix.to_string(),
             ..self
         }
     }
@@ -127,10 +118,6 @@ impl ConfigDraft {
         &self.worktree_root
     }
 
-    pub(super) fn raw_branch_prefix(&self) -> &str {
-        &self.branch_prefix
-    }
-
     pub(super) fn raw_tmux_prefix(&self) -> &str {
         &self.tmux_prefix
     }
@@ -156,7 +143,7 @@ impl ConfigDraft {
     }
 
     pub(super) fn naming(&self) -> NamingScheme {
-        NamingScheme::new(&self.worktree_root, &self.branch_prefix, &self.tmux_prefix)
+        NamingScheme::new(&self.worktree_root, &self.tmux_prefix)
     }
 
     pub(super) fn intervals(&self) -> RefreshIntervals {

@@ -98,11 +98,7 @@ impl CreationPlan {
     }
 
     pub fn rooted_at(self, worktree_root: &Path) -> Self {
-        let naming = NamingScheme::new(
-            worktree_root,
-            self.naming.branch_prefix(),
-            self.naming.tmux_prefix(),
-        );
+        let naming = NamingScheme::new(worktree_root, self.naming.tmux_prefix());
         Self { naming, ..self }
     }
 

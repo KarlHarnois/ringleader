@@ -612,15 +612,20 @@ mod tests {
     }
 
     #[test]
-    fn sample_slugs_are_legal_branch_names_under_both_prefixes() {
+    fn sample_slugs_are_legal_branch_names() {
         let fixture = GitTestRepo::new();
-        let samples = ["Fix Auth", "a:b/c", "--x--", "café", &"z".repeat(90)];
+        let samples = [
+            "Fix Auth",
+            "a:b/c",
+            "--x--",
+            "café",
+            "HEAD",
+            &"z".repeat(90),
+        ];
 
-        for prefix in ["ringleader/", "a-/"] {
-            for sample in samples {
-                let branch = format!("{prefix}{}", SessionName::new(sample).unwrap());
-                fixture.git(fixture.path(), &["check-ref-format", "--branch", &branch]);
-            }
+        for sample in samples {
+            let branch = SessionName::new(sample).unwrap().to_string();
+            fixture.git(fixture.path(), &["check-ref-format", "--branch", &branch]);
         }
     }
 

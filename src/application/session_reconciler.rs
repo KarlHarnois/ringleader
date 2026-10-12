@@ -228,7 +228,6 @@ impl<'a> SessionReconciler<'a> {
         let naming = self.config.naming();
         NamingScheme::new(
             &self.host.canonical_or_given(naming.worktree_root()),
-            naming.branch_prefix(),
             naming.tmux_prefix(),
         )
     }
@@ -474,7 +473,7 @@ mod tests {
     #[test]
     fn a_claimant_of_an_entry_whose_own_name_is_live_stays_unmanaged() {
         let entry = ServiceFixture::session("fix-auth");
-        let claimant = RekeyFixture::renamed(&entry, "ringleader-twin", "ringleader/fix-auth");
+        let claimant = RekeyFixture::renamed(&entry, "ringleader-twin", "fix-auth");
         let fixture = ServiceFixture::new()
             .with_sessions(std::slice::from_ref(&entry))
             .with_multiplexer(
@@ -492,7 +491,7 @@ mod tests {
     #[test]
     fn a_live_session_renamed_by_hand_takes_over_its_entry() {
         let entry = ServiceFixture::session("fix-auth");
-        let renamed = RekeyFixture::renamed(&entry, "ringleader-fix-login", "ringleader/fix-login");
+        let renamed = RekeyFixture::renamed(&entry, "ringleader-fix-login", "fix-login");
         let fixture = ServiceFixture::new()
             .with_sessions(std::slice::from_ref(&entry))
             .with_multiplexer(FakeMultiplexer::new().with_live(renamed));
@@ -503,14 +502,14 @@ mod tests {
         assert_eq!(row.state(), SessionState::Waiting);
         assert_eq!(stored.name().as_str(), "fix-login");
         assert_eq!(stored.tmux_name(), "ringleader-fix-login");
-        assert_eq!(stored.branch(), "ringleader/fix-login");
+        assert_eq!(stored.branch(), "fix-login");
         assert_eq!(stored.created_at(), entry.created_at());
     }
 
     #[test]
     fn a_take_over_shows_the_new_name_without_writing_when_not_persisting() {
         let entry = ServiceFixture::session("fix-auth");
-        let renamed = RekeyFixture::renamed(&entry, "ringleader-fix-login", "ringleader/fix-login");
+        let renamed = RekeyFixture::renamed(&entry, "ringleader-fix-login", "fix-login");
         let fixture = ServiceFixture::new()
             .with_sessions(std::slice::from_ref(&entry))
             .with_multiplexer(FakeMultiplexer::new().with_live(renamed));
@@ -518,14 +517,14 @@ mod tests {
         let rows = fixture.service().observe(false).unwrap();
 
         assert_eq!(rows[0].name(), "fix-login");
-        assert_eq!(rows[0].session().unwrap().branch(), "ringleader/fix-login");
+        assert_eq!(rows[0].session().unwrap().branch(), "fix-login");
         assert_eq!(fixture.registry().save_count(), 0);
     }
 
     #[test]
     fn a_delete_of_the_taken_over_name_kills_the_renamed_session() {
         let entry = ServiceFixture::session("fix-auth");
-        let renamed = RekeyFixture::renamed(&entry, "ringleader-fix-login", "ringleader/fix-login");
+        let renamed = RekeyFixture::renamed(&entry, "ringleader-fix-login", "fix-login");
         let fixture = ServiceFixture::new()
             .with_sessions(std::slice::from_ref(&entry))
             .with_workspace(ServiceFixture::workspace_for(&[&entry]))
@@ -533,8 +532,8 @@ mod tests {
             .with_multiplexer(FakeMultiplexer::new().with_live(renamed));
         let repo = std::path::Path::new(ServiceFixture::REPO);
         let workspace = ServiceFixture::workspace_for(&[&entry])
-            .with_branch(repo, "ringleader/fix-login", ServiceFixture::TIP)
-            .with_marker(repo, "ringleader/fix-login");
+            .with_branch(repo, "fix-login", ServiceFixture::TIP)
+            .with_marker(repo, "fix-login");
         let fixture = fixture.with_workspace(workspace);
 
         fixture
@@ -580,7 +579,7 @@ mod tests {
     #[test]
     fn an_unregistered_session_under_the_old_root_stays_unmanaged() {
         let old = RekeyFixture::under_old_naming("fix-auth");
-        let stranger = RekeyFixture::renamed(&old, "ringleader-fix-auth", "ringleader/fix-auth");
+        let stranger = RekeyFixture::renamed(&old, "ringleader-fix-auth", "fix-auth");
         let fixture =
             ServiceFixture::new().with_multiplexer(FakeMultiplexer::new().with_live(stranger));
 
@@ -660,11 +659,7 @@ mod tests {
     #[test]
     fn sessions_in_two_repos_with_one_branch_name_both_stay_managed() {
         let first = ServiceFixture::session("fix-auth");
-        let second = RekeyFixture::in_repo(
-            "fix-auth-two",
-            "/repos/other-project",
-            "ringleader/fix-auth",
-        );
+        let second = RekeyFixture::in_repo("fix-auth-two", "/repos/other-project", "fix-auth");
         let fixture = ServiceFixture::new()
             .with_sessions(&[first.clone(), second.clone()])
             .with_multiplexer(
@@ -747,7 +742,7 @@ mod tests {
         }
 
         fn under_old_naming(name: &str) -> Session {
-            let naming = NamingScheme::new(std::path::Path::new("/old/root"), "old/", "old-");
+            let naming = NamingScheme::new(std::path::Path::new("/old/root"), "old-");
             let name = SessionName::new(name).unwrap();
             let repo = crate::domain::RepoName::parse("example-project").unwrap();
             let metadata = SessionMetadata::new(

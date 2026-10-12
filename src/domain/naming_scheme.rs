@@ -6,25 +6,19 @@ use super::session_name::SessionName;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct NamingScheme {
     worktree_root: PathBuf,
-    branch_prefix: String,
     tmux_prefix: String,
 }
 
 impl NamingScheme {
-    pub fn new(worktree_root: &Path, branch_prefix: &str, tmux_prefix: &str) -> Self {
+    pub fn new(worktree_root: &Path, tmux_prefix: &str) -> Self {
         Self {
             worktree_root: worktree_root.to_path_buf(),
-            branch_prefix: branch_prefix.to_string(),
             tmux_prefix: tmux_prefix.to_string(),
         }
     }
 
     pub fn worktree_root(&self) -> &Path {
         &self.worktree_root
-    }
-
-    pub fn branch_prefix(&self) -> &str {
-        &self.branch_prefix
     }
 
     pub fn tmux_prefix(&self) -> &str {
@@ -36,7 +30,7 @@ impl NamingScheme {
     }
 
     pub fn branch_name(&self, name: &SessionName) -> String {
-        format!("{}{}", self.branch_prefix, name)
+        name.to_string()
     }
 
     pub fn worktree_path(&self, repo: &RepoName, name: &SessionName) -> PathBuf {
@@ -56,8 +50,16 @@ mod tests {
 
     impl NamingFixture {
         fn default_scheme() -> NamingScheme {
-            NamingScheme::new(Path::new("/worktrees"), "ringleader/", "ringleader-")
+            NamingScheme::new(Path::new("/worktrees"), "ringleader-")
         }
+    }
+
+    #[test]
+    fn the_branch_is_the_session_name() {
+        let branch =
+            NamingFixture::default_scheme().branch_name(&SessionName::new("fix-auth").unwrap());
+
+        assert_eq!(branch, "fix-auth");
     }
 
     #[test]

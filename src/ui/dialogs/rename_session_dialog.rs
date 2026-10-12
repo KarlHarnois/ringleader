@@ -196,9 +196,8 @@ mod tests {
         RenameFixture::type_text(&mut dialog, "Fix Login");
 
         assert!(
-            RenameFixture::text(&dialog).contains(
-                "[x] rename branch\n          ringleader/fix-auth → ringleader/fix-login"
-            )
+            RenameFixture::text(&dialog)
+                .contains("[x] rename branch\n          fix-auth → fix-login")
         );
     }
 
@@ -212,7 +211,7 @@ mod tests {
         let step = RenameFixture::press(&mut dialog, KeyCode::Enter);
 
         assert!(RenameFixture::text(&dialog).contains("[ ] rename branch"));
-        assert!(RenameFixture::text(&dialog).contains("ringleader/fix-auth stays"));
+        assert!(RenameFixture::text(&dialog).contains("fix-auth stays"));
         assert_eq!(step, RenameFixture::rename("fix-auth", "fix-login", true));
     }
 

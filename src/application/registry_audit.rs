@@ -146,9 +146,8 @@ impl RegistryAudit {
         let current = config.naming();
         if recorded != current {
             report.warning(format!(
-                "session {name} was created under worktree_root {}, branch_prefix {}, and tmux_prefix {}, which differ from the config; Ctrl-Q does not return from a session whose name lacks the current tmux_prefix",
+                "session {name} was created under worktree_root {} and tmux_prefix {}, which differ from the config; Ctrl-Q does not return from a session whose name lacks the current tmux_prefix",
                 recorded.worktree_root().display(),
-                recorded.branch_prefix(),
                 recorded.tmux_prefix()
             ));
         }

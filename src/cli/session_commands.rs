@@ -523,7 +523,7 @@ mod tests {
         );
         assert_eq!(
             harness.stdout(),
-            "renamed fix-auth to fix-login, branch ringleader/fix-login\n"
+            "renamed fix-auth to fix-login, branch fix-login\n"
         );
     }
 
@@ -535,7 +535,7 @@ mod tests {
             ServiceFixture::CREATED_AT,
         )
         .with_agent_pane(crate::domain::AgentPane::live(0))
-        .with_metadata(entry.metadata().with_branch("ringleader/fix-login"));
+        .with_metadata(entry.metadata().with_branch("fix-login"));
         let fixture = ServiceFixture::new()
             .with_sessions(std::slice::from_ref(&entry))
             .with_multiplexer(FakeMultiplexer::new().with_live(renamed));

@@ -444,7 +444,6 @@ mod tests {
         let current = RestartFixture::session();
         let old_naming = crate::domain::NamingScheme::new(
             std::path::Path::new(ServiceFixture::WORKTREE_ROOT),
-            "old/",
             "old-",
         );
         let session = Session::new(

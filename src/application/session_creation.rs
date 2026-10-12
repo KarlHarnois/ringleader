@@ -253,10 +253,10 @@ mod tests {
             fixture.workspace().state_changing_calls(),
             [
                 format!(
-                    "create_worktree {} ringleader/fix-auth",
+                    "create_worktree {} fix-auth",
                     ServiceFixture::worktree_path("fix-auth").display()
                 ),
-                "mark_branch_managed ringleader/fix-auth".to_string()
+                "mark_branch_managed fix-auth".to_string()
             ]
         );
     }
@@ -426,18 +426,14 @@ mod tests {
     fn create_refuses_an_existing_branch() {
         let fixture = ServiceFixture::new().with_workspace(FakeWorkspace::default().with_branch(
             Path::new(ServiceFixture::REPO),
-            "ringleader/fix-auth",
+            "fix-auth",
             ServiceFixture::TIP,
         ));
 
         let error =
             CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap_err();
 
-        assert!(
-            error
-                .to_string()
-                .contains("branch ringleader/fix-auth already exists")
-        );
+        assert!(error.to_string().contains("branch fix-auth already exists"));
         CreateFixture::assert_nothing_touched(&fixture);
     }
 
@@ -452,7 +448,7 @@ mod tests {
         CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap_err();
 
         let repo = Path::new(ServiceFixture::REPO);
-        assert!(!fixture.workspace().has_branch(repo, "ringleader/fix-auth"));
+        assert!(!fixture.workspace().has_branch(repo, "fix-auth"));
         assert!(
             !fixture
                 .workspace()
@@ -497,7 +493,7 @@ mod tests {
 
         assert!(error.to_string().contains("duplicate session"));
         let repo = Path::new(ServiceFixture::REPO);
-        assert!(!fixture.workspace().has_branch(repo, "ringleader/fix-auth"));
+        assert!(!fixture.workspace().has_branch(repo, "fix-auth"));
         assert!(fixture.registry().sessions().is_empty());
     }
 
@@ -513,7 +509,7 @@ mod tests {
 
         let repo = Path::new(ServiceFixture::REPO);
         assert!(fixture.multiplexer().live_names().is_empty());
-        assert!(!fixture.workspace().has_branch(repo, "ringleader/fix-auth"));
+        assert!(!fixture.workspace().has_branch(repo, "fix-auth"));
     }
 
     #[test]
@@ -528,7 +524,7 @@ mod tests {
             CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap_err();
 
         let repo = Path::new(ServiceFixture::REPO);
-        assert!(fixture.workspace().has_branch(repo, "ringleader/fix-auth"));
+        assert!(fixture.workspace().has_branch(repo, "fix-auth"));
         assert!(error.to_string().contains("doctor"));
     }
 

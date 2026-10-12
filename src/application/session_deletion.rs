@@ -278,11 +278,7 @@ mod tests {
         }
 
         fn assert_everything_kept(fixture: &ServiceFixture) {
-            assert!(
-                fixture
-                    .workspace()
-                    .has_branch(Self::repo(), "ringleader/fix-auth")
-            );
+            assert!(fixture.workspace().has_branch(Self::repo(), "fix-auth"));
             assert_eq!(fixture.registry().sessions().len(), 1);
         }
 
@@ -311,7 +307,7 @@ mod tests {
         assert!(
             !fixture
                 .workspace()
-                .has_branch(DeleteFixture::repo(), "ringleader/fix-auth")
+                .has_branch(DeleteFixture::repo(), "fix-auth")
         );
         assert!(fixture.registry().sessions().is_empty());
     }
@@ -320,7 +316,7 @@ mod tests {
     fn delete_reports_the_worktree_head_when_it_differs_from_the_tip() {
         let fixture = DeleteFixture::live_fixture().with_workspace(
             ServiceFixture::workspace_for(&[&DeleteFixture::session()]).with_unmerged(
-                "ringleader/fix-auth",
+                "fix-auth",
                 vec![UnmergedCommits::new(
                     0,
                     Some(ServiceFixture::TIP),
@@ -354,7 +350,7 @@ mod tests {
     fn unmerged_commits_on_a_clean_worktree_refuse_an_unconfirmed_delete() {
         let fixture = DeleteFixture::live_fixture().with_workspace(
             ServiceFixture::workspace_for(&[&DeleteFixture::session()]).with_unmerged(
-                "ringleader/fix-auth",
+                "fix-auth",
                 vec![DeleteFixture::unmerged(3, ServiceFixture::TIP)],
             ),
         );
@@ -476,7 +472,7 @@ mod tests {
     fn delete_impact_matches_the_impact_a_refused_delete_carries() {
         let fixture = DeleteFixture::live_fixture().with_workspace(
             DeleteFixture::dirty_workspace(2).with_unmerged(
-                "ringleader/fix-auth",
+                "fix-auth",
                 vec![DeleteFixture::unmerged(1, ServiceFixture::TIP)],
             ),
         );
@@ -496,7 +492,7 @@ mod tests {
     #[test]
     fn delete_refuses_a_worktree_outside_the_recorded_root() {
         let inside = DeleteFixture::session();
-        let outside_root = NamingScheme::new(Path::new("/elsewhere"), "ringleader/", "ringleader-");
+        let outside_root = NamingScheme::new(Path::new("/elsewhere"), "ringleader-");
         let session = Session::new(
             inside.name().clone(),
             inside.metadata().clone(),
@@ -552,7 +548,7 @@ mod tests {
     fn a_new_tip_after_the_kill_refuses_the_delete_and_keeps_the_branch() {
         let fixture = DeleteFixture::live_fixture().with_workspace(
             ServiceFixture::workspace_for(&[&DeleteFixture::session()]).with_unmerged(
-                "ringleader/fix-auth",
+                "fix-auth",
                 vec![
                     DeleteFixture::unmerged(0, ServiceFixture::TIP),
                     DeleteFixture::unmerged(1, OTHER_TIP),
@@ -626,7 +622,7 @@ mod tests {
 
         assert_eq!(
             outcome.kept(),
-            Some((DeleteFixture::worktree().as_path(), "ringleader/fix-auth"))
+            Some((DeleteFixture::worktree().as_path(), "fix-auth"))
         );
         assert!(fixture.workspace().state_changing_calls().is_empty());
         assert!(fixture.registry().sessions().is_empty());

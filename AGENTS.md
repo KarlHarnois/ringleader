@@ -23,7 +23,7 @@ This file is the living reference for agents working in this repository. `docs/p
 - The hermetic git environment is `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_NOSYSTEM=1`, `HOME=<tempdir>`, and fake `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME`, and `GIT_COMMITTER_EMAIL` values. Fixture repos are created with `git init -b <branch>`, never relying on `init.defaultBranch`.
 - The private GitHub repository exists and is configured as `origin`. Do not create another repository or add another remote. Push only when the project owner asks.
 - Keep the repository consumer-agnostic. Never reference or assume any specific downstream setup, local directory layout, or personal configuration. Examples and fixtures use generic names such as `example-project`.
-- Human-facing prose uses "Ringleader". Identifiers stay lowercase: binary, crate, repo, flake input, config paths, tmux and branch prefixes, JSON fields.
+- Human-facing prose uses "Ringleader". Identifiers stay lowercase: binary, crate, repo, flake input, config paths, the tmux prefix, JSON fields. The git config marker `ringleaderManaged` keeps git's camelCase.
 
 ## Commands
 
@@ -86,7 +86,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── config.rs             # Config, the parsed config.toml
     │   ├── config_draft.rs       # ConfigDraft, the raw config values the Config constructor checks
     │   ├── config_checks.rs      # ConfigChecks, the checks every config load runs
-    │   └── naming_scheme.rs      # NamingScheme, the worktree root and prefixes a session records
+    │   └── naming_scheme.rs      # NamingScheme, the worktree root and tmux prefix a session records
     ├── application/
     │   ├── mod.rs
     │   ├── session_service.rs    # SessionService, the facade the UI and CLI call

@@ -38,6 +38,8 @@ Run `ringleader` with no arguments in a directory that holds your repos. It open
 
 Ctrl-Q returns from a session to the TUI. Outside tmux it detaches the client, and inside tmux it switches back to the TUI's pane. Open extra shells with `t` instead of splitting the agent window.
 
+A session's branch has the session's name. Ringleader marks each branch it creates with `branch.<name>.ringleaderManaged` in git config, and delete and rename refuse a branch without that marker. `ringleader doctor` prints the command that marks one.
+
 ## Agent environment
 
 An agent starts with a fixed baseline of variables such as `PATH` and `HOME`. Its `env` list copies more variables from the environment Ringleader runs in, and its `set_env` table sets fixed values. A `set_env` value is used as written, except that a leading `~/` expands to your home. Variables such as `$HOME` are not expanded. The values sit in plain text in the config, so pass secrets through `env` instead. To run Claude Code under two accounts, add one agent per account and pick it when you create a session:
