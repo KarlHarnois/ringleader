@@ -27,25 +27,30 @@ impl<'a> BusyWorktree<'a> {
             return None;
         }
         let processes = self.processes_under(session, recorded)?;
-        Some(format!(
-            "{} Ringleader started that server in an environment with another XDG_RUNTIME_DIR, or none. Run Ringleader there again, or end the session with tmux -S {} kill-session -t '={}:'.",
-            Self::still_running(
-                session,
-                &format!("the tmux server at {}", recorded.display()),
-                &processes
-            ),
+        let server = format!("its tmux server at {}", recorded.display());
+        let advice = format!(
+            "End the session with tmux -S {} kill-session -t '={}:', or run Ringleader again in the environment that started that server, which had another XDG_RUNTIME_DIR.",
             recorded.display(),
             session.tmux_name()
+        );
+        Some(format!(
+            "{} {advice} {}",
+            Self::still_running(session, &server),
+            Self::listed(&processes)
         ))
     }
 
     fn on_private_server(&self, session: &Session) -> Option<String> {
         let processes = self.processes_under(session, self.private_socket)?;
-        let running = Self::still_running(session, "Ringleader's tmux server", &processes);
-        match self.host.path_exists(self.private_socket) {
-            true => Some(format!("{running} End them before a restart or rename.")),
-            false => Some(format!("{running} {}", self.lost_socket_advice())),
-        }
+        let advice = match self.host.path_exists(self.private_socket) {
+            true => "End them before a restart or rename.".to_string(),
+            false => self.lost_socket_advice(),
+        };
+        Some(format!(
+            "{} {advice} {}",
+            Self::still_running(session, "Ringleader's tmux server"),
+            Self::listed(&processes)
+        ))
     }
 
     fn processes_under(&self, session: &Session, socket: &Path) -> Option<Vec<ProcessInfo>> {
@@ -59,18 +64,20 @@ impl<'a> BusyWorktree<'a> {
         let socket = self.private_socket.display();
         let directory = self.private_socket.parent().unwrap_or(self.private_socket);
         format!(
-            "The socket {socket} is gone, so it was likely removed under the running server. Any ringleader command other than doctor recreates it. By hand, recreate {} with mode 0700, then send SIGUSR1 to the tmux server whose command line names that socket. Its sessions then list again, so do not end them.",
+            "Do not end them: the socket {socket} was removed under the running server, and its sessions come back with it. Any ringleader command other than doctor recreates it. By hand, recreate {} with mode 0700 and send SIGUSR1 to the tmux server whose command line names that socket.",
             directory.display()
         )
     }
 
-    fn still_running(session: &Session, server: &str, processes: &[ProcessInfo]) -> String {
+    fn still_running(session: &Session, server: &str) -> String {
         format!(
-            "session {} is stopped, but processes of {server} still run in its worktree {}: {}.",
-            session.name(),
-            session.worktree_path().display(),
-            ProcessInfo::listed(processes)
+            "session {} is stopped, but {server} still runs processes in its worktree.",
+            session.name()
         )
+    }
+
+    fn listed(processes: &[ProcessInfo]) -> String {
+        format!("Processes: {}.", ProcessInfo::listed(processes))
     }
 }
 
@@ -119,6 +126,20 @@ mod tests {
 
         assert!(finding.contains("send SIGUSR1"));
         assert!(!finding.contains("End them"));
+    }
+
+    #[test]
+    fn the_advice_comes_before_the_process_list() {
+        let session = BusyFixture::session();
+        let host = ServiceFixture::with_worktree_agent(&session);
+
+        let finding = BusyFixture::finding(&host, &session).unwrap();
+
+        let advice = finding.find("Do not end them").unwrap();
+        let processes = finding
+            .find(&ServiceFixture::WORKTREE_PROCESS.to_string())
+            .unwrap();
+        assert!(advice < processes);
     }
 
     #[test]

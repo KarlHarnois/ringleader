@@ -446,6 +446,38 @@ mod tests {
     }
 
     #[test]
+    fn a_restart_refused_for_a_lost_socket_keeps_its_advice_on_an_80_column_screen() {
+        let session = ServiceFixture::session("fix-auth");
+        let fixture = ServiceFixture::new()
+            .with_sessions(std::slice::from_ref(&session))
+            .with_host(ServiceFixture::with_worktree_agent(&session));
+        let mut app = AppFixture::started(&fixture, 80, 24);
+
+        app.perform(BlockingOperation::Restart("fix-auth".to_string()));
+
+        assert!(AppFixture::flattened_screen(&app, 80, 24).contains("Do not end them"));
+    }
+
+    #[test]
+    fn a_restart_refused_for_another_server_keeps_its_kill_command_on_an_80_column_screen() {
+        let recorded = Path::new("/home/example/.local/state/ringleader/tmux/tmux.sock");
+        let session = ServiceFixture::session("fix-auth").on_socket(recorded);
+        let host = ServiceFixture::with_worktree_process(&session)
+            .serving(ServiceFixture::WORKTREE_PROCESS, recorded);
+        let fixture = ServiceFixture::new()
+            .with_sessions(std::slice::from_ref(&session))
+            .with_host(host);
+        let mut app = AppFixture::started(&fixture, 80, 24);
+
+        app.perform(BlockingOperation::Restart("fix-auth".to_string()));
+
+        assert!(
+            AppFixture::flattened_screen(&app, 80, 24)
+                .contains("kill-session -t '=ringleader-fix-auth:'")
+        );
+    }
+
+    #[test]
     fn performing_a_restart_respawns_the_agent_and_reports_it() {
         let fixture = UiHarness::exited_session_fixture("fix-auth");
         let mut app = AppFixture::started(&fixture, 100, 28);
