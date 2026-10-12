@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use super::tmux_output::TmuxOutput;
+use super::tmux_server_config::TmuxServerConfig;
 use crate::application::ports::ServerState;
 use crate::domain::{
     AgentPane, RepoName, ReturnKey, SessionMetadata, SessionObservation, SessionRepo,
@@ -22,8 +23,7 @@ impl<'a> TmuxListing<'a> {
     pub const TTY_FORMAT: &'static str = "ringleader-tty #{pane_tty}";
     pub const SERVER_FORMAT: &'static str = "ringleader-server #{version}";
     pub const SESSION_FORMAT: &'static str = "ringleader-session";
-    pub const CONFIG_FORMAT: &'static str =
-        "ringleader-config #{@ringleader_config} #{@ringleader_return_key}";
+    const CONFIG_LABEL: &'static str = "ringleader-config";
     const TAGGED: &'static str = "1";
     const KEY_BINDING: &'static str = "bind-key";
     const DETACH: &'static str = "detach-client";
@@ -63,8 +63,17 @@ impl<'a> TmuxListing<'a> {
         Some(ServerState::new(version, sessions))
     }
 
+    pub fn config_format() -> String {
+        format!(
+            "{} #{{{}}} #{{{}}}",
+            Self::CONFIG_LABEL,
+            TmuxServerConfig::HASH_OPTION,
+            TmuxServerConfig::RETURN_KEY_OPTION
+        )
+    }
+
     pub fn running_config(&self) -> Option<RunningConfig> {
-        let values = self.output.first("ringleader-config")?;
+        let values = self.output.first(Self::CONFIG_LABEL)?;
         let (hash, return_key) = values.split_once(' ').unwrap_or((values, ""));
         Some(RunningConfig {
             hash: hash.to_string(),

@@ -189,7 +189,7 @@ impl TmuxMultiplexer {
     }
 
     fn running_config(&self) -> Result<Option<RunningConfig>, MultiplexerError> {
-        let query = TmuxScripts::server_value(TmuxListing::CONFIG_FORMAT);
+        let query = TmuxScripts::server_value(&TmuxListing::config_format());
         let output = self.tmux.query(&query)?;
         if let Some(running) = TmuxListing::new(&output).running_config() {
             return Ok(Some(running));
