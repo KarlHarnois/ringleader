@@ -3,9 +3,8 @@ use std::path::Path;
 
 use super::metadata_json::MetadataJson;
 use super::tmux_output::TmuxOutput;
-use super::tmux_server_config::TmuxServerConfig;
 use crate::application::ports::ServerState;
-use crate::domain::{AgentPane, ReturnKey, SessionObservation, TmuxAddress};
+use crate::domain::{AgentPane, SessionObservation, TmuxAddress};
 
 pub struct TmuxListing<'a> {
     output: &'a TmuxOutput,
@@ -19,7 +18,6 @@ impl<'a> TmuxListing<'a> {
     pub const TTY_FORMAT: &'static str = "ringleader-tty #{pane_dead} #{pane_tty}";
     pub const SERVER_FORMAT: &'static str = "ringleader-server #{version}";
     pub const SESSION_FORMAT: &'static str = "ringleader-session";
-    const CONFIG_LABEL: &'static str = "ringleader-config";
     const TAGGED: &'static str = "1";
     const DEAD: &'static str = "1";
     const KEY_BINDING: &'static str = "bind-key";
@@ -58,24 +56,6 @@ impl<'a> TmuxListing<'a> {
         let version = self.output.first("ringleader-server")?;
         let sessions = self.output.labeled(Self::SESSION_FORMAT).count();
         Some(ServerState::new(version, sessions))
-    }
-
-    pub fn config_format() -> String {
-        format!(
-            "{} #{{{}}} #{{{}}}",
-            Self::CONFIG_LABEL,
-            TmuxServerConfig::HASH_OPTION,
-            TmuxServerConfig::RETURN_KEY_OPTION
-        )
-    }
-
-    pub fn running_config(&self) -> Option<RunningConfig> {
-        let values = self.output.first(Self::CONFIG_LABEL)?;
-        let (hash, return_key) = values.split_once(' ').unwrap_or((values, ""));
-        Some(RunningConfig {
-            hash: hash.to_string(),
-            return_key: ReturnKey::parse(return_key),
-        })
     }
 
     pub fn shows_terminal(&self, terminal: &OsStr) -> bool {
@@ -126,21 +106,6 @@ impl<'a> TmuxListing<'a> {
             Some(metadata) => observation.with_metadata(metadata),
             None => observation,
         }
-    }
-}
-
-pub struct RunningConfig {
-    hash: String,
-    return_key: Option<ReturnKey>,
-}
-
-impl RunningConfig {
-    pub fn hash(&self) -> &str {
-        &self.hash
-    }
-
-    pub fn return_key(&self) -> Option<&ReturnKey> {
-        self.return_key.as_ref()
     }
 }
 
