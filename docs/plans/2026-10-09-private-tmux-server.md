@@ -64,8 +64,6 @@ The renderer is a new adapter, `TmuxServerConfig` in `src/adapters/tmux_server_c
 
 ```
 set -su terminal-features
-source-file -q '<config home>/ringleader/tmux.conf'
-set -g key-table root
 set -g prefix None
 set -g prefix2 None
 set -g status off
@@ -74,6 +72,7 @@ unbind-key -q -T root MouseDown3Pane
 unbind-key -q -T root M-MouseDown3Pane
 set -s escape-time 10
 set -g default-terminal tmux-256color
+set -g history-limit 25000
 set -s extended-keys always
 set -as terminal-features ',*:extkeys'
 set -as terminal-features ',*:RGB'
@@ -84,12 +83,14 @@ set -g detach-on-destroy on
 set -g @ringleader_return_key 'C-q'
 set -g @ringleader_config '<hash>'
 bind-key -T root 'C-q' detach-client
+bind-key -T copy-mode 'C-q' detach-client
+bind-key -T copy-mode-vi 'C-q' detach-client
 ```
 
-- **Milestones.** Milestone 2 renders every line except three. The `source-file -q` line arrives with milestone 7 (D9). The `@ringleader_return_key` and `@ringleader_config` lines arrive with milestone 6 (D7).
-- **Order.** The first line resets the one option the file appends to. Re-sourcing the file then never piles up duplicate `terminal-features` entries (D7). The user file comes next. Ringleader's own lines come last, so they win over the user file.
+- **Milestones.** The `@ringleader_return_key` and `@ringleader_config` lines arrive with milestone 6 (D7). Milestone 7 added a `source-file -q` line for the D9 user file, which left again when the owner dropped D9. `history-limit` and the copy-mode bindings came with later fixes (section 4).
+- **Order.** The first line resets the one option the file appends to. Re-sourcing the file then never piles up duplicate `terminal-features` entries (D7).
 - **Quoting.** The return key is single-quoted wherever it appears. tmux parses `}` and `C-}` as syntax and expands a bare `~` to the home directory. A syntax error anywhere in a `-f` file drops the whole file at server start, and the start still exits 0. The server would then run with prefix C-b, status on, and no return binding. `ReturnKey` rejects quotes and newlines, so single quotes are always safe.
-- **No way out without the binding.** With `prefix None`, the return key is the only way to detach. So `create_session` checks, in a labeled query after the creation invocation, that the root key table holds a `detach-client` binding. If it does not, the session is rolled back by id, and the create fails with the config path and the hand command `tmux -S <socket> show-messages`. The check accepts any key bound to `detach-client`, so a server still running an older render passes.
+- **No way out without the binding.** With `prefix None`, the return key is the only way to detach. So `create_session` checks, in a labeled query after the creation invocation, that the root key table holds a `detach-client` binding. If it does not, the session is rolled back by id, and the create fails and names the config path. The check accepts any key bound to `detach-client`, so a server still running an older render passes.
 - **Explicit defaults.** `prefix2`, `escape-time`, `default-terminal`, `exit-unattached`, `destroy-unattached`, and `detach-on-destroy` already have these values on 3.6a. They are set anyway, because older releases differ. For example, the 3.2a man page gives 500 ms as the `escape-time` default. With `detach-on-destroy off`, a client whose session is killed would move to another agent's session instead of returning to the TUI. `unbind-key -q` (present in 3.2a) keeps a second sourcing from failing on a key that is already unbound.
 - **Extended keys.** `extended-keys always` and `*:extkeys` are both required for Shift+Enter to reach an agent through two layers. Without `*:extkeys`, the nested client never asks the user's tmux for extended keys. Without `always`, agents that only send the kitty keyboard request get plain Enter, because 3.6a ignores that request. `extended-keys-format` stays out (D12).
 - **Config errors are silent at server start.** `new-session` and `start-server` return 0 when `-f` holds a line with an unknown option. The other lines still apply, and the error appears over the first attached pane. A `source-file` on a running server returns 1 with the error. So a test on the pinned tmux must show that the golden fixture loads cleanly, both at server start and when it is sourced again on the running server. The D7 reapply reports `source-file` errors.
@@ -189,7 +190,7 @@ When every milestone is in, flip the status header to `completed`.
 
 ### Implementation status
 
-As of 2026-10-11, milestones 1 to 7 are in, one commit each, and they implement the accepted recommendation in each D row. Milestone 0 is partly done: the tmux 3.2 check and the capture of the agents' keyboard requests ran, and section 7 records the results and the two fixes they led to. The rest needs the owner's real terminals and logged-in agents. Until it runs, the D12 and D13 checks and the `focus-events` default stay unconfirmed. If an agent turns out to need csi-u, D12 already says what to render.
+As of 2026-10-12, milestones 1 to 7 are in, one commit each. They implement the accepted recommendation in each D row, except D9, D11, and the v1 parts of D4, which the owner later dropped (section 2) and whose code is gone again. Milestone 0 is partly done: the tmux 3.2 check and the capture of the agents' keyboard requests ran, and section 7 records the results and the two fixes they led to. The rest needs the owner's real terminals and logged-in agents. Until it runs, the D12 and D13 checks and the `focus-events` default stay unconfirmed. If an agent turns out to need csi-u, D12 already says what to render.
 
 Where the implementation departs from the text above:
 
@@ -202,7 +203,7 @@ Where the implementation departs from the text above:
 - Help, doctor, the README, and the template say that the user's tmux must not use the return key as its prefix either, since an outer prefix swallows it too.
 - The launch-directory delete guard applies to a full delete and its measurement, not to `delete --forget`, which removes nothing on disk.
 - The status bar wraps a long message or note over up to a quarter of the terminal height, so long advice such as the hand commands for an Unmanaged session fits.
-- D4 is narrower. Restart and rename refuse only while a process in the worktree descends from a tmux server whose command line names the private socket, through `HostProbe::processes_under_server`. Counting every process blocked them whenever an editor or a shell sat in the worktree.
+- D4 is narrower. Restart and rename refuse only while a process in the worktree descends from a tmux server whose command line names the private socket or the socket the entry recorded, through `HostProbe::processes_under_server`. Counting every process blocked them whenever an editor or a shell sat in the worktree. The recorded socket covers a private socket that moved with `XDG_RUNTIME_DIR`, which section 3.6 had handled with the v1 entries. `BusyWorktree` holds this check for restart, rename, and doctor. When the private socket file is gone, its refusal gives the SIGUSR1 fix instead of asking the user to end the agents.
 - Doctor's lost socket warning from section 3.7 needs both a missing socket file and such a process, so an open editor no longer triggers it.
 - The generated config binds the return key in `copy-mode` and `copy-mode-vi` as well as `root`, and a reapply unbinds the previous key in all three. In copy mode tmux looks a key up in the mode's table first, and those tables already bind keys `ReturnKey` accepts, such as `M-x`.
 - Doctor compares only the access bits of the socket directory, since Linux copies a parent's setgid bit to new subdirectories and `chmod 700` keeps it.
