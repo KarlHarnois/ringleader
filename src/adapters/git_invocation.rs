@@ -140,3 +140,31 @@ impl GitLocation {
         option
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TERMINAL_PROMPT: &str = "GIT_TERMINAL_PROMPT";
+
+    #[test]
+    fn every_call_kind_disables_terminal_prompts_despite_overrides() {
+        let allowing_prompts = [(OsString::from(TERMINAL_PROMPT), OsString::from("1"))];
+        let every_call_kind = [
+            GitInvocation::anywhere("status"),
+            GitInvocation::anywhere("diff").diffing(),
+            GitInvocation::anywhere("worktree").writing(),
+        ];
+
+        for invocation in every_call_kind {
+            let command = invocation.command(OsStr::new("git"), &allowing_prompts);
+
+            let terminal_prompt = command
+                .get_envs()
+                .find(|(name, _)| *name == TERMINAL_PROMPT)
+                .and_then(|(_, value)| value);
+            let subcommand = invocation.subcommand();
+            assert_eq!(terminal_prompt, Some(OsStr::new("0")), "git {subcommand}");
+        }
+    }
+}
