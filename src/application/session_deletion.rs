@@ -768,24 +768,6 @@ mod tests {
     }
 
     #[test]
-    fn a_stopped_entry_on_an_earlier_server_deletes_without_a_tmux_call_there() {
-        let session = ServiceFixture::on_earlier_server(&DeleteFixture::session());
-        let fixture = DeleteFixture::stopped_fixture()
-            .with_registry(FakeSessionRegistry::with_sessions(vec![session]));
-
-        DeleteFixture::force(&mut fixture.service()).unwrap();
-
-        assert!(fixture.registry().sessions().is_empty());
-        assert!(
-            fixture
-                .multiplexer()
-                .calls()
-                .iter()
-                .all(|call| !call.contains(FakeMultiplexer::EARLIER_SOCKET))
-        );
-    }
-
-    #[test]
     fn processes_in_a_stopped_worktree_are_counted_instead_of_refusing_the_delete() {
         let session = DeleteFixture::session();
         let fixture = DeleteFixture::stopped_fixture()

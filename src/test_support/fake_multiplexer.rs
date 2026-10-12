@@ -37,7 +37,6 @@ struct MultiplexerState {
 
 impl FakeMultiplexer {
     pub const SOCKET: &'static str = "/run/user/1000/ringleader/tmux/tmux.sock";
-    pub const EARLIER_SOCKET: &'static str = "/tmp/tmux-1000/default";
     pub const STATE_CHANGING: [&'static str; 5] = [
         "create_session",
         "kill_session",

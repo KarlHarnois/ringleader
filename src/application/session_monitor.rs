@@ -5,7 +5,7 @@ use super::reconciliation::Reconciliation;
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
 use super::session_reconciler::SessionReconciler;
-use crate::domain::{Config, DiffStat, EarlierServer, ReturnKey, Session};
+use crate::domain::{Config, DiffStat, ReturnKey, Session};
 
 pub struct SessionMonitor {
     multiplexer: Arc<dyn Multiplexer>,
@@ -31,8 +31,7 @@ impl SessionMonitor {
     ) -> Result<Reconciliation, ServiceError> {
         let observations = self.multiplexer.observe_all()?;
         let now = self.clock.now_epoch_seconds();
-        let reconciler = SessionReconciler::new(config, self.host.as_ref(), now)
-            .serving(&self.multiplexer.socket());
+        let reconciler = SessionReconciler::new(config, self.host.as_ref(), now);
         Ok(reconciler.reconcile(entries, observations))
     }
 
@@ -52,9 +51,5 @@ impl SessionMonitor {
             .server_config(&ReturnKey::default())
             .ok()??;
         running.return_key().cloned()
-    }
-
-    pub fn earlier_server(&self, session: &Session) -> Option<EarlierServer> {
-        EarlierServer::of(session, &self.multiplexer.socket())
     }
 }

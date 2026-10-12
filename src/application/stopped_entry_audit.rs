@@ -5,7 +5,7 @@ use super::doctor_report::DoctorReport;
 use super::ports::{HostProbe, Multiplexer, ProcessInfo};
 use super::reconciliation::Reconciliation;
 use super::service_ports::ServicePorts;
-use crate::domain::{EarlierServer, Session};
+use crate::domain::Session;
 
 pub struct StoppedEntryAudit {
     multiplexer: Arc<dyn Multiplexer>,
@@ -27,14 +27,7 @@ impl StoppedEntryAudit {
         report: &mut DoctorReport,
     ) {
         let name = session.name();
-        let private_socket = self.multiplexer.socket();
-        match EarlierServer::of(session, &private_socket) {
-            Some(earlier) => {
-                let processes = self.host.processes_in(session.worktree_path(), &[]);
-                report.warning(earlier.audit(name.as_str(), &Self::worktree_processes(&processes)))
-            }
-            None => self.audit_lost_socket(session, &private_socket, report),
-        }
+        self.audit_lost_socket(session, &self.multiplexer.socket(), report);
         if let Some(claimant) = reconciliation.claimant_of(session) {
             report.problem(format!(
                 "session {name}: tmux session {} claims its worktree {}",
@@ -54,16 +47,6 @@ impl StoppedEntryAudit {
         if !processes.is_empty() {
             report.warning(Self::lost_socket(session, &processes, socket));
         }
-    }
-
-    fn worktree_processes(processes: &[ProcessInfo]) -> String {
-        if processes.is_empty() {
-            return "no process runs in its worktree".to_string();
-        }
-        format!(
-            "processes still run in its worktree: {}",
-            ProcessInfo::listed(processes)
-        )
     }
 
     fn lost_socket(session: &Session, processes: &[ProcessInfo], socket: &Path) -> String {

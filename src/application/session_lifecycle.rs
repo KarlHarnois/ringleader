@@ -13,7 +13,7 @@ use super::session_deletion::SessionDeletion;
 use super::session_renaming::SessionRenaming;
 use super::session_restart::SessionRestart;
 use super::worktree_containment::WorktreeContainment;
-use crate::domain::{Config, EarlierServer, ReturnKey, Session, SessionState};
+use crate::domain::{Config, ReturnKey, Session, SessionState};
 
 pub struct SessionLifecycle {
     multiplexer: Arc<dyn Multiplexer>,
@@ -158,26 +158,19 @@ impl SessionLifecycle {
     }
 
     fn refuse_busy_worktree(&self, session: &Session) -> Result<(), ServiceError> {
-        let private_socket = self.multiplexer.socket();
-        let earlier = EarlierServer::of(session, &private_socket);
         let worktree = session.worktree_path();
-        let processes = match earlier {
-            Some(_) => self.host.processes_in(worktree, &[]),
-            None => self.host.processes_under_server(worktree, &private_socket),
-        };
+        let processes = self
+            .host
+            .processes_under_server(worktree, &self.multiplexer.socket());
         if processes.is_empty() {
             return Ok(());
         }
-        let busy = format!(
+        Err(ServiceError::Conflict(format!(
             "session {} is stopped, but processes still run in its worktree {}: {}. End them first.",
             session.name(),
             worktree.display(),
             ProcessInfo::listed(&processes)
-        );
-        Err(ServiceError::Conflict(match earlier {
-            Some(earlier) => format!("{busy} {}", earlier.refusal(session.name().as_str())),
-            None => busy,
-        }))
+        )))
     }
 
     fn refuse_if_claimed(

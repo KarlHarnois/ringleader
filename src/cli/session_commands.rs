@@ -7,7 +7,7 @@ use super::{CliSession, CommandStop, DeleteArgs, ListArgs, NewArgs, RenameArgs};
 use crate::application::{
     CreateRequest, DeleteConfirmation, DeleteImpact, ServiceError, SessionService,
 };
-use crate::domain::{BaseBranch, EarlierServer};
+use crate::domain::BaseBranch;
 
 pub struct SessionCommands<'a> {
     service: &'a mut SessionService,
@@ -79,7 +79,6 @@ impl<'a> SessionCommands<'a> {
         };
         self.session.stop_if_signaled()?;
         let report = DeleteReport::new(&args.name);
-        let earlier = self.service.earlier_server(&args.name);
         match self.service.delete_session(&args.name, &confirmation) {
             Ok(outcome) => {
                 if outcome.kept().is_none() {
@@ -88,7 +87,6 @@ impl<'a> SessionCommands<'a> {
                     }
                 }
                 self.session.output().line(&report.success(&outcome));
-                self.note_earlier_server(earlier);
                 Ok(0)
             }
             Err(ServiceError::GuardsChanged { impact, .. }) => {
@@ -109,7 +107,6 @@ impl<'a> SessionCommands<'a> {
     pub fn rename(&mut self, args: &RenameArgs) -> Result<u8, CommandStop> {
         self.service.observe(true)?;
         self.session.stop_if_signaled()?;
-        let earlier = self.service.earlier_server(&args.old);
         let renamed = self
             .service
             .rename_session(&args.old, &args.new, args.keep_branch)?;
@@ -119,24 +116,15 @@ impl<'a> SessionCommands<'a> {
             renamed.name(),
             renamed.branch()
         ));
-        self.note_earlier_server(earlier);
         Ok(0)
     }
 
     pub fn restart(&mut self, name: &str) -> Result<u8, CommandStop> {
         self.service.observe(true)?;
         self.session.stop_if_signaled()?;
-        let earlier = self.service.earlier_server(name);
         self.service.restart_session(name)?;
         self.session.output().line(&format!("restarted {name}"));
-        self.note_earlier_server(earlier);
         Ok(0)
-    }
-
-    fn note_earlier_server(&mut self, earlier: Option<EarlierServer>) {
-        if let Some(earlier) = earlier {
-            self.session.output().note(&earlier.cleanup_note());
-        }
     }
 }
 
@@ -572,22 +560,6 @@ mod tests {
             harness.fixture().registry().sessions()[0].name().as_str(),
             "fix-login"
         );
-    }
-
-    #[test]
-    fn restart_of_an_entry_on_an_earlier_server_names_its_old_socket() {
-        let session = ServiceFixture::on_earlier_server(&CommandFixture::session());
-        let fixture = CommandFixture::live()
-            .with_sessions(&[session])
-            .with_multiplexer(FakeMultiplexer::new());
-        let harness = CliHarness::new(fixture);
-
-        assert_eq!(harness.run(&["restart", "fix-auth"]), CliExit::Code(0));
-        assert!(harness.stdout().contains("restarted fix-auth"));
-        assert!(harness.stderr().contains(&format!(
-            "tmux -S {} kill-session -t '=ringleader-fix-auth:'",
-            FakeMultiplexer::EARLIER_SOCKET
-        )));
     }
 
     #[test]

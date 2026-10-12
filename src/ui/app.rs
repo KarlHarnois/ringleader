@@ -434,21 +434,6 @@ mod tests {
     }
 
     #[test]
-    fn a_selected_entry_on_an_earlier_server_shows_its_kill_command_on_an_80_column_screen() {
-        let session = ServiceFixture::on_earlier_server(&ServiceFixture::session("fix-auth"));
-        let fixture = ServiceFixture::new().with_sessions(&[session]);
-
-        let app = AppFixture::started(&fixture, 80, 24);
-
-        assert!(
-            AppFixture::flattened_screen(&app, 80, 24).contains(&format!(
-                "End it with tmux -S {} kill-session -t '=ringleader-fix-auth:'",
-                FakeMultiplexer::EARLIER_SOCKET
-            ))
-        );
-    }
-
-    #[test]
     fn s_on_an_exited_session_asks_for_a_restart_behind_a_busy_message() {
         let fixture = UiHarness::exited_session_fixture("fix-auth");
         let mut app = AppFixture::started(&fixture, 100, 28);

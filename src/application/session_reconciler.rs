@@ -1,12 +1,10 @@
-use std::path::{Path, PathBuf};
-
 use super::metadata_check::MetadataCheck;
 use super::ports::HostProbe;
 use super::reconciliation::Reconciliation;
 use super::unregistered_placement::UnregisteredPlacement;
 use crate::domain::{
-    Config, EarlierServer, PairMismatch, Session, SessionClassifier, SessionName,
-    SessionObservation, SessionState, SessionSummary, UnmanagedSession,
+    Config, PairMismatch, Session, SessionClassifier, SessionName, SessionObservation,
+    SessionState, SessionSummary, UnmanagedSession,
 };
 
 pub struct SessionReconciler<'a> {
@@ -15,7 +13,6 @@ pub struct SessionReconciler<'a> {
     check: MetadataCheck<'a>,
     placement: UnregisteredPlacement<'a>,
     now: u64,
-    private_socket: Option<PathBuf>,
 }
 
 impl<'a> SessionReconciler<'a> {
@@ -26,14 +23,6 @@ impl<'a> SessionReconciler<'a> {
             check: MetadataCheck::new(host),
             placement: UnregisteredPlacement::new(config, host),
             now,
-            private_socket: None,
-        }
-    }
-
-    pub fn serving(self, private_socket: &Path) -> Self {
-        Self {
-            private_socket: Some(private_socket.to_path_buf()),
-            ..self
         }
     }
 
@@ -69,12 +58,7 @@ impl<'a> SessionReconciler<'a> {
     }
 
     fn stopped_row(&self, entry: &Session) -> SessionSummary {
-        let earlier_server = self
-            .private_socket
-            .as_ref()
-            .and_then(|socket| EarlierServer::of(entry, socket));
         SessionSummary::managed(entry.clone(), SessionState::Stopped, false)
-            .with_earlier_server(earlier_server)
     }
 
     fn paired_row(&self, entry: &Session, observation: &SessionObservation) -> SessionSummary {

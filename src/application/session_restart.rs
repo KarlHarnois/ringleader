@@ -108,10 +108,6 @@ mod tests {
             ServiceFixture::session("fix-auth")
         }
 
-        fn earlier() -> Session {
-            ServiceFixture::on_earlier_server(&Self::session())
-        }
-
         fn stopped() -> ServiceFixture {
             let session = Self::session();
             ServiceFixture::new()
@@ -391,36 +387,6 @@ mod tests {
         RestartFixture::restart(&fixture).unwrap();
 
         assert_eq!(fixture.multiplexer().launches().len(), 1);
-    }
-
-    #[test]
-    fn an_earlier_server_entry_refuses_restart_while_processes_run_in_its_worktree() {
-        let session = RestartFixture::earlier();
-        let fixture = RestartFixture::stopped()
-            .with_sessions(std::slice::from_ref(&session))
-            .with_host(ServiceFixture::with_worktree_process(&session));
-
-        let error = RestartFixture::restart(&fixture).unwrap_err();
-
-        assert!(error.to_string().contains(FakeMultiplexer::EARLIER_SOCKET));
-        assert!(fixture.multiplexer().state_changing_calls().is_empty());
-    }
-
-    #[test]
-    fn an_earlier_server_entry_restarts_on_the_private_socket_and_records_it() {
-        let fixture = RestartFixture::stopped().with_sessions(&[RestartFixture::earlier()]);
-
-        RestartFixture::restart(&fixture).unwrap();
-
-        let recorded = fixture.registry().sessions()[0].socket_path().to_path_buf();
-        assert_eq!(recorded, Path::new(FakeMultiplexer::SOCKET));
-        assert!(
-            fixture
-                .multiplexer()
-                .calls()
-                .iter()
-                .all(|call| !call.contains(FakeMultiplexer::EARLIER_SOCKET))
-        );
     }
 
     #[test]

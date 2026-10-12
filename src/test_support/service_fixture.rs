@@ -234,10 +234,6 @@ impl ServiceFixture {
         Session::new(name, metadata, Registration::new(tmux, naming, created_at))
     }
 
-    pub fn on_earlier_server(session: &Session) -> Session {
-        session.on_socket(Path::new(FakeMultiplexer::EARLIER_SOCKET))
-    }
-
     pub fn with_worktree_agent(session: &Session) -> FakeHostProbe {
         Self::with_worktree_process(session)
             .serving(Self::WORKTREE_PROCESS, Path::new(FakeMultiplexer::SOCKET))

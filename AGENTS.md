@@ -76,7 +76,6 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── session_observation.rs # SessionObservation
     │   ├── session_classifier.rs # SessionClassifier, the pure state classifier
     │   ├── diff_stat.rs          # DiffStat
-    │   ├── earlier_server.rs     # EarlierServer, the tmux server an entry ran on before the private one, and its hand commands
     │   ├── session_summary.rs    # SessionSummary
     │   ├── agent.rs              # Agent
     │   ├── repo.rs               # Repo

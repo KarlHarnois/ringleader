@@ -40,9 +40,7 @@ Your own `~/.tmux.conf` never loads on Ringleader's server. Put preferences such
 
 ## Upgrading
 
-Earlier versions ran sessions on your own tmux server. Those sessions stay there and list as stopped, and `ringleader doctor` names the server each one runs on. End each one there, then run `ringleader restart <name>` to start it again on Ringleader's own server. The `tmux_prefix` setting no longer does anything: new sessions are always named `ringleader-<name>`.
-
-Sessions an earlier version ran without recording them do not show anywhere now. To find them, run `tmux ls -F '#{session_name}' | grep '^ringleader-'` from your own tmux, with your old `tmux_prefix` in place of `ringleader-` if you had changed it.
+The `tmux_prefix` setting no longer does anything: new sessions are always named `ringleader-<name>`.
 
 ## Agent environment
 
