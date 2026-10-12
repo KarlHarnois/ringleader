@@ -55,8 +55,8 @@ A new capability that reaches outside the process goes through a port:
 
 1. Define the trait and its error type in a new file under `application/ports/`, named after the role, and re-export both from `ports/mod.rs`.
 2. Implement it in `adapters/`, named after the technology and the role.
-3. Add a hand-written fake in `src/test_support/` and wire it into `ServiceFixture`.
-4. Inject the port through constructors as an `Arc<dyn Trait>`. A port the use cases need joins a bundle in `ServicePorts`. A port only the TUI or the CLI needs, like `ReturnBinding`, goes to the constructor of the type that uses it.
+3. Add a hand-written fake in `src/test_support/`. Wire the fake of a port the use cases need into `ServiceFixture`, and the fake of a port only the TUI or the CLI needs into `UiHarness` or `CliHarness`.
+4. Inject the port as a trait object. A port the use cases need joins a bundle in `ServicePorts` as an `Arc<dyn Trait>`. A port only the TUI or the CLI needs, like `Lock`, is handed by `CompositionRoot` to the type that uses it.
 5. Build the adapter in `CompositionRoot` and pass it in.
 
 ## Layout
