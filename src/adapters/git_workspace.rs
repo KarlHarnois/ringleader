@@ -344,10 +344,45 @@ mod tests {
     }
 
     #[test]
-    fn the_ladder_prefers_origin_head() {
+    fn the_ladder_prefers_the_local_default_branch_over_origin() {
         let origin = GitTestRepo::new();
         let clone = WorktreeFixture::clone_of(&origin, "clone");
+        let local_main = origin.commit(&clone, "unpushed.md");
+
+        let start = origin
+            .workspace()
+            .resolve_start_point(&clone, None)
+            .unwrap();
+
+        assert_eq!(start, StartPoint::Commit(local_main));
+    }
+
+    #[test]
+    fn the_ladder_names_the_default_branch_after_origin_head() {
+        let origin = GitTestRepo::new();
+        origin.git(
+            origin.path(),
+            &["branch", "-m", GitTestRepo::BRANCH, "trunk"],
+        );
+        let clone = WorktreeFixture::clone_of(&origin, "clone");
+        let local_trunk = origin.commit(&clone, "unpushed.md");
+
+        let start = origin
+            .workspace()
+            .resolve_start_point(&clone, None)
+            .unwrap();
+
+        assert_eq!(start, StartPoint::Commit(local_trunk));
+    }
+
+    #[test]
+    fn the_ladder_falls_back_to_origin_without_a_local_default_branch() {
+        let origin = GitTestRepo::new();
         let origin_main = origin.git(origin.path(), &["rev-parse", "HEAD"]);
+        let clone = WorktreeFixture::clone_of(&origin, "clone");
+        origin.git(&clone, &["checkout", "-q", "-b", "feature"]);
+        origin.git(&clone, &["branch", "-q", "-D", GitTestRepo::BRANCH]);
+        origin.commit(&clone, "feature.md");
 
         let start = origin
             .workspace()
