@@ -18,9 +18,10 @@ impl ReturnKey {
     const SPACE: &'static str = "Space";
     const REFUSED_CHARACTERS: [char; 3] = ['\'', '"', '\\'];
     const CONTROL_PUNCTUATION: [char; 3] = [']', '^', '_'];
-    const AGENT_KEYS: [&'static str; 15] = [
-        "C-c", "C-d", "C-z", "C-m", "C-j", "C-i", "C-h", "Enter", "Escape", "Tab", "BTab",
-        "BSpace", "Space", "Up", "Down",
+    const LETTERS_READ_AS_TAB_AND_ENTER: [char; 2] = ['i', 'm'];
+    const AGENT_KEYS: [&'static str; 13] = [
+        "C-c", "C-d", "C-z", "C-j", "C-h", "Enter", "Escape", "Tab", "BTab", "BSpace", "Space",
+        "Up", "Down",
     ];
 
     pub fn parse(text: &str) -> Option<Self> {
@@ -86,8 +87,9 @@ impl ReturnKey {
     fn reaches_character(&self, character: char) -> bool {
         let printable =
             character.is_ascii_graphic() && !Self::REFUSED_CHARACTERS.contains(&character);
-        let sent_with_control =
-            character.is_ascii_lowercase() || Self::CONTROL_PUNCTUATION.contains(&character);
+        let control_letter = character.is_ascii_lowercase()
+            && !Self::LETTERS_READ_AS_TAB_AND_ENTER.contains(&character);
+        let sent_with_control = control_letter || Self::CONTROL_PUNCTUATION.contains(&character);
         let control_reaches = !self.has(Modifier::Control) || sent_with_control;
         printable && control_reaches && !self.has(Modifier::Shift)
     }
@@ -198,6 +200,11 @@ mod tests {
         KeyFixture::assert_refused(&[
             "C-1", "C-2", "C-/", "C-?", "C-@", "C-[", "C-}", "C-~", "C-$", "C-M-}",
         ]);
+    }
+
+    #[test]
+    fn ctrl_i_and_ctrl_m_are_refused_because_terminals_send_tab_and_enter_for_them() {
+        KeyFixture::assert_refused(&["C-i", "C-m", "C-M-i", "C-M-m", "C-I", "C-M"]);
     }
 
     #[test]

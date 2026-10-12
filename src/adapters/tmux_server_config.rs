@@ -351,6 +351,13 @@ mod tests {
     }
 
     #[test]
+    fn the_bytes_for_ctrl_h_and_ctrl_j_detach_a_nested_client() {
+        for (key, typed) in [("C-h", ["08"]), ("C-j", ["0a"])] {
+            assert!(ConfigFixture::detaches_when_typed(key, &typed), "{key}");
+        }
+    }
+
+    #[test]
     fn the_return_key_detaches_a_client_from_an_agent_window() {
         let server = TmuxTestServer::new();
         ConfigFixture::created(&server, "fix-auth");

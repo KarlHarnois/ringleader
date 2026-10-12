@@ -79,7 +79,7 @@ impl<'a> ConfigChecks<'a> {
         let raw = self.draft.raw_return_key();
         if ReturnKey::parse(raw).is_none() {
             self.fail(format!(
-                "return_key: `{}` must be a key a terminal can send, such as C-q, M-x, or F12: optional C-, M-, and S- modifiers, then a key name or one printable character other than a quote or \\. After C- the character must be a letter, ], ^, or _. S- cannot precede a character, and C- and S- cannot precede Enter, Tab, BTab, Escape, BSpace, or Space, except C-Space",
+                "return_key: `{}` must be a key a terminal can send, such as C-q, M-x, or F12: optional C-, M-, and S- modifiers, then a key name or one printable character other than a quote or \\. After C- the character must be a letter other than i or m, which terminals send as Tab and Enter, or ], ^, or _. S- cannot precede a character, and C- and S- cannot precede Enter, Tab, BTab, Escape, BSpace, or Space, except C-Space",
                 raw.escape_default()
             ));
         }
@@ -298,7 +298,7 @@ mod tests {
     #[test]
     fn return_keys_no_keystroke_reaches_fail_with_their_key_named() {
         for key in [
-            "", "C-", "'", "\\", " ", "\n", "C-}", "C-1", "S-x", "C-Enter",
+            "", "C-", "'", "\\", " ", "\n", "C-}", "C-1", "S-x", "C-Enter", "C-m",
         ] {
             ChecksFixture::fails_on(ChecksFixture::draft().return_key(key), "return_key");
         }
