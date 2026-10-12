@@ -192,6 +192,7 @@ mod tests {
 
     use super::*;
     use crate::application::ports::MultiplexerError;
+    use crate::domain::Agent;
     use crate::test_support::{FakeMultiplexer, FakeSessionRegistry, ServiceFixture};
 
     struct RenameFixture;
@@ -281,8 +282,10 @@ mod tests {
 
     #[test]
     fn an_agent_no_longer_configured_is_not_told_its_new_name() {
+        let another_agent =
+            Agent::new("opencode", "opencode").with_rename_input(&["/rename {name}".to_string()]);
         let fixture = RenameFixture::live(&["fix-auth"])
-            .with_config(ServiceFixture::config().with_agents(vec![]));
+            .with_config(ServiceFixture::config().with_agents(vec![another_agent]));
 
         fixture
             .service()
