@@ -15,6 +15,7 @@ pub struct HomeView<'a> {
 
 impl<'a> HomeView<'a> {
     const TOO_SMALL: &'static str = "Terminal too small";
+    const STATUS_SHARE: u16 = 4;
 
     pub fn new(table: SessionTable<'a>, preview: PreviewPanel<'a>, status: StatusBar<'a>) -> Self {
         Self {
@@ -31,8 +32,10 @@ impl<'a> HomeView<'a> {
             CenteredText::new([Self::TOO_SMALL]).render(frame, area);
             return;
         }
+        let status_room = (area.height / Self::STATUS_SHARE).max(1);
+        let status_rows = self.status.rows(area.width).min(status_room);
         let [main, status] =
-            Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(area);
+            Layout::vertical([Constraint::Min(1), Constraint::Length(status_rows)]).areas(area);
         self.status.render(frame, status);
         let table = self.table.for_tier(tier);
         if tier.shows_preview() && table.has_rows() {

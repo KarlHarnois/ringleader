@@ -18,10 +18,10 @@ impl EarlierServer {
 
     pub fn refusal(&self, name: &str) -> String {
         format!(
-            "{name} runs on the tmux server at {}, which Ringleader no longer uses. {}. End it with {} to restart it here.",
+            "{name} runs on the tmux server at {}, which Ringleader no longer uses. End it with {} to restart it here. {}.",
             self.socket.display(),
-            self.attach_advice(),
-            self.kill_command()
+            self.kill_command(),
+            self.attach_advice()
         )
     }
 

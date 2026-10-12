@@ -246,6 +246,11 @@ mod tests {
             screen.lines().last().unwrap().trim_end().to_string()
         }
 
+        fn flattened_screen(app: &App, width: u16, height: u16) -> String {
+            let screen = Self::screen(app, width, height);
+            screen.split_whitespace().collect::<Vec<_>>().join(" ")
+        }
+
         fn captures(fixture: &ServiceFixture) -> Vec<String> {
             fixture
                 .multiplexer()
@@ -423,7 +428,23 @@ mod tests {
         let app = AppFixture::started(&fixture, 100, 28);
 
         assert!(
-            AppFixture::status_line(&app, 250).contains("Inspect it, then end it with tmux -S")
+            AppFixture::flattened_screen(&app, 100, 28)
+                .contains("Inspect it, then end it with tmux -S")
+        );
+    }
+
+    #[test]
+    fn a_selected_entry_on_an_earlier_server_shows_its_kill_command_on_an_80_column_screen() {
+        let session = ServiceFixture::on_earlier_server(&ServiceFixture::session("fix-auth"));
+        let fixture = ServiceFixture::new().with_sessions(&[session]);
+
+        let app = AppFixture::started(&fixture, 80, 24);
+
+        assert!(
+            AppFixture::flattened_screen(&app, 80, 24).contains(&format!(
+                "End it with tmux -S {} kill-session -t '=ringleader-fix-auth:'",
+                FakeMultiplexer::EARLIER_SOCKET
+            ))
         );
     }
 
