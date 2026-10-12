@@ -45,7 +45,7 @@ Ringleader follows hexagonal architecture, also called ports and adapters. The c
 Dependencies point inward only. An inner layer never imports an outer one.
 
 - `domain` holds the entities, value types, and pure rules. It imports nothing else from the crate, and never imports `crossterm`, `ratatui`, or `std::process`.
-- `application` holds the use cases and the ports, and imports only `domain`. It never shells out, never touches the filesystem directly, and never reads the system clock. Ports are traits in `application/ports/`, named after the role they play for the use cases, such as `Workspace` and `Multiplexer`, with their error types in the same file.
+- `application` holds the use cases and the ports, and imports only `domain`. It never shells out, never touches the filesystem directly, and never reads the system clock. Ports are traits in `application/ports/`, named after the role they play for the use cases, such as `Workspace` and `Multiplexer`, with any error type in the same file.
 - `adapters` holds the driven adapters, which implement the ports with git, tmux, files, and `/proc`, and the process-level types `CompositionRoot` uses directly, such as `ProcessEnvironment`, `XdgPaths`, and `AgentLauncher`. They import `application` and `domain`, never `ui` or `cli`. Each port adapter is named after its technology and the port it implements, such as `GitWorkspace` and `TmuxMultiplexer`.
 - `ui` and `cli` are the driving adapters. They import `application` and `domain`, never `adapters`. They reach the use cases only through the `SessionService` facade, which composes `SessionLifecycle`, `SessionMonitor`, `SessionAccess`, `RepoCatalog`, and `Doctor`, so `ui` and `cli` never call those directly. A port handed to a `ui` or `cli` type, like `Lock`, is called by that type.
 - `main.rs` is the composition root and the only production code that imports every layer. The Wiring section says what it builds.
@@ -55,7 +55,7 @@ The code breaks the `ui` and `cli` rule in four places today: `SignalFlags` in `
 
 A new capability that reaches outside the process goes through a port when the use cases need it, or when the TUI and the CLI both need it, like `Lock`:
 
-1. Define the trait and its error type in a new file under `application/ports/`, named after the role, and re-export both from `ports/mod.rs`.
+1. Define the trait in a new file under `application/ports/`, named after the role, with an error type beside it when any of its methods can fail, and re-export them from `ports/mod.rs`.
 2. Implement it in `adapters/`, named after the technology and the role.
 3. Add a hand-written fake in `src/test_support/`. Wire the fake of a port the use cases need into `ServiceFixture`, and the fake of any other port into `CliHarness` or `UiHarness`.
 4. Inject the port as a trait object. A port the use cases need joins a bundle in `ServicePorts` as an `Arc<dyn Trait>`. Any other port, like `Lock`, is handed by `CompositionRoot` to the type that uses it.
