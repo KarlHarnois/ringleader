@@ -65,6 +65,7 @@ impl SessionLifecycle {
         name: &str,
     ) -> Result<DeleteImpact, ServiceError> {
         let row = self.deletable_target(reconciliation, name)?;
+        self.refuse_launch_inside(row.session())?;
         self.deletion.impact(&row)
     }
 
@@ -75,6 +76,9 @@ impl SessionLifecycle {
         confirmation: &DeleteConfirmation,
     ) -> Result<DeleteOutcome, ServiceError> {
         let row = self.deletable_target(reconciliation, name)?;
+        if !confirmation.forgets() {
+            self.refuse_launch_inside(row.session())?;
+        }
         let remaining = reconciliation.entries_without(name);
         self.deletion.delete(&row, &remaining, confirmation)
     }
@@ -114,7 +118,6 @@ impl SessionLifecycle {
                 "session {name} runs this Ringleader, delete it from another terminal"
             )));
         }
-        self.refuse_launch_inside(row.session())?;
         Ok(row)
     }
 

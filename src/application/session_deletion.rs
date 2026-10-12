@@ -620,6 +620,30 @@ mod tests {
     }
 
     #[test]
+    fn forget_works_while_ringleader_runs_inside_the_worktree() {
+        let worktree = DeleteFixture::session().worktree_path().join("src");
+        let fixture = DeleteFixture::live_fixture().launched_in(&worktree);
+
+        fixture
+            .service()
+            .delete_session("fix-auth", &DeleteConfirmation::force().forgetting())
+            .unwrap();
+
+        assert!(fixture.registry().sessions().is_empty());
+        assert!(fixture.workspace().state_changing_calls().is_empty());
+    }
+
+    #[test]
+    fn measuring_a_delete_refuses_while_ringleader_runs_inside_the_worktree() {
+        let worktree = DeleteFixture::session().worktree_path().join("src");
+        let fixture = DeleteFixture::live_fixture().launched_in(&worktree);
+
+        let error = fixture.service().delete_impact("fix-auth").unwrap_err();
+
+        assert_eq!(error.exit_code(), 3);
+    }
+
+    #[test]
     fn a_worktree_git_does_not_list_refuses_before_measuring() {
         let session = DeleteFixture::session();
         let fixture =
