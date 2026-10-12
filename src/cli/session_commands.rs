@@ -280,6 +280,19 @@ mod tests {
     }
 
     #[test]
+    fn new_reapplies_a_drifted_server_config_before_creating_the_session() {
+        let fixture = ServiceFixture::new()
+            .with_multiplexer(FakeMultiplexer::new().with_drifted_config("M-x"));
+        let harness = CliHarness::new(fixture);
+
+        harness.run(&["new", "--name", "fix-auth", "--repo", "example-project"]);
+
+        let calls = harness.fixture().multiplexer().calls();
+        let position = |prefix: &str| calls.iter().position(|call| call.starts_with(prefix));
+        assert!(position("apply_config").unwrap() < position("create_session").unwrap());
+    }
+
+    #[test]
     fn new_without_agents_exits_one_naming_the_config_path() {
         let fixture =
             ServiceFixture::new().with_config(ServiceFixture::config().with_agents(vec![]));

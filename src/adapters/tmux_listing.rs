@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use super::tmux_output::TmuxOutput;
 use crate::application::ports::ServerState;
 use crate::domain::{
-    AgentPane, RepoName, SessionMetadata, SessionObservation, SessionRepo, SessionWorktree,
-    TmuxAddress,
+    AgentPane, RepoName, ReturnKey, SessionMetadata, SessionObservation, SessionRepo,
+    SessionWorktree, TmuxAddress,
 };
 
 pub struct TmuxListing<'a> {
@@ -21,6 +21,8 @@ impl<'a> TmuxListing<'a> {
     pub const PANE_PID_FORMAT: &'static str = "ringleader-pane-pid #{pane_dead} #{pane_pid}";
     pub const TTY_FORMAT: &'static str = "ringleader-tty #{pane_tty}";
     pub const SERVER_FORMAT: &'static str = "ringleader-server #{version} #{server_sessions}";
+    pub const CONFIG_FORMAT: &'static str =
+        "ringleader-config #{@ringleader_config} #{@ringleader_return_key}";
     const TAGGED: &'static str = "1";
     const KEY_BINDING: &'static str = "bind-key";
     const DETACH: &'static str = "detach-client";
@@ -58,6 +60,15 @@ impl<'a> TmuxListing<'a> {
         let values = self.output.first("ringleader-server")?;
         let (version, sessions) = values.split_once(' ').unwrap_or((values, ""));
         Some(ServerState::new(version, sessions.parse().ok()))
+    }
+
+    pub fn running_config(&self) -> Option<RunningConfig> {
+        let values = self.output.first("ringleader-config")?;
+        let (hash, return_key) = values.split_once(' ').unwrap_or((values, ""));
+        Some(RunningConfig {
+            hash: hash.to_string(),
+            return_key: ReturnKey::parse(return_key),
+        })
     }
 
     pub fn shows_terminal(&self, terminal: &OsStr) -> bool {
@@ -106,6 +117,21 @@ impl<'a> TmuxListing<'a> {
             Some(metadata) => observation.with_metadata(metadata),
             None => observation,
         }
+    }
+}
+
+pub struct RunningConfig {
+    hash: String,
+    return_key: Option<ReturnKey>,
+}
+
+impl RunningConfig {
+    pub fn hash(&self) -> &str {
+        &self.hash
+    }
+
+    pub fn return_key(&self) -> Option<&ReturnKey> {
+        self.return_key.as_ref()
     }
 }
 

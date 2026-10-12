@@ -5,14 +5,15 @@ use super::agent_launcher::{LauncherCommand, PreparedLaunch};
 use super::tmux_command::TmuxCommand;
 use super::tmux_error::TmuxError;
 use super::tmux_launch::{Launched, TmuxLaunch};
-use super::tmux_listing::TmuxListing;
+use super::tmux_listing::{RunningConfig, TmuxListing};
 use super::tmux_output::TmuxOutput;
 use super::tmux_scripts::TmuxScripts;
 use super::tmux_server_config::TmuxServerConfig;
 use crate::application::ports::{
-    AgentLaunch, AttachTarget, Multiplexer, MultiplexerError, ServerState, SessionSpec,
+    AgentLaunch, AttachTarget, Multiplexer, MultiplexerError, ServerConfig, ServerState,
+    SessionSpec,
 };
-use crate::domain::{SessionMetadata, SessionObservation};
+use crate::domain::{ReturnKey, SessionMetadata, SessionObservation};
 
 pub struct TmuxMultiplexer {
     tmux: TmuxCommand,
@@ -178,6 +179,18 @@ impl TmuxMultiplexer {
         })
     }
 
+    fn running_config(&self) -> Result<Option<RunningConfig>, MultiplexerError> {
+        let query = TmuxScripts::server_value(TmuxListing::CONFIG_FORMAT);
+        let output = self.tmux.query(&query)?;
+        if let Some(running) = TmuxListing::new(&output).running_config() {
+            return Ok(Some(running));
+        }
+        if output.reports_no_server() {
+            return Ok(None);
+        }
+        Err(TmuxError::failed("display-message", &output).into())
+    }
+
     fn require_done(subcommand: &str, output: &TmuxOutput) -> Result<(), MultiplexerError> {
         if output.has(TmuxLaunch::DONE_LABEL) {
             return Ok(());
@@ -326,6 +339,32 @@ impl Multiplexer for TmuxMultiplexer {
         Err(TmuxError::failed("display-message", &output).into())
     }
 
+    fn server_config(
+        &self,
+        return_key: &ReturnKey,
+    ) -> Result<Option<ServerConfig>, MultiplexerError> {
+        let Some(running) = self.running_config()? else {
+            return Ok(None);
+        };
+        let current = running.hash() == TmuxServerConfig::new(return_key).hash();
+        Ok(Some(ServerConfig::new(current, running.return_key())))
+    }
+
+    fn apply_config(&self, return_key: &ReturnKey) -> Result<(), MultiplexerError> {
+        let running = self.running_config()?;
+        let previous_key = running
+            .as_ref()
+            .and_then(RunningConfig::return_key)
+            .filter(|previous| *previous != return_key);
+        let render = TmuxServerConfig::new(return_key).render();
+        let sequence = TmuxScripts::reapply(previous_key);
+        let output = self.tmux.change_with_input(&sequence, render.as_bytes())?;
+        if output.succeeded() {
+            return Ok(());
+        }
+        Err(TmuxError::failed("source-file", &output).into())
+    }
+
     fn version(&self) -> Result<String, MultiplexerError> {
         Ok(self.tmux.version()?)
     }
@@ -360,7 +399,7 @@ mod tests {
     use crate::adapters::Deadlines;
     use crate::adapters::process_environment::ProcessEnvironment;
     use crate::adapters::tmux_sequence::TmuxSequence;
-    use crate::domain::{RepoName, SessionRepo, SessionWorktree};
+    use crate::domain::{RepoName, ReturnKey, SessionRepo, SessionWorktree};
     use crate::test_support::TmuxTestServer;
 
     const HOOKED: &str = "run-shell \"echo hooked; exit 1\"";
@@ -950,6 +989,61 @@ mod tests {
         });
 
         assert_eq!(callers, [true, false, false]);
+    }
+
+    #[test]
+    fn a_server_started_with_the_render_matches_it() {
+        let fixture = MultiplexerFixture::with_holder();
+
+        let running = fixture
+            .server
+            .multiplexer()
+            .server_config(&ReturnKey::default())
+            .unwrap()
+            .unwrap();
+
+        assert!(running.is_current());
+        assert_eq!(running.return_key(), Some(&ReturnKey::default()));
+    }
+
+    #[test]
+    fn applying_another_return_key_rebinds_and_records_the_new_render() {
+        let fixture = MultiplexerFixture::with_holder();
+        let multiplexer = fixture.server.multiplexer();
+        let alt_x = ReturnKey::parse("M-x").unwrap();
+        let before = multiplexer.server_config(&alt_x).unwrap().unwrap();
+
+        multiplexer.apply_config(&alt_x).unwrap();
+
+        let keys = fixture.server.text(&["list-keys", "-T", "root"]);
+        let detaching: Vec<&str> = keys
+            .lines()
+            .filter(|line| line.ends_with(" detach-client"))
+            .filter_map(|line| line.split_whitespace().nth(3))
+            .collect();
+        let after = multiplexer.server_config(&alt_x).unwrap().unwrap();
+        assert!(!before.is_current());
+        assert_eq!(detaching, ["M-x"]);
+        assert!(after.is_current());
+        assert_eq!(
+            fixture
+                .server
+                .text(&["show-options", "-g", "-v", "@ringleader_config"]),
+            TmuxServerConfig::new(&alt_x).hash()
+        );
+    }
+
+    #[test]
+    fn an_absent_server_has_no_config_to_compare() {
+        let fixture = MultiplexerFixture::new();
+
+        let running = fixture
+            .server
+            .multiplexer()
+            .server_config(&ReturnKey::default())
+            .unwrap();
+
+        assert_eq!(running, None);
     }
 
     #[test]

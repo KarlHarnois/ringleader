@@ -83,6 +83,15 @@ impl TmuxCommand {
         )
     }
 
+    pub fn change_with_input(
+        &self,
+        sequence: &TmuxSequence,
+        input: &[u8],
+    ) -> Result<TmuxOutput, TmuxError> {
+        let call = Call::new(&Self::label(sequence), CallKind::TmuxChange).with_input(input);
+        self.run(sequence, call)
+    }
+
     pub fn create(
         &self,
         sequence: &TmuxSequence,

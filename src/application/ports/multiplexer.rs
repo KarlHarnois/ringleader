@@ -29,6 +29,11 @@ pub trait Multiplexer {
         shell: &str,
     ) -> Result<String, MultiplexerError>;
     fn server_state(&self) -> Result<Option<ServerState>, MultiplexerError>;
+    fn server_config(
+        &self,
+        return_key: &ReturnKey,
+    ) -> Result<Option<ServerConfig>, MultiplexerError>;
+    fn apply_config(&self, return_key: &ReturnKey) -> Result<(), MultiplexerError>;
     fn version(&self) -> Result<String, MultiplexerError>;
 }
 
@@ -167,6 +172,29 @@ impl ServerState {
 
     pub fn sessions(&self) -> Option<u32> {
         self.sessions
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServerConfig {
+    current: bool,
+    return_key: Option<ReturnKey>,
+}
+
+impl ServerConfig {
+    pub fn new(current: bool, return_key: Option<&ReturnKey>) -> Self {
+        Self {
+            current,
+            return_key: return_key.cloned(),
+        }
+    }
+
+    pub fn is_current(&self) -> bool {
+        self.current
+    }
+
+    pub fn return_key(&self) -> Option<&ReturnKey> {
+        self.return_key.as_ref()
     }
 }
 

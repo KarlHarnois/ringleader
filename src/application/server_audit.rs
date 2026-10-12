@@ -30,14 +30,17 @@ impl ServerAudit {
 
     pub fn audit(
         &self,
-        return_key: &ReturnKey,
+        return_key: Option<&ReturnKey>,
         client_version: Option<&str>,
         report: &mut DoctorReport,
     ) {
         self.check_location(report);
         self.check_directory(report);
         self.check_state(client_version, report);
-        self.check_return_key(return_key, report);
+        if let Some(return_key) = return_key {
+            self.check_return_key(return_key, report);
+            self.check_drift(return_key, report);
+        }
         self.check_leftover_bindings(report);
     }
 
@@ -118,6 +121,15 @@ impl ServerAudit {
             report.info(format!(
                 "this runs inside your own tmux, so sessions open nested; your tmux must not bind {key} in its root table, which doctor cannot check without reading your tmux server"
             ));
+        }
+    }
+
+    fn check_drift(&self, return_key: &ReturnKey, report: &mut DoctorReport) {
+        let Ok(Some(running)) = self.multiplexer.server_config(return_key) else {
+            return;
+        };
+        if !running.is_current() {
+            report.warning("Ringleader's tmux server runs an older generated config; the TUI at start and after r, and ringleader new and restart, apply the current one");
         }
     }
 
@@ -342,6 +354,27 @@ mod tests {
             &fixture,
             "info:",
             "your tmux must not bind Ctrl-Q in its root table"
+        ));
+    }
+
+    #[test]
+    fn a_server_running_an_older_render_is_a_warning() {
+        let fixture = ServiceFixture::new()
+            .with_multiplexer(FakeMultiplexer::new().with_drifted_config("M-x"));
+
+        assert!(AuditFixture::line_with(
+            &fixture,
+            "warning:",
+            "older generated config"
+        ));
+    }
+
+    #[test]
+    fn a_server_running_the_current_render_draws_no_drift_warning() {
+        assert!(!AuditFixture::line_with(
+            &ServiceFixture::new(),
+            "warning:",
+            "older generated config"
         ));
     }
 

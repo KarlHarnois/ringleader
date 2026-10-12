@@ -89,7 +89,7 @@ impl HelpView {
 
     fn return_key(key: &str) -> Vec<String> {
         vec![
-            format!("{key} detaches from any session and brings you back here. Set return_key in the config to use another key."),
+            format!("{key} detaches from any session and brings you back here. Set return_key in the config and press r to use another key."),
             format!("Sessions run on Ringleader's own tmux server, whose socket is listed under Files. They have no prefix key, and the mouse is on. Inside your own tmux a session opens nested, so your tmux must not bind {key} in its root table."),
             "Open extra shells with t instead of splitting the agent window, since output in a split pane counts as agent activity.".to_string(),
         ]

@@ -24,6 +24,11 @@ impl TmuxServerConfig {
         "set -g detach-on-destroy on",
     ];
 
+    pub const RETURN_KEY_OPTION: &'static str = "@ringleader_return_key";
+    pub const HASH_OPTION: &'static str = "@ringleader_config";
+    const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+    const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+
     pub fn new(return_key: &ReturnKey) -> Self {
         Self {
             return_key: return_key.clone(),
@@ -31,9 +36,33 @@ impl TmuxServerConfig {
     }
 
     pub fn render(&self) -> String {
+        let hash_line = format!("set -g {} '{}'", Self::HASH_OPTION, self.hash());
+        Self::joined(&[self.leading_lines(), vec![hash_line, self.return_binding()]].concat())
+    }
+
+    pub fn hash(&self) -> String {
+        let hashed = [self.leading_lines(), vec![self.return_binding()]].concat();
+        format!("{:016x}", Self::fnv1a(Self::joined(&hashed).as_bytes()))
+    }
+
+    fn leading_lines(&self) -> Vec<String> {
         let mut lines: Vec<String> = Self::SETTINGS.iter().map(|line| line.to_string()).collect();
-        lines.push(self.return_binding());
+        lines.push(format!(
+            "set -g {} {}",
+            Self::RETURN_KEY_OPTION,
+            self.return_key.tmux_spelling()
+        ));
+        lines
+    }
+
+    fn joined(lines: &[String]) -> String {
         lines.iter().map(|line| format!("{line}\n")).collect()
+    }
+
+    fn fnv1a(bytes: &[u8]) -> u64 {
+        bytes.iter().fold(Self::FNV_OFFSET_BASIS, |hash, byte| {
+            (hash ^ u64::from(*byte)).wrapping_mul(Self::FNV_PRIME)
+        })
     }
 
     fn return_binding(&self) -> String {

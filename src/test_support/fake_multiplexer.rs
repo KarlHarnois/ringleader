@@ -3,9 +3,10 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use crate::application::ports::{
-    AgentLaunch, AttachTarget, Multiplexer, MultiplexerError, ServerState, SessionSpec,
+    AgentLaunch, AttachTarget, Multiplexer, MultiplexerError, ServerConfig, ServerState,
+    SessionSpec,
 };
-use crate::domain::{AgentPane, SessionMetadata, SessionObservation, TmuxAddress};
+use crate::domain::{AgentPane, ReturnKey, SessionMetadata, SessionObservation, TmuxAddress};
 
 pub struct FakeMultiplexer {
     state: Mutex<MultiplexerState>,
@@ -30,6 +31,8 @@ struct MultiplexerState {
     calls: Vec<String>,
     client_version: String,
     server: Option<ServerState>,
+    config_current: bool,
+    server_return_key: Option<ReturnKey>,
 }
 
 impl FakeMultiplexer {
@@ -62,6 +65,8 @@ impl FakeMultiplexer {
                 calls: Vec::new(),
                 client_version: "3.6a".to_string(),
                 server: Some(ServerState::new("3.6a", Some(1))),
+                config_current: true,
+                server_return_key: Some(ReturnKey::default()),
             }),
         }
     }
@@ -111,6 +116,18 @@ impl FakeMultiplexer {
             state.server = server.map(|version| ServerState::new(version, Some(1)));
         });
         self
+    }
+
+    pub fn with_drifted_config(self, server_return_key: &str) -> Self {
+        self.drift_config(server_return_key);
+        self
+    }
+
+    pub fn drift_config(&self, server_return_key: &str) {
+        self.edit(|state| {
+            state.config_current = false;
+            state.server_return_key = ReturnKey::parse(server_return_key);
+        });
     }
 
     pub fn called_from_other_tmux(self) -> Self {
@@ -296,6 +313,28 @@ impl Multiplexer for FakeMultiplexer {
     fn server_state(&self) -> Result<Option<ServerState>, MultiplexerError> {
         self.call("server_state", "")?;
         Ok(self.edit(|state| state.server.clone()))
+    }
+
+    fn server_config(
+        &self,
+        _return_key: &ReturnKey,
+    ) -> Result<Option<ServerConfig>, MultiplexerError> {
+        self.call("server_config", "")?;
+        Ok(self.edit(|state| {
+            state
+                .server
+                .as_ref()
+                .map(|_| ServerConfig::new(state.config_current, state.server_return_key.as_ref()))
+        }))
+    }
+
+    fn apply_config(&self, return_key: &ReturnKey) -> Result<(), MultiplexerError> {
+        self.call("apply_config", &return_key.to_string())?;
+        self.edit(|state| {
+            state.config_current = true;
+            state.server_return_key = Some(return_key.clone());
+        });
+        Ok(())
     }
 
     fn version(&self) -> Result<String, MultiplexerError> {

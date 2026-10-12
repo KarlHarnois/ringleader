@@ -13,7 +13,7 @@ use super::session_deletion::SessionDeletion;
 use super::session_renaming::SessionRenaming;
 use super::session_restart::SessionRestart;
 use super::worktree_containment::WorktreeContainment;
-use crate::domain::{Config, EarlierServer, Session, SessionState};
+use crate::domain::{Config, EarlierServer, ReturnKey, Session, SessionState};
 
 pub struct SessionLifecycle {
     multiplexer: Arc<dyn Multiplexer>,
@@ -45,8 +45,18 @@ impl SessionLifecycle {
         config: &Config,
         config_path: &Path,
     ) -> Result<Session, ServiceError> {
+        self.sync_server_config(config.return_key())?;
         self.creation
             .create(request, reconciliation, config, config_path)
+    }
+
+    pub fn sync_server_config(&self, return_key: &ReturnKey) -> Result<(), ServiceError> {
+        match self.multiplexer.server_config(return_key)? {
+            Some(running) if !running.is_current() => {
+                Ok(self.multiplexer.apply_config(return_key)?)
+            }
+            _ => Ok(()),
+        }
     }
 
     pub fn delete_impact(
@@ -77,6 +87,7 @@ impl SessionLifecycle {
         config_path: &Path,
     ) -> Result<Session, ServiceError> {
         let row = self.quiet_target(reconciliation, name)?;
+        self.sync_server_config(config.return_key())?;
         self.restart
             .restart(&row, reconciliation, config, config_path)
     }

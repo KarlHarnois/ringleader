@@ -157,7 +157,13 @@ impl App {
         let outcome = self.service.reload();
         self.home.refresh_now();
         self.observe();
-        let outcome = outcome.map_err(|error| format!("{}: {error}", Self::RELOAD_FAILED));
+        let outcome = outcome
+            .map_err(|error| format!("{}: {error}", Self::RELOAD_FAILED))
+            .and_then(|()| {
+                self.service
+                    .reapply_server_config()
+                    .map_err(|error| error.to_string())
+            });
         self.status.outcome(outcome, Self::RELOADED.to_string());
     }
 
@@ -488,6 +494,27 @@ mod tests {
         assert_eq!(
             AppFixture::status_line(&app, 100),
             " Reloaded the config and the registry."
+        );
+    }
+
+    #[test]
+    fn r_shows_a_failed_reapply_of_the_server_config() {
+        let fixture = AppFixture::two_waiting_sessions();
+        fixture.multiplexer().fail(
+            "apply_config",
+            MultiplexerError::Failed {
+                subcommand: "source-file".to_string(),
+                detail: "invalid option: no-such-option".to_string(),
+            },
+        );
+        fixture.multiplexer().drift_config("M-x");
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press(&mut app, 'r');
+
+        assert_eq!(
+            AppFixture::status_line(&app, 200),
+            " tmux source-file failed: invalid option: no-such-option"
         );
     }
 

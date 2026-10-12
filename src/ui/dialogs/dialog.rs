@@ -62,10 +62,7 @@ impl Dialog {
             ("tmux socket", paths.tmux_socket()),
             ("tmux config", paths.tmux_config()),
         ];
-        Self::Help(Box::new(HelpView::new(
-            service.config().return_key(),
-            &files,
-        )))
+        Self::Help(Box::new(HelpView::new(&service.shown_return_key(), &files)))
     }
 
     pub fn poll(&mut self) {

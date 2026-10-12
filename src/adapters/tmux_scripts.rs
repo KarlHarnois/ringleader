@@ -5,7 +5,7 @@ use super::tmux_launch::TmuxLaunch;
 use super::tmux_listing::{MetadataJson, TmuxListing};
 use super::tmux_sequence::TmuxSequence;
 use crate::application::ports::{AgentLaunch, SessionSpec};
-use crate::domain::SessionMetadata;
+use crate::domain::{ReturnKey, SessionMetadata};
 
 pub struct TmuxScripts;
 
@@ -156,6 +156,16 @@ impl TmuxScripts {
 
     pub fn capture(pane: &str) -> TmuxSequence {
         TmuxSequence::new().command(["capture-pane", "-e", "-p", "-t", pane])
+    }
+
+    pub fn reapply(previous_key: Option<&ReturnKey>) -> TmuxSequence {
+        let sequence = match previous_key {
+            Some(key) => {
+                TmuxSequence::new().command(["unbind-key", "-q", "-T", "root", &key.to_string()])
+            }
+            None => TmuxSequence::new(),
+        };
+        sequence.command(["source-file", "-"])
     }
 
     pub fn root_keys() -> TmuxSequence {

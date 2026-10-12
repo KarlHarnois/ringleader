@@ -187,10 +187,19 @@ impl CompositionRoot {
             Ok(warning) => warning,
             Err(error) => return Self::fail(&error.to_string()),
         };
-        let warnings: Vec<String> = [log.err(), registry_warning, startup_message, pane_warning]
-            .into_iter()
-            .flatten()
-            .collect();
+        let config_warning = service.reapply_server_config().err().map(|error| {
+            format!("could not update the config of Ringleader's tmux server: {error}")
+        });
+        let warnings: Vec<String> = [
+            log.err(),
+            registry_warning,
+            startup_message,
+            pane_warning,
+            config_warning,
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
         let app = App::new(service, Box::new(io::stdout()), Instant::now())
             .with_message((!warnings.is_empty()).then(|| warnings.join("; ")));
         match Self::run_event_loop(app) {
