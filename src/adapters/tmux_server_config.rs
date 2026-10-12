@@ -103,6 +103,7 @@ impl TmuxServerConfig {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
     use std::ffi::OsStr;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -135,9 +136,44 @@ mod tests {
             )
         }
 
-        fn is_control_case_alias(key: &str) -> bool {
-            key.strip_prefix("C-")
-                .is_some_and(|rest| rest.chars().all(|character| character.is_ascii_uppercase()))
+        fn detaches_when_typed(key: &str, typed_bytes: &[&str]) -> bool {
+            let inner = TmuxTestServer::with_config(&Self::render(key));
+            inner.start_session("holder");
+            let outer = TmuxTestServer::new();
+            let socket = inner.socket().display().to_string();
+            let config = inner.config().display().to_string();
+            outer.text(&[
+                "new-session",
+                "-d",
+                "-s",
+                "outer",
+                "env",
+                "-u",
+                "TMUX",
+                "-u",
+                "TMUX_PANE",
+                "tmux",
+                "-u",
+                "-S",
+                &socket,
+                "-f",
+                &config,
+                "attach-session",
+                "-t",
+                "=holder:",
+            ]);
+            let attached = inner.wait_for(|| Self::clients(&inner) == 1);
+            let mut typing = vec!["send-keys", "-t", "=outer:", "-H"];
+            typing.extend(typed_bytes);
+            outer.text(&typing);
+            attached && inner.wait_for(|| Self::clients(&inner) == 0)
+        }
+
+        fn clients(server: &TmuxTestServer) -> usize {
+            server
+                .text(&["list-clients", "-F", "client"])
+                .lines()
+                .count()
         }
 
         fn detach_keys(server: &TmuxTestServer) -> Vec<String> {
@@ -279,12 +315,12 @@ mod tests {
     fn every_printable_character_the_return_key_accepts_binds_with_each_modifier() {
         let server = TmuxTestServer::with_config("");
         server.start_session("holder");
-        let accepted: Vec<String> = (b'!'..=b'~')
+        let accepted: BTreeSet<String> = (b'!'..=b'~')
             .flat_map(|byte| {
                 ["", "C-", "M-"].map(|modifier| format!("{modifier}{}", char::from(byte)))
             })
-            .filter(|key| ReturnKey::parse(key).is_some())
-            .filter(|key| !ConfigFixture::is_control_case_alias(key))
+            .filter_map(|key| ReturnKey::parse(&key))
+            .map(|key| key.to_string())
             .collect();
 
         let bindings: String = accepted
@@ -295,6 +331,23 @@ mod tests {
 
         assert!(sourced.status.success(), "{sourced:?}");
         assert_eq!(ConfigFixture::detach_keys(&server).len(), accepted.len());
+    }
+
+    #[test]
+    fn the_bytes_a_terminal_sends_for_each_key_class_detach_a_nested_client() {
+        for (key, typed) in [
+            ("C-q", ["11"].as_slice()),
+            ("C-Q", &["11"]),
+            ("C-]", &["1d"]),
+            ("M-x", &["1b", "78"]),
+        ] {
+            assert!(ConfigFixture::detaches_when_typed(key, typed), "{key}");
+        }
+    }
+
+    #[test]
+    fn bytes_for_another_key_leave_a_nested_client_attached() {
+        assert!(!ConfigFixture::detaches_when_typed("M-x", &["11"]));
     }
 
     #[test]

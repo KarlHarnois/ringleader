@@ -79,7 +79,7 @@ impl<'a> ConfigChecks<'a> {
         let raw = self.draft.raw_return_key();
         if ReturnKey::parse(raw).is_none() {
             self.fail(format!(
-                "return_key: `{}` must be a tmux key such as C-q, M-x, or F12: optional C-, M-, and S- modifiers, then one printable character other than a quote or \\, or a key name. C- cannot precede $ % & * {{ | }} or ~, which tmux 3.2 cannot bind",
+                "return_key: `{}` must be a key a terminal can send, such as C-q, M-x, or F12: optional C-, M-, and S- modifiers, then a key name or one printable character other than a quote or \\. After C- the character must be a letter, ], ^, or _. S- cannot precede a character, and C- and S- cannot precede Enter, Tab, BTab, Escape, BSpace, or Space, except C-Space",
                 raw.escape_default()
             ));
         }
@@ -284,7 +284,7 @@ mod tests {
     }
 
     #[test]
-    fn return_keys_tmux_can_bind_pass() {
+    fn return_keys_a_terminal_can_send_pass() {
         for key in ["C-q", "M-x", "F12", "~", "}", "M-}"] {
             let draft = ChecksFixture::draft().return_key(key);
 
@@ -296,8 +296,10 @@ mod tests {
     }
 
     #[test]
-    fn return_keys_tmux_cannot_bind_fail_with_their_key_named() {
-        for key in ["", "C-", "'", "\\", " ", "\n", "C-}"] {
+    fn return_keys_no_keystroke_reaches_fail_with_their_key_named() {
+        for key in [
+            "", "C-", "'", "\\", " ", "\n", "C-}", "C-1", "S-x", "C-Enter",
+        ] {
             ChecksFixture::fails_on(ChecksFixture::draft().return_key(key), "return_key");
         }
     }
