@@ -180,6 +180,18 @@ One commit per milestone, after every command under "Commands" in `AGENTS.md` pa
 
 When every milestone is in, flip the status header to `completed`.
 
+### Implementation status
+
+As of 2026-10-11, milestones 1 to 7 are in, one commit each, and the recommendation in each D row is what they implement. Milestone 0 is still open, because it needs the owner's real terminals, Claude Code, and opencode. Until it runs, D12, D13, and the defaults for `history-limit` and `focus-events` stay working assumptions.
+
+Where the implementation departs from the text above:
+
+- The v1 doctor row from section 3.7 landed with milestone 3 instead of milestone 5, so doctor names the earlier server from the same commit that removes `has_session_on`, as the README upgrade note says.
+- The leftover `bindings.json` row moved into `ServerAudit` with milestone 5, which keeps `doctor.rs` under 200 lines.
+- `TmuxTestServer` starts every test server with the rendered config, not only the tests of the generated config, because the post-create check in `create_session` needs a `detach-client` binding.
+- The `kill-session` notes in the restart, rename, and delete results come from `SessionService::earlier_server`, which the CLI and the TUI query before the command, instead of from new outcome types.
+- A changed user file from D9 does not change the hash, so it reaches a running server only when the server next starts. The README says so.
+
 ## 5. What goes away
 
 | Item | Lines |
