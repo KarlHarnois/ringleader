@@ -413,6 +413,7 @@ mod tests {
         let origin = GitTestRepo::new();
         let clone = WorktreeFixture::clone_of(&origin, "clone");
         origin.git(&clone, &["branch", "-m", GitTestRepo::BRANCH, "master"]);
+        origin.git(&clone, &["branch", "--unset-upstream", "master"]);
         let origin_main = origin.commit(origin.path(), "merged.md");
         origin.git(&clone, &["fetch", "-q", "origin"]);
 
