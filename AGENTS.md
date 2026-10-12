@@ -40,7 +40,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
 
 ## Architecture
 
-Ringleader follows hexagonal architecture, also called ports and adapters. The core holds the domain and the use cases and knows nothing about tmux, git, the filesystem, or the terminal. It reaches them through traits it owns, and adapters outside the core implement those traits.
+Ringleader follows hexagonal architecture, also called ports and adapters. The core holds the domain and the use cases. It never runs tmux or git, never touches the filesystem or the terminal, and never imports an adapter. It reaches them through traits it owns, which adapters outside the core implement.
 
 Dependencies point inward only. An inner layer never imports an outer one.
 
