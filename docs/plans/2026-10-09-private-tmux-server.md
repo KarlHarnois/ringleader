@@ -94,7 +94,7 @@ bind-key -T root 'C-q' detach-client
 - **Extended keys.** `extended-keys always` and `*:extkeys` are both required for Shift+Enter to reach an agent through two layers. Without `*:extkeys`, the nested client never asks the user's tmux for extended keys. Without `always`, agents that only send the kitty keyboard request get plain Enter, because 3.6a ignores that request. `extended-keys-format` stays out (D12).
 - **Config errors are silent at server start.** `new-session` and `start-server` return 0 when `-f` holds a line with an unknown option. The other lines still apply, and the error appears over the first attached pane. A `source-file` on a running server returns 1 with the error. So a test on the pinned tmux must show that the golden fixture loads cleanly, both at server start and when it is sourced again on the running server. The D7 reapply reports `source-file` errors.
 - **The hash.** `@ringleader_config` is the lowercase hex FNV-1a 64-bit hash of every rendered line except its own. `TmuxServerConfig` computes it from named constants, so the value does not change between Rust releases, as `std::hash::DefaultHasher`'s would. No new crate is needed.
-- **Left at tmux defaults.** `history-limit` (2,000 lines) and `focus-events` (off) used to come from the user's config. With no user file (D9 dropped), any value either needs goes here. `history-limit` waits on a survey of other agent session managers, and `focus-events` on milestone 0.
+- **History.** `history-limit` is 25,000 lines instead of tmux's 2,000, chosen on 2026-10-12 from a survey of other agent session managers. Most that set it use 10,000 or 50,000, the two that measured the cost settled at 20,000 and 25,000, and several lowered 50,000 or 100,000 after memory or latency trouble, since tmux's single-threaded server stalls every session during a deep scroll. The deepest agent session seen in a 19-day fleet log was about 14,900 lines. The config sets it before any pane exists, so the first pane gets it on every tmux release. `focus-events` stays at its default until milestone 0 shows an agent needs it.
 - **Per-session `destroy-unattached off`** in the single creation invocation stays as it is. It costs nothing and survives a hand `set -g`. On 3.6a the option also accepts `keep-last`, so it is not a boolean there.
 
 ### 3.3 One attach flow
@@ -171,7 +171,7 @@ bind-key -T root 'C-q' detach-client
 
 One commit per milestone, after every command under "Commands" in `AGENTS.md` passes. The crate is a binary with no library target, so every new item needs a production caller in the commit that adds it, and every removal takes its last caller with it. Each commit also updates the help text, README, and `AGENTS.md` passages it makes false.
 
-0. **Real-terminal checks.** Run the list at the end of section 7 and record the results there. Confirm D12 and D13 on real terminals, and decide whether `history-limit` and `focus-events` need values in section 3.2. No code.
+0. **Real-terminal checks.** Run the list at the end of section 7 and record the results there. Confirm D12 and D13 on real terminals, and decide whether `focus-events` needs a value in section 3.2. No code.
 1. **Remove the inside bell** (D10): `ring_bell`, the `list-clients` parser and fixture, the port method, the fake support, and the inside branch of `Bell`. It is independent of the rest and goes away under any outcome.
 2. **Switch to the private server.** This is the largest commit, and its parts cannot land apart. A private server combined with the inside-tmux `switch-client` path breaks the inside case. Once attach drops `prepare_return`, the return binding has no caller, and its startup repair would keep acting on the user's server. Every new type below has its first production caller here. It contains:
    - `ReturnKey`, the `return_key` key and template line, `TmuxServerConfig` with its golden fixture (without the D7 and D9 lines), `XdgPaths::tmux_socket` and `tmux_config`, and `DiagnosticPaths`, shown by help's Files section.
@@ -189,7 +189,7 @@ When every milestone is in, flip the status header to `completed`.
 
 ### Implementation status
 
-As of 2026-10-11, milestones 1 to 7 are in, one commit each, and they implement the accepted recommendation in each D row. Milestone 0 is partly done: the tmux 3.2 check and the capture of the agents' keyboard requests ran, and section 7 records the results and the two fixes they led to. The rest needs the owner's real terminals and logged-in agents. Until it runs, the D12 and D13 checks and the defaults for `history-limit` and `focus-events` stay unconfirmed. If an agent turns out to need csi-u, D12 already says what to render.
+As of 2026-10-11, milestones 1 to 7 are in, one commit each, and they implement the accepted recommendation in each D row. Milestone 0 is partly done: the tmux 3.2 check and the capture of the agents' keyboard requests ran, and section 7 records the results and the two fixes they led to. The rest needs the owner's real terminals and logged-in agents. Until it runs, the D12 and D13 checks and the `focus-events` default stay unconfirmed. If an agent turns out to need csi-u, D12 already says what to render.
 
 Where the implementation departs from the text above:
 

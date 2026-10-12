@@ -8,7 +8,7 @@ pub struct TmuxServerConfig {
 impl TmuxServerConfig {
     const RESET: &'static str = "set -su terminal-features";
     const RETURN_TABLES: [&'static str; 3] = ["root", "copy-mode", "copy-mode-vi"];
-    const SETTINGS: [&'static str; 15] = [
+    const SETTINGS: [&'static str; 16] = [
         "set -g prefix None",
         "set -g prefix2 None",
         "set -g status off",
@@ -17,6 +17,7 @@ impl TmuxServerConfig {
         "unbind-key -q -T root M-MouseDown3Pane",
         "set -s escape-time 10",
         "set -g default-terminal tmux-256color",
+        "set -g history-limit 25000",
         "set -s extended-keys always",
         "set -as terminal-features ',*:extkeys'",
         "set -as terminal-features ',*:RGB'",
@@ -226,6 +227,21 @@ mod tests {
         let status = ConfigFixture::option(&server, "status");
 
         assert_eq!((prefix.as_str(), status.as_str()), ("None", "off"));
+    }
+
+    #[test]
+    fn the_first_pane_keeps_twenty_five_thousand_lines_of_history() {
+        let server = TmuxTestServer::with_session("holder");
+
+        let limit = server.text(&[
+            "display-message",
+            "-p",
+            "-t",
+            "=holder:",
+            "#{history_limit}",
+        ]);
+
+        assert_eq!(limit, "25000");
     }
 
     #[test]
