@@ -358,6 +358,22 @@ mod tests {
     }
 
     #[test]
+    fn the_ladder_keeps_the_local_default_branch_when_origin_is_ahead() {
+        let origin = GitTestRepo::new();
+        let clone = WorktreeFixture::clone_of(&origin, "clone");
+        let local_main = origin.git(&clone, &["rev-parse", "HEAD"]);
+        origin.commit(origin.path(), "merged.md");
+        origin.git(&clone, &["fetch", "-q", "origin"]);
+
+        let start = origin
+            .workspace()
+            .resolve_start_point(&clone, None)
+            .unwrap();
+
+        assert_eq!(start, StartPoint::Commit(local_main));
+    }
+
+    #[test]
     fn the_ladder_names_the_default_branch_after_origin_head() {
         let origin = GitTestRepo::new();
         origin.git(
