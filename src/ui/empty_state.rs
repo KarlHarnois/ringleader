@@ -3,6 +3,7 @@ use ratatui::layout::Rect;
 use ratatui::text::Line;
 
 use super::home_view::CenteredText;
+use super::text_fit::TextFit;
 
 pub struct EmptyState;
 
@@ -39,13 +40,13 @@ impl EmptyState {
 
     fn logo_rows_of_one_width() -> impl Iterator<Item = Line<'static>> {
         let width = Self::LOGO
-            .map(str::len)
+            .map(|row| row.chars().count())
             .into_iter()
             .max()
             .unwrap_or_default();
         Self::LOGO
             .into_iter()
-            .map(move |row| Line::from(format!("{row:<width$}")))
+            .map(move |row| Line::from(TextFit::new(row).padded(width)))
     }
 }
 
