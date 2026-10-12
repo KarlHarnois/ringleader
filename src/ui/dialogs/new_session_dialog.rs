@@ -734,12 +734,13 @@ mod tests {
         let (mut dialog, service) =
             DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
         dialog.paste(DialogFixture::SEVEN_LINES);
-        DialogFixture::text(&dialog);
+        let scrolled = DialogFixture::text_with_cursor(&dialog);
 
         for _ in 0..6 {
             DialogFixture::press(&mut dialog, &service, KeyCode::Up);
         }
 
+        assert!(scrolled.contains("Agent     claude\nPrompt    two\n"));
         assert!(DialogFixture::text_with_cursor(&dialog).contains(
             "Prompt    one█\n          two\n          three\n          four\n          five\n          six\n\n"
         ));
@@ -806,7 +807,6 @@ mod tests {
         let (mut dialog, service) =
             DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
         dialog.paste("fix the test\nthen push");
-        DialogFixture::text(&dialog);
 
         DialogFixture::press(&mut dialog, &service, KeyCode::Up);
         DialogFixture::press(&mut dialog, &service, KeyCode::End);
