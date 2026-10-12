@@ -90,7 +90,7 @@ impl HelpView {
     fn return_key(key: &str) -> Vec<String> {
         vec![
             format!("{key} detaches from any session and brings you back here. Set return_key in the config and press r to use another key."),
-            format!("Sessions run on Ringleader's own tmux server, whose socket is listed under Files. They have no prefix key, and the mouse is on. Inside your own tmux a session opens nested, so your tmux must not bind {key} in its root table."),
+            format!("Sessions run on Ringleader's own tmux server, whose socket is listed under Files. They have no prefix key, and the mouse is on. Inside your own tmux a session opens nested, so your tmux must not use {key} as its prefix or bind it in its root table."),
             "Open extra shells with t instead of splitting the agent window, since output in a split pane counts as agent activity.".to_string(),
         ]
     }
@@ -229,7 +229,9 @@ mod tests {
 
         assert!(text.contains("Returning with Alt-x"));
         assert!(text.contains("Alt-x detaches from any session and brings you back here."));
-        assert!(text.contains("so your tmux must not bind Alt-x in its root table"));
+        assert!(text.contains(
+            "so your tmux must not use Alt-x as its prefix or bind it in its root table"
+        ));
         assert!(text.contains("Open extra shells with t instead of splitting the agent window"));
         assert!(text.contains("the bell rings only while this screen shows"));
         assert!(!text.contains("tmux_prefix"));

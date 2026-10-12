@@ -120,7 +120,7 @@ impl ServerAudit {
         }
         if self.multiplexer.caller_in_other_tmux() {
             report.info(format!(
-                "this runs inside your own tmux, so sessions open nested; your tmux must not bind {key} in its root table, which doctor cannot check without reading your tmux server"
+                "this runs inside your own tmux, so sessions open nested; your tmux must not use {key} as its prefix or bind it in its root table, which doctor cannot check without reading your tmux server"
             ));
         }
     }
@@ -368,7 +368,7 @@ mod tests {
         assert!(AuditFixture::line_with(
             &fixture,
             "info:",
-            "your tmux must not bind Ctrl-Q in its root table"
+            "your tmux must not use Ctrl-Q as its prefix or bind it in its root table"
         ));
     }
 
