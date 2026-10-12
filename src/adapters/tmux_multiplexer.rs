@@ -1131,6 +1131,21 @@ mod tests {
     }
 
     #[test]
+    fn typing_after_a_rename_checks_the_prompt_without_waiting() {
+        let fixture = MultiplexerFixture::with_holder();
+        fixture.create("fix-auth").unwrap();
+        let started = Instant::now();
+
+        let typed = fixture
+            .server
+            .multiplexer()
+            .type_if_ready("ringleader-fix-auth", &["/rename fix-auth".to_string()]);
+
+        assert!(typed.is_err());
+        assert!(started.elapsed() < TmuxMultiplexer::STARTUP_PATIENCE);
+    }
+
+    #[test]
     fn the_caller_session_is_the_one_holding_the_pane_variable() {
         let fixture = MultiplexerFixture::with_holder();
         let pane = fixture.server.pane_of("=holder:");
