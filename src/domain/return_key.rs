@@ -14,6 +14,7 @@ impl ReturnKey {
         "PPage", "NPage", "Up", "Down", "Left", "Right",
     ];
     const REFUSED_CHARACTERS: [char; 3] = ['\'', '"', '\\'];
+    const CONTROL_REFUSED_CHARACTERS: [char; 8] = ['$', '%', '&', '*', '{', '|', '}', '~'];
     const AGENT_KEYS: [&'static str; 16] = [
         "C-c", "C-d", "C-z", "C-m", "C-j", "C-i", "C-[", "C-h", "Enter", "Escape", "Tab", "BTab",
         "BSpace", "Space", "Up", "Down",
@@ -26,10 +27,11 @@ impl ReturnKey {
             modifiers.push(modifier);
             rest = after;
         }
-        Self::is_key(rest).then(|| Self {
+        let key = Self {
             modifiers,
             key: rest.to_string(),
-        })
+        };
+        key.is_bindable().then_some(key)
     }
 
     pub fn shadows_agent_input(&self) -> bool {
@@ -48,12 +50,18 @@ impl ReturnKey {
     }
 
     fn displayed_key(&self) -> String {
-        let is_control_character =
-            self.modifiers.contains(&Modifier::Control) && self.key.chars().count() == 1;
-        match is_control_character {
-            true => self.key.to_uppercase(),
-            false => self.key.clone(),
+        match self.control_character() {
+            Some(_) => self.key.to_uppercase(),
+            None => self.key.clone(),
         }
+    }
+
+    fn control_character(&self) -> Option<char> {
+        let mut characters = self.key.chars();
+        let single = characters.next().filter(|_| characters.next().is_none())?;
+        self.modifiers
+            .contains(&Modifier::Control)
+            .then_some(single)
     }
 
     fn is_typed_character(&self) -> bool {
@@ -67,6 +75,13 @@ impl ReturnKey {
     fn tmux_name(&self) -> String {
         let prefixes: String = self.modifiers.iter().map(Modifier::prefix).collect();
         format!("{prefixes}{}", self.key)
+    }
+
+    fn is_bindable(&self) -> bool {
+        let refused_with_control = self
+            .control_character()
+            .is_some_and(|character| Self::CONTROL_REFUSED_CHARACTERS.contains(&character));
+        Self::is_key(&self.key) && !refused_with_control
     }
 
     fn is_key(text: &str) -> bool {
@@ -134,7 +149,7 @@ mod tests {
 
     #[test]
     fn modifiers_and_single_characters_and_named_keys_parse() {
-        for text in ["C-q", "M-x", "F12", "~", "}", "C-}", "C--", "S-F1", "C-M-x"] {
+        for text in ["C-q", "M-x", "F12", "~", "}", "M-}", "C--", "S-F1", "C-M-x"] {
             assert!(ReturnKey::parse(text).is_some(), "{text} should parse");
         }
     }
@@ -149,10 +164,19 @@ mod tests {
     }
 
     #[test]
-    fn the_tmux_spelling_is_single_quoted() {
-        let key = ReturnKey::parse("C-}").unwrap();
+    fn ctrl_with_a_character_tmux_3_2_cannot_bind_is_refused() {
+        for text in [
+            "C-$", "C-%", "C-&", "C-*", "C-{", "C-|", "C-}", "C-~", "C-M-}",
+        ] {
+            assert!(ReturnKey::parse(text).is_none(), "{text} should fail");
+        }
+    }
 
-        assert_eq!(key.tmux_spelling(), "'C-}'");
+    #[test]
+    fn the_tmux_spelling_is_single_quoted() {
+        let key = ReturnKey::parse("M-}").unwrap();
+
+        assert_eq!(key.tmux_spelling(), "'M-}'");
     }
 
     #[test]
@@ -174,7 +198,7 @@ mod tests {
 
     #[test]
     fn the_default_and_other_rare_keys_leave_agent_input_alone() {
-        for text in ["C-q", "M-x", "F12", "C-}"] {
+        for text in ["C-q", "M-x", "F12", "M-}"] {
             assert!(
                 !ReturnKey::parse(text).unwrap().shadows_agent_input(),
                 "{text}"

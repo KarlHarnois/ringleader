@@ -79,7 +79,7 @@ impl<'a> ConfigChecks<'a> {
         let raw = self.draft.raw_return_key();
         if ReturnKey::parse(raw).is_none() {
             self.fail(format!(
-                "return_key: `{}` must be a tmux key such as C-q, M-x, or F12: optional C-, M-, and S- modifiers, then one printable character other than a quote or \\, or a key name",
+                "return_key: `{}` must be a tmux key such as C-q, M-x, or F12: optional C-, M-, and S- modifiers, then one printable character other than a quote or \\, or a key name. C- cannot precede $ % & * {{ | }} or ~, which tmux 3.2 cannot bind",
                 raw.escape_default()
             ));
         }
@@ -285,7 +285,7 @@ mod tests {
 
     #[test]
     fn return_keys_tmux_can_bind_pass() {
-        for key in ["C-q", "M-x", "F12", "~", "}", "C-}"] {
+        for key in ["C-q", "M-x", "F12", "~", "}", "M-}"] {
             let draft = ChecksFixture::draft().return_key(key);
 
             assert!(
@@ -297,7 +297,7 @@ mod tests {
 
     #[test]
     fn return_keys_tmux_cannot_bind_fail_with_their_key_named() {
-        for key in ["", "C-", "'", "\\", " ", "\n"] {
+        for key in ["", "C-", "'", "\\", " ", "\n", "C-}"] {
             ChecksFixture::fails_on(ChecksFixture::draft().return_key(key), "return_key");
         }
     }

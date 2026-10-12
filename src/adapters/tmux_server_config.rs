@@ -106,7 +106,7 @@ mod tests {
     use crate::test_support::TmuxTestServer;
 
     const GOLDEN: &str = include_str!("../../tests/fixtures/tmux-server.conf");
-    const KEY_CLASSES: [&str; 6] = ["C-q", "M-x", "F12", "~", "}", "C-}"];
+    const KEY_CLASSES: [&str; 6] = ["C-q", "M-x", "F12", "~", "}", "M-}"];
     const DETACH_LIMIT: Duration = Duration::from_secs(2);
 
     struct ConfigFixture;
@@ -121,6 +121,11 @@ mod tests {
                 "bind-key -T root {} detach-client\n",
                 ReturnKey::parse(key).unwrap().tmux_spelling()
             )
+        }
+
+        fn is_control_case_alias(key: &str) -> bool {
+            key.strip_prefix("C-")
+                .is_some_and(|rest| rest.chars().all(|character| character.is_ascii_uppercase()))
         }
 
         fn detach_keys(server: &TmuxTestServer) -> Vec<String> {
@@ -259,12 +264,15 @@ mod tests {
     }
 
     #[test]
-    fn every_printable_character_the_return_key_accepts_binds() {
+    fn every_printable_character_the_return_key_accepts_binds_with_each_modifier() {
         let server = TmuxTestServer::with_config("");
         server.start_session("holder");
         let accepted: Vec<String> = (b'!'..=b'~')
-            .map(|byte| char::from(byte).to_string())
+            .flat_map(|byte| {
+                ["", "C-", "M-"].map(|modifier| format!("{modifier}{}", char::from(byte)))
+            })
             .filter(|key| ReturnKey::parse(key).is_some())
+            .filter(|key| !ConfigFixture::is_control_case_alias(key))
             .collect();
 
         let bindings: String = accepted
