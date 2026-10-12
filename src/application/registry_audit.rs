@@ -114,7 +114,7 @@ impl RegistryAudit {
             .is_branch_published(session.repo_path(), session.branch())
         {
             report.warning(format!(
-                "session {}: branch {} differs from the session name, rename the session to bring them in line",
+                "session {}: branch {} differs from the session name, rename the session to a new name to move its branch",
                 session.name(),
                 session.branch()
             ));

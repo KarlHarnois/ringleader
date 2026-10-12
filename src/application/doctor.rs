@@ -441,7 +441,7 @@ mod tests {
 
         assert!(DoctorFixture::has_warning(
             &fixture,
-            "branch ringleader/fix-auth differs from the session name"
+            "branch ringleader/fix-auth differs from the session name, rename the session to a new name"
         ));
     }
 
