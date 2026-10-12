@@ -204,6 +204,10 @@ Where the implementation departs from the text above:
 - The generated config sets `key-table root` after the user file, since a session key table set there would hide the root return binding while the post-create check still passed.
 - The launch-directory delete guard applies to a full delete and its measurement, not to `delete --forget`, which removes nothing on disk.
 - The status bar wraps a long message or note over up to a quarter of the terminal height, so the hand commands fit. The earlier-server note leads with the `kill-session` command.
+- D4 is narrower for an entry on the private socket. Restart and rename refuse only while a process in the worktree descends from a tmux server whose command line names the private socket, through `HostProbe::processes_under_server`. Counting every process blocked them whenever an editor or a shell sat in the worktree. An entry on an earlier server still counts every process, since `/proc` is the only evidence there.
+- Doctor's lost socket warning from section 3.7 needs both a missing socket file and such a process, so an open editor no longer triggers it.
+- The generated config binds the return key in `copy-mode` and `copy-mode-vi` as well as `root`, and a reapply unbinds the previous key in all three. In copy mode tmux looks a key up in the mode's table first, and those tables already bind keys `ReturnKey` accepts, such as `M-x`.
+- Doctor compares only the access bits of the socket directory, since Linux copies a parent's setgid bit to new subdirectories and `chmod 700` keeps it.
 
 ## 5. What goes away
 
