@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -14,6 +15,8 @@ pub struct LiveProcess {
 
 impl LiveProcess {
     const ZOMBIE: &'static str = "Z";
+    const DELETED_SUFFIX: &'static str = " (deleted)";
+    const TMUX: &'static str = "tmux";
 
     pub fn pid(&self) -> u32 {
         self.pid
@@ -31,8 +34,19 @@ impl LiveProcess {
         self.cwd.as_deref()
     }
 
-    pub fn executable(&self) -> &str {
-        &self.executable
+    pub fn is_tmux(&self) -> bool {
+        let executable = self.executable.trim_end_matches(Self::DELETED_SUFFIX);
+        Path::new(executable)
+            .file_name()
+            .is_some_and(|name| name == Self::TMUX)
+    }
+
+    pub fn runs_under_server(&self, by_pid: &HashMap<u32, &LiveProcess>, socket: &str) -> bool {
+        std::iter::successors(by_pid.get(&self.parent), |ancestor| {
+            by_pid.get(&ancestor.parent)
+        })
+        .take(by_pid.len())
+        .any(|ancestor| ancestor.is_tmux() && ancestor.command.contains(socket))
     }
 
     pub fn all() -> Vec<Self> {

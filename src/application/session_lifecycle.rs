@@ -158,17 +158,22 @@ impl SessionLifecycle {
     }
 
     fn refuse_busy_worktree(&self, session: &Session) -> Result<(), ServiceError> {
-        let processes = self.host.processes_in(session.worktree_path(), &[]);
+        let private_socket = self.multiplexer.socket();
+        let earlier = EarlierServer::of(session, &private_socket);
+        let worktree = session.worktree_path();
+        let processes = match earlier {
+            Some(_) => self.host.processes_in(worktree, &[]),
+            None => self.host.processes_under_server(worktree, &private_socket),
+        };
         if processes.is_empty() {
             return Ok(());
         }
         let busy = format!(
             "session {} is stopped, but processes still run in its worktree {}: {}. End them first.",
             session.name(),
-            session.worktree_path().display(),
+            worktree.display(),
             ProcessInfo::listed(&processes)
         );
-        let earlier = EarlierServer::of(session, &self.multiplexer.socket());
         Err(ServiceError::Conflict(match earlier {
             Some(earlier) => format!("{busy} {}", earlier.refusal(session.name().as_str())),
             None => busy,

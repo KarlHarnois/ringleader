@@ -366,8 +366,8 @@ mod tests {
     }
 
     #[test]
-    fn a_stopped_session_refuses_restart_while_processes_run_in_its_worktree() {
-        let fixture = RestartFixture::stopped().with_host(ServiceFixture::with_worktree_process(
+    fn a_stopped_session_refuses_restart_while_its_agent_runs_under_the_private_server() {
+        let fixture = RestartFixture::stopped().with_host(ServiceFixture::with_worktree_agent(
             &RestartFixture::session(),
         ));
 
@@ -380,6 +380,17 @@ mod tests {
                 .contains("processes still run in its worktree")
         );
         assert!(fixture.multiplexer().state_changing_calls().is_empty());
+    }
+
+    #[test]
+    fn an_editor_open_in_a_stopped_worktree_does_not_block_restart() {
+        let fixture = RestartFixture::stopped().with_host(ServiceFixture::with_worktree_process(
+            &RestartFixture::session(),
+        ));
+
+        RestartFixture::restart(&fixture).unwrap();
+
+        assert_eq!(fixture.multiplexer().launches().len(), 1);
     }
 
     #[test]

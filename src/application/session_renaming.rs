@@ -386,10 +386,10 @@ mod tests {
     }
 
     #[test]
-    fn rename_refuses_a_stopped_session_while_processes_run_in_its_worktree() {
+    fn rename_refuses_a_stopped_session_while_its_agent_runs_under_the_private_server() {
         let session = ServiceFixture::session("fix-auth");
         let fixture = RenameFixture::stopped("fix-auth")
-            .with_host(ServiceFixture::with_worktree_process(&session));
+            .with_host(ServiceFixture::with_worktree_agent(&session));
 
         let error = fixture
             .service()

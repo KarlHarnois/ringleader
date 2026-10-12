@@ -27,6 +27,7 @@ struct FakeProcess {
     cwd: PathBuf,
     session: u32,
     survives_sigterm: bool,
+    server_socket: Option<PathBuf>,
 }
 
 impl FakeHostProbe {
@@ -87,6 +88,19 @@ impl FakeHostProbe {
         self
     }
 
+    pub fn serving(self, pid: u32, socket: &Path) -> Self {
+        let mut state = self.state.lock().unwrap();
+        for process in state
+            .processes
+            .iter_mut()
+            .filter(|process| process.info.pid() == pid)
+        {
+            process.server_socket = Some(socket.to_path_buf());
+        }
+        drop(state);
+        self
+    }
+
     pub fn add_directory(&self, path: &Path) {
         let mut state = self.state.lock().unwrap();
         for ancestor in path.ancestors() {
@@ -104,6 +118,7 @@ impl FakeHostProbe {
             cwd: cwd.to_path_buf(),
             session,
             survives_sigterm: survives,
+            server_socket: None,
         });
     }
 
@@ -157,6 +172,17 @@ impl HostProbe for FakeHostProbe {
             .iter()
             .filter(|process| process.cwd.starts_with(path))
             .filter(|process| !excluded_sessions.contains(&process.session))
+            .map(|process| process.info.clone())
+            .collect()
+    }
+
+    fn processes_under_server(&self, path: &Path, socket: &Path) -> Vec<ProcessInfo> {
+        let state = self.state.lock().unwrap();
+        state
+            .processes
+            .iter()
+            .filter(|process| process.cwd.starts_with(path))
+            .filter(|process| process.server_socket.as_deref() == Some(socket))
             .map(|process| process.info.clone())
             .collect()
     }

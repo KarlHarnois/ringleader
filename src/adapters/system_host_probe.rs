@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fs::{self, OpenOptions};
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
@@ -20,7 +21,6 @@ impl SystemHostProbe {
     const TERMINATE_POLL: Duration = Duration::from_millis(50);
     const EXECUTABLE_BITS: u32 = 0o111;
     const ACCESS_BITS: u32 = 0o777;
-    const DELETED_SUFFIX: &'static str = " (deleted)";
 
     pub fn new(environment: &ProcessEnvironment) -> Self {
         Self {
@@ -47,11 +47,16 @@ impl SystemHostProbe {
         self.own_lineage.contains(&process.pid()) || process.parent() == std::process::id()
     }
 
-    fn is_tmux(process: &LiveProcess) -> bool {
-        let executable = process.executable().trim_end_matches(Self::DELETED_SUFFIX);
-        Path::new(executable)
-            .file_name()
-            .is_some_and(|name| name == "tmux")
+    fn others_in<'p>(
+        &'p self,
+        processes: &'p [LiveProcess],
+        path: &Path,
+    ) -> impl Iterator<Item = &'p LiveProcess> {
+        let canonical = HostPath::new(path).canonical_lenient();
+        processes
+            .iter()
+            .filter(move |process| process.cwd().is_some_and(|cwd| cwd.starts_with(&canonical)))
+            .filter(|process| !self.is_own(process) && !process.is_tmux())
     }
 
     fn probe_directory_write(directory: &Path) -> bool {
@@ -120,13 +125,23 @@ impl HostProbe for SystemHostProbe {
     }
 
     fn processes_in(&self, path: &Path, excluded_sessions: &[u32]) -> Vec<ProcessInfo> {
-        let canonical = HostPath::new(path).canonical_lenient();
-        LiveProcess::all()
-            .into_iter()
-            .filter(|process| process.cwd().is_some_and(|cwd| cwd.starts_with(&canonical)))
+        let processes = LiveProcess::all();
+        self.others_in(&processes, path)
             .filter(|process| !excluded_sessions.contains(&process.session()))
-            .filter(|process| !self.is_own(process) && !Self::is_tmux(process))
-            .map(|process| process.info())
+            .map(LiveProcess::info)
+            .collect()
+    }
+
+    fn processes_under_server(&self, path: &Path, socket: &Path) -> Vec<ProcessInfo> {
+        let socket = socket.to_string_lossy();
+        let processes = LiveProcess::all();
+        let by_pid: HashMap<u32, &LiveProcess> = processes
+            .iter()
+            .map(|process| (process.pid(), process))
+            .collect();
+        self.others_in(&processes, path)
+            .filter(|process| process.runs_under_server(&by_pid, &socket))
+            .map(LiveProcess::info)
             .collect()
     }
 
@@ -251,6 +266,36 @@ mod tests {
             .unwrap();
 
         assert_eq!(access, DirectoryAccess::new(0o750, true));
+    }
+
+    #[test]
+    fn processes_under_a_server_are_found_by_its_socket_and_not_by_another() {
+        let server = ProbeFixture::started_probe_session();
+        let other_socket = server.directory().join("other.sock");
+
+        let own = ProbeFixture::probe().processes_under_server(server.directory(), server.socket());
+        let other = ProbeFixture::probe().processes_under_server(server.directory(), &other_socket);
+
+        assert!(own.iter().any(|process| process.command() == "sleep 31"));
+        assert!(other.is_empty());
+    }
+
+    #[test]
+    fn a_process_outside_any_tmux_server_is_not_under_one() {
+        let directory = tempfile::tempdir().unwrap();
+        std::process::Command::new("sh")
+            .args(["-c", "nohup sleep 33 >/dev/null 2>&1 &"])
+            .current_dir(directory.path())
+            .status()
+            .unwrap();
+        let probe = ProbeFixture::probe();
+        let orphan = probe.processes_in(directory.path(), &[]);
+
+        let under = probe.processes_under_server(directory.path(), Path::new("/run/example.sock"));
+
+        probe.terminate(&orphan.iter().map(ProcessInfo::pid).collect::<Vec<_>>());
+        assert_eq!(orphan.len(), 1);
+        assert!(under.is_empty());
     }
 
     #[test]

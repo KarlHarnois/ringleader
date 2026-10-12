@@ -238,6 +238,11 @@ impl ServiceFixture {
         session.on_socket(Path::new(FakeMultiplexer::EARLIER_SOCKET))
     }
 
+    pub fn with_worktree_agent(session: &Session) -> FakeHostProbe {
+        Self::with_worktree_process(session)
+            .serving(Self::WORKTREE_PROCESS, Path::new(FakeMultiplexer::SOCKET))
+    }
+
     pub fn with_worktree_process(session: &Session) -> FakeHostProbe {
         Self::host_for(&[session]).with_process(
             Self::WORKTREE_PROCESS,
