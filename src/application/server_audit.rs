@@ -51,9 +51,6 @@ impl ServerAudit {
         if let Some(problem) = self.paths.socket_problem() {
             report.problem(problem);
         }
-        if let Some(problem) = self.paths.user_tmux_config_problem() {
-            report.warning(problem);
-        }
     }
 
     fn check_directory(&self, report: &mut DoctorReport) {
@@ -219,20 +216,6 @@ mod tests {
         let fixture = AuditFixture::with_socket(&socket);
 
         assert!(AuditFixture::line_with(&fixture, "problem:", "100 bytes"));
-    }
-
-    #[test]
-    fn a_config_home_with_a_bracket_draws_the_user_file_warning() {
-        let fixture = ServiceFixture::new().with_diagnostics(
-            ServiceFixture::diagnostics()
-                .with_user_tmux_config(Path::new("/home/example/[1]/ringleader/tmux.conf")),
-        );
-
-        assert!(AuditFixture::line_with(
-            &fixture,
-            "warning:",
-            "cannot load /home/example/[1]"
-        ));
     }
 
     #[test]

@@ -11,7 +11,6 @@ use crate::application::DiagnosticPaths;
 pub struct ServerFiles {
     socket: PathBuf,
     config: PathBuf,
-    user_config: Option<PathBuf>,
 }
 
 impl ServerFiles {
@@ -19,19 +18,7 @@ impl ServerFiles {
         Self {
             socket: socket.to_path_buf(),
             config: config.to_path_buf(),
-            user_config: None,
         }
-    }
-
-    pub fn sourcing(self, user_config: &Path) -> Self {
-        Self {
-            user_config: Some(user_config.to_path_buf()),
-            ..self
-        }
-    }
-
-    pub fn user_config(&self) -> Option<&Path> {
-        self.user_config.as_deref()
     }
 
     pub fn socket(&self) -> &Path {

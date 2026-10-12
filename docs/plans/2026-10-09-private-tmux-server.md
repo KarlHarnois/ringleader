@@ -26,7 +26,7 @@ The goal: Ringleader behaves the same whether it runs inside tmux or outside, an
 
 The owner accepted each recommendation on 2026-10-12. The alternatives stay as a record of what was weighed.
 
-Later the same day the owner dropped every part of v1 migration: D11, the parts of D4 about entries on an earlier server, section 3.6, and the v1 doctor row of section 3.7. The owner ends every v1 session and quits every v1 TUI before this branch merges, and the app is still in beta, so that code would have nothing left to handle.
+Later the same day the owner dropped every part of v1 migration: D11, the parts of D4 about entries on an earlier server, section 3.6, and the v1 doctor row of section 3.7. The owner ends every v1 session and quits every v1 TUI before this branch merges, and the app is still in beta, so that code would have nothing left to handle. The owner also dropped D9: Ringleader owns the private server's look and keys as part of its interface, so the server loads no user tmux file and milestone 7 is undone.
 
 | # | Question | Recommendation | Alternative |
 |---|---|---|---|
@@ -94,7 +94,7 @@ bind-key -T root 'C-q' detach-client
 - **Extended keys.** `extended-keys always` and `*:extkeys` are both required for Shift+Enter to reach an agent through two layers. Without `*:extkeys`, the nested client never asks the user's tmux for extended keys. Without `always`, agents that only send the kitty keyboard request get plain Enter, because 3.6a ignores that request. `extended-keys-format` stays out (D12).
 - **Config errors are silent at server start.** `new-session` and `start-server` return 0 when `-f` holds a line with an unknown option. The other lines still apply, and the error appears over the first attached pane. A `source-file` on a running server returns 1 with the error. So a test on the pinned tmux must show that the golden fixture loads cleanly, both at server start and when it is sourced again on the running server. The D7 reapply reports `source-file` errors.
 - **The hash.** `@ringleader_config` is the lowercase hex FNV-1a 64-bit hash of every rendered line except its own. `TmuxServerConfig` computes it from named constants, so the value does not change between Rust releases, as `std::hash::DefaultHasher`'s would. No new crate is needed.
-- **Left at tmux defaults.** `history-limit` (2,000 lines) and `focus-events` (off) used to come from the user's config. Milestone 0 decides whether either needs a value here. Otherwise the D9 user file is the place for them.
+- **Left at tmux defaults.** `history-limit` (2,000 lines) and `focus-events` (off) used to come from the user's config. With no user file (D9 dropped), any value either needs goes here. `history-limit` waits on a survey of other agent session managers, and `focus-events` on milestone 0.
 - **Per-session `destroy-unattached off`** in the single creation invocation stays as it is. It costs nothing and survives a hand `set -g`. On 3.6a the option also accepts `keep-last`, so it is not a boolean there.
 
 ### 3.3 One attach flow
@@ -194,23 +194,20 @@ As of 2026-10-11, milestones 1 to 7 are in, one commit each, and they implement 
 Where the implementation departs from the text above:
 
 - `TmuxTestServer` starts every test server with the rendered config, not only the tests of the generated config, because the post-create check in `create_session` needs a `detach-client` binding.
-- A changed user file from D9 does not change the hash, so it reaches a running server only when the server next starts. The README says so.
-- A reapply whose `source-file` exits 1 still counts as applied when the server then holds the current hash, because tmux runs every line of the render after a failing line in the user file. tmux's error goes to the log. A reapply that leaves the old hash still fails.
 - The naming drift row warns only when `worktree_root` or `branch_prefix` differ from the config.
 - The D5 own-pane check skips dead panes. tmux keeps reporting an exited pane's terminal after freeing it, and Linux hands that `/dev/pts` number to the next terminal opened.
 - A reapply writes the render to the generated config file before sourcing it, so the file help and doctor name matches the running server.
 - The private server's config handling lives in `PrivateServer` rather than `TmuxMultiplexer`, which keeps the multiplexer below its size on `master`.
 - A live `t` repeats the D5 own-pane check that attach makes, since the TUI only warns when the startup check fails for a reason other than a conflict.
 - Help, doctor, the README, and the template say that the user's tmux must not use the return key as its prefix either, since an outer prefix swallows it too.
-- The generated config sets `key-table root` after the user file, since a session key table set there would hide the root return binding while the post-create check still passed.
 - The launch-directory delete guard applies to a full delete and its measurement, not to `delete --forget`, which removes nothing on disk.
 - The status bar wraps a long message or note over up to a quarter of the terminal height, so long advice such as the hand commands for an Unmanaged session fits.
 - D4 is narrower. Restart and rename refuse only while a process in the worktree descends from a tmux server whose command line names the private socket, through `HostProbe::processes_under_server`. Counting every process blocked them whenever an editor or a shell sat in the worktree.
 - Doctor's lost socket warning from section 3.7 needs both a missing socket file and such a process, so an open editor no longer triggers it.
 - The generated config binds the return key in `copy-mode` and `copy-mode-vi` as well as `root`, and a reapply unbinds the previous key in all three. In copy mode tmux looks a key up in the mode's table first, and those tables already bind keys `ReturnKey` accepts, such as `M-x`.
 - Doctor compares only the access bits of the socket directory, since Linux copies a parent's setgid bit to new subdirectories and `chmod 700` keeps it.
+- The optional user file from D9 is gone (section 2). The render has no `source-file -q` line and no `key-table root` line, which only guarded against the user file, and a reapply that `source-file` fails on is an error.
 - `EarlierServer` and the `LeftoverBindings` port are gone with the v1 migration (section 2). An entry's recorded socket is always the private one, so restart and rename treat every Stopped entry alike, and rename keeps the socket as recorded.
-- When a user file is sourced, the render binds the return key in all three tables before the `source-file -q` line as well as at the end. A reapply unbinds the previous key and sources the render in one tmux call, and a command in the user file that blocks past the 10 second deadline gets that call killed partway through. The early bindings keep a way out in that case, and the error names the user file.
 
 ## 5. What goes away
 

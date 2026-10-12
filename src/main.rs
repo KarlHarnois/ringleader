@@ -73,12 +73,7 @@ impl CompositionRoot {
     }
 
     fn server_files(paths: &XdgPaths) -> ServerFiles {
-        let files = ServerFiles::new(&paths.tmux_socket(), &paths.tmux_config());
-        let user_config = paths.user_tmux_config();
-        match DiagnosticPaths::can_source(&user_config) {
-            true => files.sourcing(&user_config),
-            false => files,
-        }
+        ServerFiles::new(&paths.tmux_socket(), &paths.tmux_config())
     }
 
     fn run(self) -> ExitCode {
@@ -291,8 +286,7 @@ impl CompositionRoot {
             &self.programs.git().to_string_lossy(),
             &self.paths.state_directory(),
         )
-        .with_tmux_server(self.server.socket(), self.server.config())
-        .with_user_tmux_config(&self.paths.user_tmux_config());
+        .with_tmux_server(self.server.socket(), self.server.config());
         match self.paths.has_runtime_directory() {
             true => paths,
             false => paths.with_socket_in_state_directory(),

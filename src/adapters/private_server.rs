@@ -65,35 +65,15 @@ impl<'a> PrivateServer<'a> {
         let sequence = TmuxServerConfig::reapply_script(previous_key);
         let output = self
             .tmux
-            .change_with_input(&sequence, render.render().as_bytes())
-            .map_err(|error| self.reapply_error(error))?;
+            .change_with_input(&sequence, render.render().as_bytes())?;
         if output.succeeded() {
-            return Ok(());
-        }
-        if self.runs_render(&render)? {
-            log::warn!(
-                "the tmux server applied Ringleader's config, but a line, likely in the user tmux file, failed: {}",
-                output.stderr()
-            );
             return Ok(());
         }
         Err(TmuxError::failed("source-file", &output).into())
     }
 
-    fn reapply_error(&self, error: TmuxError) -> MultiplexerError {
-        match (error, self.tmux.server().user_config()) {
-            (TmuxError::TimedOut { seconds, .. }, Some(user_file)) => {
-                MultiplexerError::SourceTimedOut {
-                    seconds,
-                    user_file: user_file.display().to_string(),
-                }
-            }
-            (error, _) => error.into(),
-        }
-    }
-
     fn render_for(&self, return_key: &ReturnKey) -> TmuxServerConfig {
-        TmuxServerConfig::new(return_key).sourcing(self.tmux.server().user_config())
+        TmuxServerConfig::new(return_key)
     }
 
     fn write_render(&self, render: &TmuxServerConfig) -> Result<(), MultiplexerError> {
@@ -108,11 +88,6 @@ impl<'a> PrivateServer<'a> {
     fn binds_return_key(&self) -> Result<bool, MultiplexerError> {
         let output = self.tmux.query(&TmuxScripts::root_keys())?;
         Ok(TmuxListing::new(&output).binds_detach())
-    }
-
-    fn runs_render(&self, render: &TmuxServerConfig) -> Result<bool, MultiplexerError> {
-        let running = self.running_config()?;
-        Ok(running.is_some_and(|running| running.hash() == render.hash()))
     }
 
     fn running_config(&self) -> Result<Option<RunningConfig>, MultiplexerError> {
@@ -165,24 +140,15 @@ impl RunningConfig {
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::OsStr;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
-    use std::path::{Path, PathBuf};
-    use std::time::Duration;
 
     use super::*;
-    use crate::adapters::Deadlines;
-    use crate::adapters::server_files::ServerFiles;
-    use crate::adapters::tmux_sequence::TmuxSequence;
     use crate::test_support::TmuxTestServer;
 
     struct ServerFixture;
 
     impl ServerFixture {
-        const BLOCKING_LINE: &'static str = "run-shell 'sleep 3'\n";
-        const SHORT_DEADLINE: Duration = Duration::from_secs(1);
-
         fn alt_x() -> ReturnKey {
             ReturnKey::parse("M-x").unwrap()
         }
@@ -199,32 +165,6 @@ mod tests {
                 .filter_map(|line| line.split_whitespace().nth(3))
                 .map(str::to_string)
                 .collect()
-        }
-
-        fn sourcing(server: &TmuxTestServer, user_file: &Path) -> TmuxCommand {
-            let files = ServerFiles::new(server.socket(), server.config()).sourcing(user_file);
-            TmuxCommand::new(OsStr::new("tmux"), &files, &server.environment())
-        }
-
-        fn started_sourcing(server: &TmuxTestServer, user_file: &Path) -> TmuxCommand {
-            let tmux = Self::sourcing(server, user_file);
-            PrivateServer::new(&tmux)
-                .write_files(&ReturnKey::default())
-                .unwrap();
-            let start =
-                TmuxSequence::new().command(["new-session", "-d", "-s", "holder", "sleep", "30"]);
-            tmux.create(&start, &[]).unwrap();
-            tmux
-        }
-
-        fn blocked_reapply(server: &TmuxTestServer) -> (Result<(), MultiplexerError>, PathBuf) {
-            let user_file = server.directory().join("user.conf");
-            fs::write(&user_file, "").unwrap();
-            Self::started_sourcing(server, &user_file);
-            fs::write(&user_file, Self::BLOCKING_LINE).unwrap();
-            let tmux = Self::sourcing(server, &user_file)
-                .with_deadlines(Deadlines::uniform(Self::SHORT_DEADLINE));
-            (PrivateServer::new(&tmux).apply(&Self::alt_x()), user_file)
         }
     }
 
@@ -308,46 +248,5 @@ mod tests {
             server.text(&["show-options", "-g", "-v", "@ringleader_config"]),
             TmuxServerConfig::new(&ServerFixture::alt_x()).hash()
         );
-    }
-
-    #[test]
-    fn an_error_in_the_user_file_still_applies_the_new_return_key() {
-        let server = TmuxTestServer::new();
-        let user_file = server.directory().join("user.conf");
-        fs::write(&user_file, "set -g histroy-limit 5000\n").unwrap();
-        let tmux = ServerFixture::started_sourcing(&server, &user_file);
-        let private = PrivateServer::new(&tmux);
-
-        private.apply(&ServerFixture::alt_x()).unwrap();
-
-        let running = private.config(&ServerFixture::alt_x()).unwrap().unwrap();
-        assert!(running.is_current());
-    }
-
-    #[test]
-    fn a_user_file_that_blocks_a_reapply_leaves_the_new_return_key_bound() {
-        let server = TmuxTestServer::new();
-
-        let (applied, _) = ServerFixture::blocked_reapply(&server);
-
-        assert!(applied.is_err());
-        for table in ["root", "copy-mode", "copy-mode-vi"] {
-            assert_eq!(
-                ServerFixture::detach_keys_in(&server, table),
-                ["M-x"],
-                "{table}"
-            );
-        }
-    }
-
-    #[test]
-    fn a_reapply_blocked_by_the_user_file_names_that_file() {
-        let server = TmuxTestServer::new();
-
-        let (applied, user_file) = ServerFixture::blocked_reapply(&server);
-
-        let error = applied.unwrap_err();
-        assert!(error.is_timeout());
-        assert!(error.to_string().contains(&user_file.display().to_string()));
     }
 }

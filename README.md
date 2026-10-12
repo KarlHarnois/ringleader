@@ -36,7 +36,7 @@ Sessions run on Ringleader's own tmux server, so they do not show in your own `t
 
 To inspect the sessions with tmux itself, run `tmux -S "$XDG_RUNTIME_DIR/ringleader/tmux/tmux.sock" ls`. Without `XDG_RUNTIME_DIR`, the socket is under `~/.local/state/ringleader/tmux/`. The help screen (`?`) shows the path.
 
-Your own `~/.tmux.conf` never loads on Ringleader's server. Put preferences such as `history-limit`, colors, or copy-mode keys in `~/.config/ringleader/tmux.conf` instead. Ringleader's server loads that file first, so the return key, the missing prefix key, and its other settings still apply. Changes to that file apply when the server next starts, which happens after its last session ends.
+Ringleader owns the configuration of its tmux server, as it owns the rest of its interface. Your own `~/.tmux.conf` never loads there, and Ringleader reads no other tmux file.
 
 ## Agent environment
 
