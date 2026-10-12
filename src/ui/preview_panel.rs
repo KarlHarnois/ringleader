@@ -3,7 +3,6 @@ use ratatui::layout::Rect;
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Padding, Paragraph};
 
-use super::home_view::CenteredText;
 use super::preview_text::PreviewText;
 use super::text_fit::TextFit;
 use super::theme::Theme;
@@ -38,9 +37,8 @@ impl<'a> PreviewPanel<'a> {
             .padding(Padding::horizontal(1));
         let inner = block.inner(area);
         frame.render_widget(block, area);
-        match self.row {
-            Some(row) => self.render_row(row, frame, inner),
-            None => CenteredText::new(&CenteredText::EMPTY_STATE).render(frame, inner),
+        if let Some(row) = self.row {
+            self.render_row(row, frame, inner);
         }
     }
 
@@ -104,6 +102,7 @@ pub enum PreviewCapture {
 mod tests {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
+    use ratatui::layout::Margin;
 
     use super::*;
     use crate::domain::SessionState;
@@ -210,6 +209,23 @@ mod tests {
         assert_eq!(
             (cell.symbol(), cell.fg),
             ("r", ratatui::style::Color::Green)
+        );
+    }
+
+    #[test]
+    fn a_panel_without_a_selected_session_leaves_its_interior_blank() {
+        let mut terminal = Terminal::new(TestBackend::new(70, 10)).unwrap();
+
+        terminal
+            .draw(|frame| PreviewPanel::new(None, None, Theme).render(frame, frame.area()))
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let inside_border = buffer.area.inner(Margin::new(1, 1));
+        assert!(
+            inside_border
+                .positions()
+                .all(|cell| buffer[cell].symbol() == " ")
         );
     }
 
