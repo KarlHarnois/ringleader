@@ -1,5 +1,13 @@
 # Ringleader
 
+```text
+    ____  _____   __________    _________    ____  __________
+   / __ \/  _/ | / / ____/ /   / ____/   |  / __ \/ ____/ __ \
+  / /_/ // //  |/ / / __/ /   / __/ / /| | / / / / __/ / /_/ /
+ / _, _// // /|  / /_/ / /___/ /___/ ___ |/ /_/ / /___/ _, _/
+/_/ |_/___/_/ |_/\____/_____/_____/_/  |_/_____/_____/_/ |_|
+```
+
 A tmux session manager for Claude and opencode. Each session gets its own git worktree, branch, and tmux session. A terminal UI lists the sessions with their state, their diff, and a live preview of the agent.
 
 Linux only. Needs tmux 3.2 or newer and git 2.42 or newer.
