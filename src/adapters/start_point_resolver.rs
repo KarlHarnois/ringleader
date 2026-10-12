@@ -40,8 +40,8 @@ impl<'a> StartPointResolver<'a> {
             return Ok(StartPoint::Commit(sha));
         }
         let suggestion = base.origin_suggestion();
-        let origin_ref = format!("refs/remotes/{suggestion}^{{commit}}");
-        let origin_exists = self.git.resolve(repo, &origin_ref)?.is_some();
+        let origin_ref = format!("refs/remotes/{suggestion}");
+        let origin_exists = self.commit_of(repo, &origin_ref)?.is_some();
         Err(WorkspaceError::BaseBranchNotFound {
             base: base.to_string(),
             local_ref: base.local_ref(),
