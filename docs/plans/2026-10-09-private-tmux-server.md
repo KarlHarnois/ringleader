@@ -26,6 +26,8 @@ The goal: Ringleader behaves the same whether it runs inside tmux or outside, an
 
 The owner accepted each recommendation on 2026-10-12. The alternatives stay as a record of what was weighed.
 
+Later the same day the owner dropped every part of v1 migration: D11, the parts of D4 about entries on an earlier server, section 3.6, and the v1 doctor row of section 3.7. The owner ends every v1 session and quits every v1 TUI before this branch merges, and the app is still in beta, so that code would have nothing left to handle.
+
 | # | Question | Recommendation | Alternative |
 |---|---|---|---|
 | D1 | Where does the socket live? | `$XDG_RUNTIME_DIR/ringleader/tmux/tmux.sock`, falling back to `$XDG_STATE_HOME/ringleader/tmux/tmux.sock` when `XDG_RUNTIME_DIR` is unset or relative, as `handoff_directory` falls back. The `tmux` directory is created with mode 0700, as `handoff` is. Refuse, naming the path, when it reaches 100 bytes or contains a comma, since `$TMUX` separates its fields with commas. | `${TMUX_TMPDIR:-/tmp}/ringleader-<uid>/tmux.sock` with an owner and mode check. |
@@ -122,6 +124,8 @@ bind-key -T root 'C-q' detach-client
 
 ### 3.6 Migration from v1
 
+> Dropped on 2026-10-12, before the merge. The owner ends every v1 session by hand first. This section stays as a record.
+
 - **v1 entries.** An entry whose recorded socket is not the current private socket is a v1 entry. That also covers a private socket that moved because `XDG_RUNTIME_DIR` changed. The registry shape and schema version stay at 1, so a new binary reads v1 files as they are.
   - It lists as `Stopped`, because the TUI observes only the private server. Selecting it shows a status note naming its socket and the hand commands.
   - Attach and a live `t` refuse with: `<name> runs on the tmux server at <socket>, which Ringleader no longer uses. Attach there with tmux -S <socket> attach -t '=<tmux name>:', or end it with kill-session and press s to restart it here.` The ephemeral `t` shell already works.
@@ -189,27 +193,23 @@ As of 2026-10-11, milestones 1 to 7 are in, one commit each, and they implement 
 
 Where the implementation departs from the text above:
 
-- The v1 doctor row from section 3.7 landed with milestone 3 instead of milestone 5, so doctor names the earlier server from the same commit that removes `has_session_on`, as the README upgrade note says.
-- The leftover `bindings.json` row moved into `ServerAudit` with milestone 5, which keeps `doctor.rs` under 200 lines.
 - `TmuxTestServer` starts every test server with the rendered config, not only the tests of the generated config, because the post-create check in `create_session` needs a `detach-client` binding.
-- The `kill-session` notes in the restart, rename, and delete results come from `SessionService::earlier_server`, which the CLI and the TUI query before the command, instead of from new outcome types.
 - A changed user file from D9 does not change the hash, so it reaches a running server only when the server next starts. The README says so.
 - A reapply whose `source-file` exits 1 still counts as applied when the server then holds the current hash, because tmux runs every line of the render after a failing line in the user file. tmux's error goes to the log. A reapply that leaves the old hash still fails.
-- Rename records the entry on the private socket, as restart does. Without that, an entry from an earlier server kept its old socket under the new tmux name, and every hand command named a session that does not exist there.
-- The naming drift row warns only when `worktree_root` or `branch_prefix` differ from the config. An entry recorded under an earlier `tmux_prefix` gets an info line, since no setting can clear it.
+- The naming drift row warns only when `worktree_root` or `branch_prefix` differ from the config.
 - The D5 own-pane check skips dead panes. tmux keeps reporting an exited pane's terminal after freeing it, and Linux hands that `/dev/pts` number to the next terminal opened.
 - A reapply writes the render to the generated config file before sourcing it, so the file help and doctor name matches the running server.
 - The private server's config handling lives in `PrivateServer` rather than `TmuxMultiplexer`, which keeps the multiplexer below its size on `master`.
-- The hand commands for an entry on an earlier server give `tmux -S <socket> switch-client` for use inside that tmux next to the `attach` that section 3.6 names, because tmux refuses that `attach` from a pane of the same server.
 - A live `t` repeats the D5 own-pane check that attach makes, since the TUI only warns when the startup check fails for a reason other than a conflict.
 - Help, doctor, the README, and the template say that the user's tmux must not use the return key as its prefix either, since an outer prefix swallows it too.
 - The generated config sets `key-table root` after the user file, since a session key table set there would hide the root return binding while the post-create check still passed.
 - The launch-directory delete guard applies to a full delete and its measurement, not to `delete --forget`, which removes nothing on disk.
-- The status bar wraps a long message or note over up to a quarter of the terminal height, so the hand commands fit. The earlier-server note leads with the `kill-session` command.
-- D4 is narrower for an entry on the private socket. Restart and rename refuse only while a process in the worktree descends from a tmux server whose command line names the private socket, through `HostProbe::processes_under_server`. Counting every process blocked them whenever an editor or a shell sat in the worktree. An entry on an earlier server still counts every process, since `/proc` is the only evidence there.
+- The status bar wraps a long message or note over up to a quarter of the terminal height, so long advice such as the hand commands for an Unmanaged session fits.
+- D4 is narrower. Restart and rename refuse only while a process in the worktree descends from a tmux server whose command line names the private socket, through `HostProbe::processes_under_server`. Counting every process blocked them whenever an editor or a shell sat in the worktree.
 - Doctor's lost socket warning from section 3.7 needs both a missing socket file and such a process, so an open editor no longer triggers it.
 - The generated config binds the return key in `copy-mode` and `copy-mode-vi` as well as `root`, and a reapply unbinds the previous key in all three. In copy mode tmux looks a key up in the mode's table first, and those tables already bind keys `ReturnKey` accepts, such as `M-x`.
 - Doctor compares only the access bits of the socket directory, since Linux copies a parent's setgid bit to new subdirectories and `chmod 700` keeps it.
+- `EarlierServer` and the `LeftoverBindings` port are gone with the v1 migration (section 2). An entry's recorded socket is always the private one, so restart and rename treat every Stopped entry alike, and rename keeps the socket as recorded.
 - When a user file is sourced, the render binds the return key in all three tables before the `source-file -q` line as well as at the end. A reapply unbinds the previous key and sources the render in one tmux call, and a command in the user file that blocks past the 10 second deadline gets that call killed partway through. The early bindings keep a way out in that case, and the error names the user file.
 
 ## 5. What goes away
