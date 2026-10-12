@@ -1,5 +1,9 @@
 # Ringleader
 
+[![CI](https://github.com/KarlHarnois/ringleader/actions/workflows/ci.yml/badge.svg)](https://github.com/KarlHarnois/ringleader/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Nix flake](https://img.shields.io/badge/nix-flake-5277C3?logo=nixos&logoColor=white)](#install)
+
 ```text
     ____  _____   __________    _________    ____  __________
    / __ \/  _/ | / / ____/ /   / ____/   |  / __ \/ ____/ __ \
@@ -10,7 +14,7 @@
 
 A tmux session manager for Claude and opencode. Each session gets its own git worktree, branch, and tmux session. A terminal UI lists the sessions with their state, their diff, and a live preview of the agent.
 
-Linux only. Needs tmux 3.2 or newer and git 2.42 or newer.
+Linux only.
 
 ## Install
 
@@ -95,7 +99,3 @@ Every command accepts `--config <path>` and `--log-level <level>`. The log is at
 ## Git credentials
 
 Git can never prompt in the terminal during a Ringleader operation. Credentials that git needs during checkout must come from a credential helper, an askpass program, or `ssh-agent`.
-
-## License
-
-MIT
