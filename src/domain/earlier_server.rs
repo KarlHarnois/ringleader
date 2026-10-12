@@ -18,9 +18,9 @@ impl EarlierServer {
 
     pub fn refusal(&self, name: &str) -> String {
         format!(
-            "{name} runs on the tmux server at {}, which Ringleader no longer uses. Attach there with {}, or end it with {} and restart it here.",
+            "{name} runs on the tmux server at {}, which Ringleader no longer uses. {}. End it with {} to restart it here.",
             self.socket.display(),
-            self.attach_command(),
+            self.attach_advice(),
             self.kill_command()
         )
     }
@@ -35,17 +35,25 @@ impl EarlierServer {
 
     pub fn audit(&self, name: &str, worktree_processes: &str) -> String {
         format!(
-            "session {name} was created on the tmux server at {}, which Ringleader no longer uses, and {worktree_processes}. An exited session kept as a pane leaves no process, so check with tmux -S {} ls. Attach there with {}, or end it with {} and run ringleader restart {name}.",
+            "session {name} was created on the tmux server at {}, which Ringleader no longer uses, and {worktree_processes}. An exited session kept as a pane leaves no process, so check with tmux -S {} ls. {}. End it with {}, then run ringleader restart {name}.",
             self.socket.display(),
             self.socket.display(),
-            self.attach_command(),
+            self.attach_advice(),
             self.kill_command()
         )
     }
 
-    fn attach_command(&self) -> String {
+    fn attach_advice(&self) -> String {
         format!(
-            "tmux -S {} attach -t '={}:'",
+            "Attach there with {} from outside that tmux, or with {} from inside it",
+            self.client_command("attach"),
+            self.client_command("switch-client")
+        )
+    }
+
+    fn client_command(&self, subcommand: &str) -> String {
+        format!(
+            "tmux -S {} {subcommand} -t '={}:'",
             self.socket.display(),
             self.tmux_name
         )
@@ -118,6 +126,9 @@ mod tests {
         assert!(
             refusal.contains("tmux -S /tmp/tmux-1000/default attach -t '=ringleader-fix-auth:'")
         );
+        assert!(refusal.contains(
+            "tmux -S /tmp/tmux-1000/default switch-client -t '=ringleader-fix-auth:' from inside it"
+        ));
         assert!(
             refusal
                 .contains("tmux -S /tmp/tmux-1000/default kill-session -t '=ringleader-fix-auth:'")
