@@ -46,10 +46,12 @@ Dependencies point inward only. An inner layer never imports an outer one.
 
 - `domain` holds the entities, value types, and pure rules. It imports nothing else from the crate, and never imports `crossterm`, `ratatui`, or `std::process`.
 - `application` holds the use cases and the ports, and imports only `domain`. It never shells out, never touches the filesystem directly, and never reads the system clock. Ports are traits in `application/ports/`, named after the role they play for the use cases, such as `Workspace` and `Multiplexer`, with their error types in the same file.
-- `adapters` holds the driven adapters, which implement the ports with git, tmux, files, `/proc`, and signals. They import `application` and `domain`, never `ui` or `cli`. Each is named after its technology and the port it implements, such as `GitWorkspace` and `TmuxMultiplexer`.
+- `adapters` holds the driven adapters, which implement the ports with git, tmux, files, and `/proc`. They import `application` and `domain`, never `ui` or `cli`. Each is named after its technology and the port it implements, such as `GitWorkspace` and `TmuxMultiplexer`.
 - `ui` and `cli` are the driving adapters. They import `application` and `domain`, never `adapters`. They reach the use cases only through the `SessionService` facade, which composes `SessionLifecycle`, `SessionMonitor`, `SessionAccess`, `RepoCatalog`, and `Doctor`, so `ui` and `cli` never call those directly. A port handed to a `ui` or `cli` type, like `Lock`, is called by that type.
 - `main.rs` is the composition root and the only production code that imports every layer. It builds the concrete adapters and injects them into the core as trait objects.
 - `src/test_support/` may import any layer, because it fakes the ports and drives the outer layers under test.
+
+The code breaks the `ui` and `cli` rule in four places today: `SignalFlags` in `ui/event_loop.rs`, `cli/cli_session.rs`, and a test in `cli/session_commands.rs`, and `AppLog` in `ui/dialogs/dialog.rs`. They are violations to fix, not precedent to copy.
 
 A new capability that reaches outside the process goes through a port:
 
