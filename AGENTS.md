@@ -205,7 +205,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │       ├── dialog.rs                # Dialog, the open dialog, its key routing and placement
     │       ├── dialog_slot.rs           # DialogSlot, the dialog App shows, if any
     │       ├── dialog_labels.rs         # DialogLabels, full or abbreviated field labels
-    │       ├── text_field.rs            # TextField, typing and paste rules for name, prompt, and path fields
+    │       ├── text_field.rs            # TextField, typing, paste, and wrapping rules for name, prompt, and path fields
     │       ├── new_session_dialog.rs    # NewSessionDialog
     │       ├── new_session_field.rs     # NewSessionField, the n dialog's fields in Tab order with their labels and hints
     │       ├── repo_picker.rs           # RepoPicker, the n dialog's Repo field and its search

@@ -1,5 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use crate::ui::text_fit::TextFit;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FieldKind {
     Name,
@@ -14,7 +16,7 @@ pub struct TextField {
 }
 
 impl TextField {
-    const LINE_BREAK_MARK: char = '⏎';
+    const LINE_BREAK_MODIFIER: KeyModifiers = KeyModifiers::ALT;
     const LINE_BREAK_IN_PATH: &'static str = "a path cannot contain a line break";
 
     pub fn new(kind: FieldKind) -> Self {
@@ -28,19 +30,25 @@ impl TextField {
         &self.value
     }
 
-    pub fn display(&self) -> String {
-        self.value.replace('\n', &Self::LINE_BREAK_MARK.to_string())
-    }
-
     pub fn visible(&self, width: usize, cursor: Option<char>) -> String {
-        let shown: String = self.display().chars().chain(cursor).collect();
+        let shown = self.with_cursor(cursor);
         let skipped = shown.chars().count().saturating_sub(width);
         shown.chars().skip(skipped).collect()
+    }
+
+    pub fn visible_rows(&self, width: usize, max_rows: usize, cursor: Option<char>) -> Vec<String> {
+        let rows = self.wrapped(width, cursor);
+        let skipped = rows.len().saturating_sub(max_rows);
+        rows.into_iter().skip(skipped).collect()
     }
 
     pub fn edit(&mut self, key: &KeyEvent) -> bool {
         let typed_text = key.modifiers.difference(KeyModifiers::SHIFT).is_empty();
         match key.code {
+            KeyCode::Enter if self.accepts_line_break(key) => {
+                self.value.push('\n');
+                true
+            }
             KeyCode::Char(character) if typed_text && !character.is_control() => {
                 self.value.push(character);
                 true
@@ -57,6 +65,10 @@ impl TextField {
         }
     }
 
+    pub fn accepts_line_break(&self, key: &KeyEvent) -> bool {
+        self.kind == FieldKind::Prompt && key.modifiers == Self::LINE_BREAK_MODIFIER
+    }
+
     pub fn paste(&mut self, text: &str) -> Result<(), String> {
         let lines: Vec<&str> = text
             .split("\r\n")
@@ -69,6 +81,17 @@ impl TextField {
         };
         self.value.push_str(&pasted);
         Ok(())
+    }
+
+    fn wrapped(&self, width: usize, cursor: Option<char>) -> Vec<String> {
+        self.with_cursor(cursor)
+            .split('\n')
+            .flat_map(|line| TextFit::new(line).wrapped(width))
+            .collect()
+    }
+
+    fn with_cursor(&self, cursor: Option<char>) -> String {
+        self.value.chars().chain(cursor).collect()
     }
 
     fn delete_word(&mut self) {
@@ -97,6 +120,10 @@ mod tests {
     impl FieldFixture {
         fn key(code: KeyCode) -> KeyEvent {
             KeyEvent::new(code, KeyModifiers::NONE)
+        }
+
+        fn alt_enter() -> KeyEvent {
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT)
         }
 
         fn after_control_w(kind: FieldKind, text: &str) -> (bool, String) {
@@ -193,10 +220,54 @@ mod tests {
     }
 
     #[test]
-    fn a_prompt_field_shows_line_breaks_as_a_return_mark() {
+    fn a_prompt_wraps_the_word_that_reaches_the_edge_onto_the_next_row() {
+        let field = FieldFixture::holding(FieldKind::Prompt, "fix the login flow");
+
+        assert_eq!(field.visible_rows(9, 4, None), ["fix the", "login", "flow"]);
+    }
+
+    #[test]
+    fn a_word_longer_than_the_row_breaks_inside_the_word() {
+        let field = FieldFixture::holding(FieldKind::Prompt, "refactor-the-reconciler");
+
+        assert_eq!(
+            field.visible_rows(8, 4, None),
+            ["refactor", "-the-rec", "onciler"]
+        );
+    }
+
+    #[test]
+    fn a_line_break_starts_a_new_row_and_the_cursor_follows_the_text() {
         let field = FieldFixture::holding(FieldKind::Prompt, "one\ntwo");
 
-        assert_eq!(field.display(), "one⏎two");
+        assert_eq!(field.visible_rows(10, 4, Some('█')), ["one", "two█"]);
+    }
+
+    #[test]
+    fn a_long_prompt_shows_its_last_rows() {
+        let field = FieldFixture::holding(FieldKind::Prompt, "one\ntwo\nthree");
+
+        assert_eq!(field.visible_rows(10, 2, None), ["two", "three"]);
+    }
+
+    #[test]
+    fn alt_enter_adds_a_line_break_to_a_prompt() {
+        let mut field = FieldFixture::holding(FieldKind::Prompt, "one");
+
+        field.edit(&FieldFixture::alt_enter());
+
+        assert_eq!(field.value(), "one\n");
+        assert_eq!(field.visible_rows(10, 4, Some('█')), ["one", "█"]);
+    }
+
+    #[test]
+    fn alt_enter_is_ignored_by_a_name_field() {
+        let mut field = FieldFixture::holding(FieldKind::Name, "fix-auth");
+
+        let consumed = field.edit(&FieldFixture::alt_enter());
+
+        assert!(!consumed);
+        assert_eq!(field.value(), "fix-auth");
     }
 
     #[test]
