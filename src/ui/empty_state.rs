@@ -60,6 +60,23 @@ mod tests {
     struct ScreenFixture;
 
     impl ScreenFixture {
+        const ODD_SPARE_COLUMNS: u16 = 19;
+        const SPARE_ROWS: u16 = 2;
+
+        fn block_size() -> (u16, u16) {
+            let block = EmptyState::logo_above_message();
+            let width = block.iter().map(Line::width).max().unwrap();
+            (
+                u16::try_from(width).unwrap(),
+                u16::try_from(block.len()).unwrap(),
+            )
+        }
+
+        fn rows_with_room() -> Vec<String> {
+            let (width, height) = Self::block_size();
+            Self::rows(width + Self::ODD_SPARE_COLUMNS, height + Self::SPARE_ROWS)
+        }
+
         fn rows(width: u16, height: u16) -> Vec<String> {
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
             terminal
@@ -96,7 +113,7 @@ mod tests {
 
     #[test]
     fn the_logo_rows_start_in_the_same_column() {
-        let rows = ScreenFixture::rows(81, 10);
+        let rows = ScreenFixture::rows_with_room();
 
         let (top, indent) = ScreenFixture::logo_top_left(&rows);
         for (row, expected) in rows[top..].iter().zip(EmptyState::LOGO) {
@@ -106,17 +123,20 @@ mod tests {
 
     #[test]
     fn the_logo_and_message_are_centered_in_the_area() {
-        let rows = ScreenFixture::rows(81, 10);
+        let rows = ScreenFixture::rows_with_room();
 
-        assert_eq!(
-            ScreenFixture::logo_top_left(&rows),
-            ((10 - 8) / 2, (81 - 62) / 2)
+        let (top, left) = ScreenFixture::logo_top_left(&rows);
+        let bottom = usize::from(ScreenFixture::SPARE_ROWS) - top;
+        let right = usize::from(ScreenFixture::ODD_SPARE_COLUMNS) - left;
+        assert!(
+            top.abs_diff(bottom) <= 1 && left.abs_diff(right) <= 1,
+            "margins: top {top}, bottom {bottom}, left {left}, right {right}"
         );
     }
 
     #[test]
     fn the_message_stays_under_the_logo() {
-        let rows = ScreenFixture::rows(80, 10);
+        let rows = ScreenFixture::rows_with_room();
 
         let logo_bottom = rows
             .iter()
@@ -127,22 +147,25 @@ mod tests {
 
     #[test]
     fn an_area_exactly_the_size_of_the_logo_and_message_shows_both() {
-        let rows = ScreenFixture::rows(62, 8);
+        let (width, height) = ScreenFixture::block_size();
+        let rows = ScreenFixture::rows(width, height);
 
         assert!(ScreenFixture::shows_logo(&rows));
-        assert!(rows[7].contains("Press n to create one."));
+        assert!(rows.last().unwrap().contains("Press n to create one."));
     }
 
     #[test]
     fn an_area_narrower_than_the_logo_shows_only_the_message() {
-        let rows = ScreenFixture::rows(61, 8);
+        let (width, height) = ScreenFixture::block_size();
+        let rows = ScreenFixture::rows(width - 1, height);
 
         assert_eq!(ScreenFixture::drawn_rows(&rows), EmptyState::MESSAGE);
     }
 
     #[test]
     fn an_area_too_short_for_the_logo_and_message_shows_only_the_message() {
-        let rows = ScreenFixture::rows(80, 7);
+        let (width, height) = ScreenFixture::block_size();
+        let rows = ScreenFixture::rows(width, height - 1);
 
         assert_eq!(ScreenFixture::drawn_rows(&rows), EmptyState::MESSAGE);
     }
