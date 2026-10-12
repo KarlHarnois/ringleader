@@ -3,7 +3,6 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FieldKind {
     Name,
-    Prompt,
     Path,
 }
 
@@ -14,7 +13,6 @@ pub struct TextField {
 }
 
 impl TextField {
-    const LINE_BREAK_MARK: char = '⏎';
     const LINE_BREAK_IN_PATH: &'static str = "a path cannot contain a line break";
 
     pub fn new(kind: FieldKind) -> Self {
@@ -28,12 +26,8 @@ impl TextField {
         &self.value
     }
 
-    pub fn display(&self) -> String {
-        self.value.replace('\n', &Self::LINE_BREAK_MARK.to_string())
-    }
-
     pub fn visible(&self, width: usize, cursor: Option<char>) -> String {
-        let shown: String = self.display().chars().chain(cursor).collect();
+        let shown: String = self.value.chars().chain(cursor).collect();
         let skipped = shown.chars().count().saturating_sub(width);
         shown.chars().skip(skipped).collect()
     }
@@ -64,7 +58,6 @@ impl TextField {
             .collect();
         let pasted = match self.kind {
             FieldKind::Name => lines.join(" "),
-            FieldKind::Prompt => lines.join("\n"),
             FieldKind::Path => Self::single_line_path(text)?,
         };
         self.value.push_str(&pasted);
@@ -152,13 +145,6 @@ mod tests {
     }
 
     #[test]
-    fn control_w_in_a_prompt_stops_at_the_line_break() {
-        let (_, value) = FieldFixture::after_control_w(FieldKind::Prompt, "first line\nsecond");
-
-        assert_eq!(value, "first line\n");
-    }
-
-    #[test]
     fn control_w_on_an_empty_field_is_handled_and_changes_nothing() {
         let (consumed, value) = FieldFixture::after_control_w(FieldKind::Name, "");
 
@@ -182,21 +168,6 @@ mod tests {
             FieldFixture::pasted(FieldKind::Name, "fix\r\nthe\rlogin\nflow"),
             Ok("fix the login flow".to_string())
         );
-    }
-
-    #[test]
-    fn a_prompt_field_keeps_every_kind_of_line_break_as_a_newline() {
-        assert_eq!(
-            FieldFixture::pasted(FieldKind::Prompt, "one\r\ntwo\rthree\nfour"),
-            Ok("one\ntwo\nthree\nfour".to_string())
-        );
-    }
-
-    #[test]
-    fn a_prompt_field_shows_line_breaks_as_a_return_mark() {
-        let field = FieldFixture::holding(FieldKind::Prompt, "one\ntwo");
-
-        assert_eq!(field.display(), "one⏎two");
     }
 
     #[test]
