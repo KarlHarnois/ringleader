@@ -148,7 +148,7 @@ bind-key -T root 'C-q' detach-client
 
 ### 3.8 Config, help, README, and AGENTS.md
 
-- **Config.** Add `return_key`, default `C-q`, through `RawConfig`, `ConfigDraft`, `ConfigChecks`, `Config`, and the first-run template. It is a new domain type, `ReturnKey` in `src/domain/return_key.rs`. It accepts optional `C-`, `M-`, and `S-` modifiers followed by one printable non-space ASCII character or a named key such as `F1` to `F12`, `Escape`, or `Home`. It rejects empty values, whitespace, quotes, `\`, and newlines, and accepts only keys a terminal can send (section 7): after `C-` a letter, stored in lowercase, or `]`, `^`, or `_`; no `S-` before a character; and no `C-` or `S-` before Enter, Tab, BTab, Escape, BSpace, or Space, except `C-Space`. It gives the single-quoted tmux spelling for the config and a display form for help and the README.
+- **Config.** Add `return_key`, default `C-q`, through `RawConfig`, `ConfigDraft`, `ConfigChecks`, `Config`, and the first-run template. It is a new domain type, `ReturnKey` in `src/domain/return_key.rs`. It accepts optional `C-`, `M-`, and `S-` modifiers followed by one printable non-space ASCII character or a named key such as `F1` to `F12`, `Escape`, or `Home`. It rejects empty values, whitespace, quotes, `\`, and newlines, and accepts only keys a terminal can send (section 7): after `C-` a letter other than `i` or `m`, stored in lowercase, or `]`, `^`, or `_`; no `S-` before a character; and no `C-` or `S-` before Enter, Tab, BTab, Escape, BSpace, or Space, except `C-Space`. It gives the single-quoted tmux spelling for the config and a display form for help and the README.
 - **Help.** `HelpView::new` takes the return key, the socket path, and the config path instead of `tmux_prefix`. The return section says the return key detaches back to the TUI from any session. It also says sessions have no prefix key and the mouse is on, and that inside your own tmux the session opens nested, so your tmux must not bind the return key. The prefix sentence and the `env -u TMUX -u TMUX_PANE ringleader` sentence go. The bell sentence becomes "the bell rings only while this screen shows". The Files section adds the socket and the config path.
 - **README.** Replace the Ctrl-Q paragraph with the return key paragraph above. Add a short upgrade note: sessions from earlier versions stay on your own tmux server, `ringleader doctor` lists them, end each there and run `ringleader restart <name>`, and `tmux_prefix` no longer does anything. Add the hand command to inspect the private server.
 - **AGENTS.md.** In the same commit as the behavior each rule describes:
@@ -197,6 +197,9 @@ Where the implementation departs from the text above:
 - The D5 own-pane check skips dead panes. tmux keeps reporting an exited pane's terminal after freeing it, and Linux hands that `/dev/pts` number to the next terminal opened.
 - A reapply writes the render to the generated config file before sourcing it, so the file help and doctor name matches the running server.
 - The private server's config handling lives in `PrivateServer` rather than `TmuxMultiplexer`, which keeps the multiplexer below its size on `master`.
+- The hand commands for an entry on an earlier server give `tmux -S <socket> switch-client` for use inside that tmux next to the `attach` that section 3.6 names, because tmux refuses that `attach` from a pane of the same server.
+- A live `t` repeats the D5 own-pane check that attach makes, since the TUI only warns when the startup check fails for a reason other than a conflict.
+- Help, doctor, the README, and the template say that the user's tmux must not use the return key as its prefix either, since an outer prefix swallows it too.
 
 ## 5. What goes away
 
@@ -333,6 +336,7 @@ The implementing agent ran two of the items above on 2026-10-11, on throwaway se
 
 - `C-q`, `C-]`, `C-^`, `C-_`, and `C-Space` detach on both. `C-Q` and `C-A` never fire on 3.6a, because Ctrl-Q and Ctrl-A send the bytes for `C-q` and `C-a`. `C-@` and `C-[` fire only on 3.2a.
 - `S-x` never fires, because Shift+x types `X`. `C-1`, `C-2`, `C-/`, `C-?`, `C-Enter`, `C-Tab`, and `C-Escape` never fire.
+- `C-i` and `C-m` fire on 3.2a but never on 3.6a, which reads their bytes as Tab and Enter. `C-h` and `C-j` fire on both.
 - `M-x`, `M-X`, `C-M-x`, `C-Up`, `M-Up`, `C-F1`, `S-F1`, and `BTab` detach on both.
 
 `ReturnKey` now accepts only keys in the reachable groups, and a test types the bytes into a client nested in a second test server.
