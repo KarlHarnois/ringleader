@@ -166,7 +166,7 @@ pub enum MultiplexerError {
     #[error("tmux {subcommand} timed out after {seconds} seconds")]
     TimedOut { subcommand: String, seconds: u64 },
     #[error(
-        "the tmux server at {socket} binds no key to detach-client, so its sessions could not be left; check {config} and the load errors that tmux -S {socket} show-messages prints"
+        "the tmux server at {socket} binds no key to detach-client, so its sessions could not be left; check {config}"
     )]
     NoReturnBinding { socket: String, config: String },
     #[error("cannot prepare the tmux server files: {detail}")]
