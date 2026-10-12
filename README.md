@@ -91,7 +91,3 @@ Every command accepts `--config <path>` and `--log-level <level>`. The log is at
 | 1 | invalid input or a failure |
 | 2 | no session with that name |
 | 3 | conflict: a refused guard, an unmanaged session, a session that is live and healthy, or a held lock |
-
-## License
-
-MIT
