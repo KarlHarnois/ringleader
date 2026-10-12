@@ -245,6 +245,8 @@ mod tests {
         const SETTLE_LIMIT: Duration = Duration::from_secs(2);
 
         const FOUND: &'static str = "/home/example/work/api-gateway";
+        const WORK: &'static str = "/home/example/work";
+        const GATEWAY_COUNT: usize = 20;
         const TYPED: &'static str = "/srv/tools";
         const AGENT_HINTS: &'static str =
             "↑ ↓ j k choose · Enter next field · Ctrl-S create · Esc cancel";
@@ -261,6 +263,19 @@ mod tests {
             );
             ServiceFixture::new().with_scanner(
                 FakeRepoScanner::finding(vec![found]).inside_repo(Path::new(ServiceFixture::REPO)),
+            )
+        }
+
+        fn launched_among_gateways() -> ServiceFixture {
+            let found = (1..=Self::GATEWAY_COUNT)
+                .map(|number| {
+                    let name = format!("gateway-{number:02}");
+                    let path = Path::new(Self::WORK).join(&name);
+                    Repo::discovered(RepoName::parse(&name).unwrap(), &path)
+                })
+                .collect();
+            ServiceFixture::new().with_scanner(
+                FakeRepoScanner::finding(found).inside_repo(Path::new(ServiceFixture::REPO)),
             )
         }
 
@@ -623,6 +638,31 @@ mod tests {
         dialog.paste("one\ntwo\nthree");
 
         assert!(DialogFixture::text_at(&dialog, 7).contains("Prompt    three█\n\n"));
+    }
+
+    #[test]
+    fn a_tall_prompt_shows_its_last_six_rows() {
+        let (mut dialog, _service) = DialogFixture::in_prompt(&DialogFixture::launched_in_repo());
+
+        dialog.paste(DialogFixture::SEVEN_LINE_PROMPT);
+
+        assert!(DialogFixture::text(&dialog).contains(
+            "Prompt    two\n          three\n          four\n          five\n          six\n          seven█\n"
+        ));
+    }
+
+    #[test]
+    fn a_repo_search_shrinks_to_fit_beside_a_tall_prompt() {
+        let fixture = DialogFixture::launched_among_gateways();
+        let (mut dialog, service) = DialogFixture::in_prompt(&fixture);
+        dialog.paste(DialogFixture::SEVEN_LINE_PROMPT);
+        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
+
+        DialogFixture::search(&mut dialog, &service, "gate");
+        DialogFixture::settle(&mut dialog, |text| text.contains("20/20 repos under ~"));
+
+        let shown = DialogFixture::shown_at(&dialog, DialogFixture::FULL_HEIGHT);
+        assert!(shown.ends_with(DialogFixture::SEARCH_HINTS));
     }
 
     #[test]
