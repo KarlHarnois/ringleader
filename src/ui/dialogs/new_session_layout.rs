@@ -40,7 +40,7 @@ impl NewSessionLayout {
     }
 
     pub fn repo_room(&self) -> usize {
-        self.repo_floor + self.shared_rows().saturating_sub(self.prompt_rows())
+        self.repo_floor + self.rows_after_prompt() - self.placeholder_rows()
     }
 
     pub fn areas(&self, upper_rows: usize) -> [Rect; 4] {
@@ -72,13 +72,25 @@ impl NewSessionLayout {
     }
 
     fn shared_rows(&self) -> usize {
-        self.spare_rows() - self.gap_rows()
+        self.spare_rows() - self.spacer_rows()
+    }
+
+    fn rows_after_prompt(&self) -> usize {
+        self.shared_rows().saturating_sub(self.prompt_rows())
     }
 
     fn gap_rows(&self) -> usize {
-        let placeholder_rows = Self::ERROR_PLACEHOLDER_ROWS.saturating_sub(self.error_rows);
-        let wanted = Self::SPACER_ROWS + placeholder_rows;
-        wanted.min(self.spare_rows().saturating_sub(Self::PROMPT_FLOOR))
+        self.spacer_rows() + self.placeholder_rows()
+    }
+
+    fn spacer_rows(&self) -> usize {
+        let room = self.spare_rows().saturating_sub(Self::PROMPT_FLOOR);
+        Self::SPACER_ROWS.min(room)
+    }
+
+    fn placeholder_rows(&self) -> usize {
+        let wanted = Self::ERROR_PLACEHOLDER_ROWS.saturating_sub(self.error_rows);
+        wanted.min(self.rows_after_prompt())
     }
 
     fn spare_rows(&self) -> usize {

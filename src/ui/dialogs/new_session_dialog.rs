@@ -846,6 +846,18 @@ mod tests {
     }
 
     #[test]
+    fn a_short_dialog_gives_the_rows_kept_for_an_error_to_a_tall_prompt() {
+        let (mut dialog, _service) =
+            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
+
+        dialog.paste(DialogFixture::SEVEN_LINES);
+
+        let shown = DialogFixture::text_at(&dialog, DialogFixture::COMPACT_HEIGHT);
+        assert!(shown.contains("Prompt    five\n          six\n          seven\n\n"));
+        assert!(shown.ends_with(DialogFixture::PROMPT_HINTS));
+    }
+
+    #[test]
     fn a_short_dialog_without_an_error_keeps_every_field() {
         let (dialog, _service) =
             DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
