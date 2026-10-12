@@ -78,6 +78,14 @@ mod tests {
             rows.iter().any(|row| row.contains(EmptyState::LOGO[1]))
         }
 
+        fn logo_top_left(rows: &[String]) -> (usize, usize) {
+            let top = rows
+                .iter()
+                .position(|row| row.contains(EmptyState::LOGO[0]))
+                .unwrap();
+            (top, rows[top].find(EmptyState::LOGO[0]).unwrap())
+        }
+
         fn drawn_rows(rows: &[String]) -> Vec<&str> {
             rows.iter()
                 .map(|row| row.trim())
@@ -90,14 +98,20 @@ mod tests {
     fn the_logo_rows_start_in_the_same_column() {
         let rows = ScreenFixture::rows(81, 10);
 
-        let top = rows
-            .iter()
-            .position(|row| row.contains(EmptyState::LOGO[0]))
-            .unwrap();
-        let indent = rows[top].find(EmptyState::LOGO[0]).unwrap();
+        let (top, indent) = ScreenFixture::logo_top_left(&rows);
         for (row, expected) in rows[top..].iter().zip(EmptyState::LOGO) {
             assert_eq!(&row[indent..indent + expected.len()], expected);
         }
+    }
+
+    #[test]
+    fn the_logo_and_message_are_centered_in_the_area() {
+        let rows = ScreenFixture::rows(81, 10);
+
+        assert_eq!(
+            ScreenFixture::logo_top_left(&rows),
+            ((10 - 8) / 2, (81 - 62) / 2)
+        );
     }
 
     #[test]
