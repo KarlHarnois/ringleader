@@ -200,15 +200,14 @@ mod tests {
         }
 
         fn on_branch(name: &str, branch: &str) -> ServiceFixture {
-            let session = ServiceFixture::session_on_branch(name, branch);
-            ServiceFixture::new()
-                .with_registry(FakeSessionRegistry::with_sessions(vec![session.clone()]))
-                .with_workspace(ServiceFixture::workspace_for(&[&session]))
-                .with_host(ServiceFixture::host_for(&[&session]))
+            Self::registered(ServiceFixture::session_on_branch(name, branch))
         }
 
         fn stopped(name: &str) -> ServiceFixture {
-            let session = ServiceFixture::session(name);
+            Self::registered(ServiceFixture::session(name))
+        }
+
+        fn registered(session: Session) -> ServiceFixture {
             ServiceFixture::new()
                 .with_registry(FakeSessionRegistry::with_sessions(vec![session.clone()]))
                 .with_workspace(ServiceFixture::workspace_for(&[&session]))

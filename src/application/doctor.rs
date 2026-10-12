@@ -223,10 +223,7 @@ mod tests {
 
         fn healthy() -> ServiceFixture {
             let session = Self::session();
-            ServiceFixture::new()
-                .with_sessions(std::slice::from_ref(&session))
-                .with_workspace(ServiceFixture::workspace_for(&[&session]))
-                .with_host(ServiceFixture::host_for(&[&session]))
+            Self::with_session(&session, ServiceFixture::workspace_for(&[&session]))
         }
 
         fn lines(fixture: &ServiceFixture) -> Vec<String> {
