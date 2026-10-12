@@ -1,5 +1,5 @@
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::widgets::Paragraph;
@@ -7,6 +7,7 @@ use ratatui::widgets::Paragraph;
 use super::agent_picker::AgentPicker;
 use super::dialog_labels::DialogLabels;
 use super::new_session_field::NewSessionField;
+use super::new_session_layout::NewSessionLayout;
 use super::prompt_field::PromptField;
 use super::repo_picker::RepoPicker;
 use super::text_field::TextField;
@@ -24,8 +25,7 @@ pub struct NewSessionView<'a> {
 
 impl<'a> NewSessionView<'a> {
     const CURSOR: char = '█';
-    const FIXED_LINES: usize = 7;
-    const PROMPT_ROWS: u16 = 1;
+    const NAME_ROWS: usize = 1;
 
     pub fn new(
         name: &'a TextField,
@@ -55,25 +55,29 @@ impl<'a> NewSessionView<'a> {
     }
 
     pub fn render(&self, frame: &mut Frame, area: Rect, labels: DialogLabels, theme: &Theme) {
-        let field_width = labels.field_width(area);
-        let upper = self.upper_lines(field_width, self.repo_room(area), labels, theme);
-        let upper_rows = u16::try_from(upper.len()).unwrap_or(u16::MAX);
-        let [upper_area, prompt_area, lower_area] = Layout::vertical([
-            Constraint::Length(upper_rows),
-            Constraint::Length(Self::PROMPT_ROWS),
-            Constraint::Fill(1),
-        ])
-        .areas(area);
+        let errors = TextFit::new(self.error).styled_lines(usize::from(area.width), theme.error());
+        let layout = self.layout(area, labels, errors.len(), theme);
+        let upper = self.upper_lines(labels.field_width(area), layout.repo_room(), labels, theme);
+        let [upper_area, prompt_area, error_area, hints_area] = layout.areas(upper.len());
         frame.render_widget(Paragraph::new(upper), upper_area);
         let cursor_style = self.focus_style(NewSessionField::Prompt, theme);
         self.prompt.render(frame, prompt_area, labels, cursor_style);
-        let lower = self.lower_lines(usize::from(area.width), theme);
-        frame.render_widget(Paragraph::new(lower), lower_area);
+        frame.render_widget(Paragraph::new(errors), error_area);
+        frame.render_widget(Line::styled(self.hints(), theme.dim()), hints_area);
     }
 
-    fn repo_room(&self, area: Rect) -> usize {
-        let fixed_lines = Self::FIXED_LINES + self.agents.height(self.agents_expanded());
-        usize::from(area.height).saturating_sub(fixed_lines)
+    fn layout(
+        &self,
+        area: Rect,
+        labels: DialogLabels,
+        error_rows: usize,
+        theme: &Theme,
+    ) -> NewSessionLayout {
+        let field_width = labels.field_width(area);
+        let fixed_rows = Self::NAME_ROWS + self.agents.height(self.agents_expanded());
+        NewSessionLayout::new(area, error_rows)
+            .with_upper_rows(fixed_rows, self.repos.fewest_rows(field_width, theme))
+            .with_prompt_rows(self.prompt.rows(field_width))
     }
 
     fn upper_lines(
@@ -91,13 +95,6 @@ impl<'a> NewSessionView<'a> {
         let mut lines = labels.labeled(NewSessionField::Name.label(), vec![name_line]);
         lines.extend(labels.labeled(NewSessionField::Repo.label(), repo_lines));
         lines.extend(labels.labeled(NewSessionField::Agent.label(), agent_lines));
-        lines
-    }
-
-    fn lower_lines(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
-        let mut lines = vec![Line::from("")];
-        lines.extend(TextFit::new(self.error).styled_lines(width, theme.error()));
-        lines.push(Line::styled(self.hints(), theme.dim()));
         lines
     }
 

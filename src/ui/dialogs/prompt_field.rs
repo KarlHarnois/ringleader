@@ -4,8 +4,8 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Position, Rect};
 use ratatui::style::Style;
 use ratatui::text::Line;
-use ratatui::widgets::Paragraph;
-use ratatui_textarea::{TextArea, WrapMode};
+use ratatui::widgets::{Paragraph, Widget};
+use ratatui_textarea::{CursorMove, TextArea, WrapMode};
 
 use super::dialog_labels::DialogLabels;
 use super::new_session_field::NewSessionField;
@@ -25,8 +25,11 @@ impl Default for PromptField {
 }
 
 impl PromptField {
+    const MOST_ROWS: usize = 6;
     const LINE_BREAK_KEY: char = 'j';
     const CURSOR_COLUMN_WIDTH: u16 = 1;
+    const PROBE_HEIGHT: u16 = 1;
+    const TEXT_END: CursorMove = CursorMove::Jump(u16::MAX, u16::MAX);
 
     pub fn value(&self) -> String {
         self.editor.lines().join("\n")
@@ -45,6 +48,13 @@ impl PromptField {
         self.editor.insert_str(unix_line_breaks);
     }
 
+    pub fn rows(&self, field_width: usize) -> usize {
+        let width = u16::try_from(field_width).unwrap_or(u16::MAX);
+        let field = Rect::new(0, 0, width, Self::PROBE_HEIGHT);
+        self.wrapped_rows(Self::text_area(field))
+            .min(Self::MOST_ROWS)
+    }
+
     pub fn render(&self, frame: &mut Frame, area: Rect, labels: DialogLabels, cursor_style: Style) {
         let label = labels.labeled(NewSessionField::Prompt.label(), vec![Line::default()]);
         frame.render_widget(Paragraph::new(label), area);
@@ -55,6 +65,13 @@ impl PromptField {
 
     fn breaks_line(key: &KeyEvent) -> bool {
         key.code == KeyCode::Char(Self::LINE_BREAK_KEY) && key.modifiers == KeyModifiers::CONTROL
+    }
+
+    fn wrapped_rows(&self, text: Rect) -> usize {
+        let mut probe = self.editor.clone();
+        (&probe).render(text, &mut Buffer::empty(text));
+        probe.move_cursor(Self::TEXT_END);
+        probe.screen_cursor().row + 1
     }
 
     fn text_area(field: Rect) -> Rect {

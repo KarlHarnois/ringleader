@@ -208,6 +208,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │       ├── text_field.rs            # TextField, typing and paste rules for name and path fields
     │       ├── new_session_dialog.rs    # NewSessionDialog
     │       ├── new_session_view.rs      # NewSessionView, draws the n dialog's fields, error, and hints into its area
+    │       ├── new_session_layout.rs    # NewSessionLayout, the rows the n dialog gives its repo search, prompt, and error
     │       ├── prompt_field.rs          # PromptField, the n dialog's multiline prompt on ratatui-textarea
     │       ├── new_session_field.rs     # NewSessionField, the n dialog's fields in Tab order with their labels and hints
     │       ├── repo_picker.rs           # RepoPicker, the n dialog's Repo field and its search
