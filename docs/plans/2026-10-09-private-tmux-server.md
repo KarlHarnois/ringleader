@@ -61,6 +61,7 @@ The renderer is a new adapter, `TmuxServerConfig` in `src/adapters/tmux_server_c
 ```
 set -su terminal-features
 source-file -q '<config home>/ringleader/tmux.conf'
+set -g key-table root
 set -g prefix None
 set -g prefix2 None
 set -g status off
@@ -200,6 +201,9 @@ Where the implementation departs from the text above:
 - The hand commands for an entry on an earlier server give `tmux -S <socket> switch-client` for use inside that tmux next to the `attach` that section 3.6 names, because tmux refuses that `attach` from a pane of the same server.
 - A live `t` repeats the D5 own-pane check that attach makes, since the TUI only warns when the startup check fails for a reason other than a conflict.
 - Help, doctor, the README, and the template say that the user's tmux must not use the return key as its prefix either, since an outer prefix swallows it too.
+- The generated config sets `key-table root` after the user file, since a session key table set there would hide the root return binding while the post-create check still passed.
+- The launch-directory delete guard applies to a full delete and its measurement, not to `delete --forget`, which removes nothing on disk.
+- The status bar wraps a long message or note over up to a quarter of the terminal height, so the hand commands fit. The earlier-server note leads with the `kill-session` command.
 
 ## 5. What goes away
 
