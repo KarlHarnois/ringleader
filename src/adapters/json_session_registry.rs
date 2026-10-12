@@ -18,7 +18,7 @@ pub struct JsonSessionRegistry {
 }
 
 impl JsonSessionRegistry {
-    pub const SCHEMA_VERSION: u64 = 1;
+    pub const SCHEMA_VERSION: u64 = 2;
 
     pub fn new(path: &Path, clock: Arc<dyn Clock>) -> Self {
         Self {
@@ -120,7 +120,6 @@ struct SessionEntry {
     socket_path: PathBuf,
     created_at: u64,
     worktree_root: PathBuf,
-    branch_prefix: String,
     tmux_prefix: String,
 }
 
@@ -139,7 +138,6 @@ impl SessionEntry {
             socket_path: session.socket_path().to_path_buf(),
             created_at: session.created_at(),
             worktree_root: naming.worktree_root().to_path_buf(),
-            branch_prefix: naming.branch_prefix().to_string(),
             tmux_prefix: naming.tmux_prefix().to_string(),
         }
     }
@@ -152,7 +150,7 @@ impl SessionEntry {
         );
         let registration = Registration::new(
             TmuxAddress::new(&self.tmux_session_name, &self.socket_path),
-            NamingScheme::new(&self.worktree_root, &self.branch_prefix, &self.tmux_prefix),
+            NamingScheme::new(&self.worktree_root, &self.tmux_prefix),
             self.created_at,
         );
         Some(Session::new(
@@ -169,6 +167,7 @@ mod tests {
     use crate::test_support::{FakeClock, ServiceFixture};
 
     const FIXTURE: &str = include_str!("../../tests/fixtures/sessions.json");
+    const VERSION_ONE: &str = include_str!("../../tests/fixtures/sessions-v1.json");
 
     struct RegistryFixture {
         directory: tempfile::TempDir,
@@ -220,16 +219,26 @@ mod tests {
     }
 
     #[test]
-    fn entries_recorded_on_the_users_tmux_server_load_with_their_sockets() {
-        let fixture = RegistryFixture::with_contents(FIXTURE);
+    fn a_version_one_registry_loads_its_prefixed_branches() {
+        let fixture = RegistryFixture::with_contents(VERSION_ONE);
 
         let sessions = fixture.registry().load().unwrap();
 
-        assert!(
-            sessions
-                .iter()
-                .all(|session| session.socket_path() == Path::new("/tmp/tmux-1000/default"))
-        );
+        assert_eq!(sessions[0].branch(), "ringleader/fix-auth");
+    }
+
+    #[test]
+    fn saving_a_loaded_version_one_registry_writes_version_two() {
+        let fixture = RegistryFixture::with_contents(VERSION_ONE);
+        let registry = fixture.registry();
+        let sessions = registry.load().unwrap();
+
+        registry.save(&sessions).unwrap();
+
+        let text = fs::read_to_string(fixture.path()).unwrap();
+        let saved: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(saved["version"], 2);
+        assert!(saved["sessions"][0].get("branch_prefix").is_none());
     }
 
     #[test]
@@ -294,7 +303,7 @@ mod tests {
             error,
             RegistryError::NewerSchema {
                 found: 9,
-                supported: 1
+                supported: 2
             }
         );
         assert_eq!(fs::read_to_string(fixture.path()).unwrap(), newer);

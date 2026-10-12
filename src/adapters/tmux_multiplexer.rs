@@ -1,8 +1,10 @@
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use super::agent_launcher::{LauncherCommand, PreparedLaunch};
 use super::private_server::PrivateServer;
+use super::tmux_agent_input::TmuxAgentInput;
 use super::tmux_command::TmuxCommand;
 use super::tmux_error::TmuxError;
 use super::tmux_launch::{Launched, TmuxLaunch};
@@ -22,6 +24,7 @@ pub struct TmuxMultiplexer {
 
 impl TmuxMultiplexer {
     const MISSING_SESSION: &'static str = "can't find session";
+    const STARTUP_PATIENCE: Duration = Duration::from_secs(10);
 
     pub fn new(tmux: TmuxCommand, launcher: LauncherCommand) -> Self {
         Self { tmux, launcher }
@@ -100,6 +103,25 @@ impl TmuxMultiplexer {
         let launched = launcher.run(&sequence, output)?;
         let current_pane = launched.done_values().first().map(|pane| pane.to_string());
         Ok(launcher.settle_agent_tag(&launched, &current_pane.unwrap_or_default())?)
+    }
+
+    fn type_into_agent(
+        &self,
+        tmux_name: &str,
+        lines: &[String],
+        patience: Duration,
+    ) -> Result<(), MultiplexerError> {
+        let pane = self.required_agent_pane(tmux_name)?;
+        TmuxAgentInput::new(&self.tmux, patience)
+            .type_when_ready(&pane, lines)
+            .map_err(|error| error.in_session(tmux_name))
+    }
+
+    fn required_agent_pane(&self, tmux_name: &str) -> Result<String, MultiplexerError> {
+        self.agent_pane(tmux_name)?
+            .ok_or_else(|| MultiplexerError::NoAgentPane {
+                tmux_name: tmux_name.to_string(),
+            })
     }
 
     fn agent_pane(&self, tmux_name: &str) -> Result<Option<String>, MultiplexerError> {
@@ -244,11 +266,7 @@ impl Multiplexer for TmuxMultiplexer {
     }
 
     fn capture_pane(&self, tmux_name: &str) -> Result<String, MultiplexerError> {
-        let pane = self
-            .agent_pane(tmux_name)?
-            .ok_or_else(|| MultiplexerError::NoAgentPane {
-                tmux_name: tmux_name.to_string(),
-            })?;
+        let pane = self.required_agent_pane(tmux_name)?;
         let output = self.tmux.query(&TmuxScripts::capture(&pane))?;
         if !output.succeeded() && output.stdout().is_empty() {
             return Err(TmuxError::failed("capture-pane", &output).into());
@@ -269,6 +287,14 @@ impl Multiplexer for TmuxMultiplexer {
     fn respawn_agent(&self, tmux_name: &str, launch: &AgentLaunch) -> Result<(), MultiplexerError> {
         let prepared = self.prepare(launch)?;
         Self::discarding_on_failure(&prepared, self.revive_agent(tmux_name, launch, &prepared))
+    }
+
+    fn type_when_ready(&self, tmux_name: &str, lines: &[String]) -> Result<(), MultiplexerError> {
+        self.type_into_agent(tmux_name, lines, Self::STARTUP_PATIENCE)
+    }
+
+    fn type_if_ready(&self, tmux_name: &str, lines: &[String]) -> Result<(), MultiplexerError> {
+        self.type_into_agent(tmux_name, lines, Duration::ZERO)
     }
 
     fn ensure_shell_window(
@@ -1145,6 +1171,66 @@ mod tests {
         });
 
         assert!(captured);
+    }
+
+    #[test]
+    fn typed_input_reaches_the_agent_pane_at_its_prompt() {
+        let fixture = MultiplexerFixture::with_holder();
+        let multiplexer = TmuxMultiplexer::new(
+            fixture.server.command(),
+            fixture.server.launcher(
+                ["sh", "-c", "printf '> '; exec cat", "--"]
+                    .map(OsString::from)
+                    .to_vec(),
+            ),
+        );
+        multiplexer
+            .create_session(&fixture.spec("fix-auth"))
+            .unwrap();
+
+        multiplexer
+            .type_when_ready("ringleader-fix-auth", &["hello fix-auth".to_string()])
+            .unwrap();
+
+        let typed = fixture.server.wait_for(|| {
+            multiplexer
+                .capture_pane("ringleader-fix-auth")
+                .is_ok_and(|text| text.contains("hello fix-auth"))
+        });
+        assert!(typed);
+    }
+
+    #[test]
+    fn an_agent_away_from_its_prompt_is_reported_by_session_name() {
+        let fixture = MultiplexerFixture::with_holder();
+        fixture.create("fix-auth").unwrap();
+
+        let typed = fixture
+            .server
+            .multiplexer()
+            .type_if_ready("ringleader-fix-auth", &["/rename fix-auth".to_string()]);
+
+        assert_eq!(
+            typed,
+            Err(MultiplexerError::AgentNotReady {
+                tmux_name: "ringleader-fix-auth".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn typing_after_a_rename_checks_the_prompt_without_waiting() {
+        let fixture = MultiplexerFixture::with_holder();
+        fixture.create("fix-auth").unwrap();
+        let started = Instant::now();
+
+        let typed = fixture
+            .server
+            .multiplexer()
+            .type_if_ready("ringleader-fix-auth", &["/rename fix-auth".to_string()]);
+
+        assert!(typed.is_err());
+        assert!(started.elapsed() < TmuxMultiplexer::STARTUP_PATIENCE);
     }
 
     #[test]

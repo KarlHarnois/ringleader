@@ -9,7 +9,6 @@ use crate::domain::{Agent, ConfigDraft, RepoDraft};
 #[serde(default)]
 pub struct RawConfig {
     worktree_root: Option<PathBuf>,
-    branch_prefix: Option<String>,
     return_key: Option<String>,
     state_poll_ms: Option<u64>,
     preview_refresh_ms: Option<u64>,
@@ -36,9 +35,6 @@ impl RawConfig {
         let mut draft = self.timing_into(defaults);
         if let Some(root) = &self.worktree_root {
             draft = draft.worktree_root(&home.path(root));
-        }
-        if let Some(prefix) = &self.branch_prefix {
-            draft = draft.branch_prefix(prefix);
         }
         if let Some(key) = &self.return_key {
             draft = draft.return_key(key);
@@ -110,6 +106,10 @@ struct RawAgent {
     set_env: BTreeMap<String, String>,
     #[serde(default)]
     prompt_args: Vec<String>,
+    #[serde(default)]
+    startup_input: Vec<String>,
+    #[serde(default)]
+    rename_input: Vec<String>,
 }
 
 impl RawAgent {
@@ -119,6 +119,8 @@ impl RawAgent {
             .with_env_names(&self.env)
             .with_env_assignments(&self.expanded_assignments(home))
             .with_prompt_args(&self.prompt_args)
+            .with_startup_input(&self.startup_input)
+            .with_rename_input(&self.rename_input)
     }
 
     fn expanded_assignments(&self, home: &HomeExpansion) -> Vec<(String, String)> {

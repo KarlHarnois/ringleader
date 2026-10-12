@@ -20,7 +20,6 @@ impl<'a> MetadataCheck<'a> {
     ) -> Option<&'o SessionMetadata> {
         observation.metadata().filter(|metadata| {
             metadata.has_absolute_paths()
-                && naming.owns_branch(metadata.branch())
                 && self
                     .containment
                     .contains(naming.worktree_root(), metadata.worktree_path())

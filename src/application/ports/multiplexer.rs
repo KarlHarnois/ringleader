@@ -23,6 +23,8 @@ pub trait Multiplexer {
         metadata: &SessionMetadata,
     ) -> Result<(), MultiplexerError>;
     fn respawn_agent(&self, tmux_name: &str, launch: &AgentLaunch) -> Result<(), MultiplexerError>;
+    fn type_when_ready(&self, tmux_name: &str, lines: &[String]) -> Result<(), MultiplexerError>;
+    fn type_if_ready(&self, tmux_name: &str, lines: &[String]) -> Result<(), MultiplexerError>;
     fn ensure_shell_window(
         &self,
         tmux_name: &str,
@@ -173,6 +175,8 @@ pub enum MultiplexerError {
     ServerFiles { detail: String },
     #[error("cannot find the agent pane of tmux session {tmux_name}")]
     NoAgentPane { tmux_name: String },
+    #[error("the agent in tmux session {tmux_name} is not at its prompt")]
+    AgentNotReady { tmux_name: String },
     #[error("cannot write the agent handoff file: {detail}")]
     Handoff { detail: String },
 }

@@ -8,6 +8,7 @@ This file is the living reference for agents working in this repository.
 - Comments are failures to express intent in code. Every comment is a signal, not documentation: revisit the code it explains and improve it until the comment is unnecessary, then delete it. Rename the variable, extract the function, introduce the type, or restructure the control flow. Never add a comment to justify messy code or to stand in for a better name. The only surviving comments are these exceptions: legal headers, non-obvious intent that cannot be encoded in structure, warnings of real consequences, and TODOs that reference a tracked issue. Doc comments are comments and follow the same rule. When a comment seems to survive, stop and justify it to the project owner before committing, and never announce it in the commit body. If the justification against an exception is not convincing, delete the comment and fix the code. A commit that adds an unjustified comment is not done.
 - Write object-oriented Rust: state in structs with private fields, behavior in `impl` blocks, traits as interfaces, composition over inheritance, dependencies injected through constructors. No public data fields and no free functions except `main` and `#[test]` functions, which Rust requires to be free. A test helper that is not a `#[test]` function is a method or associated function of a fixture struct. A fixture struct used by one file's tests lives in that file's `mod tests`, and one shared across files lives in `src/test_support/` with a tree entry.
 - Names reveal intent. Types are nouns, methods that act are verbs, and accessors are named after what they return. No abbreviations, no number series, no noise words, and no magic numbers or strings: a value whose meaning is not obvious becomes a named constant. Files are named after their primary type in snake case.
+- When a type's role matches an established pattern, name it after that pattern instead of inventing a name. The sign to look for one is a first name that is a gerund, or that says how the type works rather than what role it plays. User-configured actions that run when an event happens are hooks, so the type that runs them is `AgentHooks` with `after_start` and `after_rename`, not `AgentTyping`. This codebase already names adapters, guards, plans, requests, fakes, and fixtures this way. When no pattern fits, name the type after its domain role. Never reshape a type to fit a pattern, and never give a type a pattern name for a role it does not play.
 - Build, test, and run every tool inside `nix develop`. The host `PATH` may carry other versions of `cargo`, `rustc`, and `tmux`, so never rely on what the host provides. `.envrc` loads the same dev shell through direnv with `use flake` once `direnv allow` has been run in the repository. The commands below keep `nix develop -c`, so they also work without direnv.
 - Stage each new file by path with `git add` before running any `nix` command, because `nix develop`, `nix build`, and `nix flake check` ignore files outside the git index.
 - Every ad-hoc tmux command, such as a binding experiment, runs as `env -u TMUX -u TMUX_PANE tmux -u -S <tempdir>/x.sock -f /dev/null ...` and ends with `kill-server` on that socket. `nix develop` passes `$TMUX` through, so a bare `tmux` command reaches the user's live server. Never touch the default server, the server named in `$TMUX`, or the owner's real Ringleader server at `$XDG_RUNTIME_DIR/ringleader/tmux/tmux.sock`. Keep the socket path under 100 bytes, because tmux rejects a longer one with `File name too long`. Use a directory from `mktemp -d` under `/tmp`.
@@ -22,7 +23,7 @@ This file is the living reference for agents working in this repository.
 - The hermetic git environment is `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_NOSYSTEM=1`, `HOME=<tempdir>`, and fake `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME`, and `GIT_COMMITTER_EMAIL` values. Fixture repos are created with `git init -b <branch>`, never relying on `init.defaultBranch`.
 - The private GitHub repository exists and is configured as `origin`. Do not create another repository or add another remote. Push only when the project owner asks.
 - Keep the repository consumer-agnostic. Never reference or assume any specific downstream setup, local directory layout, or personal configuration. Examples and fixtures use generic names such as `example-project`.
-- Human-facing prose uses "Ringleader". Identifiers stay lowercase: binary, crate, repo, flake input, config paths, tmux and branch prefixes, JSON fields.
+- Human-facing prose uses "Ringleader". Identifiers stay lowercase: binary, crate, repo, flake input, config paths, the tmux prefix, JSON fields. The git config marker `ringleaderManaged` keeps git's camelCase.
 
 ## Commands
 
@@ -81,7 +82,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── config.rs             # Config, the parsed config.toml
     │   ├── config_draft.rs       # ConfigDraft, the raw config values the Config constructor checks
     │   ├── config_checks.rs      # ConfigChecks, the checks every config load runs
-    │   ├── naming_scheme.rs      # NamingScheme, the worktree root and prefixes a session records
+    │   ├── naming_scheme.rs      # NamingScheme, the worktree root and tmux prefix a session records
     │   └── return_key.rs         # ReturnKey, the key that detaches from a session back to Ringleader
     ├── application/
     │   ├── mod.rs
@@ -96,10 +97,14 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── creation_plan.rs      # CreationPlan and CreateRequest
     │   ├── use_checks.rs         # UseChecks, the checks a create or a restart runs before acting
     │   ├── session_renaming.rs   # SessionRenaming: rename_session with its branch rollback
+    │   ├── rename_request.rs     # RenameRequest, the old and new names and whether the branch stays
+    │   ├── branch_availability.rs # BranchAvailability, refuses a branch name that exists or holds other branches, for create and rename
     │   ├── session_restart.rs    # SessionRestart: restart of an Exited or Stopped session
+    │   ├── agent_hooks.rs        # AgentHooks, types an agent's startup and rename input after a start or a rename
     │   ├── worktree_inspection.rs # WorktreeInspection, the worktree checks restart, delete, and doctor share
     │   ├── session_deletion.rs   # SessionDeletion: delete_session steps 5 to 8 and forget
     │   ├── deletion_guards.rs    # DeletionGuards: delete_session steps 2 to 4
+    │   ├── branch_ownership.rs   # BranchOwnership, refuses to delete or rename a branch without the Ringleader marker
     │   ├── delete_impact.rs      # DeleteImpact and DeleteConfirmation
     │   ├── delete_outcome.rs     # DeleteOutcome
     │   ├── worktree_containment.rs # WorktreeContainment, shared by delete step 3 and reconciliation
@@ -122,11 +127,13 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── doctor_report.rs      # DoctorReport, the doctor's info, warning, and problem lines
     │   ├── registry_audit.rs     # RegistryAudit, the doctor's checks of each registry entry
     │   ├── stopped_entry_audit.rs # StoppedEntryAudit, the doctor's checks of a stopped entry: the tmux server processes in its worktree and claims on it
+    │   ├── orphan_audit.rs       # OrphanAudit, the doctor's search for worktrees and marked branches no session claims
     │   ├── server_audit.rs       # ServerAudit, the doctor's checks of Ringleader's tmux server and the return key
     │   └── ports/
     │       ├── mod.rs
     │       ├── session_registry.rs   # SessionRegistry trait
     │       ├── workspace.rs          # Workspace trait
+    │       ├── branch_marker.rs      # BranchMarker, the git config entry that marks a branch Ringleader created
     │       ├── dirty_state.rs        # DirtyState, the uncommitted files and nested repos of a worktree
     │       ├── unmerged_commits.rs   # UnmergedCommits, commits on no other ref with the tip and HEAD
     │       ├── multiplexer.rs        # Multiplexer trait
@@ -157,7 +164,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── git_runner.rs         # GitRunner, runs a GitInvocation through BoundedCommand
     │   ├── git_invocation.rs     # GitInvocation, one git call with its child environment
     │   ├── git_porcelain.rs      # GitPorcelain, parses git's machine-readable output
-    │   ├── git_branches.rs       # GitBranches: compare-and-swap delete, rename, listing
+    │   ├── git_branches.rs       # GitBranches: compare-and-swap delete, rename, and the managed-branch marker
     │   ├── start_point_resolver.rs # StartPointResolver, the base branch ladder
     │   ├── submodule_commits.rs  # SubmoduleCommits, the submodule walk of unmerged_commits
     │   ├── system_clock.rs       # SystemClock, reads `SystemTime`
@@ -173,6 +180,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── tmux_output.rs        # TmuxOutput, labeled lines and the zero-session errors
     │   ├── tmux_scripts.rs       # TmuxScripts, every tmux command sequence the multiplexer sends, exact targets, start directories
     │   ├── tmux_launch.rs        # TmuxLaunch, ringleader-created and ringleader-done handling, rollback, tag move
+    │   ├── tmux_agent_input.rs   # TmuxAgentInput, waits for the agent's prompt and types lines into its pane
     │   ├── tmux_listing.rs       # TmuxListing, parses list-panes, list-windows, list-keys, and server rows
     │   ├── tmux_multiplexer.rs   # TmuxMultiplexer
     │   ├── private_server.rs     # PrivateServer, the private server's config files, return binding check, state, and config reapply
@@ -206,8 +214,11 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │       ├── dialog.rs                # Dialog, the open dialog, its key routing and placement
     │       ├── dialog_slot.rs           # DialogSlot, the dialog App shows, if any
     │       ├── dialog_labels.rs         # DialogLabels, full or abbreviated field labels
-    │       ├── text_field.rs            # TextField, typing and paste rules for name, prompt, and path fields
+    │       ├── text_field.rs            # TextField, typing and paste rules for name and path fields
     │       ├── new_session_dialog.rs    # NewSessionDialog
+    │       ├── new_session_view.rs      # NewSessionView, draws the n dialog's fields, error, and hints into its area
+    │       ├── new_session_layout.rs    # NewSessionLayout, the rows the n dialog gives its repo search, prompt, and error
+    │       ├── prompt_field.rs          # PromptField, the n dialog's multiline prompt on ratatui-textarea
     │       ├── new_session_field.rs     # NewSessionField, the n dialog's fields in Tab order with their labels and hints
     │       ├── repo_picker.rs           # RepoPicker, the n dialog's Repo field and its search
     │       ├── chosen_repo.rs           # ChosenRepo, the default repo until the search picks another
@@ -259,6 +270,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
 - Key bindings come only from the generated config of the private tmux server, which `create_session` writes, and which the TUI at start and after `r`, `new`, and `restart` re-source on the running server when its `@ringleader_config` hash differs from the current render. Only lock holders do either, so only one process ever writes that config, and the reapply is skipped while the config failed to load. Every tmux call passes `-S <private socket>` and `-f`, so Ringleader never reads or writes the user's tmux server. An entry recorded on another socket is checked only through `/proc`. The TUI and the CLI attach through the same foreground child.
 - Blocking TUI operations (create, delete, rename, restart, and the delete measurement) run behind a busy message, and the event loop drops the key and paste events queued while they ran.
 - Logs go to `$XDG_STATE_HOME/ringleader/app.log` through `env_logger`, never to the terminal.
+- `AgentHooks` types an agent's `startup_input` after create and restart, waiting up to 10 seconds for its prompt, and its `rename_input` after a rename only when the agent is at its prompt at that moment. Each later line waits up to 2 seconds for the prompt to come back, after a short pause that lets the agent take the line before it. An agent is at its prompt when its pane is out of copy mode, shows the cursor, and the text before the cursor on its row is a bare prompt marker and a blank, with no letters or digits. Copy mode would take the keys instead of the agent. Claude hides the cursor in its trust and permission dialogs, an agent still starting has drawn no marker, and an unsent draft puts its text before the cursor. A skipped or failed typing is logged and never fails the use case.
 
 ## CLI exit codes
 

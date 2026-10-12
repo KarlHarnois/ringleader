@@ -83,8 +83,10 @@ impl CreationPlan {
         agent: &Agent,
         config: &Config,
     ) -> Result<Self, InvalidName> {
+        let name = SessionName::new(&request.name)?;
         Ok(Self {
-            name: SessionName::new(&request.name)?,
+            argv: agent.launch_argv(&name, &request.prompt),
+            name,
             repo: request.repo.clone(),
             base_branch: request
                 .base_branch
@@ -92,7 +94,6 @@ impl CreationPlan {
                 .or_else(|| request.repo.base_branch().cloned()),
             naming: config.naming().clone(),
             agent: agent.clone(),
-            argv: agent.launch_argv(&request.prompt),
             removed_env_names: config.agent_env_union(),
             size: config.session_size(),
             return_key: config.return_key().clone(),
@@ -100,16 +101,16 @@ impl CreationPlan {
     }
 
     pub fn rooted_at(self, worktree_root: &Path) -> Self {
-        let naming = NamingScheme::new(
-            worktree_root,
-            self.naming.branch_prefix(),
-            self.naming.tmux_prefix(),
-        );
+        let naming = NamingScheme::new(worktree_root, self.naming.tmux_prefix());
         Self { naming, ..self }
     }
 
     pub fn name(&self) -> &SessionName {
         &self.name
+    }
+
+    pub fn agent(&self) -> &Agent {
+        &self.agent
     }
 
     pub fn repo_path(&self) -> &Path {

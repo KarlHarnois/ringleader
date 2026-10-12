@@ -14,6 +14,10 @@ impl Theme {
         self.base().add_modifier(Modifier::REVERSED)
     }
 
+    pub fn selected_text(&self) -> Style {
+        self.base().add_modifier(Modifier::UNDERLINED)
+    }
+
     pub fn dim(&self) -> Style {
         self.base().add_modifier(Modifier::DIM)
     }

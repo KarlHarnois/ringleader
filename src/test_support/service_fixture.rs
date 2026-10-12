@@ -192,6 +192,17 @@ impl ServiceFixture {
             .with_prompt_args(&["{prompt}".to_string()])
     }
 
+    pub fn agent_with_input() -> Agent {
+        Self::agent()
+            .with_args(&["--name".to_string(), "{name}".to_string()])
+            .with_startup_input(&["/color".to_string()])
+            .with_rename_input(&["/rename {name}".to_string()])
+    }
+
+    pub fn config_with_input() -> Config {
+        Self::config().with_agents(vec![Self::agent_with_input()])
+    }
+
     pub fn config() -> Config {
         Config::defaults(Path::new(Self::WORKTREE_ROOT)).with_agents(vec![Self::agent()])
     }
@@ -287,6 +298,7 @@ impl ServiceFixture {
                         .at_head(Self::TIP),
                 )
                 .with_branch(repo, session.branch(), Self::TIP)
+                .with_marker(repo, session.branch())
         })
     }
 

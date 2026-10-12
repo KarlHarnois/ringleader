@@ -83,17 +83,34 @@ impl GitTestRepo {
     }
 
     pub fn try_git(&self, directory: &Path, args: &[&str]) -> Output {
-        let mut command = Command::new("git");
-        command.envs(self.environment());
-        for name in GitInvocation::REPOSITORY_LOCAL_VARIABLES {
-            command.env_remove(name);
-        }
-        command
+        self.hermetic("git")
             .arg("-C")
             .arg(directory)
             .args(args)
             .output()
             .expect("git runs")
+    }
+
+    pub fn shell(&self, line: &str) {
+        let output = self
+            .hermetic("sh")
+            .args(["-c", line])
+            .output()
+            .expect("sh runs");
+        assert!(
+            output.status.success(),
+            "sh -c {line:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn hermetic(&self, program: &str) -> Command {
+        let mut command = Command::new(program);
+        command.envs(self.environment());
+        for name in GitInvocation::REPOSITORY_LOCAL_VARIABLES {
+            command.env_remove(name);
+        }
+        command
     }
 
     pub fn commit(&self, directory: &Path, file: &str) -> String {

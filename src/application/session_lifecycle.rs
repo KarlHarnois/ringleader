@@ -7,6 +7,7 @@ use super::delete_impact::{DeleteConfirmation, DeleteImpact};
 use super::delete_outcome::DeleteOutcome;
 use super::ports::{HostProbe, Multiplexer};
 use super::reconciliation::{ManagedRow, Reconciliation};
+use super::rename_request::RenameRequest;
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
 use super::session_creation::SessionCreation;
@@ -100,12 +101,11 @@ impl SessionLifecycle {
     pub fn rename(
         &self,
         reconciliation: &Reconciliation,
-        old: &str,
-        new: &str,
-        keep_branch: bool,
+        request: &RenameRequest,
+        config: &Config,
     ) -> Result<Session, ServiceError> {
-        let row = self.quiet_target(reconciliation, old)?;
-        self.renaming.rename(&row, new, keep_branch, reconciliation)
+        let row = self.quiet_target(reconciliation, request.old_name())?;
+        self.renaming.rename(&row, request, reconciliation, config)
     }
 
     fn deletable_target<'r>(

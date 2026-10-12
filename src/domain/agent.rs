@@ -1,3 +1,5 @@
+use super::session_name::SessionName;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Agent {
     name: String,
@@ -6,10 +8,13 @@ pub struct Agent {
     env_names: Vec<String>,
     env_assignments: Vec<(String, String)>,
     prompt_args: Vec<String>,
+    startup_input: Vec<String>,
+    rename_input: Vec<String>,
 }
 
 impl Agent {
     pub const PROMPT_PLACEHOLDER: &'static str = "{prompt}";
+    pub const NAME_PLACEHOLDER: &'static str = "{name}";
     const BASELINE_VARIABLES: [&'static str; 33] = [
         "PATH",
         "HOME",
@@ -62,6 +67,8 @@ impl Agent {
             env_names: Vec::new(),
             env_assignments: Vec::new(),
             prompt_args: Vec::new(),
+            startup_input: Vec::new(),
+            rename_input: Vec::new(),
         }
     }
 
@@ -92,6 +99,20 @@ impl Agent {
     pub fn with_prompt_args(self, template: &[String]) -> Self {
         Self {
             prompt_args: template.to_vec(),
+            ..self
+        }
+    }
+
+    pub fn with_startup_input(self, lines: &[String]) -> Self {
+        Self {
+            startup_input: lines.to_vec(),
+            ..self
+        }
+    }
+
+    pub fn with_rename_input(self, lines: &[String]) -> Self {
+        Self {
+            rename_input: lines.to_vec(),
             ..self
         }
     }
@@ -133,18 +154,33 @@ impl Agent {
         ))
     }
 
-    pub fn launch_argv(&self, prompt: &str) -> Vec<String> {
-        let mut argv = self.restart_argv();
+    pub fn launch_argv(&self, session: &SessionName, prompt: &str) -> Vec<String> {
+        let mut argv = self.restart_argv(session);
         if !prompt.is_empty() {
             argv.extend(self.expanded_prompt_args(prompt));
         }
         argv
     }
 
-    pub fn restart_argv(&self) -> Vec<String> {
+    pub fn restart_argv(&self, session: &SessionName) -> Vec<String> {
         let mut argv = vec![self.command.clone()];
-        argv.extend(self.args.iter().cloned());
+        argv.extend(Self::named(&self.args, session));
         argv
+    }
+
+    pub fn startup_input(&self, session: &SessionName) -> Vec<String> {
+        Self::named(&self.startup_input, session)
+    }
+
+    pub fn rename_input(&self, session: &SessionName) -> Vec<String> {
+        Self::named(&self.rename_input, session)
+    }
+
+    fn named(template: &[String], session: &SessionName) -> Vec<String> {
+        template
+            .iter()
+            .map(|element| element.replace(Self::NAME_PLACEHOLDER, session.as_str()))
+            .collect()
     }
 
     fn expanded_prompt_args(&self, prompt: &str) -> impl Iterator<Item = String> {
@@ -162,11 +198,26 @@ mod tests {
 
     impl AgentFixture {
         fn with_template(template: &[&str]) -> Agent {
-            let template: Vec<String> = template.iter().map(|part| part.to_string()).collect();
             let args = ["--model".to_string(), "opus".to_string()];
             Agent::new("example-agent", "example-agent")
                 .with_args(&args)
-                .with_prompt_args(&template)
+                .with_prompt_args(&Self::words(template))
+        }
+
+        fn named() -> Agent {
+            Agent::new("example-agent", "example-agent")
+                .with_args(&Self::words(&["--name", "{name}"]))
+                .with_prompt_args(&Self::words(&["{prompt}"]))
+                .with_startup_input(&Self::words(&["/color", "hello {name}"]))
+                .with_rename_input(&Self::words(&["/rename {name}"]))
+        }
+
+        fn session() -> SessionName {
+            SessionName::new("fix-auth").unwrap()
+        }
+
+        fn words(parts: &[&str]) -> Vec<String> {
+            parts.iter().map(|part| part.to_string()).collect()
         }
     }
 
@@ -174,7 +225,7 @@ mod tests {
     fn the_argv_is_command_then_args_then_prompt_args() {
         let agent = AgentFixture::with_template(&["{prompt}"]);
 
-        let argv = agent.launch_argv("fix the tests");
+        let argv = agent.launch_argv(&AgentFixture::session(), "fix the tests");
 
         assert_eq!(argv, ["example-agent", "--model", "opus", "fix the tests"]);
     }
@@ -183,7 +234,7 @@ mod tests {
     fn an_empty_prompt_appends_no_prompt_args() {
         let agent = AgentFixture::with_template(&["--prompt", "{prompt}"]);
 
-        let argv = agent.launch_argv("");
+        let argv = agent.launch_argv(&AgentFixture::session(), "");
 
         assert_eq!(argv, ["example-agent", "--model", "opus"]);
     }
@@ -192,7 +243,7 @@ mod tests {
     fn a_multi_word_prompt_stays_one_argv_element() {
         let agent = AgentFixture::with_template(&["{prompt}"]);
 
-        let argv = agent.launch_argv("fix \"the\" tests;");
+        let argv = agent.launch_argv(&AgentFixture::session(), "fix \"the\" tests;");
 
         assert_eq!(argv.last().unwrap(), "fix \"the\" tests;");
     }
@@ -201,7 +252,7 @@ mod tests {
     fn the_placeholder_expands_inside_a_larger_element() {
         let agent = AgentFixture::with_template(&["--prompt={prompt}"]);
 
-        let argv = agent.launch_argv("- fix the tests");
+        let argv = agent.launch_argv(&AgentFixture::session(), "- fix the tests");
 
         assert_eq!(argv.last().unwrap(), "--prompt=- fix the tests");
     }
@@ -210,7 +261,7 @@ mod tests {
     fn the_placeholder_expands_twice_in_one_element() {
         let agent = AgentFixture::with_template(&["{prompt}|{prompt}"]);
 
-        let argv = agent.launch_argv("go");
+        let argv = agent.launch_argv(&AgentFixture::session(), "go");
 
         assert_eq!(argv.last().unwrap(), "go|go");
     }
@@ -219,7 +270,7 @@ mod tests {
     fn a_prompt_containing_the_placeholder_is_not_expanded_again() {
         let agent = AgentFixture::with_template(&["--prompt={prompt}"]);
 
-        let argv = agent.launch_argv("say {prompt}");
+        let argv = agent.launch_argv(&AgentFixture::session(), "say {prompt}");
 
         assert_eq!(argv.last().unwrap(), "--prompt=say {prompt}");
     }
@@ -228,7 +279,56 @@ mod tests {
     fn restart_keeps_args_and_never_replays_a_prompt() {
         let agent = AgentFixture::with_template(&["{prompt}"]);
 
-        assert_eq!(agent.restart_argv(), ["example-agent", "--model", "opus"]);
+        assert_eq!(
+            agent.restart_argv(&AgentFixture::session()),
+            ["example-agent", "--model", "opus"]
+        );
+    }
+
+    #[test]
+    fn the_name_placeholder_expands_in_args_on_launch() {
+        let argv = AgentFixture::named().launch_argv(&AgentFixture::session(), "fix the tests");
+
+        assert_eq!(
+            argv,
+            ["example-agent", "--name", "fix-auth", "fix the tests"]
+        );
+    }
+
+    #[test]
+    fn the_name_placeholder_expands_in_args_on_restart() {
+        let argv = AgentFixture::named().restart_argv(&AgentFixture::session());
+
+        assert_eq!(argv, ["example-agent", "--name", "fix-auth"]);
+    }
+
+    #[test]
+    fn a_prompt_containing_the_name_placeholder_is_not_expanded() {
+        let argv = AgentFixture::named().launch_argv(&AgentFixture::session(), "say {name}");
+
+        assert_eq!(argv.last().unwrap(), "say {name}");
+    }
+
+    #[test]
+    fn the_startup_input_carries_the_session_name() {
+        let lines = AgentFixture::named().startup_input(&AgentFixture::session());
+
+        assert_eq!(lines, ["/color", "hello fix-auth"]);
+    }
+
+    #[test]
+    fn the_rename_input_carries_the_session_name() {
+        let lines = AgentFixture::named().rename_input(&AgentFixture::session());
+
+        assert_eq!(lines, ["/rename fix-auth"]);
+    }
+
+    #[test]
+    fn an_agent_without_input_has_no_lines() {
+        let agent = AgentFixture::with_template(&["{prompt}"]);
+
+        assert!(agent.startup_input(&AgentFixture::session()).is_empty());
+        assert!(agent.rename_input(&AgentFixture::session()).is_empty());
     }
 
     #[test]

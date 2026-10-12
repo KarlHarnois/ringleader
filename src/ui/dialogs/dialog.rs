@@ -1,6 +1,7 @@
 use crossterm::event::{Event, KeyEventKind};
 use ratatui::Frame;
 use ratatui::layout::{Margin, Rect};
+use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use super::delete_session_dialog::DeleteSessionDialog;
@@ -116,13 +117,20 @@ impl Dialog {
         frame.render_widget(Clear, area);
         frame.render_widget(block, area);
         let (width, height) = (usize::from(inner.width), usize::from(inner.height));
-        let lines = match self {
-            Self::NewSession(dialog) => dialog.lines(width, height, labels, theme),
-            Self::Delete(dialog) => dialog.lines(width, labels, theme),
-            Self::Rename(dialog) => dialog.lines(width, labels, theme),
-            Self::Help(help) => help.lines(width, height, theme),
-        };
-        frame.render_widget(Paragraph::new(lines), inner);
+        match self {
+            Self::NewSession(dialog) => dialog.render(frame, inner, labels, theme),
+            Self::Delete(dialog) => {
+                Self::render_lines(frame, inner, dialog.lines(width, labels, theme))
+            }
+            Self::Rename(dialog) => {
+                Self::render_lines(frame, inner, dialog.lines(width, labels, theme))
+            }
+            Self::Help(help) => Self::render_lines(frame, inner, help.lines(width, height, theme)),
+        }
+    }
+
+    fn render_lines(frame: &mut Frame, area: Rect, lines: Vec<Line<'static>>) {
+        frame.render_widget(Paragraph::new(lines), area);
     }
 
     fn title(&self) -> &'static str {

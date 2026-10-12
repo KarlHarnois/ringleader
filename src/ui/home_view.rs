@@ -217,7 +217,7 @@ mod tests {
         let screen = ViewFixture::render(&ViewFixture::rows(), 60, 12);
 
         assert!(!screen.contains("Preview"));
-        assert!(screen.contains("ringleader/fix-auth"));
+        assert!(screen.contains("Branch"));
     }
 
     #[test]
@@ -225,7 +225,7 @@ mod tests {
         let screen = ViewFixture::render(&ViewFixture::rows(), 36, 8);
 
         assert!(screen.contains("● fix-auth"));
-        assert!(!screen.contains("ringleader/fix-auth"));
+        assert!(!screen.contains("Branch"));
         assert!(!screen.contains("Name"));
     }
 

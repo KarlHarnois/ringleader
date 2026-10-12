@@ -237,6 +237,6 @@ mod tests {
 
         assert_eq!(lines[4], "No preview: can't find pane");
         assert_eq!(lines[5], "Repo: /repos/example-project");
-        assert_eq!(lines[6], "Branch: ringleader/fix-auth");
+        assert_eq!(lines[6], "Branch: fix-auth");
     }
 }

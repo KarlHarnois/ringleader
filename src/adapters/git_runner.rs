@@ -14,7 +14,7 @@ pub struct GitRunner {
 }
 
 impl GitRunner {
-    const MISSING_REF_EXIT: i32 = 1;
+    const NOTHING_FOUND_EXIT: i32 = 1;
 
     pub fn new(program: &OsStr, bounded: BoundedCommand) -> Self {
         Self {
@@ -49,13 +49,23 @@ impl GitRunner {
     pub fn run_checked(&self, invocation: &GitInvocation) -> Result<GitPorcelain, WorkspaceError> {
         let output = self.run(invocation)?;
         if !output.succeeded() {
-            return Err(WorkspaceError::Failed {
-                subcommand: invocation.subcommand().to_string(),
-                status: output.status_label(),
-                stderr: output.stderr_text(),
-            });
+            return Err(Self::failure(invocation, &output));
         }
         Ok(GitPorcelain::new(output.stdout()))
+    }
+
+    pub fn lookup(
+        &self,
+        invocation: &GitInvocation,
+    ) -> Result<Option<GitPorcelain>, WorkspaceError> {
+        let output = self.run(invocation)?;
+        if output.succeeded() {
+            return Ok(Some(GitPorcelain::new(output.stdout())));
+        }
+        if output.exit_code() == Some(Self::NOTHING_FOUND_EXIT) {
+            return Ok(None);
+        }
+        Err(Self::failure(invocation, &output))
     }
 
     pub fn resolve(
@@ -72,19 +82,15 @@ impl GitRunner {
         &self,
         invocation: &GitInvocation,
     ) -> Result<Option<String>, WorkspaceError> {
-        let output = self.run(invocation)?;
-        if output.succeeded() {
-            return Ok(Some(
-                GitPorcelain::new(output.stdout()).first_line().to_string(),
-            ));
-        }
-        if output.exit_code() == Some(Self::MISSING_REF_EXIT) {
-            return Ok(None);
-        }
-        Err(WorkspaceError::Failed {
+        let found = self.lookup(invocation)?;
+        Ok(found.map(|porcelain| porcelain.first_line().to_string()))
+    }
+
+    fn failure(invocation: &GitInvocation, output: &CommandOutput) -> WorkspaceError {
+        WorkspaceError::Failed {
             subcommand: invocation.subcommand().to_string(),
             status: output.status_label(),
             stderr: output.stderr_text(),
-        })
+        }
     }
 }

@@ -33,7 +33,6 @@ impl<'a> ConfigChecks<'a> {
     }
 
     pub fn failures(mut self) -> Vec<String> {
-        self.check_prefix("branch_prefix", self.draft.raw_branch_prefix(), '/');
         self.check_absolute("worktree_root", self.draft.raw_worktree_root());
         self.check_return_key();
         self.check_session_size();
@@ -46,22 +45,6 @@ impl<'a> ConfigChecks<'a> {
 
     fn fail(&mut self, failure: String) {
         self.failures.push(failure);
-    }
-
-    fn check_prefix(&mut self, key: &str, prefix: &str, ending: char) {
-        let body = prefix.strip_suffix(ending).unwrap_or("");
-        let starts_well = body
-            .chars()
-            .next()
-            .is_some_and(|first| first.is_ascii_lowercase() || first.is_ascii_digit());
-        let body_well_formed = body.chars().all(|character| {
-            character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'
-        });
-        if !(starts_well && body_well_formed) {
-            self.fail(format!(
-                "{key}: `{prefix}` must start with a lowercase letter or digit, use only a-z, 0-9, and -, and end with `{ending}`"
-            ));
-        }
     }
 
     fn check_absolute(&mut self, key: &str, path: &Path) {
@@ -312,19 +295,6 @@ mod tests {
     }
 
     #[test]
-    fn a_branch_prefix_starting_with_a_dash_fails() {
-        ChecksFixture::fails_on(
-            ChecksFixture::draft().branch_prefix("-rl/"),
-            "branch_prefix",
-        );
-    }
-
-    #[test]
-    fn a_short_branch_prefix_passes() {
-        assert!(ChecksFixture::failures(&ChecksFixture::draft().branch_prefix("a-/")).is_empty());
-    }
-
-    #[test]
     fn malformed_and_out_of_range_session_sizes_fail() {
         for size in ["0x0", "200X50", "200 x 50", "10000x10000"] {
             ChecksFixture::fails_on(ChecksFixture::draft().session_size(size), "session_size");
@@ -481,9 +451,7 @@ mod tests {
 
     #[test]
     fn two_bad_values_are_both_reported() {
-        let draft = ChecksFixture::draft()
-            .branch_prefix("//")
-            .session_size("0x0");
+        let draft = ChecksFixture::draft().return_key("C-").session_size("0x0");
 
         assert_eq!(ChecksFixture::failures(&draft).len(), 2);
     }

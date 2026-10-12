@@ -26,6 +26,7 @@ pub mod start_point_resolver;
 pub mod submodule_commits;
 pub mod system_clock;
 pub mod system_host_probe;
+pub mod tmux_agent_input;
 pub mod tmux_command;
 pub mod tmux_error;
 pub mod tmux_launch;

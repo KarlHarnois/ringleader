@@ -66,7 +66,6 @@ impl<'a> UnregisteredPlacement<'a> {
         let naming = self.config.naming();
         NamingScheme::new(
             &self.host.canonical_or_given(naming.worktree_root()),
-            naming.branch_prefix(),
             naming.tmux_prefix(),
         )
     }

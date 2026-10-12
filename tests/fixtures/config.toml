@@ -1,4 +1,3 @@
-branch_prefix = "ringleader/"
 return_key = "C-q"
 state_poll_ms = 1000
 preview_refresh_ms = 750

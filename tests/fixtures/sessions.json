@@ -1,19 +1,18 @@
 {
-  "version": 1,
+  "version": 2,
   "sessions": [
     {
       "name": "fix-auth",
       "repo_name": "example-project",
       "repo_path": "/home/user/projects/example-project",
       "worktree_path": "/home/user/.local/share/ringleader/worktrees/example-project/fix-auth",
-      "branch": "ringleader/fix-auth",
+      "branch": "fix-auth",
       "base_commit": "0123456789abcdef0123456789abcdef01234567",
       "agent": "claude",
       "tmux_session_name": "ringleader-fix-auth",
       "socket_path": "/tmp/tmux-1000/default",
       "created_at": 1791000000,
       "worktree_root": "/home/user/.local/share/ringleader/worktrees",
-      "branch_prefix": "ringleader/",
       "tmux_prefix": "ringleader-"
     },
     {
@@ -21,14 +20,13 @@
       "repo_name": "example-project",
       "repo_path": "/home/user/projects/example-project",
       "worktree_path": "/home/user/.local/share/ringleader/worktrees/example-project/dark-mode",
-      "branch": "ringleader/dark-mode",
+      "branch": "dark-mode",
       "base_commit": "",
       "agent": "opencode",
       "tmux_session_name": "ringleader-dark-mode",
       "socket_path": "/tmp/tmux-1000/default",
       "created_at": 1791000100,
       "worktree_root": "/home/user/.local/share/ringleader/worktrees",
-      "branch_prefix": "ringleader/",
       "tmux_prefix": "ringleader-"
     }
   ]

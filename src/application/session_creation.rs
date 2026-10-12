@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use super::agent_hooks::AgentHooks;
+use super::branch_availability::BranchAvailability;
 use super::creation_plan::{CreateRequest, CreationPlan};
 use super::ports::{Clock, HostProbe, Multiplexer, SessionRegistry, StartPoint, Workspace};
 use super::reconciliation::Reconciliation;
@@ -11,21 +13,25 @@ use super::worktree_rollback::WorktreeRollback;
 use crate::domain::{Config, Session};
 
 pub struct SessionCreation {
+    branches: BranchAvailability,
     workspace: Arc<dyn Workspace>,
     multiplexer: Arc<dyn Multiplexer>,
     host: Arc<dyn HostProbe>,
     registry: Arc<dyn SessionRegistry>,
     clock: Arc<dyn Clock>,
+    hooks: AgentHooks,
 }
 
 impl SessionCreation {
     pub fn new(ports: &ServicePorts) -> Self {
         Self {
+            branches: BranchAvailability::new(ports),
             workspace: ports.repos().workspace(),
             multiplexer: ports.tmux().multiplexer(),
             host: ports.repos().host(),
             registry: ports.state().registry(),
             clock: ports.state().clock(),
+            hooks: AgentHooks::new(ports),
         }
     }
 
@@ -43,9 +49,7 @@ impl SessionCreation {
             .resolve_start_point(plan.repo_path(), plan.base_branch())?;
         let rollback =
             WorktreeRollback::new(self.workspace.as_ref(), self.host.as_ref(), &plan, &start);
-        self.workspace
-            .create_worktree(plan.repo_path(), &plan.worktree(), &plan.branch(), &start)
-            .map_err(|error| rollback.run(error.into()))?;
+        self.create_marked_worktree(&plan, &start, &rollback)?;
         let socket = self.start_tmux_session(&plan, &start, &rollback)?;
         let session = plan.session(&start, &socket, self.clock.now_epoch_seconds());
         let mut entries = reconciliation.entries().to_vec();
@@ -54,6 +58,7 @@ impl SessionCreation {
             ServiceError::from(error)
                 .adding_context("the session runs, and the next observe adopts it from tmux")
         })?;
+        self.hooks.after_start(&session, plan.agent());
         Ok(session)
     }
 
@@ -87,16 +92,7 @@ impl SessionCreation {
             )));
         }
         self.check_worktree_available(plan, reconciliation)?;
-        if self
-            .workspace
-            .branch_exists(plan.repo_path(), &plan.branch())?
-        {
-            return Err(ServiceError::Conflict(format!(
-                "branch {} already exists",
-                plan.branch()
-            )));
-        }
-        Ok(())
+        self.branches.refuse_taken(plan.repo_path(), &plan.branch())
     }
 
     fn check_worktree_available(
@@ -121,6 +117,22 @@ impl SessionCreation {
             )));
         }
         Ok(())
+    }
+
+    fn create_marked_worktree(
+        &self,
+        plan: &CreationPlan,
+        start: &StartPoint,
+        rollback: &WorktreeRollback,
+    ) -> Result<(), ServiceError> {
+        let branch = plan.branch();
+        self.workspace
+            .create_worktree(plan.repo_path(), &plan.worktree(), &branch, start)
+            .and_then(|()| {
+                self.workspace
+                    .mark_branch_managed(plan.repo_path(), &branch)
+            })
+            .map_err(|error| rollback.run(error.into()))
     }
 
     fn start_tmux_session(
@@ -171,6 +183,16 @@ mod tests {
     impl CreateFixture {
         fn request(name: &str) -> CreateRequest {
             CreateRequest::new(name, ServiceFixture::repo())
+        }
+
+        fn branch(name: &str) -> String {
+            ServiceFixture::session(name).branch().to_string()
+        }
+
+        fn has_marker(fixture: &ServiceFixture, name: &str) -> bool {
+            fixture
+                .workspace()
+                .has_marker(Path::new(ServiceFixture::REPO), &Self::branch(name))
         }
 
         fn git_failure() -> WorkspaceError {
@@ -227,11 +249,52 @@ mod tests {
 
         assert_eq!(
             fixture.workspace().state_changing_calls(),
-            [format!(
-                "create_worktree {} ringleader/fix-auth",
-                ServiceFixture::worktree_path("fix-auth").display()
-            )]
+            [
+                format!(
+                    "create_worktree {} fix-auth",
+                    ServiceFixture::worktree_path("fix-auth").display()
+                ),
+                "mark_branch_managed fix-auth".to_string()
+            ]
         );
+    }
+
+    #[test]
+    fn create_marks_the_branch_it_creates() {
+        let fixture = ServiceFixture::new();
+
+        CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap();
+
+        assert!(CreateFixture::has_marker(&fixture, "fix-auth"));
+    }
+
+    #[test]
+    fn a_failed_marking_removes_the_worktree_and_branch() {
+        let fixture = ServiceFixture::new().with_workspace(
+            FakeWorkspace::default().failing("mark_branch_managed", CreateFixture::git_failure()),
+        );
+
+        CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap_err();
+
+        let repo = Path::new(ServiceFixture::REPO);
+        let worktree = ServiceFixture::worktree_path("fix-auth");
+        let branch = CreateFixture::branch("fix-auth");
+        assert!(!fixture.workspace().has_branch(repo, &branch));
+        assert!(!fixture.workspace().lists_worktree(repo, &worktree));
+        assert!(fixture.multiplexer().state_changing_calls().is_empty());
+    }
+
+    #[test]
+    fn a_failed_orphan_creation_leaves_no_marker() {
+        let fixture = ServiceFixture::new()
+            .with_workspace(FakeWorkspace::default().starting_orphan())
+            .with_multiplexer(
+                FakeMultiplexer::new().failing("create_session", CreateFixture::tmux_failure()),
+            );
+
+        CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap_err();
+
+        assert!(!CreateFixture::has_marker(&fixture, "fix-auth"));
     }
 
     #[test]
@@ -259,6 +322,61 @@ mod tests {
 
         let launch = fixture.multiplexer().launches().pop().unwrap();
         assert_eq!(launch.argv(), ["claude", "fix the tests; then stop"]);
+    }
+
+    #[test]
+    fn create_passes_the_session_name_to_the_agent() {
+        let fixture = ServiceFixture::new().with_config(ServiceFixture::config_with_input());
+
+        CreateFixture::create(&fixture, CreateFixture::request("Fix Auth")).unwrap();
+
+        let launch = fixture.multiplexer().launches().pop().unwrap();
+        assert_eq!(launch.argv(), ["claude", "--name", "fix-auth"]);
+    }
+
+    #[test]
+    fn create_types_the_startup_input_into_the_new_session() {
+        let fixture = ServiceFixture::new().with_config(ServiceFixture::config_with_input());
+
+        CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap();
+
+        assert_eq!(
+            fixture
+                .multiplexer()
+                .typed_when_ready("ringleader-fix-auth"),
+            ["/color"]
+        );
+    }
+
+    #[test]
+    fn create_types_nothing_for_an_agent_without_startup_input() {
+        let fixture = ServiceFixture::new();
+
+        CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap();
+
+        assert!(
+            fixture
+                .multiplexer()
+                .calls()
+                .iter()
+                .all(|call| !call.starts_with("type_when_ready"))
+        );
+    }
+
+    #[test]
+    fn an_agent_that_never_reaches_its_prompt_still_gets_its_session_recorded() {
+        let fixture = ServiceFixture::new()
+            .with_config(ServiceFixture::config_with_input())
+            .with_multiplexer(FakeMultiplexer::new().failing(
+                "type_when_ready",
+                MultiplexerError::AgentNotReady {
+                    tmux_name: "ringleader-fix-auth".to_string(),
+                },
+            ));
+
+        let session = CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap();
+
+        assert_eq!(fixture.registry().sessions(), vec![session]);
     }
 
     #[test]
@@ -361,17 +479,33 @@ mod tests {
     fn create_refuses_an_existing_branch() {
         let fixture = ServiceFixture::new().with_workspace(FakeWorkspace::default().with_branch(
             Path::new(ServiceFixture::REPO),
-            "ringleader/fix-auth",
+            "fix-auth",
             ServiceFixture::TIP,
         ));
 
         let error =
             CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap_err();
 
+        assert!(error.to_string().contains("branch fix-auth already exists"));
+        CreateFixture::assert_nothing_touched(&fixture);
+    }
+
+    #[test]
+    fn create_refuses_a_name_that_holds_other_branches() {
+        let fixture = ServiceFixture::new().with_workspace(FakeWorkspace::default().with_branch(
+            Path::new(ServiceFixture::REPO),
+            "fix-auth/draft",
+            ServiceFixture::TIP,
+        ));
+
+        let error =
+            CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap_err();
+
+        assert_eq!(error.exit_code(), 3);
         assert!(
             error
                 .to_string()
-                .contains("branch ringleader/fix-auth already exists")
+                .contains("branch fix-auth clashes with existing branch fix-auth/draft")
         );
         CreateFixture::assert_nothing_touched(&fixture);
     }
@@ -387,7 +521,7 @@ mod tests {
         CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap_err();
 
         let repo = Path::new(ServiceFixture::REPO);
-        assert!(!fixture.workspace().has_branch(repo, "ringleader/fix-auth"));
+        assert!(!fixture.workspace().has_branch(repo, "fix-auth"));
         assert!(
             !fixture
                 .workspace()
@@ -432,7 +566,7 @@ mod tests {
 
         assert!(error.to_string().contains("duplicate session"));
         let repo = Path::new(ServiceFixture::REPO);
-        assert!(!fixture.workspace().has_branch(repo, "ringleader/fix-auth"));
+        assert!(!fixture.workspace().has_branch(repo, "fix-auth"));
         assert!(fixture.registry().sessions().is_empty());
     }
 
@@ -448,7 +582,7 @@ mod tests {
 
         let repo = Path::new(ServiceFixture::REPO);
         assert!(fixture.multiplexer().live_names().is_empty());
-        assert!(!fixture.workspace().has_branch(repo, "ringleader/fix-auth"));
+        assert!(!fixture.workspace().has_branch(repo, "fix-auth"));
     }
 
     #[test]
@@ -463,7 +597,7 @@ mod tests {
             CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap_err();
 
         let repo = Path::new(ServiceFixture::REPO);
-        assert!(fixture.workspace().has_branch(repo, "ringleader/fix-auth"));
+        assert!(fixture.workspace().has_branch(repo, "fix-auth"));
         assert!(error.to_string().contains("doctor"));
     }
 
