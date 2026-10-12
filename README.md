@@ -3,7 +3,6 @@
 [![CI](https://github.com/KarlHarnois/ringleader/actions/workflows/ci.yml/badge.svg)](https://github.com/KarlHarnois/ringleader/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Nix flake](https://img.shields.io/badge/nix-flake-5277C3?logo=nixos&logoColor=white)](#install)
-[![Rust 1.95+](https://img.shields.io/badge/rust-1.95%2B-orange?logo=rust)](Cargo.toml)
 
 ```text
     ____  _____   __________    _________    ____  __________
