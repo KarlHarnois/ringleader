@@ -58,6 +58,7 @@ impl SessionAccess {
             let shell = EphemeralShell::new(&self.shell, session.worktree_path());
             return Ok(ShellOutcome::Ephemeral(shell));
         }
+        self.refuse_own_pane()?;
         let window = self.multiplexer.ensure_shell_window(
             session.tmux_name(),
             session.worktree_path(),
@@ -208,6 +209,22 @@ mod tests {
             fixture.multiplexer().attached(),
             [AttachTarget::Shell("@9".to_string())]
         );
+    }
+
+    #[test]
+    fn a_shell_from_a_pane_of_the_own_server_is_a_conflict() {
+        let session = ServiceFixture::session("fix-auth");
+        let fixture = ShellFixture::live().with_multiplexer(
+            FakeMultiplexer::new()
+                .with_live(ServiceFixture::waiting(&session))
+                .called_from_own_pane(),
+        );
+
+        let error = fixture.service().open_shell("fix-auth").unwrap_err();
+
+        assert_eq!(error.exit_code(), 3);
+        assert!(fixture.multiplexer().state_changing_calls().is_empty());
+        assert!(fixture.multiplexer().attached().is_empty());
     }
 
     #[test]
