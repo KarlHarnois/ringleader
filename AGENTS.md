@@ -53,13 +53,15 @@ Dependencies point inward only. An inner layer never imports an outer one.
 
 The code breaks the `ui` and `cli` rule in four places today: `SignalFlags` in `ui/event_loop.rs`, `cli/cli_session.rs`, and a test in `cli/session_commands.rs`, and `AppLog` in `ui/dialogs/dialog.rs`. They are violations to fix, not precedent to copy.
 
-A new capability that reaches outside the process goes through a port:
+A new capability that reaches outside the process goes through a port when the use cases need it, or when the TUI and the CLI both need it, like `Lock`:
 
 1. Define the trait and its error type in a new file under `application/ports/`, named after the role, and re-export both from `ports/mod.rs`.
 2. Implement it in `adapters/`, named after the technology and the role.
-3. Add a hand-written fake in `src/test_support/`. Wire the fake of a port the use cases need into `ServiceFixture`, and the fake of a port only the TUI or the CLI needs into `UiHarness` or `CliHarness`.
-4. Inject the port as a trait object. A port the use cases need joins a bundle in `ServicePorts` as an `Arc<dyn Trait>`. A port only the TUI or the CLI needs, like `Lock`, is handed by `CompositionRoot` to the type that uses it.
+3. Add a hand-written fake in `src/test_support/`. Wire the fake of a port the use cases need into `ServiceFixture`, and the fake of any other port into `CliHarness` or `UiHarness`.
+4. Inject the port as a trait object. A port the use cases need joins a bundle in `ServicePorts` as an `Arc<dyn Trait>`. Any other port, like `Lock`, is handed by `CompositionRoot` to the type that uses it.
 5. Build the adapter in `CompositionRoot` and pass it in.
+
+A capability only one driving adapter needs, as part of how it talks to the user, stays in that adapter instead. The TUI owns `InputSource`, `ScreenMode`, and `ShellRunner` this way: each is a trait in `ui` with its real implementation beside it and its fake wired into `UiHarness`.
 
 ## Layout
 
