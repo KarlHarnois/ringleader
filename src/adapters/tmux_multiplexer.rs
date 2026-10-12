@@ -10,7 +10,7 @@ use super::tmux_output::TmuxOutput;
 use super::tmux_scripts::TmuxScripts;
 use super::tmux_server_config::TmuxServerConfig;
 use crate::application::ports::{
-    AgentLaunch, AttachTarget, Multiplexer, MultiplexerError, SessionSpec,
+    AgentLaunch, AttachTarget, Multiplexer, MultiplexerError, ServerState, SessionSpec,
 };
 use crate::domain::{SessionMetadata, SessionObservation};
 
@@ -20,7 +20,6 @@ pub struct TmuxMultiplexer {
 }
 
 impl TmuxMultiplexer {
-    const EXIT_UNATTACHED_ON: &'static str = "1";
     const MISSING_SESSION: &'static str = "can't find session";
 
     pub fn new(tmux: TmuxCommand, launcher: LauncherCommand) -> Self {
@@ -105,17 +104,13 @@ impl TmuxMultiplexer {
     fn finish_creation(&self, launched: &Launched) -> Result<PathBuf, MultiplexerError> {
         let launch = TmuxLaunch::new(&self.tmux);
         let values = launched.done_values();
-        let [current_pane, exit_unattached, socket] = values.as_slice() else {
+        let [current_pane, socket] = values.as_slice() else {
             launch.roll_back(launched);
             return Err(MultiplexerError::Failed {
                 subcommand: "new-session".to_string(),
                 detail: "tmux printed an incomplete confirmation".to_string(),
             });
         };
-        if *exit_unattached == Self::EXIT_UNATTACHED_ON {
-            launch.roll_back(launched);
-            return Err(MultiplexerError::ExitUnattached);
-        }
         launch.settle_agent_tag(launched, current_pane)?;
         Ok(PathBuf::from(socket))
     }
@@ -236,6 +231,10 @@ impl Multiplexer for TmuxMultiplexer {
         Err(TmuxError::failed("list-panes", &output).into())
     }
 
+    fn caller_in_other_tmux(&self) -> bool {
+        self.tmux.caller_in_other_tmux()
+    }
+
     fn caller_session(&self) -> Result<Option<String>, MultiplexerError> {
         let Some(pane) = self.tmux.caller_pane() else {
             return Ok(None);
@@ -315,19 +314,16 @@ impl Multiplexer for TmuxMultiplexer {
         Ok(launched.container().to_string())
     }
 
-    fn server_version(&self) -> Result<Option<String>, MultiplexerError> {
-        let output = self
-            .tmux
-            .query(&TmuxScripts::server_value("ringleader-version #{version}"))?;
-        Ok(output.first("ringleader-version").map(str::to_string))
-    }
-
-    fn server_exit_unattached(&self) -> Result<Option<bool>, MultiplexerError> {
-        let query = TmuxScripts::server_value("ringleader-exit-unattached #{exit-unattached}");
+    fn server_state(&self) -> Result<Option<ServerState>, MultiplexerError> {
+        let query = TmuxScripts::server_value(TmuxListing::SERVER_FORMAT);
         let output = self.tmux.query(&query)?;
-        Ok(output
-            .first("ringleader-exit-unattached")
-            .map(|value| value == Self::EXIT_UNATTACHED_ON))
+        if let Some(state) = TmuxListing::new(&output).server_state() {
+            return Ok(Some(state));
+        }
+        if output.reports_no_server() {
+            return Ok(None);
+        }
+        Err(TmuxError::failed("display-message", &output).into())
     }
 
     fn version(&self) -> Result<String, MultiplexerError> {
@@ -356,6 +352,7 @@ impl From<TmuxError> for MultiplexerError {
 mod tests {
     use std::ffi::OsString;
     use std::fs;
+    use std::os::unix::fs::PermissionsExt;
     use std::os::unix::net::UnixListener;
     use std::time::{Duration, Instant};
 
@@ -507,7 +504,7 @@ mod tests {
             multiplexer.agent_pane("ringleader-fix-auth").unwrap();
             multiplexer.caller_session().unwrap();
             multiplexer.caller_in_own_pane().unwrap();
-            multiplexer.server_version().unwrap();
+            multiplexer.server_state().unwrap();
             multiplexer.version().unwrap();
         }
     }
@@ -758,20 +755,6 @@ mod tests {
     }
 
     #[test]
-    fn a_server_with_exit_unattached_on_refuses_the_creation() {
-        let fixture = MultiplexerFixture::with_holder();
-        let _client = fixture.server.control_client("=holder:");
-        fixture
-            .server
-            .text(&["set-option", "-s", "exit-unattached", "on"]);
-
-        let error = fixture.create("fix-auth").unwrap_err();
-
-        assert_eq!(error, MultiplexerError::ExitUnattached);
-        assert_eq!(fixture.sessions(), ["holder"]);
-    }
-
-    #[test]
     fn noisy_failing_hooks_never_undo_a_creation_shell_window_or_rename() {
         let fixture = MultiplexerFixture::with_holder();
         for hook in [
@@ -910,6 +893,63 @@ mod tests {
         UsersServer::exercise(&fixture, &multiplexer);
 
         assert_eq!(UsersServer::snapshot(&users_server), before);
+    }
+
+    #[test]
+    fn the_server_state_gives_the_version_and_the_session_count() {
+        let fixture = MultiplexerFixture::with_holder();
+        fixture.server.start_session("second");
+
+        let state = fixture
+            .server
+            .multiplexer()
+            .server_state()
+            .unwrap()
+            .unwrap();
+
+        assert!(state.version().starts_with('3'));
+        assert_eq!(state.sessions(), Some(2));
+    }
+
+    #[test]
+    fn an_absent_server_has_no_state() {
+        let fixture = MultiplexerFixture::new();
+
+        assert_eq!(fixture.server.multiplexer().server_state().unwrap(), None);
+    }
+
+    #[test]
+    fn a_socket_without_access_is_an_error_and_not_an_absent_server() {
+        let fixture = MultiplexerFixture::with_holder();
+        let directory = fixture.server.directory();
+        fs::set_permissions(directory, fs::Permissions::from_mode(0o000)).unwrap();
+
+        let state = fixture.server.multiplexer().server_state();
+
+        fs::set_permissions(directory, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(state.is_err(), "{state:?}");
+    }
+
+    #[test]
+    fn a_tmux_variable_naming_another_server_is_a_caller_in_other_tmux() {
+        let fixture = MultiplexerFixture::new();
+        let other = format!(
+            "{},1,0",
+            fixture.server.directory().join("users-tmux").display()
+        );
+        let own = format!("{},1,0", fixture.server.socket().display());
+
+        let callers = [Some(other.as_str()), Some(own.as_str()), None].map(|tmux| {
+            let extra: Vec<(&str, &str)> = tmux.map(|value| ("TMUX", value)).into_iter().collect();
+            let environment = fixture.server.environment_with(&extra);
+            TmuxMultiplexer::new(
+                fixture.server.command_with(&environment),
+                fixture.server.stand_in(),
+            )
+            .caller_in_other_tmux()
+        });
+
+        assert_eq!(callers, [true, false, false]);
     }
 
     #[test]

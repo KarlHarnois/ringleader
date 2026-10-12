@@ -13,10 +13,12 @@ pub mod workspace;
 pub use clock::Clock;
 pub use config_source::{ConfigError, ConfigSource};
 pub use dirty_state::DirtyState;
-pub use host_probe::{HostProbe, HostProbeError, ProcessInfo};
+pub use host_probe::{DirectoryAccess, HostProbe, HostProbeError, ProcessInfo};
 pub use leftover_bindings::{LeftoverBinding, LeftoverBindings, LeftoverBindingsError};
 pub use lock::{Lock, LockError};
-pub use multiplexer::{AgentLaunch, AttachTarget, Multiplexer, MultiplexerError, SessionSpec};
+pub use multiplexer::{
+    AgentLaunch, AttachTarget, Multiplexer, MultiplexerError, ServerState, SessionSpec,
+};
 pub use repo_scanner::{RepoScanner, ScanError, ScanOutcome};
 pub use session_registry::{RegistryError, SessionRegistry};
 pub use unmerged_commits::UnmergedCommits;

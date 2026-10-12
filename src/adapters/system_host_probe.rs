@@ -1,6 +1,6 @@
 use std::ffi::OsString;
 use std::fs::{self, OpenOptions};
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Component, Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use super::host_path::HostPath;
 use super::live_process::LiveProcess;
 use super::process_environment::ProcessEnvironment;
-use crate::application::ports::{HostProbe, HostProbeError, ProcessInfo};
+use crate::application::ports::{DirectoryAccess, HostProbe, HostProbeError, ProcessInfo};
 
 pub struct SystemHostProbe {
     search_path: OsString,
@@ -19,6 +19,7 @@ impl SystemHostProbe {
     const TERMINATE_LIMIT: Duration = Duration::from_secs(5);
     const TERMINATE_POLL: Duration = Duration::from_millis(50);
     const EXECUTABLE_BITS: u32 = 0o111;
+    const PERMISSION_BITS: u32 = 0o7777;
     const DELETED_SUFFIX: &'static str = " (deleted)";
 
     pub fn new(environment: &ProcessEnvironment) -> Self {
@@ -35,6 +36,11 @@ impl SystemHostProbe {
         fs::metadata(path).is_ok_and(|metadata| {
             metadata.is_file() && metadata.permissions().mode() & Self::EXECUTABLE_BITS != 0
         })
+    }
+
+    fn user_id() -> u32 {
+        // SAFETY: geteuid takes no arguments, reads no memory of this process, and cannot fail.
+        unsafe { libc::geteuid() }
     }
 
     fn is_own(&self, process: &LiveProcess) -> bool {
@@ -87,6 +93,17 @@ impl HostProbe for SystemHostProbe {
 
     fn is_file(&self, path: &Path) -> bool {
         fs::metadata(path).is_ok_and(|metadata| metadata.is_file())
+    }
+
+    fn directory_access(&self, path: &Path) -> Option<DirectoryAccess> {
+        let metadata = fs::metadata(path)
+            .ok()
+            .filter(|metadata| metadata.is_dir())?;
+        let mode = metadata.permissions().mode() & Self::PERMISSION_BITS;
+        Some(DirectoryAccess::new(
+            mode,
+            metadata.uid() == Self::user_id(),
+        ))
     }
 
     fn canonicalize_lenient(&self, path: &Path) -> Result<PathBuf, HostProbeError> {
@@ -222,6 +239,27 @@ mod tests {
     #[test]
     fn a_relative_command_with_a_slash_does_not_resolve() {
         assert_eq!(ProbeFixture::probe().resolve_command("bin/sh"), None);
+    }
+
+    #[test]
+    fn a_directory_of_this_user_reports_its_mode() {
+        let directory = tempfile::tempdir().unwrap();
+        fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o750)).unwrap();
+
+        let access = ProbeFixture::probe()
+            .directory_access(directory.path())
+            .unwrap();
+
+        assert_eq!(access, DirectoryAccess::new(0o750, true));
+    }
+
+    #[test]
+    fn a_missing_directory_reports_no_access() {
+        let directory = tempfile::tempdir().unwrap();
+
+        let access = ProbeFixture::probe().directory_access(&directory.path().join("missing"));
+
+        assert_eq!(access, None);
     }
 
     #[test]

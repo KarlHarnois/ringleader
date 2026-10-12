@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use super::tmux_output::TmuxOutput;
+use crate::application::ports::ServerState;
 use crate::domain::{
     AgentPane, RepoName, SessionMetadata, SessionObservation, SessionRepo, SessionWorktree,
     TmuxAddress,
@@ -19,6 +20,7 @@ impl<'a> TmuxListing<'a> {
     pub const AGENT_FORMAT: &'static str = "ringleader-agent #{pane_id} #{@ringleader_agent}";
     pub const PANE_PID_FORMAT: &'static str = "ringleader-pane-pid #{pane_dead} #{pane_pid}";
     pub const TTY_FORMAT: &'static str = "ringleader-tty #{pane_tty}";
+    pub const SERVER_FORMAT: &'static str = "ringleader-server #{version} #{server_sessions}";
     const TAGGED: &'static str = "1";
     const KEY_BINDING: &'static str = "bind-key";
     const DETACH: &'static str = "detach-client";
@@ -50,6 +52,12 @@ impl<'a> TmuxListing<'a> {
             let (window, tag) = row.split_once(' ')?;
             (tag == Self::TAGGED).then(|| window.to_string())
         })
+    }
+
+    pub fn server_state(&self) -> Option<ServerState> {
+        let values = self.output.first("ringleader-server")?;
+        let (version, sessions) = values.split_once(' ').unwrap_or((values, ""));
+        Some(ServerState::new(version, sessions.parse().ok()))
     }
 
     pub fn shows_terminal(&self, terminal: &OsStr) -> bool {

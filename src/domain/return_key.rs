@@ -14,6 +14,10 @@ impl ReturnKey {
         "PPage", "NPage", "Up", "Down", "Left", "Right",
     ];
     const REFUSED_CHARACTERS: [char; 3] = ['\'', '"', '\\'];
+    const AGENT_KEYS: [&'static str; 16] = [
+        "C-c", "C-d", "C-z", "C-m", "C-j", "C-i", "C-[", "C-h", "Enter", "Escape", "Tab", "BTab",
+        "BSpace", "Space", "Up", "Down",
+    ];
 
     pub fn parse(text: &str) -> Option<Self> {
         let mut rest = text;
@@ -26,6 +30,10 @@ impl ReturnKey {
             modifiers,
             key: rest.to_string(),
         })
+    }
+
+    pub fn shadows_agent_input(&self) -> bool {
+        Self::AGENT_KEYS.contains(&self.tmux_name().as_str()) || self.is_typed_character()
     }
 
     pub fn tmux_spelling(&self) -> String {
@@ -46,6 +54,14 @@ impl ReturnKey {
             true => self.key.to_uppercase(),
             false => self.key.clone(),
         }
+    }
+
+    fn is_typed_character(&self) -> bool {
+        let unmodified = self
+            .modifiers
+            .iter()
+            .all(|modifier| *modifier == Modifier::Shift);
+        unmodified && self.key.chars().count() == 1
     }
 
     fn tmux_name(&self) -> String {
@@ -145,6 +161,25 @@ mod tests {
             .map(|text| ReturnKey::parse(text).unwrap().display());
 
         assert_eq!(shown, ["Ctrl-Q", "Alt-x", "Shift-F1", "Ctrl-Escape", "~"]);
+    }
+
+    #[test]
+    fn keys_agents_need_and_typed_characters_shadow_agent_input() {
+        for text in ["C-c", "C-d", "Enter", "Escape", "~", "x", "S-x"] {
+            let key = ReturnKey::parse(text).unwrap();
+
+            assert!(key.shadows_agent_input(), "{text}");
+        }
+    }
+
+    #[test]
+    fn the_default_and_other_rare_keys_leave_agent_input_alone() {
+        for text in ["C-q", "M-x", "F12", "C-}"] {
+            assert!(
+                !ReturnKey::parse(text).unwrap().shadows_agent_input(),
+                "{text}"
+            );
+        }
     }
 
     #[test]

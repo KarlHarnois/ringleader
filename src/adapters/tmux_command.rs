@@ -59,6 +59,12 @@ impl TmuxCommand {
             .filter(|_| self.server.is_reached_through(&socket))
     }
 
+    pub fn caller_in_other_tmux(&self) -> bool {
+        self.caller
+            .socket()
+            .is_some_and(|socket| !self.server.is_reached_through(&socket))
+    }
+
     pub fn caller_terminal(&self) -> Option<&OsStr> {
         self.environment.terminal()
     }

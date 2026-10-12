@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
 
-use crate::application::ports::{HostProbe, HostProbeError, ProcessInfo};
+use crate::application::ports::{DirectoryAccess, HostProbe, HostProbeError, ProcessInfo};
 
 #[derive(Default)]
 pub struct FakeHostProbe {
@@ -16,6 +16,7 @@ struct HostState {
     directories: HashSet<PathBuf>,
     files: HashSet<PathBuf>,
     canonical: HashMap<PathBuf, PathBuf>,
+    access: HashMap<PathBuf, DirectoryAccess>,
     processes: Vec<FakeProcess>,
     terminated: Vec<u32>,
 }
@@ -64,6 +65,15 @@ impl FakeHostProbe {
             .unwrap()
             .canonical
             .insert(path.to_path_buf(), canonical.to_path_buf());
+        self
+    }
+
+    pub fn with_directory_access(self, path: &Path, access: DirectoryAccess) -> Self {
+        self.state
+            .lock()
+            .unwrap()
+            .access
+            .insert(path.to_path_buf(), access);
         self
     }
 
@@ -134,6 +144,10 @@ impl HostProbe for FakeHostProbe {
             .get(path)
             .cloned()
             .unwrap_or_else(|| path.to_path_buf()))
+    }
+
+    fn directory_access(&self, path: &Path) -> Option<DirectoryAccess> {
+        self.state.lock().unwrap().access.get(path).copied()
     }
 
     fn processes_in(&self, path: &Path, excluded_sessions: &[u32]) -> Vec<ProcessInfo> {

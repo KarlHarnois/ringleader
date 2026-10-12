@@ -7,8 +7,8 @@ use super::{
 };
 use crate::application::ports::{ConfigError, WorktreeEntry};
 use crate::application::{
-    CorruptRegistry, LoadedConfig, RepoPorts, ServiceContext, ServicePorts, SessionService,
-    StatePorts, TmuxPorts,
+    CorruptRegistry, DiagnosticPaths, LoadedConfig, RepoPorts, ServiceContext, ServicePorts,
+    SessionService, StatePorts, TmuxPorts,
 };
 use crate::domain::{
     Agent, AgentPane, Config, NamingScheme, Registration, Repo, RepoName, Session, SessionMetadata,
@@ -26,6 +26,7 @@ pub struct ServiceFixture {
     clock: Arc<FakeClock>,
     config_error: Option<ConfigError>,
     launch_directory: PathBuf,
+    diagnostics: DiagnosticPaths,
     shell: String,
     home: Option<PathBuf>,
 }
@@ -41,6 +42,8 @@ impl ServiceFixture {
     pub const IDLE_SECONDS: u64 = 3;
     pub const SHELL: &'static str = "/bin/example-shell";
     pub const WORKTREE_PROCESS: u32 = 4_000_042;
+    pub const STATE_DIRECTORY: &'static str = "/state/ringleader";
+    pub const TMUX_CONFIG: &'static str = "/state/ringleader/tmux.conf";
 
     pub fn new() -> Self {
         Self {
@@ -54,6 +57,7 @@ impl ServiceFixture {
             clock: Arc::new(FakeClock::at(Self::NOW)),
             config_error: None,
             launch_directory: PathBuf::from(Self::REPO),
+            diagnostics: Self::diagnostics(),
             shell: Self::SHELL.to_string(),
             home: Some(PathBuf::from(Self::HOME)),
         }
@@ -125,6 +129,20 @@ impl ServiceFixture {
 
     pub fn without_home(self) -> Self {
         Self { home: None, ..self }
+    }
+
+    pub fn with_diagnostics(self, diagnostics: DiagnosticPaths) -> Self {
+        Self {
+            diagnostics,
+            ..self
+        }
+    }
+
+    pub fn diagnostics() -> DiagnosticPaths {
+        DiagnosticPaths::new("tmux", "git", Path::new(Self::STATE_DIRECTORY)).with_tmux_server(
+            Path::new(FakeMultiplexer::SOCKET),
+            Path::new(Self::TMUX_CONFIG),
+        )
     }
 
     pub fn launched_in(self, directory: &Path) -> Self {
@@ -254,7 +272,8 @@ impl ServiceFixture {
         let host = FakeHostProbe::default()
             .with_command("claude")
             .with_directory(Path::new(Self::REPO))
-            .with_directory(Path::new(Self::DATA_DIR));
+            .with_directory(Path::new(Self::DATA_DIR))
+            .with_directory(Path::new(Self::STATE_DIRECTORY));
         for session in sessions {
             host.add_directory(session.worktree_path());
         }
@@ -306,6 +325,7 @@ impl ServiceFixture {
             None => LoadedConfig::valid(config),
         };
         ServiceContext::new(loaded, &self.launch_directory)
+            .with_diagnostics(self.diagnostics.clone())
             .with_home(self.home.as_deref())
             .with_shell(&self.shell)
     }

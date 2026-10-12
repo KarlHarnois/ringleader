@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use crate::application::ports::{
-    AgentLaunch, AttachTarget, Multiplexer, MultiplexerError, SessionSpec,
+    AgentLaunch, AttachTarget, Multiplexer, MultiplexerError, ServerState, SessionSpec,
 };
 use crate::domain::{AgentPane, SessionMetadata, SessionObservation, TmuxAddress};
 
@@ -22,14 +22,14 @@ struct MultiplexerState {
     pane_pids: HashMap<String, Vec<u32>>,
     caller: Option<String>,
     caller_in_own_pane: bool,
+    caller_in_other_tmux: bool,
     captures: HashMap<String, String>,
     failures: HashMap<&'static str, MultiplexerError>,
     failed_create_still_creates: bool,
     attached: Vec<AttachTarget>,
     calls: Vec<String>,
     client_version: String,
-    server_version: Option<String>,
-    exit_unattached: bool,
+    server: Option<ServerState>,
 }
 
 impl FakeMultiplexer {
@@ -54,14 +54,14 @@ impl FakeMultiplexer {
                 pane_pids: HashMap::new(),
                 caller: None,
                 caller_in_own_pane: false,
+                caller_in_other_tmux: false,
                 captures: HashMap::new(),
                 failures: HashMap::new(),
                 failed_create_still_creates: false,
                 attached: Vec::new(),
                 calls: Vec::new(),
                 client_version: "3.6a".to_string(),
-                server_version: Some("3.6a".to_string()),
-                exit_unattached: false,
+                server: Some(ServerState::new("3.6a", Some(1))),
             }),
         }
     }
@@ -108,13 +108,13 @@ impl FakeMultiplexer {
     pub fn with_versions(self, client: &str, server: Option<&str>) -> Self {
         self.edit(|state| {
             state.client_version = client.to_string();
-            state.server_version = server.map(str::to_string);
+            state.server = server.map(|version| ServerState::new(version, Some(1)));
         });
         self
     }
 
-    pub fn with_exit_unattached(self) -> Self {
-        self.edit(|state| state.exit_unattached = true);
+    pub fn called_from_other_tmux(self) -> Self {
+        self.edit(|state| state.caller_in_other_tmux = true);
         self
     }
 
@@ -229,6 +229,10 @@ impl Multiplexer for FakeMultiplexer {
         Ok(self.edit(|state| state.pane_pids.get(tmux_name).cloned().unwrap_or_default()))
     }
 
+    fn caller_in_other_tmux(&self) -> bool {
+        self.edit(|state| state.caller_in_other_tmux)
+    }
+
     fn caller_session(&self) -> Result<Option<String>, MultiplexerError> {
         Ok(self.edit(|state| state.caller.clone()))
     }
@@ -289,14 +293,9 @@ impl Multiplexer for FakeMultiplexer {
         Ok("@9".to_string())
     }
 
-    fn server_version(&self) -> Result<Option<String>, MultiplexerError> {
-        self.call("server_version", "")?;
-        Ok(self.edit(|state| state.server_version.clone()))
-    }
-
-    fn server_exit_unattached(&self) -> Result<Option<bool>, MultiplexerError> {
-        self.call("server_exit_unattached", "")?;
-        Ok(Some(self.edit(|state| state.exit_unattached)))
+    fn server_state(&self) -> Result<Option<ServerState>, MultiplexerError> {
+        self.call("server_state", "")?;
+        Ok(self.edit(|state| state.server.clone()))
     }
 
     fn version(&self) -> Result<String, MultiplexerError> {

@@ -1,3 +1,5 @@
+use super::doctor_report::DoctorReport;
+
 pub struct ToolVersion<'a> {
     text: &'a str,
 }
@@ -5,6 +7,16 @@ pub struct ToolVersion<'a> {
 impl<'a> ToolVersion<'a> {
     pub fn new(text: &'a str) -> Self {
         Self { text }
+    }
+
+    pub fn audit(&self, label: &str, minimum: (u32, u32), report: &mut DoctorReport) {
+        match self.numbers() {
+            Some(found) if found >= minimum => report.info(format!("{label} {}", self.text)),
+            _ => report.problem(format!(
+                "{label} {} is older than {}.{}",
+                self.text, minimum.0, minimum.1
+            )),
+        }
     }
 
     pub fn numbers(&self) -> Option<(u32, u32)> {

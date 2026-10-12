@@ -11,6 +11,7 @@ pub trait Multiplexer {
     fn pane_pids(&self, tmux_name: &str) -> Result<Vec<u32>, MultiplexerError>;
     fn caller_session(&self) -> Result<Option<String>, MultiplexerError>;
     fn caller_in_own_pane(&self) -> Result<bool, MultiplexerError>;
+    fn caller_in_other_tmux(&self) -> bool;
     fn observe_all(&self) -> Result<Vec<SessionObservation>, MultiplexerError>;
     fn attach(&self, target: &AttachTarget) -> Result<(), MultiplexerError>;
     fn capture_pane(&self, tmux_name: &str) -> Result<String, MultiplexerError>;
@@ -27,8 +28,7 @@ pub trait Multiplexer {
         worktree: &Path,
         shell: &str,
     ) -> Result<String, MultiplexerError>;
-    fn server_version(&self) -> Result<Option<String>, MultiplexerError>;
-    fn server_exit_unattached(&self) -> Result<Option<bool>, MultiplexerError>;
+    fn server_state(&self) -> Result<Option<ServerState>, MultiplexerError>;
     fn version(&self) -> Result<String, MultiplexerError>;
 }
 
@@ -148,6 +148,29 @@ impl AgentLaunch {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServerState {
+    version: String,
+    sessions: Option<u32>,
+}
+
+impl ServerState {
+    pub fn new(version: &str, sessions: Option<u32>) -> Self {
+        Self {
+            version: version.to_string(),
+            sessions,
+        }
+    }
+
+    pub fn version(&self) -> &str {
+        &self.version
+    }
+
+    pub fn sessions(&self) -> Option<u32> {
+        self.sessions
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AttachTarget {
     Agent(String),
     Shell(String),
@@ -159,10 +182,6 @@ pub enum MultiplexerError {
     Failed { subcommand: String, detail: String },
     #[error("tmux {subcommand} timed out after {seconds} seconds")]
     TimedOut { subcommand: String, seconds: u64 },
-    #[error(
-        "the tmux server has exit-unattached on, which ends every detached session; turn it off to create sessions"
-    )]
-    ExitUnattached,
     #[error(
         "the tmux server at {socket} binds no key to detach-client, so its sessions could not be left; check {config} and the load errors that tmux -S {socket} show-messages prints"
     )]

@@ -69,6 +69,10 @@ impl XdgPaths {
         self.state_directory().join("tmux.conf")
     }
 
+    pub fn has_runtime_directory(&self) -> bool {
+        self.runtime_directory.is_some()
+    }
+
     fn runtime_application_directory(&self) -> PathBuf {
         let base = self.runtime_directory.as_ref().unwrap_or(&self.state_home);
         base.join(Self::APPLICATION)

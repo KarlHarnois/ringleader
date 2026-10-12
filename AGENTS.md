@@ -123,6 +123,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── tool_version.rs       # ToolVersion, the major and minor numbers of a tmux or git version
     │   ├── doctor_report.rs      # DoctorReport, the doctor's info, warning, and problem lines
     │   ├── registry_audit.rs     # RegistryAudit, the doctor's checks of each registry entry
+    │   ├── server_audit.rs       # ServerAudit, the doctor's checks of Ringleader's tmux server, the return key, and leftover bindings
     │   └── ports/
     │       ├── mod.rs
     │       ├── session_registry.rs   # SessionRegistry trait

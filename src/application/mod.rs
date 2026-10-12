@@ -14,6 +14,7 @@ pub mod registry_audit;
 pub mod repo_catalog;
 pub mod repo_merge;
 pub mod repo_overrides;
+pub mod server_audit;
 pub mod service_context;
 pub mod service_error;
 pub mod service_ports;

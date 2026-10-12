@@ -271,12 +271,16 @@ impl CompositionRoot {
     }
 
     fn diagnostics(&self) -> DiagnosticPaths {
-        DiagnosticPaths::new(
+        let paths = DiagnosticPaths::new(
             &self.programs.tmux().to_string_lossy(),
             &self.programs.git().to_string_lossy(),
             &self.paths.state_directory(),
         )
-        .with_tmux_server(self.server.socket(), self.server.config())
+        .with_tmux_server(self.server.socket(), self.server.config());
+        match self.paths.has_runtime_directory() {
+            true => paths,
+            false => paths.with_socket_in_state_directory(),
+        }
     }
 
     fn tmux(&self, env_names: &[String]) -> TmuxCommand {

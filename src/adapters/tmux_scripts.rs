@@ -44,7 +44,7 @@ impl TmuxScripts {
                 "-p",
                 "-t",
                 &target,
-                "ringleader-done #{pane_id} #{exit-unattached} #{socket_path}",
+                "ringleader-done #{pane_id} #{socket_path}",
             ])
     }
 
