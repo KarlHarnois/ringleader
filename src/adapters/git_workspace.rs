@@ -1112,17 +1112,21 @@ mod tests {
     }
 
     #[test]
-    fn the_printed_marking_command_marks_the_branch() {
+    fn the_printed_marking_command_marks_the_branch_through_a_shell() {
         let fixture = GitTestRepo::new();
-        WorktreeFixture::created(&fixture);
-        let command = BranchMarker::new(BRANCH).marking_command(fixture.path());
-        let words: Vec<&str> = command.split(' ').collect();
-        let (program, args) = words.split_first().unwrap();
+        let repo = fixture.init_repo("example's project");
+        let branch = "feat(ui)";
+        fixture.git(&repo, &["branch", branch]);
+        let command = BranchMarker::new(branch).marking_command(&repo);
 
-        fixture.git(fixture.root(), args);
+        fixture.shell(&command);
 
-        assert_eq!(*program, "git");
-        assert!(WorktreeFixture::is_managed(&fixture, BRANCH));
+        assert!(
+            fixture
+                .workspace()
+                .is_branch_managed(&repo, branch)
+                .unwrap()
+        );
     }
 
     #[test]

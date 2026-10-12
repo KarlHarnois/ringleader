@@ -8,6 +8,7 @@ impl<'a> BranchMarker<'a> {
     pub const VARIABLE: &'static str = "ringleaderManaged";
     pub const VALUE: &'static str = "true";
     const SECTION: &'static str = "branch";
+    const SHELL_SAFE_PUNCTUATION: &'static str = "/._-:@%+=,";
 
     pub fn new(branch: &'a str) -> Self {
         Self { branch }
@@ -40,10 +41,25 @@ impl<'a> BranchMarker<'a> {
     pub fn marking_command(&self, repo: &Path) -> String {
         format!(
             "git -C {} config {} {}",
-            repo.display(),
-            self.key(),
+            Self::shell_word(&repo.display().to_string()),
+            Self::shell_word(&self.key()),
             Self::VALUE
         )
+    }
+
+    fn shell_word(word: &str) -> String {
+        if Self::needs_no_quotes(word) {
+            return word.to_string();
+        }
+        format!("'{}'", word.replace('\'', r"'\''"))
+    }
+
+    fn needs_no_quotes(word: &str) -> bool {
+        !word.is_empty()
+            && word.chars().all(|character| {
+                character.is_ascii_alphanumeric()
+                    || Self::SHELL_SAFE_PUNCTUATION.contains(character)
+            })
     }
 }
 
@@ -66,6 +82,37 @@ mod tests {
         assert_eq!(
             command,
             "git -C /repos/example config branch.fix-auth.ringleaderManaged true"
+        );
+    }
+
+    #[test]
+    fn the_marking_command_quotes_a_path_with_a_space() {
+        let command =
+            BranchMarker::new("fix-auth").marking_command(Path::new("/repos/example project"));
+
+        assert_eq!(
+            command,
+            "git -C '/repos/example project' config branch.fix-auth.ringleaderManaged true"
+        );
+    }
+
+    #[test]
+    fn the_marking_command_quotes_a_branch_with_shell_characters() {
+        let command = BranchMarker::new("feat(ui)").marking_command(Path::new("/repos/example"));
+
+        assert_eq!(
+            command,
+            "git -C /repos/example config 'branch.feat(ui).ringleaderManaged' true"
+        );
+    }
+
+    #[test]
+    fn the_marking_command_escapes_a_single_quote() {
+        let command = BranchMarker::new("fix-auth").marking_command(Path::new("/repos/it's"));
+
+        assert_eq!(
+            command,
+            r"git -C '/repos/it'\''s' config branch.fix-auth.ringleaderManaged true"
         );
     }
 
