@@ -1,6 +1,8 @@
 use std::thread;
 use std::time::{Duration, Instant};
 
+use unicode_width::UnicodeWidthChar;
+
 use super::tmux_command::TmuxCommand;
 use super::tmux_error::TmuxError;
 use super::tmux_launch::TmuxLaunch;
@@ -146,19 +148,25 @@ impl AgentCursor {
     }
 
     fn follows_a_bare_prompt_marker(&self, row: &str) -> bool {
-        let before_cursor: String = row.chars().take(self.column).collect();
+        let before_cursor = self.cells_before_cursor(row);
         let marker = before_cursor.trim();
         !marker.is_empty()
             && !marker.chars().any(char::is_alphanumeric)
-            && self.follows_a_blank(row)
+            && before_cursor.ends_with(char::is_whitespace)
     }
 
-    fn follows_a_blank(&self, row: &str) -> bool {
-        let cell_before_cursor = self
-            .column
-            .checked_sub(1)
-            .and_then(|cell| row.chars().nth(cell));
-        cell_before_cursor.is_none_or(char::is_whitespace)
+    fn cells_before_cursor(&self, row: &str) -> String {
+        let mut before_cursor = String::new();
+        let mut cells = 0;
+        for character in row.chars() {
+            cells += character.width().unwrap_or_default();
+            if cells > self.column {
+                return before_cursor;
+            }
+            before_cursor.push(character);
+        }
+        let trimmed_blanks = " ".repeat(self.column - cells);
+        before_cursor + &trimmed_blanks
     }
 }
 
@@ -183,6 +191,8 @@ mod tests {
         const PLACEHOLDER: &'static str = "printf '> Try this\\r\\033[2C'; exec cat";
         const DRAFT: &'static str = "printf '> delete the old'; exec cat";
         const SYMBOL_DRAFT: &'static str = "printf '> /'; exec cat";
+        const WIDE_DRAFT: &'static str = "printf '> 👍'; exec cat";
+        const WIDE_MARKER: &'static str = "printf '🤖 Ask anything\\r\\033[3C'; exec cat";
         const DRAFT_SECOND_LINE: &'static str = "printf '> first line\\n  '; exec cat";
         const LATE_PROMPT: &'static str = "sleep 0.5; printf '> '; exec cat";
         const HIDDEN_CURSOR: &'static str = "printf '\\033[?25l> '; exec cat";
@@ -246,6 +256,16 @@ mod tests {
     #[test]
     fn placeholder_text_after_the_cursor_leaves_the_prompt_ready() {
         let fixture = InputFixture::running(InputFixture::PLACEHOLDER);
+
+        let typed = fixture.type_lines(&["hello demo"], InputFixture::LONG_PATIENCE);
+
+        assert_eq!(typed, Ok(()));
+        assert!(fixture.shows("hello demo"));
+    }
+
+    #[test]
+    fn a_wide_prompt_marker_leaves_the_prompt_ready() {
+        let fixture = InputFixture::running(InputFixture::WIDE_MARKER);
 
         let typed = fixture.type_lines(&["hello demo"], InputFixture::LONG_PATIENCE);
 
@@ -333,6 +353,16 @@ mod tests {
     #[test]
     fn a_draft_of_symbols_keeps_the_agent_from_being_ready() {
         let fixture = InputFixture::running(InputFixture::SYMBOL_DRAFT);
+
+        let typed = fixture.type_lines(&["hello demo"], InputFixture::SHORT_PATIENCE);
+
+        assert_eq!(typed, Err(InputError::NotReady));
+        assert!(!fixture.screen().contains("hello demo"));
+    }
+
+    #[test]
+    fn a_draft_of_wide_characters_keeps_the_agent_from_being_ready() {
+        let fixture = InputFixture::running(InputFixture::WIDE_DRAFT);
 
         let typed = fixture.type_lines(&["hello demo"], InputFixture::SHORT_PATIENCE);
 
