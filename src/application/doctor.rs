@@ -449,10 +449,9 @@ mod tests {
     #[test]
     fn an_entry_under_another_branch_prefix_is_a_warning() {
         let session = DoctorFixture::session();
-        let naming = crate::domain::NamingScheme::new(
+        let naming = crate::domain::NamingScheme::for_new_sessions(
             Path::new(ServiceFixture::WORKTREE_ROOT),
             "agents/",
-            crate::domain::NamingScheme::TMUX_PREFIX,
         );
         let recorded = Session::new(
             session.name().clone(),

@@ -3,16 +3,17 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::doctor_report::DoctorReport;
-use super::ports::{HostProbe, Multiplexer, ProcessInfo, Workspace};
+use super::ports::{HostProbe, Workspace};
 use super::reconciliation::Reconciliation;
 use super::service_ports::ServicePorts;
+use super::stopped_entry_audit::StoppedEntryAudit;
 use super::worktree_inspection::WorktreeInspection;
-use crate::domain::{Config, EarlierServer, Session, SessionState};
+use crate::domain::{Config, Session, SessionState};
 
 pub struct RegistryAudit {
     inspection: WorktreeInspection,
+    stopped: StoppedEntryAudit,
     workspace: Arc<dyn Workspace>,
-    multiplexer: Arc<dyn Multiplexer>,
     host: Arc<dyn HostProbe>,
 }
 
@@ -20,8 +21,8 @@ impl RegistryAudit {
     pub fn new(ports: &ServicePorts) -> Self {
         Self {
             inspection: WorktreeInspection::new(ports),
+            stopped: StoppedEntryAudit::new(ports),
             workspace: ports.repos().workspace(),
-            multiplexer: ports.tmux().multiplexer(),
             host: ports.repos().host(),
         }
     }
@@ -85,56 +86,8 @@ impl RegistryAudit {
             ));
         }
         if state == SessionState::Stopped {
-            self.audit_stopped(session, reconciliation, report);
+            self.stopped.audit(session, reconciliation, report);
         }
-    }
-
-    fn audit_stopped(
-        &self,
-        session: &Session,
-        reconciliation: &Reconciliation,
-        report: &mut DoctorReport,
-    ) {
-        let name = session.name();
-        let processes = self.host.processes_in(session.worktree_path(), &[]);
-        let private_socket = self.multiplexer.socket();
-        match EarlierServer::of(session, &private_socket) {
-            Some(earlier) => {
-                report.warning(earlier.audit(name.as_str(), &Self::worktree_processes(&processes)))
-            }
-            None if !processes.is_empty() => {
-                report.warning(Self::lost_socket(session, &processes, &private_socket))
-            }
-            None => {}
-        }
-        if let Some(claimant) = reconciliation.claimant_of(session) {
-            report.problem(format!(
-                "session {name}: tmux session {} claims its worktree {}",
-                claimant.tmux_name(),
-                session.worktree_path().display()
-            ));
-        }
-    }
-
-    fn worktree_processes(processes: &[ProcessInfo]) -> String {
-        if processes.is_empty() {
-            return "no process runs in its worktree".to_string();
-        }
-        format!(
-            "processes still run in its worktree: {}",
-            ProcessInfo::listed(processes)
-        )
-    }
-
-    fn lost_socket(session: &Session, processes: &[ProcessInfo], socket: &Path) -> String {
-        let directory = socket.parent().unwrap_or(socket).display();
-        format!(
-            "session {} is stopped, but processes still run in its worktree {}: {}. The socket {} of Ringleader's tmux server may have been removed under the running server. Recreate {directory} with mode 0700, then send SIGUSR1 to the tmux server whose command line names that socket, which makes tmux recreate it.",
-            session.name(),
-            session.worktree_path().display(),
-            ProcessInfo::listed(processes),
-            socket.display()
-        )
     }
 
     fn audit_against_config(session: &Session, config: &Config, report: &mut DoctorReport) {

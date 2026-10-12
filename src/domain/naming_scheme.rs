@@ -11,7 +11,11 @@ pub struct NamingScheme {
 }
 
 impl NamingScheme {
-    pub const TMUX_PREFIX: &'static str = "ringleader-";
+    const TMUX_PREFIX: &'static str = "ringleader-";
+
+    pub fn for_new_sessions(worktree_root: &Path, branch_prefix: &str) -> Self {
+        Self::new(worktree_root, branch_prefix, Self::TMUX_PREFIX)
+    }
 
     pub fn new(worktree_root: &Path, branch_prefix: &str, tmux_prefix: &str) -> Self {
         Self {

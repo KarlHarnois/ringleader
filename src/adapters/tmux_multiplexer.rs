@@ -365,7 +365,7 @@ impl Multiplexer for TmuxMultiplexer {
             .and_then(RunningConfig::return_key)
             .filter(|previous| *previous != return_key);
         let render = self.server_config_for(return_key);
-        let sequence = TmuxScripts::reapply(previous_key);
+        let sequence = TmuxServerConfig::reapply_script(previous_key);
         let output = self
             .tmux
             .change_with_input(&sequence, render.render().as_bytes())?;
@@ -415,7 +415,7 @@ mod tests {
     use super::*;
     use crate::adapters::Deadlines;
     use crate::adapters::process_environment::ProcessEnvironment;
-    use crate::adapters::tmux_command::ServerFiles;
+    use crate::adapters::server_files::ServerFiles;
     use crate::adapters::tmux_sequence::TmuxSequence;
     use crate::domain::{RepoName, ReturnKey, SessionRepo, SessionWorktree};
     use crate::test_support::TmuxTestServer;

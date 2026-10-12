@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use super::tmux_sequence::TmuxSequence;
 use crate::domain::ReturnKey;
 
 pub struct TmuxServerConfig {
@@ -44,6 +45,16 @@ impl TmuxServerConfig {
             user_file: user_file.map(Path::to_path_buf),
             ..self
         }
+    }
+
+    pub fn reapply_script(previous_key: Option<&ReturnKey>) -> TmuxSequence {
+        let sequence = match previous_key {
+            Some(key) => {
+                TmuxSequence::new().command(["unbind-key", "-q", "-T", "root", &key.to_string()])
+            }
+            None => TmuxSequence::new(),
+        };
+        sequence.command(["source-file", "-"])
     }
 
     pub fn render(&self) -> String {
@@ -98,7 +109,8 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::adapters::tmux_command::{ServerFiles, TmuxCommand};
+    use crate::adapters::server_files::ServerFiles;
+    use crate::adapters::tmux_command::TmuxCommand;
     use crate::adapters::tmux_multiplexer::TmuxMultiplexer;
     use crate::adapters::tmux_sequence::TmuxSequence;
     use crate::application::ports::{AgentLaunch, Multiplexer, SessionSpec};

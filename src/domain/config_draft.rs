@@ -157,11 +157,7 @@ impl ConfigDraft {
     }
 
     pub(super) fn naming(&self) -> NamingScheme {
-        NamingScheme::new(
-            &self.worktree_root,
-            &self.branch_prefix,
-            NamingScheme::TMUX_PREFIX,
-        )
+        NamingScheme::for_new_sessions(&self.worktree_root, &self.branch_prefix)
     }
 
     pub(super) fn intervals(&self) -> RefreshIntervals {

@@ -1,15 +1,11 @@
 use std::ffi::OsStr;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use serde::{Deserialize, Serialize};
-
+use super::metadata_json::MetadataJson;
 use super::tmux_output::TmuxOutput;
 use super::tmux_server_config::TmuxServerConfig;
 use crate::application::ports::ServerState;
-use crate::domain::{
-    AgentPane, RepoName, ReturnKey, SessionMetadata, SessionObservation, SessionRepo,
-    SessionWorktree, TmuxAddress,
-};
+use crate::domain::{AgentPane, ReturnKey, SessionObservation, TmuxAddress};
 
 pub struct TmuxListing<'a> {
     output: &'a TmuxOutput,
@@ -201,38 +197,6 @@ impl<'a> PaneRow<'a> {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct MetadataJson {
-    repo_name: String,
-    repo_path: PathBuf,
-    branch: String,
-    base_commit: String,
-    worktree_path: PathBuf,
-    agent: String,
-}
-
-impl MetadataJson {
-    pub fn encode(metadata: &SessionMetadata) -> String {
-        let record = Self {
-            repo_name: metadata.repo_name().to_string(),
-            repo_path: metadata.repo_path().to_path_buf(),
-            branch: metadata.branch().to_string(),
-            base_commit: metadata.base_commit().to_string(),
-            worktree_path: metadata.worktree_path().to_path_buf(),
-            agent: metadata.agent().to_string(),
-        };
-        serde_json::to_string(&record).unwrap_or_default()
-    }
-
-    pub fn decode(text: &str) -> Option<SessionMetadata> {
-        let record: Self = serde_json::from_str(text).ok()?;
-        let repo = SessionRepo::new(RepoName::parse(&record.repo_name).ok()?, &record.repo_path);
-        let worktree =
-            SessionWorktree::new(&record.worktree_path, &record.branch, &record.base_commit);
-        Some(SessionMetadata::new(repo, worktree, &record.agent))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -340,15 +304,5 @@ mod tests {
             TmuxListing::new(&output).shell_window(),
             Some("@7".to_string())
         );
-    }
-
-    #[test]
-    fn metadata_survives_an_encode_decode_round_trip() {
-        let observation = ListingFixture::observation("ringleader-fix-auth");
-        let metadata = observation.metadata().unwrap();
-
-        let decoded = MetadataJson::decode(&MetadataJson::encode(metadata)).unwrap();
-
-        assert_eq!(&decoded, metadata);
     }
 }

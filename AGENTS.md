@@ -123,6 +123,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── tool_version.rs       # ToolVersion, the major and minor numbers of a tmux or git version
     │   ├── doctor_report.rs      # DoctorReport, the doctor's info, warning, and problem lines
     │   ├── registry_audit.rs     # RegistryAudit, the doctor's checks of each registry entry
+    │   ├── stopped_entry_audit.rs # StoppedEntryAudit, the doctor's checks of a stopped entry: its earlier server, the processes in its worktree, and claims on it
     │   ├── server_audit.rs       # ServerAudit, the doctor's checks of Ringleader's tmux server, the return key, and leftover bindings
     │   └── ports/
     │       ├── mod.rs
@@ -131,6 +132,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │       ├── dirty_state.rs        # DirtyState, the uncommitted files and nested repos of a worktree
     │       ├── unmerged_commits.rs   # UnmergedCommits, commits on no other ref with the tip and HEAD
     │       ├── multiplexer.rs        # Multiplexer trait
+    │       ├── agent_launch.rs       # AgentLaunch, the argv, environment, and worktree an agent starts with
     │       ├── leftover_bindings.rs  # LeftoverBindings trait, the bindings.json an earlier Ringleader left
     │       ├── config_source.rs      # ConfigSource trait
     │       ├── repo_scanner.rs       # RepoScanner trait
@@ -164,17 +166,19 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── system_clock.rs       # SystemClock, reads `SystemTime`
     │   ├── system_host_probe.rs  # SystemHostProbe
     │   ├── live_process.rs       # LiveProcess, one /proc entry
+    │   ├── metadata_json.rs      # MetadataJson, the @ringleader_meta JSON each session carries
     │   ├── signal_flags.rs       # SignalFlags, the SIGHUP, SIGINT, SIGTERM, and SIGQUIT flags
     │   ├── durable_file.rs       # DurableFile, synced temp file renamed over the target
-    │   ├── tmux_command.rs       # TmuxCommand and ServerFiles, the private server's `-S` and `-f`, `-u` and `-N`, a child environment without `TMUX` and `TMUX_PANE`, the caller's identity
+    │   ├── tmux_command.rs       # TmuxCommand, the private server's `-S` and `-f`, `-u` and `-N`, a child environment without `TMUX` and `TMUX_PANE`, the caller's identity
+    │   ├── server_files.rs       # ServerFiles, the private server's socket, generated config, and user file, and the 0700 socket directory
     │   ├── tmux_error.rs         # TmuxError
     │   ├── tmux_sequence.rs      # TmuxSequence, `;`-separated commands with `#` and `;` escaping
     │   ├── tmux_output.rs        # TmuxOutput, labeled lines and the zero-session errors
     │   ├── tmux_scripts.rs       # TmuxScripts, every tmux command sequence the multiplexer sends
     │   ├── tmux_launch.rs        # TmuxLaunch, ringleader-created and ringleader-done handling, rollback, tag move
-    │   ├── tmux_listing.rs       # TmuxListing, parses list-panes, list-windows, and list-keys rows and @ringleader_meta
+    │   ├── tmux_listing.rs       # TmuxListing, parses list-panes, list-windows, list-keys, and server rows
     │   ├── tmux_multiplexer.rs   # TmuxMultiplexer
-    │   ├── tmux_server_config.rs # TmuxServerConfig, the generated config of the private tmux server and its hash
+    │   ├── tmux_server_config.rs # TmuxServerConfig, the generated config of the private tmux server, its hash, and the script that reapplies it
     │   └── leftover_bindings_file.rs # LeftoverBindingsFile, reads the bindings.json an earlier Ringleader left
     ├── ui/
     │   ├── mod.rs

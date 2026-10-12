@@ -1,14 +1,10 @@
 use std::ffi::{OsStr, OsString};
-use std::fs::{self, DirBuilder};
-use std::io;
-use std::os::unix::fs::DirBuilderExt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 
 use super::bounded_command::{BoundedCommand, Call, CallKind, Deadlines};
-use super::durable_file::DurableFile;
-use super::host_path::HostPath;
 use super::process_environment::ProcessEnvironment;
+use super::server_files::ServerFiles;
 use super::tmux_error::TmuxError;
 use super::tmux_output::TmuxOutput;
 use super::tmux_sequence::TmuxSequence;
@@ -138,68 +134,14 @@ impl TmuxCommand {
         if !sequence.starts_server() {
             command.arg("-N");
         }
-        command.arg("-S").arg(&self.server.socket);
-        command.arg("-f").arg(&self.server.config);
+        command.arg("-S").arg(self.server.socket());
+        command.arg("-f").arg(self.server.config());
         command.args(sequence.argv());
         command
     }
 
     fn label(sequence: &TmuxSequence) -> String {
         format!("tmux {}", sequence.first_subcommand())
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ServerFiles {
-    socket: PathBuf,
-    config: PathBuf,
-    user_config: Option<PathBuf>,
-}
-
-impl ServerFiles {
-    const DIRECTORY_MODE: u32 = 0o700;
-
-    pub fn new(socket: &Path, config: &Path) -> Self {
-        Self {
-            socket: socket.to_path_buf(),
-            config: config.to_path_buf(),
-            user_config: None,
-        }
-    }
-
-    pub fn sourcing(self, user_config: &Path) -> Self {
-        Self {
-            user_config: Some(user_config.to_path_buf()),
-            ..self
-        }
-    }
-
-    pub fn user_config(&self) -> Option<&Path> {
-        self.user_config.as_deref()
-    }
-
-    pub fn socket(&self) -> &Path {
-        &self.socket
-    }
-
-    pub fn config(&self) -> &Path {
-        &self.config
-    }
-
-    pub fn prepare(&self, config_text: &str) -> io::Result<()> {
-        let socket_directory = self.socket.parent().unwrap_or(Path::new("/"));
-        DirBuilder::new()
-            .recursive(true)
-            .mode(Self::DIRECTORY_MODE)
-            .create(socket_directory)?;
-        if let Some(config_directory) = self.config.parent() {
-            fs::create_dir_all(config_directory)?;
-        }
-        DurableFile::new(&self.config).write(config_text.as_bytes())
-    }
-
-    fn is_reached_through(&self, socket: &Path) -> bool {
-        HostPath::new(socket).canonical_lenient() == HostPath::new(&self.socket).canonical_lenient()
     }
 }
 
@@ -240,7 +182,8 @@ impl CallerIdentity {
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::PermissionsExt;
+    use std::fs;
+    use std::path::Path;
 
     use super::*;
     use crate::test_support::TmuxTestServer;
@@ -326,24 +269,6 @@ mod tests {
         let pane = CallerFixture::command(&server, &users_socket).caller_pane();
 
         assert_eq!(pane, None);
-    }
-
-    #[test]
-    fn preparing_the_server_files_makes_a_private_socket_directory_and_the_config() {
-        let directory = tempfile::tempdir().unwrap();
-        let socket = directory.path().join("run/ringleader/tmux/tmux.sock");
-        let config = directory.path().join("state/ringleader/tmux.conf");
-
-        ServerFiles::new(&socket, &config)
-            .prepare("example\n")
-            .unwrap();
-
-        let mode = fs::metadata(socket.parent().unwrap())
-            .unwrap()
-            .permissions()
-            .mode();
-        assert_eq!(mode & 0o777, 0o700);
-        assert_eq!(fs::read_to_string(&config).unwrap(), "example\n");
     }
 
     #[test]
