@@ -161,6 +161,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── git_invocation.rs     # GitInvocation, one git call with its child environment
     │   ├── git_porcelain.rs      # GitPorcelain, parses git's machine-readable output
     │   ├── git_branches.rs       # GitBranches: compare-and-swap delete, rename, and the managed-branch marker
+    │   ├── branch_section.rs     # BranchSection, the git config section and upstream keys of one branch
     │   ├── start_point_resolver.rs # StartPointResolver, the base branch ladder
     │   ├── submodule_commits.rs  # SubmoduleCommits, the submodule walk of unmerged_commits
     │   ├── system_clock.rs       # SystemClock, reads `SystemTime`

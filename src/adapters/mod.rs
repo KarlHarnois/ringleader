@@ -3,6 +3,7 @@ pub mod agent_launcher;
 pub mod app_log;
 pub mod binding_records;
 pub mod bounded_command;
+pub mod branch_section;
 pub mod caller_process;
 pub mod command_output;
 pub mod config_file_writer;
