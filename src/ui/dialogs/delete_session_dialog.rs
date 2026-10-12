@@ -188,7 +188,7 @@ mod tests {
         ));
 
         assert!(screen.contains("Name      fix-auth"));
-        assert!(screen.contains("Branch    ringleader/fix-auth"));
+        assert!(screen.contains("Branch    fix-auth"));
         assert!(screen.contains("Worktree  /data/ringleader/worktrees/example-project/fix-auth"));
         assert!(screen.contains("Diff      +0 -0 ?1"));
     }

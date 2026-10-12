@@ -270,6 +270,7 @@ impl ServiceFixture {
                         .at_head(Self::TIP),
                 )
                 .with_branch(repo, session.branch(), Self::TIP)
+                .with_marker(repo, session.branch())
         })
     }
 

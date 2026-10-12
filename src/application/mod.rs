@@ -1,3 +1,5 @@
+pub mod branch_availability;
+pub mod branch_ownership;
 pub mod creation_plan;
 pub mod default_repo;
 pub mod delete_impact;
@@ -7,6 +9,7 @@ pub mod diagnostic_paths;
 pub mod doctor;
 pub mod doctor_report;
 pub mod home_repo_search;
+pub mod orphan_audit;
 pub mod pending;
 pub mod ports;
 pub mod reconciliation;

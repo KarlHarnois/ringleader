@@ -23,7 +23,7 @@ This file is the living reference for agents working in this repository.
 - The hermetic git environment is `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_NOSYSTEM=1`, `HOME=<tempdir>`, and fake `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME`, and `GIT_COMMITTER_EMAIL` values. Fixture repos are created with `git init -b <branch>`, never relying on `init.defaultBranch`.
 - The private GitHub repository exists and is configured as `origin`. Do not create another repository or add another remote. Push only when the project owner asks.
 - Keep the repository consumer-agnostic. Never reference or assume any specific downstream setup, local directory layout, or personal configuration. Examples and fixtures use generic names such as `example-project`.
-- Human-facing prose uses "Ringleader". Identifiers stay lowercase: binary, crate, repo, flake input, config paths, tmux and branch prefixes, JSON fields.
+- Human-facing prose uses "Ringleader". Identifiers stay lowercase: binary, crate, repo, flake input, config paths, the tmux prefix, JSON fields. The git config marker `ringleaderManaged` keeps git's camelCase.
 
 ## Commands
 
@@ -82,7 +82,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── config.rs             # Config, the parsed config.toml
     │   ├── config_draft.rs       # ConfigDraft, the raw config values the Config constructor checks
     │   ├── config_checks.rs      # ConfigChecks, the checks every config load runs
-    │   └── naming_scheme.rs      # NamingScheme, the worktree root and prefixes a session records
+    │   └── naming_scheme.rs      # NamingScheme, the worktree root and tmux prefix a session records
     ├── application/
     │   ├── mod.rs
     │   ├── session_service.rs    # SessionService, the facade the UI and CLI call
@@ -95,10 +95,12 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── creation_plan.rs      # CreationPlan and CreateRequest
     │   ├── use_checks.rs         # UseChecks, the checks a create or a restart runs before acting
     │   ├── session_renaming.rs   # SessionRenaming: rename_session with its branch rollback
+    │   ├── branch_availability.rs # BranchAvailability, refuses a branch name that exists or holds other branches, for create and rename
     │   ├── session_restart.rs    # SessionRestart: restart of an Exited or Stopped session
     │   ├── worktree_inspection.rs # WorktreeInspection, the worktree checks restart, delete, and doctor share
     │   ├── session_deletion.rs   # SessionDeletion: delete_session steps 5 to 8 and forget
     │   ├── deletion_guards.rs    # DeletionGuards: delete_session steps 2 to 4
+    │   ├── branch_ownership.rs   # BranchOwnership, refuses to delete or rename a branch without the Ringleader marker
     │   ├── delete_impact.rs      # DeleteImpact and DeleteConfirmation
     │   ├── delete_outcome.rs     # DeleteOutcome
     │   ├── worktree_containment.rs # WorktreeContainment, shared by delete step 3 and reconciliation
@@ -118,10 +120,12 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── tool_version.rs       # ToolVersion, the major and minor numbers of a tmux or git version
     │   ├── doctor_report.rs      # DoctorReport, the doctor's info, warning, and problem lines
     │   ├── registry_audit.rs     # RegistryAudit, the doctor's checks of each registry entry
+    │   ├── orphan_audit.rs       # OrphanAudit, the doctor's search for worktrees and marked branches no session claims
     │   └── ports/
     │       ├── mod.rs
     │       ├── session_registry.rs   # SessionRegistry trait
     │       ├── workspace.rs          # Workspace trait
+    │       ├── branch_marker.rs      # BranchMarker, the git config entry that marks a branch Ringleader created
     │       ├── dirty_state.rs        # DirtyState, the uncommitted files and nested repos of a worktree
     │       ├── unmerged_commits.rs   # UnmergedCommits, commits on no other ref with the tip and HEAD
     │       ├── multiplexer.rs        # Multiplexer trait
@@ -152,7 +156,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── git_runner.rs         # GitRunner, runs a GitInvocation through BoundedCommand
     │   ├── git_invocation.rs     # GitInvocation, one git call with its child environment
     │   ├── git_porcelain.rs      # GitPorcelain, parses git's machine-readable output
-    │   ├── git_branches.rs       # GitBranches: compare-and-swap delete, rename, listing
+    │   ├── git_branches.rs       # GitBranches: compare-and-swap delete, rename, and the managed-branch marker
     │   ├── start_point_resolver.rs # StartPointResolver, the base branch ladder
     │   ├── submodule_commits.rs  # SubmoduleCommits, the submodule walk of unmerged_commits
     │   ├── system_clock.rs       # SystemClock, reads `SystemTime`

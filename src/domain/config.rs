@@ -38,7 +38,7 @@ impl Config {
 
     pub fn defaults(worktree_root: &Path) -> Self {
         Self {
-            naming: NamingScheme::new(worktree_root, "ringleader/", "ringleader-"),
+            naming: NamingScheme::new(worktree_root, "ringleader-"),
             intervals: RefreshIntervals::default(),
             activity_idle_seconds: 3,
             session_size: SessionSize::default(),

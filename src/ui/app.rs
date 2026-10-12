@@ -661,7 +661,7 @@ mod tests {
         assert_eq!(AppFixture::selected(&app).as_deref(), Some("new-idea"));
         assert_eq!(
             AppFixture::status_line(&app, 100),
-            " Created new-idea on branch ringleader/new-idea."
+            " Created new-idea on branch new-idea."
         );
     }
 
@@ -756,7 +756,7 @@ mod tests {
     fn changed_guards_reopen_the_dialog_with_the_new_impact() {
         let session = ServiceFixture::session("fix-auth");
         let workspace = ServiceFixture::workspace_for(&[&session]).with_unmerged(
-            "ringleader/fix-auth",
+            "fix-auth",
             vec![
                 UnmergedCommits::new(0, Some(ServiceFixture::TIP), Some(ServiceFixture::TIP)),
                 UnmergedCommits::new(2, Some(ServiceFixture::TIP), Some(ServiceFixture::TIP)),
@@ -946,7 +946,7 @@ mod tests {
         assert_eq!(AppFixture::selected(&app).as_deref(), Some("fix-login"));
         assert_eq!(
             AppFixture::status_line(&app, 100),
-            " Renamed fix-auth to fix-login, branch ringleader/fix-login."
+            " Renamed fix-auth to fix-login, branch fix-login."
         );
     }
 

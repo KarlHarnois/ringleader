@@ -38,6 +38,11 @@ impl<'a> WorktreeRollback<'a> {
     }
 
     fn remove_created(&self) -> Result<(), ServiceError> {
+        self.remove_worktree()?;
+        self.remove_branch()
+    }
+
+    fn remove_worktree(&self) -> Result<(), ServiceError> {
         let canonical = self.host.canonicalize_lenient(&self.worktree)?;
         let listed = self.workspace.list_worktrees(self.repo)?;
         if let Some(entry) = listed.iter().find(|entry| entry.path() == canonical) {
@@ -46,14 +51,24 @@ impl<'a> WorktreeRollback<'a> {
             }
             self.workspace.remove_worktree(self.repo, &self.worktree)?;
         }
+        Ok(())
+    }
+
+    fn remove_branch(&self) -> Result<(), ServiceError> {
         if self.workspace.branch_exists(self.repo, &self.branch)? {
-            let expected_tip = match self.start {
-                StartPoint::Commit(sha) => Some(sha.as_str()),
-                StartPoint::Orphan => None,
-            };
             self.workspace
-                .delete_branch(self.repo, &self.branch, expected_tip)?;
+                .delete_branch(self.repo, &self.branch, self.expected_tip())?;
+        } else if self.workspace.is_branch_managed(self.repo, &self.branch)? {
+            self.workspace
+                .delete_branch(self.repo, &self.branch, None)?;
         }
         Ok(())
+    }
+
+    fn expected_tip(&self) -> Option<&str> {
+        match self.start {
+            StartPoint::Commit(sha) => Some(sha),
+            StartPoint::Orphan => None,
+        }
     }
 }

@@ -153,7 +153,7 @@ mod tests {
 
     impl SessionFixture {
         fn fix_auth() -> Session {
-            let naming = NamingScheme::new(Path::new("/worktrees"), "ringleader/", "ringleader-");
+            let naming = NamingScheme::new(Path::new("/worktrees"), "ringleader-");
             let metadata = SessionMetadata::new(
                 SessionRepo::new(
                     RepoName::parse("example-project").unwrap(),
@@ -161,7 +161,7 @@ mod tests {
                 ),
                 SessionWorktree::new(
                     Path::new("/worktrees/example-project/fix-auth"),
-                    "ringleader/fix-auth",
+                    "fix-auth",
                     "abc123",
                 ),
                 "claude",
@@ -179,23 +179,17 @@ mod tests {
     fn renaming_derives_the_tmux_name_from_the_recorded_prefix() {
         let session = SessionFixture::fix_auth();
 
-        let renamed = session.renamed(
-            SessionName::new("fix-login").unwrap(),
-            "ringleader/fix-login",
-        );
+        let renamed = session.renamed(SessionName::new("fix-login").unwrap(), "fix-login");
 
         assert_eq!(renamed.tmux_name(), "ringleader-fix-login");
-        assert_eq!(renamed.branch(), "ringleader/fix-login");
+        assert_eq!(renamed.branch(), "fix-login");
     }
 
     #[test]
     fn renaming_keeps_the_worktree_path() {
         let session = SessionFixture::fix_auth();
 
-        let renamed = session.renamed(
-            SessionName::new("fix-login").unwrap(),
-            "ringleader/fix-login",
-        );
+        let renamed = session.renamed(SessionName::new("fix-login").unwrap(), "fix-login");
 
         assert_eq!(renamed.worktree_path(), session.worktree_path());
     }

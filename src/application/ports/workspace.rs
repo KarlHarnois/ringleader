@@ -26,7 +26,14 @@ pub trait Workspace: Send + Sync {
     ) -> Result<(), WorkspaceError>;
     fn rename_branch(&self, location: &Path, old: &str, new: &str) -> Result<(), WorkspaceError>;
     fn branch_exists(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError>;
-    fn list_branches(&self, repo: &Path, prefix: &str) -> Result<Vec<String>, WorkspaceError>;
+    fn first_branch_under(
+        &self,
+        repo: &Path,
+        branch: &str,
+    ) -> Result<Option<String>, WorkspaceError>;
+    fn mark_branch_managed(&self, repo: &Path, branch: &str) -> Result<(), WorkspaceError>;
+    fn is_branch_managed(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError>;
+    fn list_managed_branches(&self, repo: &Path) -> Result<Vec<String>, WorkspaceError>;
     fn resolve_start_point(
         &self,
         repo: &Path,

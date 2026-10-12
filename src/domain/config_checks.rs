@@ -33,7 +33,6 @@ impl<'a> ConfigChecks<'a> {
 
     pub fn failures(mut self) -> Vec<String> {
         self.check_prefix("tmux_prefix", self.draft.raw_tmux_prefix(), '-');
-        self.check_prefix("branch_prefix", self.draft.raw_branch_prefix(), '/');
         self.check_absolute("worktree_root", self.draft.raw_worktree_root());
         self.check_session_size();
         self.check_idle_seconds();
@@ -280,19 +279,6 @@ mod tests {
     #[test]
     fn a_tmux_prefix_starting_with_a_dash_fails() {
         ChecksFixture::fails_on(ChecksFixture::draft().tmux_prefix("-x-"), "tmux_prefix");
-    }
-
-    #[test]
-    fn a_branch_prefix_starting_with_a_dash_fails() {
-        ChecksFixture::fails_on(
-            ChecksFixture::draft().branch_prefix("-rl/"),
-            "branch_prefix",
-        );
-    }
-
-    #[test]
-    fn a_short_branch_prefix_passes() {
-        assert!(ChecksFixture::failures(&ChecksFixture::draft().branch_prefix("a-/")).is_empty());
     }
 
     #[test]

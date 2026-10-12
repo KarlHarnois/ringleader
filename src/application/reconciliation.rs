@@ -1,7 +1,6 @@
 use super::service_error::ServiceError;
 use crate::domain::{
-    NamingScheme, Session, SessionMetadata, SessionObservation, SessionState, SessionSummary,
-    UnmanagedSession,
+    Session, SessionMetadata, SessionObservation, SessionState, SessionSummary, UnmanagedSession,
 };
 
 pub struct Reconciliation {
@@ -94,9 +93,9 @@ impl Reconciliation {
     pub fn claimant_of(&self, session: &Session) -> Option<&SessionObservation> {
         self.observations.iter().find(|observation| {
             observation.tmux_name() != session.tmux_name()
-                && observation.metadata().is_some_and(|metadata| {
-                    Self::claims_worktree(metadata, session.naming(), session)
-                })
+                && observation
+                    .metadata()
+                    .is_some_and(|metadata| Self::claims_worktree(metadata, session))
         })
     }
 
@@ -159,9 +158,7 @@ impl ManagedRow<'_> {
 }
 
 impl Reconciliation {
-    fn claims_worktree(metadata: &SessionMetadata, naming: &NamingScheme, entry: &Session) -> bool {
-        metadata.has_absolute_paths()
-            && naming.owns_branch(metadata.branch())
-            && metadata.worktree_path() == entry.worktree_path()
+    fn claims_worktree(metadata: &SessionMetadata, entry: &Session) -> bool {
+        metadata.has_absolute_paths() && metadata.worktree_path() == entry.worktree_path()
     }
 }
