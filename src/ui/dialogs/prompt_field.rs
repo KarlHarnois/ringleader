@@ -58,20 +58,21 @@ impl PromptField {
         Self::wrapped_rows(&self.editor.borrow(), Self::text_area(field)).min(Self::MOST_ROWS)
     }
 
-    pub fn render(&self, frame: &mut Frame, area: Rect, labels: DialogLabels, cursor_style: Style) {
+    pub fn render(&self, frame: &mut Frame, area: Rect, labels: DialogLabels, focus_style: Style) {
         let label = labels.labeled(NewSessionField::Prompt.label(), vec![Line::default()]);
         frame.render_widget(Paragraph::new(label), area);
         let field = labels.field_area(area);
-        self.render_text(frame, Self::text_area(field));
-        self.paint_cursor(frame.buffer_mut(), field, cursor_style);
+        self.render_text(frame, Self::text_area(field), focus_style);
+        self.paint_cursor(frame.buffer_mut(), field, focus_style);
     }
 
     fn breaks_line(key: &KeyEvent) -> bool {
         key.code == KeyCode::Char(Self::LINE_BREAK_KEY) && key.modifiers == KeyModifiers::CONTROL
     }
 
-    fn render_text(&self, frame: &mut Frame, text: Rect) {
+    fn render_text(&self, frame: &mut Frame, text: Rect, selection_style: Style) {
         let mut editor = self.editor.borrow_mut();
+        editor.set_selection_style(selection_style);
         frame.render_widget(&*editor, text);
         let stale_rows = Self::stale_scroll_rows(&editor, text);
         if stale_rows > 0 {

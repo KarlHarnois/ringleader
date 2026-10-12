@@ -57,8 +57,8 @@ impl<'a> NewSessionView<'a> {
         let upper = self.upper_lines(labels.field_width(area), layout.repo_room(), labels, theme);
         let [upper_area, prompt_area, error_area, hints_area] = layout.areas(upper.len());
         self.render_upper(frame, upper_area, upper);
-        let cursor_style = self.focus_style(NewSessionField::Prompt, theme);
-        self.prompt.render(frame, prompt_area, labels, cursor_style);
+        let prompt_style = self.focus_style(NewSessionField::Prompt, theme);
+        self.prompt.render(frame, prompt_area, labels, prompt_style);
         frame.render_widget(Paragraph::new(errors), error_area);
         frame.render_widget(Line::styled(self.hints(), theme.dim()), hints_area);
     }

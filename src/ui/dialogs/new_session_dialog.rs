@@ -708,6 +708,23 @@ mod tests {
     }
 
     #[test]
+    fn a_selection_in_the_prompt_shows_like_the_cursor_and_hides_with_it() {
+        let (mut dialog, service) =
+            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
+        DialogFixture::type_text(&mut dialog, &service, "fix the tests");
+        let select_left = KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT);
+        for _ in 0.."tests".len() {
+            dialog.handle_key(&select_left, &service);
+        }
+        let focused = DialogFixture::text_with_cursor(&dialog);
+
+        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
+
+        assert!(focused.contains("Prompt    fix the █████\n"));
+        assert!(!DialogFixture::shows_a_cursor(&dialog));
+    }
+
+    #[test]
     fn an_empty_prompt_takes_one_row() {
         let (dialog, _service) =
             DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
