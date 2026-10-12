@@ -373,7 +373,27 @@ mod tests {
         assert!(
             error
                 .to_string()
-                .contains("processes still run in its worktree")
+                .contains("processes of Ringleader's tmux server still run in its worktree")
+        );
+        assert!(fixture.multiplexer().state_changing_calls().is_empty());
+    }
+
+    #[test]
+    fn a_stopped_session_refuses_restart_while_its_agent_runs_on_its_recorded_server() {
+        let recorded = Path::new("/home/example/.local/state/ringleader/tmux/tmux.sock");
+        let session = RestartFixture::session().on_socket(recorded);
+        let host = ServiceFixture::with_worktree_process(&session)
+            .serving(ServiceFixture::WORKTREE_PROCESS, recorded);
+        let fixture = RestartFixture::stopped()
+            .with_sessions(std::slice::from_ref(&session))
+            .with_host(host);
+
+        let error = RestartFixture::restart(&fixture).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains(&format!("tmux -S {} kill-session", recorded.display()))
         );
         assert!(fixture.multiplexer().state_changing_calls().is_empty());
     }

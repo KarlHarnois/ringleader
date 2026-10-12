@@ -94,6 +94,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── service_ports.rs      # ServicePorts with the StatePorts, RepoPorts, and TmuxPorts bundles
     │   ├── service_error.rs      # ServiceError and its exit codes
     │   ├── session_lifecycle.rs  # SessionLifecycle: create, delete, rename, restart
+    │   ├── busy_worktree.rs      # BusyWorktree, the tmux server processes that keep a stopped entry from restarting, with the advice for each case
     │   ├── session_creation.rs   # SessionCreation: create_session with its rollbacks
     │   ├── worktree_rollback.rs  # WorktreeRollback, removes the worktree and branch of a failed create
     │   ├── creation_plan.rs      # CreationPlan and CreateRequest
@@ -124,8 +125,8 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── tool_version.rs       # ToolVersion, the major and minor numbers of a tmux or git version
     │   ├── doctor_report.rs      # DoctorReport, the doctor's info, warning, and problem lines
     │   ├── registry_audit.rs     # RegistryAudit, the doctor's checks of each registry entry
-    │   ├── stopped_entry_audit.rs # StoppedEntryAudit, the doctor's checks of a stopped entry: its earlier server, the processes in its worktree, and claims on it
-    │   ├── server_audit.rs       # ServerAudit, the doctor's checks of Ringleader's tmux server, the return key, and leftover bindings
+    │   ├── stopped_entry_audit.rs # StoppedEntryAudit, the doctor's checks of a stopped entry: the tmux server processes in its worktree and claims on it
+    │   ├── server_audit.rs       # ServerAudit, the doctor's checks of Ringleader's tmux server and the return key
     │   └── ports/
     │       ├── mod.rs
     │       ├── session_registry.rs   # SessionRegistry trait

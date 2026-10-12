@@ -398,7 +398,7 @@ mod tests {
         assert!(
             error
                 .to_string()
-                .contains("processes still run in its worktree")
+                .contains("processes of Ringleader's tmux server still run in its worktree")
         );
         assert!(fixture.workspace().state_changing_calls().is_empty());
     }

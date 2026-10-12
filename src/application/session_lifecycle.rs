@@ -1,10 +1,11 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use super::busy_worktree::BusyWorktree;
 use super::creation_plan::CreateRequest;
 use super::delete_impact::{DeleteConfirmation, DeleteImpact};
 use super::delete_outcome::DeleteOutcome;
-use super::ports::{HostProbe, Multiplexer, ProcessInfo};
+use super::ports::{HostProbe, Multiplexer};
 use super::reconciliation::{ManagedRow, Reconciliation};
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
@@ -158,19 +159,11 @@ impl SessionLifecycle {
     }
 
     fn refuse_busy_worktree(&self, session: &Session) -> Result<(), ServiceError> {
-        let worktree = session.worktree_path();
-        let processes = self
-            .host
-            .processes_under_server(worktree, &self.multiplexer.socket());
-        if processes.is_empty() {
-            return Ok(());
+        let socket = self.multiplexer.socket();
+        match BusyWorktree::new(self.host.as_ref(), &socket).finding(session) {
+            Some(finding) => Err(ServiceError::Conflict(finding)),
+            None => Ok(()),
         }
-        Err(ServiceError::Conflict(format!(
-            "session {} is stopped, but processes still run in its worktree {}: {}. End them first.",
-            session.name(),
-            worktree.display(),
-            ProcessInfo::listed(&processes)
-        )))
     }
 
     fn refuse_if_claimed(
