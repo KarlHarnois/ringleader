@@ -195,7 +195,7 @@ As of 2026-10-12, milestones 1 to 7 are in, one commit each. They implement the 
 Where the implementation departs from the text above:
 
 - `TmuxTestServer` starts every test server with the rendered config, not only the tests of the generated config, because the post-create check in `create_session` needs a `detach-client` binding.
-- The naming drift row warns only when `worktree_root` or `branch_prefix` differ from the config.
+- The naming drift row warns only when `worktree_root` differs from the config. `master` dropped `branch_prefix`, since branches now take the session's name and carry a Ringleader marker, so with D3 the config has no prefix key at all.
 - The D5 own-pane check skips dead panes. tmux keeps reporting an exited pane's terminal after freeing it, and Linux hands that `/dev/pts` number to the next terminal opened.
 - A reapply writes the render to the generated config file before sourcing it, so the file help and doctor name matches the running server.
 - The private server's config handling lives in `PrivateServer` rather than `TmuxMultiplexer`, which keeps the multiplexer below its size on `master`.
