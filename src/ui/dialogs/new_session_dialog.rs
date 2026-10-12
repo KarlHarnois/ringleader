@@ -250,6 +250,8 @@ mod tests {
             "Type to search · ↑ ↓ ctrl-j ctrl-k choose · Enter pick · Esc back";
         const SEVEN_LINE_PROMPT: &'static str = "one\ntwo\nthree\nfour\nfive\nsix\nseven";
         const FULL_HEIGHT: usize = 20;
+        const ONE_ROW_FIELDS: usize = 3;
+        const NO_SPARE_ROWS_HEIGHT: usize = NewSessionDialog::FIXED_LINES + Self::ONE_ROW_FIELDS;
 
         fn launched_in_repo() -> ServiceFixture {
             let found = Repo::discovered(
@@ -623,12 +625,13 @@ mod tests {
     }
 
     #[test]
-    fn a_dialog_with_no_spare_rows_keeps_the_prompt_on_one_row() {
+    fn a_dialog_with_no_spare_rows_still_shows_one_prompt_row() {
         let (mut dialog, _service) = DialogFixture::in_prompt(&DialogFixture::launched_in_repo());
 
         dialog.paste("one\ntwo\nthree");
 
-        assert!(DialogFixture::text_at(&dialog, 7).contains("Prompt    three█\n\n"));
+        let text = DialogFixture::text_at(&dialog, DialogFixture::NO_SPARE_ROWS_HEIGHT);
+        assert!(text.contains("Prompt    three█\n\n"));
     }
 
     #[test]
