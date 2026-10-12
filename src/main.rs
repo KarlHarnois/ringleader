@@ -208,9 +208,15 @@ impl CompositionRoot {
         screen.state().install_panic_hook();
         let mut app_inside_the_screen = app;
         let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
-        terminal.clear()?;
+        Self::clear_alternate_screen_leftovers(&mut terminal)?;
         EventLoop::new(terminal, CrosstermInput, signals, screen.state())
             .run(&mut app_inside_the_screen)
+    }
+
+    fn clear_alternate_screen_leftovers(
+        terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    ) -> io::Result<()> {
+        terminal.clear()
     }
 
     fn config_source(&self, cli: &Cli) -> TomlConfigSource {
