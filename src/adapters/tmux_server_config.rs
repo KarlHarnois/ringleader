@@ -1,12 +1,15 @@
+use std::path::{Path, PathBuf};
+
 use crate::domain::ReturnKey;
 
 pub struct TmuxServerConfig {
     return_key: ReturnKey,
+    user_file: Option<PathBuf>,
 }
 
 impl TmuxServerConfig {
-    const SETTINGS: [&'static str; 16] = [
-        "set -su terminal-features",
+    const RESET: &'static str = "set -su terminal-features";
+    const SETTINGS: [&'static str; 15] = [
         "set -g prefix None",
         "set -g prefix2 None",
         "set -g status off",
@@ -32,6 +35,14 @@ impl TmuxServerConfig {
     pub fn new(return_key: &ReturnKey) -> Self {
         Self {
             return_key: return_key.clone(),
+            user_file: None,
+        }
+    }
+
+    pub fn sourcing(self, user_file: Option<&Path>) -> Self {
+        Self {
+            user_file: user_file.map(Path::to_path_buf),
+            ..self
         }
     }
 
@@ -46,7 +57,13 @@ impl TmuxServerConfig {
     }
 
     fn leading_lines(&self) -> Vec<String> {
-        let mut lines: Vec<String> = Self::SETTINGS.iter().map(|line| line.to_string()).collect();
+        let mut lines = vec![Self::RESET.to_string()];
+        lines.extend(
+            self.user_file
+                .as_ref()
+                .map(|file| format!("source-file -q '{}'", file.display())),
+        );
+        lines.extend(Self::SETTINGS.iter().map(|line| line.to_string()));
         lines.push(format!(
             "set -g {} {}",
             Self::RETURN_KEY_OPTION,
@@ -75,12 +92,14 @@ impl TmuxServerConfig {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsStr;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::time::Duration;
 
     use super::*;
     use crate::adapters::tmux_command::{ServerFiles, TmuxCommand};
+    use crate::adapters::tmux_multiplexer::TmuxMultiplexer;
     use crate::adapters::tmux_sequence::TmuxSequence;
     use crate::application::ports::{AgentLaunch, Multiplexer, SessionSpec};
     use crate::domain::{RepoName, SessionMetadata, SessionRepo, SessionWorktree};
@@ -128,6 +147,26 @@ mod tests {
             worktree
         }
 
+        fn created_sourcing(server: &TmuxTestServer, user_file: Option<&Path>) {
+            let files = ServerFiles::new(server.socket(), server.config());
+            let files = match user_file {
+                Some(file) => files.sourcing(file),
+                None => files,
+            };
+            let tmux = TmuxCommand::new(OsStr::new("tmux"), &files, &server.environment());
+            let multiplexer = TmuxMultiplexer::new(tmux, server.stand_in());
+            let worktree = server.directory().join("fix-auth");
+            fs::create_dir_all(&worktree).unwrap();
+            let metadata = SessionMetadata::new(
+                SessionRepo::new(RepoName::parse("example-project").unwrap(), &worktree),
+                SessionWorktree::new(&worktree, "ringleader/fix-auth", ""),
+                "stand-in",
+            );
+            let launch = AgentLaunch::new(Vec::new(), &[], &worktree);
+            let spec = SessionSpec::new("ringleader-fix-auth", metadata, launch);
+            multiplexer.create_session(&spec).unwrap();
+        }
+
         fn returns_from(server: &TmuxTestServer, target: &str) -> bool {
             let mut client = server.control_client(target);
             server.press(&client, "C-q");
@@ -141,7 +180,36 @@ mod tests {
 
     #[test]
     fn the_default_render_matches_the_golden_fixture() {
-        assert_eq!(ConfigFixture::render(ReturnKey::DEFAULT), GOLDEN);
+        let render = TmuxServerConfig::new(&ReturnKey::default())
+            .sourcing(Some(Path::new(
+                "/home/example/.config/ringleader/tmux.conf",
+            )))
+            .render();
+
+        assert_eq!(render, GOLDEN);
+    }
+
+    #[test]
+    fn a_user_file_cannot_override_the_essential_settings() {
+        let server = TmuxTestServer::new();
+        let user_file = server.directory().join("user.conf");
+        fs::write(&user_file, "set -g history-limit 5000\nset -g status on\n").unwrap();
+
+        ConfigFixture::created_sourcing(&server, Some(&user_file));
+
+        assert_eq!(ConfigFixture::option(&server, "history-limit"), "5000");
+        assert_eq!(ConfigFixture::option(&server, "status"), "off");
+    }
+
+    #[test]
+    fn a_missing_user_file_loads_cleanly() {
+        let server = TmuxTestServer::new();
+        let missing = server.directory().join("missing.conf");
+
+        ConfigFixture::created_sourcing(&server, Some(&missing));
+
+        assert_eq!(ConfigFixture::option(&server, "prefix"), "None");
+        assert_eq!(ConfigFixture::option(&server, "status"), "off");
     }
 
     #[test]
@@ -263,7 +331,7 @@ mod tests {
         files
             .prepare(&ConfigFixture::render(ReturnKey::DEFAULT))
             .unwrap();
-        let tmux = TmuxCommand::new(std::ffi::OsStr::new("tmux"), &files, &server.environment());
+        let tmux = TmuxCommand::new(OsStr::new("tmux"), &files, &server.environment());
 
         tmux.create(
             &TmuxSequence::new().command(["new-session", "-d", "-s", "holder", "sleep", "30"]),

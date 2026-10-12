@@ -46,6 +46,10 @@ impl XdgPaths {
         self.config_home.join(Self::APPLICATION).join("config.toml")
     }
 
+    pub fn user_tmux_config(&self) -> PathBuf {
+        self.config_home.join(Self::APPLICATION).join("tmux.conf")
+    }
+
     pub fn state_directory(&self) -> PathBuf {
         self.state_home.join(Self::APPLICATION)
     }
@@ -132,6 +136,16 @@ mod tests {
         assert_eq!(
             paths.tmux_config(),
             Path::new("/example-state/ringleader/tmux.conf")
+        );
+    }
+
+    #[test]
+    fn the_user_tmux_config_lives_in_the_config_home() {
+        let paths = PathsFixture::with(&[("XDG_CONFIG_HOME", "/example-config")]);
+
+        assert_eq!(
+            paths.user_tmux_config(),
+            Path::new("/example-config/ringleader/tmux.conf")
         );
     }
 

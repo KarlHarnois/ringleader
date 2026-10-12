@@ -28,6 +28,8 @@ Sessions run on Ringleader's own tmux server, so they do not show in your own `t
 
 To inspect the sessions with tmux itself, run `tmux -S "$XDG_RUNTIME_DIR/ringleader/tmux/tmux.sock" ls`. Without `XDG_RUNTIME_DIR`, the socket is under `~/.local/state/ringleader/tmux/`. The help screen (`?`) shows the path.
 
+Your own `~/.tmux.conf` never loads on Ringleader's server. Put preferences such as `history-limit`, colors, or copy-mode keys in `~/.config/ringleader/tmux.conf` instead. Ringleader's server loads that file first, so the return key, the missing prefix key, and its other settings still apply. Changes to that file apply when the server next starts, which happens after its last session ends.
+
 ## Upgrading
 
 Earlier versions ran sessions on your own tmux server. Those sessions stay there and list as stopped, and `ringleader doctor` names the server each one runs on. End each one there, then run `ringleader restart <name>` to start it again on Ringleader's own server. The `tmux_prefix` setting no longer does anything: new sessions are always named `ringleader-<name>`.

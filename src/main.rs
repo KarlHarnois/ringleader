@@ -64,11 +64,20 @@ impl CompositionRoot {
         let (programs, environment) = snapshot.split_program_paths();
         let paths = XdgPaths::from_environment(&environment);
         Self {
-            server: ServerFiles::new(&paths.tmux_socket(), &paths.tmux_config()),
+            server: Self::server_files(&paths),
             paths,
             launch_directory: std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")),
             environment,
             programs,
+        }
+    }
+
+    fn server_files(paths: &XdgPaths) -> ServerFiles {
+        let files = ServerFiles::new(&paths.tmux_socket(), &paths.tmux_config());
+        let user_config = paths.user_tmux_config();
+        match DiagnosticPaths::can_source(&user_config) {
+            true => files.sourcing(&user_config),
+            false => files,
         }
     }
 
@@ -285,7 +294,8 @@ impl CompositionRoot {
             &self.programs.git().to_string_lossy(),
             &self.paths.state_directory(),
         )
-        .with_tmux_server(self.server.socket(), self.server.config());
+        .with_tmux_server(self.server.socket(), self.server.config())
+        .with_user_tmux_config(&self.paths.user_tmux_config());
         match self.paths.has_runtime_directory() {
             true => paths,
             false => paths.with_socket_in_state_directory(),

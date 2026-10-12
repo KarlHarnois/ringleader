@@ -60,7 +60,7 @@ impl TmuxMultiplexer {
     }
 
     fn prepare_server(&self, spec: &SessionSpec) -> Result<(), MultiplexerError> {
-        let render = TmuxServerConfig::new(spec.return_key()).render();
+        let render = self.server_config_for(spec.return_key()).render();
         self.tmux
             .server()
             .prepare(&render)
@@ -177,6 +177,10 @@ impl TmuxMultiplexer {
             subcommand: "attach-session".to_string(),
             detail: format!("tmux attach-session ended with wait status {status}"),
         })
+    }
+
+    fn server_config_for(&self, return_key: &ReturnKey) -> TmuxServerConfig {
+        TmuxServerConfig::new(return_key).sourcing(self.tmux.server().user_config())
     }
 
     fn running_config(&self) -> Result<Option<RunningConfig>, MultiplexerError> {
@@ -346,7 +350,7 @@ impl Multiplexer for TmuxMultiplexer {
         let Some(running) = self.running_config()? else {
             return Ok(None);
         };
-        let current = running.hash() == TmuxServerConfig::new(return_key).hash();
+        let current = running.hash() == self.server_config_for(return_key).hash();
         Ok(Some(ServerConfig::new(current, running.return_key())))
     }
 
@@ -356,7 +360,7 @@ impl Multiplexer for TmuxMultiplexer {
             .as_ref()
             .and_then(RunningConfig::return_key)
             .filter(|previous| *previous != return_key);
-        let render = TmuxServerConfig::new(return_key).render();
+        let render = self.server_config_for(return_key).render();
         let sequence = TmuxScripts::reapply(previous_key);
         let output = self.tmux.change_with_input(&sequence, render.as_bytes())?;
         if output.succeeded() {
