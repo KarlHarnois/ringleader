@@ -154,6 +154,13 @@ impl TmuxScripts {
         TmuxSequence::new().command(["display-message", "-p", format])
     }
 
+    pub fn type_line(pane: &str, line: &str) -> TmuxSequence {
+        TmuxSequence::new()
+            .command(["send-keys", "-t", pane, "-l", "--", line])
+            .command(["send-keys", "-t", pane, "Enter"])
+            .command(["display-message", "-p", "-t", pane, TmuxLaunch::DONE_LABEL])
+    }
+
     pub fn capture(pane: &str) -> TmuxSequence {
         TmuxSequence::new().command(["capture-pane", "-e", "-p", "-t", pane])
     }

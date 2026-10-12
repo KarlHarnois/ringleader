@@ -99,7 +99,9 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── creation_plan.rs      # CreationPlan and CreateRequest
     │   ├── use_checks.rs         # UseChecks, the checks a create or a restart runs before acting
     │   ├── session_renaming.rs   # SessionRenaming: rename_session with its branch rollback
+    │   ├── rename_request.rs     # RenameRequest, the old and new names and whether the branch stays
     │   ├── session_restart.rs    # SessionRestart: restart of an Exited or Stopped session
+    │   ├── agent_typing.rs       # AgentTyping, types an agent's startup and rename input and logs a skip
     │   ├── worktree_inspection.rs # WorktreeInspection, the worktree checks restart, delete, and doctor share
     │   ├── session_deletion.rs   # SessionDeletion: delete_session steps 5 to 8 and forget
     │   ├── deletion_guards.rs    # DeletionGuards: delete_session steps 2 to 4
@@ -171,6 +173,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── tmux_output.rs        # TmuxOutput, labeled lines and the zero-session errors
     │   ├── tmux_scripts.rs       # TmuxScripts, every tmux command sequence the multiplexer sends
     │   ├── tmux_launch.rs        # TmuxLaunch, ringleader-created and ringleader-done handling, rollback, tag move
+    │   ├── tmux_agent_input.rs   # TmuxAgentInput, waits for the agent's prompt and types lines into its pane
     │   ├── tmux_listing.rs       # TmuxListing, parses list-panes, list-windows, and list-clients rows and @ringleader_meta
     │   ├── tmux_multiplexer.rs   # TmuxMultiplexer
     │   ├── tmux_return_binding.rs # TmuxReturnBinding, owns bindings.json
@@ -258,6 +261,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
 - Only the TUI installs the Ctrl-Q return binding. The CLI never touches tmux key bindings.
 - Blocking TUI operations (create, delete, rename, restart, and the delete measurement) run behind a busy message, and the event loop drops the key and paste events queued while they ran.
 - Logs go to `$XDG_STATE_HOME/ringleader/app.log` through `env_logger`, never to the terminal.
+- An agent's `startup_input` is typed after create and restart, waiting up to 10 seconds for its prompt. Its `rename_input` is typed after a rename only when the agent is at its prompt at that moment. An agent is at its prompt when its pane shows the cursor away from the home position: Claude hides the cursor in its trust and permission dialogs, and an agent still starting has not moved it. A skipped or failed typing is logged and never fails the use case.
 
 ## CLI exit codes
 

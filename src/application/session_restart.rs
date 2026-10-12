@@ -1,19 +1,21 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use super::agent_typing::AgentTyping;
 use super::ports::{AgentLaunch, HostProbe, Multiplexer, SessionRegistry, SessionSpec};
 use super::reconciliation::{ManagedRow, Reconciliation};
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
 use super::use_checks::UseChecks;
 use super::worktree_inspection::WorktreeInspection;
-use crate::domain::{Agent, Config, Session, SessionState};
+use crate::domain::{Agent, Config, Session};
 
 pub struct SessionRestart {
     inspection: WorktreeInspection,
     multiplexer: Arc<dyn Multiplexer>,
     host: Arc<dyn HostProbe>,
     registry: Arc<dyn SessionRegistry>,
+    typing: AgentTyping,
 }
 
 impl SessionRestart {
@@ -23,6 +25,7 @@ impl SessionRestart {
             multiplexer: ports.tmux().multiplexer(),
             host: ports.repos().host(),
             registry: ports.state().registry(),
+            typing: AgentTyping::new(ports),
         }
     }
 
@@ -34,7 +37,7 @@ impl SessionRestart {
         config_path: &Path,
     ) -> Result<Session, ServiceError> {
         let session = row.session();
-        if matches!(row.state(), SessionState::Working | SessionState::Waiting) {
+        if row.state().runs_agent() {
             return Err(ServiceError::Conflict(format!(
                 "session {} is running, restart only revives an exited or stopped agent",
                 session.name()
@@ -43,17 +46,30 @@ impl SessionRestart {
         let checks = UseChecks::new(self.host.as_ref(), config, config_path);
         let agent = checks.agent_for_restart(session.agent())?;
         self.check_worktree(session)?;
-        let launch = Self::launch(agent, session);
+        let restarted = self.revive(row, Self::launch(agent, session), reconciliation, config)?;
+        self.typing.type_startup_input(&restarted, agent);
+        Ok(restarted)
+    }
+
+    fn launch(agent: &Agent, session: &Session) -> AgentLaunch {
+        let argv = agent.restart_argv(session.name());
+        AgentLaunch::for_agent(agent, argv, session.worktree_path())
+    }
+
+    fn revive(
+        &self,
+        row: &ManagedRow,
+        launch: AgentLaunch,
+        reconciliation: &Reconciliation,
+        config: &Config,
+    ) -> Result<Session, ServiceError> {
+        let session = row.session();
         if row.is_live() {
             self.multiplexer
                 .respawn_agent(session.tmux_name(), &launch)?;
             return Ok(session.clone());
         }
         self.recreate(session, launch, reconciliation, config)
-    }
-
-    fn launch(agent: &Agent, session: &Session) -> AgentLaunch {
-        AgentLaunch::for_agent(agent, agent.restart_argv(), session.worktree_path())
     }
 
     fn check_worktree(&self, session: &Session) -> Result<(), ServiceError> {
@@ -160,6 +176,40 @@ mod tests {
 
         let launch = fixture.multiplexer().launches().pop().unwrap();
         assert_eq!(launch.argv(), ["claude", "--model", "opus"]);
+    }
+
+    #[test]
+    fn restart_passes_the_session_name_to_the_agent() {
+        let fixture = RestartFixture::exited().with_config(ServiceFixture::config_with_input());
+
+        RestartFixture::restart(&fixture).unwrap();
+
+        let launch = fixture.multiplexer().launches().pop().unwrap();
+        assert_eq!(launch.argv(), ["claude", "--name", "fix-auth"]);
+    }
+
+    #[test]
+    fn a_respawned_agent_gets_its_startup_input() {
+        let fixture = RestartFixture::exited().with_config(ServiceFixture::config_with_input());
+
+        RestartFixture::restart(&fixture).unwrap();
+
+        assert_eq!(
+            fixture.multiplexer().typed_into("ringleader-fix-auth"),
+            ["/color"]
+        );
+    }
+
+    #[test]
+    fn a_recreated_session_gets_its_startup_input() {
+        let fixture = RestartFixture::stopped().with_config(ServiceFixture::config_with_input());
+
+        RestartFixture::restart(&fixture).unwrap();
+
+        assert_eq!(
+            fixture.multiplexer().typed_into("ringleader-fix-auth"),
+            ["/color"]
+        );
     }
 
     #[test]

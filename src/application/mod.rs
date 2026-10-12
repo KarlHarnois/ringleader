@@ -1,3 +1,4 @@
+pub mod agent_typing;
 pub mod creation_plan;
 pub mod default_repo;
 pub mod delete_impact;
@@ -11,6 +12,7 @@ pub mod pending;
 pub mod ports;
 pub mod reconciliation;
 pub mod registry_audit;
+pub mod rename_request;
 pub mod repo_catalog;
 pub mod repo_merge;
 pub mod repo_overrides;

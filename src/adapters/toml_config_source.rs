@@ -41,14 +41,18 @@ scan_depth = 3
 [[agents]]
 name = "claude"
 command = "claude"
-# command is never split. Put flags in args.
-# args = ["--model", "opus"]
+# command is never split. Put flags in args. {name} is the session name.
+args = ["--name", "{name}"]
 env = ["ANTHROPIC_API_KEY"]
 # env copies these variables from Ringleader's environment. set_env sets fixed
 # values, for example the config directory of a second Claude account. Values
 # are used as written: only a leading ~/ expands. Keep secrets in env.
 # set_env = { CLAUDE_CONFIG_DIR = "~/.claude-work" }
 prompt_args = ["{prompt}"]
+# Lines typed into the agent once its prompt is ready, each followed by Enter.
+# startup_input is typed at every start, rename_input after a rename.
+startup_input = ["/color"]
+rename_input = ["/rename {name}"]
 
 [[agents]]
 name = "opencode"
@@ -194,7 +198,7 @@ impl ConfigSource for TomlConfigSource {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::Agent;
+    use crate::domain::{Agent, SessionName};
 
     const FIXTURE: &str = include_str!("../../tests/fixtures/config.toml");
 
@@ -338,6 +342,34 @@ mod tests {
                 ("EXAMPLE_MODE".to_string(), "plain".to_string()),
             ]
         );
+    }
+
+    #[test]
+    fn agent_input_loads_with_the_name_placeholder_kept_for_each_session() {
+        let fixture = SourceFixture::with_text(concat!(
+            "[[agents]]\nname = \"a\"\ncommand = \"a\"\n",
+            "startup_input = [\"/color\"]\nrename_input = [\"/rename {name}\"]\n",
+        ));
+
+        let config = fixture.source().load().unwrap();
+
+        let session = SessionName::new("fix-auth").unwrap();
+        assert_eq!(config.agents()[0].startup_input(&session), ["/color"]);
+        assert_eq!(
+            config.agents()[0].rename_input(&session),
+            ["/rename fix-auth"]
+        );
+    }
+
+    #[test]
+    fn an_agent_without_input_loads_with_none() {
+        let fixture = SourceFixture::with_text("[[agents]]\nname = \"a\"\ncommand = \"a\"\n");
+
+        let config = fixture.source().load().unwrap();
+
+        let session = SessionName::new("fix-auth").unwrap();
+        assert!(config.agents()[0].startup_input(&session).is_empty());
+        assert!(config.agents()[0].rename_input(&session).is_empty());
     }
 
     #[test]

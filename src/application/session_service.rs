@@ -9,6 +9,7 @@ use super::doctor_report::DoctorReport;
 use super::pending::Pending;
 use super::ports::{ConfigError, ConfigSource, RegistryError, SessionRegistry};
 use super::reconciliation::Reconciliation;
+use super::rename_request::RenameRequest;
 use super::repo_catalog::{RepoCatalog, RepoDiscovery};
 use super::repo_overrides::{AddRepoRequest, RepoAddition};
 use super::service_context::{LoadedConfig, ServiceContext};
@@ -185,9 +186,10 @@ impl SessionService {
         keep_branch: bool,
     ) -> Result<Session, ServiceError> {
         let reconciliation = self.reconcile()?;
+        let request = RenameRequest::new(old, new, keep_branch);
         let renamed = self
             .lifecycle
-            .rename(&reconciliation, old, new, keep_branch)?;
+            .rename(&reconciliation, &request, self.config())?;
         self.entries = reconciliation.entries_with(old, renamed.clone());
         Ok(renamed)
     }
