@@ -1,6 +1,4 @@
-use std::fs::OpenOptions;
-use std::io::{self, Write};
-use std::os::unix::fs::OpenOptionsExt;
+use std::io;
 use std::path::{Path, PathBuf};
 
 use super::agent_launcher::{LauncherCommand, PreparedLaunch};
@@ -24,7 +22,6 @@ pub struct TmuxMultiplexer {
 impl TmuxMultiplexer {
     const EXIT_UNATTACHED_ON: &'static str = "1";
     const MISSING_SESSION: &'static str = "can't find session";
-    const BELL: &'static [u8] = b"\x07";
 
     pub fn new(tmux: TmuxCommand, launcher: LauncherCommand, inside_tmux: bool) -> Self {
         Self {
@@ -164,17 +161,6 @@ impl TmuxMultiplexer {
         }
         Err(TmuxError::failed(subcommand, output).into())
     }
-
-    fn write_bell(tty: &Path) {
-        let written = OpenOptions::new()
-            .write(true)
-            .custom_flags(libc::O_NONBLOCK | libc::O_NOCTTY)
-            .open(tty)
-            .and_then(|mut terminal| terminal.write_all(Self::BELL));
-        if let Err(error) = written {
-            log::debug!("skipped the bell for {}: {error}", tty.display());
-        }
-    }
 }
 
 impl Multiplexer for TmuxMultiplexer {
@@ -300,17 +286,6 @@ impl Multiplexer for TmuxMultiplexer {
         let output = self.tmux.change(&sequence)?;
         let launched = TmuxLaunch::new(&self.tmux).run(&sequence, output)?;
         Ok(launched.container().to_string())
-    }
-
-    fn ring_bell(&self) -> Result<(), MultiplexerError> {
-        let output = self.tmux.query(&TmuxScripts::clients())?;
-        if !output.succeeded() && !output.has("ringleader-client") && !output.reports_no_server() {
-            return Err(TmuxError::failed("list-clients", &output).into());
-        }
-        for tty in TmuxListing::new(&output).bell_ttys() {
-            Self::write_bell(&tty);
-        }
-        Ok(())
     }
 
     fn server_version(&self) -> Result<Option<String>, MultiplexerError> {
@@ -1157,29 +1132,5 @@ mod tests {
 
         assert!(error.is_timeout());
         assert_eq!(fixture.sessions(), ["holder"]);
-    }
-
-    #[test]
-    fn the_bell_reaches_a_server_whose_only_client_is_in_control_mode() {
-        let fixture = MultiplexerFixture::with_holder();
-        let _client = fixture.server.control_client("=holder:");
-
-        assert!(fixture.server.multiplexer().ring_bell().is_ok());
-    }
-
-    #[test]
-    fn a_bell_for_a_tty_that_would_block_returns_at_once() {
-        let directory = tempfile::tempdir().unwrap();
-        let fifo = directory.path().join("unread-tty");
-        let made = std::process::Command::new("mkfifo")
-            .arg(&fifo)
-            .status()
-            .unwrap();
-        assert!(made.success());
-        let started = Instant::now();
-
-        TmuxMultiplexer::write_bell(&fifo);
-
-        assert!(started.elapsed() < Duration::from_secs(1));
     }
 }

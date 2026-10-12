@@ -26,7 +26,6 @@ struct MultiplexerState {
     failures: HashMap<&'static str, MultiplexerError>,
     failed_create_still_creates: bool,
     attached: Vec<AttachTarget>,
-    bells: usize,
     calls: Vec<String>,
     client_version: String,
     server_version: Option<String>,
@@ -58,7 +57,6 @@ impl FakeMultiplexer {
                 failures: HashMap::new(),
                 failed_create_still_creates: false,
                 attached: Vec::new(),
-                bells: 0,
                 calls: Vec::new(),
                 client_version: "3.6a".to_string(),
                 server_version: Some("3.6a".to_string()),
@@ -172,10 +170,6 @@ impl FakeMultiplexer {
 
     pub fn attached(&self) -> Vec<AttachTarget> {
         self.edit(|state| state.attached.clone())
-    }
-
-    pub fn bells(&self) -> usize {
-        self.edit(|state| state.bells)
     }
 
     fn edit<T>(&self, change: impl FnOnce(&mut MultiplexerState) -> T) -> T {
@@ -305,12 +299,6 @@ impl Multiplexer for FakeMultiplexer {
     ) -> Result<String, MultiplexerError> {
         self.call("ensure_shell_window", &format!("{tmux_name} {shell}"))?;
         Ok("@9".to_string())
-    }
-
-    fn ring_bell(&self) -> Result<(), MultiplexerError> {
-        self.call("ring_bell", "")?;
-        self.edit(|state| state.bells += 1);
-        Ok(())
     }
 
     fn server_version(&self) -> Result<Option<String>, MultiplexerError> {

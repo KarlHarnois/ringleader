@@ -221,10 +221,6 @@ impl SessionService {
         self.access.open_shell(reconciliation.row(name)?, mode)
     }
 
-    pub fn ring_bell(&self) -> Result<(), ServiceError> {
-        self.monitor.ring_bell()
-    }
-
     fn reconcile(&mut self) -> Result<Reconciliation, ServiceError> {
         let reconciliation = self
             .monitor

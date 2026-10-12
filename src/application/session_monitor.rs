@@ -44,8 +44,4 @@ impl SessionMonitor {
     pub fn preview(&self, tmux_name: &str) -> Result<String, ServiceError> {
         Ok(self.multiplexer.capture_pane(tmux_name)?)
     }
-
-    pub fn ring_bell(&self) -> Result<(), ServiceError> {
-        Ok(self.multiplexer.ring_bell()?)
-    }
 }

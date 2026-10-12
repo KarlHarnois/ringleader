@@ -106,7 +106,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── delete_impact.rs      # DeleteImpact and DeleteConfirmation
     │   ├── delete_outcome.rs     # DeleteOutcome
     │   ├── worktree_containment.rs # WorktreeContainment, shared by delete step 3 and reconciliation
-    │   ├── session_monitor.rs    # SessionMonitor: reconcile, observe, diffs, preview, bell
+    │   ├── session_monitor.rs    # SessionMonitor: reconcile, observe, diffs, preview
     │   ├── session_reconciler.rs # SessionReconciler, pairs registry entries with live tmux sessions
     │   ├── reconciliation.rs     # Reconciliation, the reconciled entries and rows
     │   ├── session_access.rs     # SessionAccess: attach, open_shell, return binding
@@ -171,7 +171,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── tmux_output.rs        # TmuxOutput, labeled lines and the zero-session errors
     │   ├── tmux_scripts.rs       # TmuxScripts, every tmux command sequence the multiplexer sends
     │   ├── tmux_launch.rs        # TmuxLaunch, ringleader-created and ringleader-done handling, rollback, tag move
-    │   ├── tmux_listing.rs       # TmuxListing, parses list-panes, list-windows, and list-clients rows and @ringleader_meta
+    │   ├── tmux_listing.rs       # TmuxListing, parses list-panes and list-windows rows and @ringleader_meta
     │   ├── tmux_multiplexer.rs   # TmuxMultiplexer
     │   ├── tmux_return_binding.rs # TmuxReturnBinding, owns bindings.json
     │   ├── binding_records.rs    # BindingRecords, the bindings.json records

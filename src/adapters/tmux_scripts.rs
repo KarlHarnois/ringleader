@@ -168,10 +168,6 @@ impl TmuxScripts {
         TmuxSequence::new().command(["attach-session", "-t", target])
     }
 
-    pub fn clients() -> TmuxSequence {
-        TmuxSequence::new().command(["list-clients", "-F", TmuxListing::CLIENT_FORMAT])
-    }
-
     fn metadata_option(target: &str, metadata: &SessionMetadata) -> Vec<OsString> {
         let encoded = MetadataJson::encode(metadata);
         Self::words(&["set-option", "-t", target, "@ringleader_meta", &encoded])

@@ -15,8 +15,6 @@ pub struct TmuxListing<'a> {
 impl<'a> TmuxListing<'a> {
     pub const PANE_FORMAT: &'static str = "ringleader-pane\t#{session_name}\t#{socket_path}\t#{session_created}\t#{window_active_clients}\t#{pane_id}\t#{@ringleader_agent}\t#{pane_dead}\t#{window_activity}\t#{@ringleader_meta}";
     pub const WINDOW_FORMAT: &'static str = "ringleader-window #{window_id} #{@ringleader_shell}";
-    pub const CLIENT_FORMAT: &'static str =
-        "ringleader-client\t#{client_control_mode}\t#{client_tty}";
     pub const AGENT_FORMAT: &'static str = "ringleader-agent #{pane_id} #{@ringleader_agent}";
     pub const PANE_PID_FORMAT: &'static str = "ringleader-pane-pid #{pane_dead} #{pane_pid}";
     pub const CLAIM_FORMAT: &'static str = "ringleader-claim\t#{session_name}\t#{@ringleader_meta}";
@@ -49,15 +47,6 @@ impl<'a> TmuxListing<'a> {
             let (window, tag) = row.split_once(' ')?;
             (tag == Self::TAGGED).then(|| window.to_string())
         })
-    }
-
-    pub fn bell_ttys(&self) -> Vec<PathBuf> {
-        self.output
-            .labeled("ringleader-client")
-            .filter_map(|row| row.split_once('\t'))
-            .filter(|(control_mode, tty)| *control_mode != Self::TAGGED && !tty.is_empty())
-            .map(|(_, tty)| PathBuf::from(tty))
-            .collect()
     }
 
     pub fn agent_pane(&self) -> Option<String> {
@@ -199,7 +188,6 @@ mod tests {
 
     const PANES: &str = include_str!("../../tests/fixtures/tmux-list-panes.txt");
     const WINDOWS: &str = include_str!("../../tests/fixtures/tmux-list-windows-shell.txt");
-    const CLIENTS: &str = include_str!("../../tests/fixtures/tmux-list-clients.txt");
 
     struct ListingFixture;
 
@@ -300,16 +288,6 @@ mod tests {
         assert_eq!(
             TmuxListing::new(&output).shell_window(),
             Some("@7".to_string())
-        );
-    }
-
-    #[test]
-    fn the_bell_skips_both_control_mode_clients_and_hook_lines() {
-        let output = TmuxOutput::new(true, CLIENTS, "");
-
-        assert_eq!(
-            TmuxListing::new(&output).bell_ttys(),
-            [PathBuf::from("/dev/pts/3"), PathBuf::from("/dev/pts/9")]
         );
     }
 

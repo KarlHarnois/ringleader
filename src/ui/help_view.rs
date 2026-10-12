@@ -96,7 +96,7 @@ impl HelpView {
     fn bell() -> Vec<String> {
         vec![
             "With bell_on_waiting on, the bell rings when an agent goes from working to waiting, unless a client shows its agent window. An exit never rings.".to_string(),
-            "While an attach from outside tmux runs, this screen is suspended and does not poll, so the bell rings only inside tmux or while this screen shows.".to_string(),
+            "The bell is a BEL on this screen's own terminal, and an attach suspends or hides this screen, so the bell rings only while this screen shows.".to_string(),
         ]
     }
 
@@ -213,7 +213,7 @@ mod tests {
         ));
         assert!(text.contains("env -u TMUX -u TMUX_PANE ringleader"));
         assert!(text.contains("Open extra shells with t instead of splitting the agent window"));
-        assert!(text.contains("the bell rings only inside tmux or while this screen shows"));
+        assert!(text.contains("the bell rings only while this screen shows"));
     }
 
     #[test]

@@ -31,7 +31,6 @@ pub trait Multiplexer {
         worktree: &Path,
         shell: &str,
     ) -> Result<String, MultiplexerError>;
-    fn ring_bell(&self) -> Result<(), MultiplexerError>;
     fn server_version(&self) -> Result<Option<String>, MultiplexerError>;
     fn server_exit_unattached(&self) -> Result<Option<bool>, MultiplexerError>;
     fn version(&self) -> Result<String, MultiplexerError>;

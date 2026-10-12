@@ -102,11 +102,8 @@ impl HomeState {
         self.change_selection(service, |sessions| sessions.show(rows));
         self.diffs.keep_only(&self.sessions.names());
         self.sessions.apply_diffs(self.diffs.diffs());
-        let rung = self.bell.watch(self.sessions.rows(), service);
-        if let Err(error) = &rung {
-            self.pause_after(error);
-        }
-        rung
+        self.bell.watch(self.sessions.rows(), service);
+        Ok(())
     }
 
     pub fn select(&mut self, name: &str, service: &SessionService) {
