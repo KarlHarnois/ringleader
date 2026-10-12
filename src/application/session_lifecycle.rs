@@ -28,6 +28,9 @@ pub struct SessionLifecycle {
 }
 
 impl SessionLifecycle {
+    const RESTORED_SOCKET: &'static str =
+        "recreated the socket of Ringleader's tmux server, which was removed while the server ran";
+
     pub fn new(ports: &ServicePorts, launch_directory: &Path) -> Self {
         Self {
             multiplexer: ports.tmux().multiplexer(),
@@ -50,6 +53,11 @@ impl SessionLifecycle {
         self.sync_server_config(config.return_key())?;
         self.creation
             .create(request, reconciliation, config, config_path)
+    }
+
+    pub fn restore_server_socket(&self) -> Result<Option<String>, ServiceError> {
+        let restored = self.multiplexer.restore_socket()?;
+        Ok(restored.then(|| Self::RESTORED_SOCKET.to_string()))
     }
 
     pub fn sync_server_config(&self, return_key: &ReturnKey) -> Result<(), ServiceError> {

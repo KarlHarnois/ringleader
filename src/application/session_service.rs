@@ -120,6 +120,13 @@ impl SessionService {
         &self.paths
     }
 
+    pub fn restore_server_socket(&self) -> Result<Option<String>, ServiceError> {
+        if self.read_only_reason().is_some() {
+            return Ok(None);
+        }
+        self.lifecycle.restore_server_socket()
+    }
+
     pub fn reapply_server_config(&self) -> Result<(), ServiceError> {
         if self.read_only_reason().is_some() {
             return Ok(());
@@ -275,6 +282,19 @@ mod tests {
         });
 
         assert!(fixture.service().read_only_reason().is_some());
+    }
+
+    #[test]
+    fn a_restored_server_socket_gives_a_note_once() {
+        let fixture =
+            ServiceFixture::new().with_multiplexer(FakeMultiplexer::new().with_lost_socket());
+        let service = fixture.service();
+
+        let first = service.restore_server_socket().unwrap();
+        let second = service.restore_server_socket().unwrap();
+
+        assert!(first.unwrap().contains("recreated the socket"));
+        assert_eq!(second, None);
     }
 
     #[test]

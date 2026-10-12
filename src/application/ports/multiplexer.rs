@@ -36,6 +36,7 @@ pub trait Multiplexer {
         &self,
         return_key: &ReturnKey,
     ) -> Result<Option<ServerConfig>, MultiplexerError>;
+    fn restore_socket(&self) -> Result<bool, MultiplexerError>;
     fn apply_config(&self, return_key: &ReturnKey) -> Result<(), MultiplexerError>;
     fn version(&self) -> Result<String, MultiplexerError>;
 }
@@ -171,6 +172,10 @@ pub enum MultiplexerError {
         "the tmux server at {socket} binds no key to detach-client, so its sessions could not be left; check {config}"
     )]
     NoReturnBinding { socket: String, config: String },
+    #[error(
+        "Ringleader's tmux server runs without its socket {socket}, and SIGUSR1 did not bring it back"
+    )]
+    SocketNotRestored { socket: String },
     #[error("cannot prepare the tmux server files: {detail}")]
     ServerFiles { detail: String },
     #[error("cannot find the agent pane of tmux session {tmux_name}")]

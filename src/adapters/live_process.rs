@@ -11,12 +11,14 @@ pub struct LiveProcess {
     cwd: Option<PathBuf>,
     executable: String,
     command: String,
+    name: String,
 }
 
 impl LiveProcess {
     const ZOMBIE: &'static str = "Z";
     const DELETED_SUFFIX: &'static str = " (deleted)";
     const TMUX: &'static str = "tmux";
+    const TMUX_SERVER_NAME: &'static str = "tmux: server";
 
     pub fn pid(&self) -> u32 {
         self.pid
@@ -46,7 +48,30 @@ impl LiveProcess {
             by_pid.get(&ancestor.parent)
         })
         .take(by_pid.len())
-        .any(|ancestor| ancestor.is_tmux() && ancestor.command.contains(socket))
+        .any(|ancestor| ancestor.serves(socket))
+    }
+
+    pub fn tmux_servers_on(socket: &Path) -> Vec<Self> {
+        let socket = socket.to_string_lossy();
+        Self::all()
+            .into_iter()
+            .filter(|process| process.serves(&socket))
+            .collect()
+    }
+
+    pub fn signal(&self, signal: libc::c_int) {
+        let Ok(pid) = libc::pid_t::try_from(self.pid) else {
+            return;
+        };
+        // SAFETY: kill only sends a signal to a pid read from /proc a moment ago and
+        // touches no memory.
+        unsafe {
+            libc::kill(pid, signal);
+        }
+    }
+
+    fn serves(&self, socket: &str) -> bool {
+        self.name == Self::TMUX_SERVER_NAME && self.command.contains(socket)
     }
 
     pub fn all() -> Vec<Self> {
@@ -78,6 +103,9 @@ impl LiveProcess {
                 .filter(|part| !part.is_empty())
                 .collect::<Vec<_>>()
                 .join(" "),
+            name: fs::read_to_string(directory.join("comm"))
+                .map(|name| name.trim_end().to_string())
+                .unwrap_or_default(),
         })
     }
 

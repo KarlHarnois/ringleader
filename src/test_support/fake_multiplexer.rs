@@ -40,6 +40,7 @@ struct MultiplexerState {
     server: Option<ServerState>,
     config_current: bool,
     server_return_key: Option<ReturnKey>,
+    socket_lost: bool,
 }
 
 impl FakeMultiplexer {
@@ -76,6 +77,7 @@ impl FakeMultiplexer {
                 server: Some(ServerState::new("3.6a", 1)),
                 config_current: true,
                 server_return_key: Some(ReturnKey::default()),
+                socket_lost: false,
             }),
         }
     }
@@ -124,6 +126,11 @@ impl FakeMultiplexer {
             state.client_version = client.to_string();
             state.server = server.map(|version| ServerState::new(version, 1));
         });
+        self
+    }
+
+    pub fn with_lost_socket(self) -> Self {
+        self.edit(|state| state.socket_lost = true);
         self
     }
 
@@ -374,6 +381,11 @@ impl Multiplexer for FakeMultiplexer {
                 .as_ref()
                 .map(|_| ServerConfig::new(state.config_current, state.server_return_key.as_ref()))
         }))
+    }
+
+    fn restore_socket(&self) -> Result<bool, MultiplexerError> {
+        self.call("restore_socket", "")?;
+        Ok(self.edit(|state| std::mem::take(&mut state.socket_lost)))
     }
 
     fn apply_config(&self, return_key: &ReturnKey) -> Result<(), MultiplexerError> {

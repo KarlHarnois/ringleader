@@ -324,6 +324,10 @@ impl Multiplexer for TmuxMultiplexer {
         PrivateServer::new(&self.tmux).config(return_key)
     }
 
+    fn restore_socket(&self) -> Result<bool, MultiplexerError> {
+        PrivateServer::new(&self.tmux).restore_socket()
+    }
+
     fn apply_config(&self, return_key: &ReturnKey) -> Result<(), MultiplexerError> {
         PrivateServer::new(&self.tmux).apply(return_key)
     }

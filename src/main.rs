@@ -182,6 +182,9 @@ impl CompositionRoot {
             .map(|error| format!("config error, running read-only: {error}"))
             .or(template_warning);
         let mut service = self.service(config_source, loaded);
+        let socket_message = service
+            .restore_server_socket()
+            .unwrap_or_else(|error| Some(error.to_string()));
         let pane_warning = match service.refuse_own_pane() {
             Ok(()) => None,
             Err(error @ ServiceError::Conflict(_)) => return Self::refuse(&error),
@@ -198,6 +201,7 @@ impl CompositionRoot {
             log.err(),
             registry_warning,
             startup_message,
+            socket_message,
             pane_warning,
             config_warning,
         ]

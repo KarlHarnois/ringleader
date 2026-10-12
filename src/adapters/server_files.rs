@@ -30,15 +30,19 @@ impl ServerFiles {
     }
 
     pub fn prepare(&self, config_text: &str) -> io::Result<()> {
-        let socket_directory = self.socket.parent().unwrap_or(Path::new("/"));
-        DirBuilder::new()
-            .recursive(true)
-            .mode(DiagnosticPaths::PRIVATE_DIRECTORY_MODE)
-            .create(socket_directory)?;
+        self.prepare_socket_directory()?;
         if let Some(config_directory) = self.config.parent() {
             fs::create_dir_all(config_directory)?;
         }
         DurableFile::new(&self.config).write(config_text.as_bytes())
+    }
+
+    pub fn prepare_socket_directory(&self) -> io::Result<()> {
+        let socket_directory = self.socket.parent().unwrap_or(Path::new("/"));
+        DirBuilder::new()
+            .recursive(true)
+            .mode(DiagnosticPaths::PRIVATE_DIRECTORY_MODE)
+            .create(socket_directory)
     }
 
     pub fn is_reached_through(&self, socket: &Path) -> bool {

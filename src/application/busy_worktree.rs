@@ -59,7 +59,7 @@ impl<'a> BusyWorktree<'a> {
         let socket = self.private_socket.display();
         let directory = self.private_socket.parent().unwrap_or(self.private_socket);
         format!(
-            "The socket {socket} is gone, so it was likely removed under the running server. Recreate {} with mode 0700, then send SIGUSR1 to the tmux server whose command line names that socket, which makes tmux recreate it. Its sessions then list again, so do not end them.",
+            "The socket {socket} is gone, so it was likely removed under the running server. Any ringleader command other than doctor recreates it. By hand, recreate {} with mode 0700, then send SIGUSR1 to the tmux server whose command line names that socket. Its sessions then list again, so do not end them.",
             directory.display()
         )
     }

@@ -247,6 +247,20 @@ mod tests {
     }
 
     #[test]
+    fn list_recreates_a_lost_server_socket_and_says_so() {
+        let harness = CliHarness::new(
+            ServiceFixture::new().with_multiplexer(FakeMultiplexer::new().with_lost_socket()),
+        );
+
+        assert_eq!(harness.run(&["list"]), CliExit::Code(0));
+        assert!(
+            harness
+                .stderr()
+                .contains("recreated the socket of Ringleader's tmux server")
+        );
+    }
+
+    #[test]
     fn an_unparsable_config_makes_list_and_attach_exit_one_without_tmux() {
         let harness = CliHarness::new(
             CommandFixture::live().with_broken_config(CommandFixture::broken_config()),
