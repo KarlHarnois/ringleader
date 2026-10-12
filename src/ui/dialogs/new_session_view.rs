@@ -20,7 +20,7 @@ pub struct NewSessionView<'a> {
     agents: &'a AgentPicker,
     prompt: &'a PromptField,
     focus: NewSessionField,
-    error: &'a str,
+    error: Option<&'a str>,
 }
 
 impl<'a> NewSessionView<'a> {
@@ -39,7 +39,7 @@ impl<'a> NewSessionView<'a> {
             agents,
             prompt,
             focus: NewSessionField::Name,
-            error: "",
+            error: None,
         }
     }
 
@@ -48,14 +48,11 @@ impl<'a> NewSessionView<'a> {
     }
 
     pub fn with_error(self, error: Option<&'a str>) -> Self {
-        Self {
-            error: error.unwrap_or_default(),
-            ..self
-        }
+        Self { error, ..self }
     }
 
     pub fn render(&self, frame: &mut Frame, area: Rect, labels: DialogLabels, theme: &Theme) {
-        let errors = TextFit::new(self.error).styled_lines(usize::from(area.width), theme.error());
+        let errors = self.error_lines(usize::from(area.width), theme);
         let layout = self.layout(area, labels, errors.len(), theme);
         let upper = self.upper_lines(labels.field_width(area), layout.repo_room(), labels, theme);
         let [upper_area, prompt_area, error_area, hints_area] = layout.areas(upper.len());
@@ -96,6 +93,11 @@ impl<'a> NewSessionView<'a> {
         lines.extend(labels.labeled(NewSessionField::Repo.label(), repo_lines));
         lines.extend(labels.labeled(NewSessionField::Agent.label(), agent_lines));
         lines
+    }
+
+    fn error_lines(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
+        let wrapped = |error| TextFit::new(error).styled_lines(width, theme.error());
+        self.error.map(wrapped).unwrap_or_default()
     }
 
     fn agents_expanded(&self) -> bool {

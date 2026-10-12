@@ -11,6 +11,7 @@ pub struct NewSessionLayout {
 impl NewSessionLayout {
     const PROMPT_FLOOR: usize = 1;
     const SPACER_ROWS: usize = 1;
+    const ERROR_PLACEHOLDER_ROWS: usize = 1;
     const HINT_ROWS: usize = 1;
 
     pub fn new(area: Rect, error_rows: usize) -> Self {
@@ -53,12 +54,12 @@ impl NewSessionLayout {
         let prompt_rows = self.prompt_rows();
         let room = self.height().saturating_sub(prompt_rows + Self::HINT_ROWS);
         let error_rows = self.error_rows.min(room);
-        let spacer_rows = self.spacer_rows();
-        let upper_rows = upper_rows.min(room.saturating_sub(error_rows + spacer_rows));
+        let gap_rows = self.gap_rows();
+        let upper_rows = upper_rows.min(room.saturating_sub(error_rows + gap_rows));
         [
             upper_rows,
             prompt_rows,
-            spacer_rows,
+            gap_rows,
             error_rows,
             Self::HINT_ROWS,
         ]
@@ -71,12 +72,13 @@ impl NewSessionLayout {
     }
 
     fn shared_rows(&self) -> usize {
-        self.spare_rows() - self.spacer_rows()
+        self.spare_rows() - self.gap_rows()
     }
 
-    fn spacer_rows(&self) -> usize {
-        let fits = self.spare_rows() >= Self::PROMPT_FLOOR + Self::SPACER_ROWS;
-        if fits { Self::SPACER_ROWS } else { 0 }
+    fn gap_rows(&self) -> usize {
+        let placeholder_rows = Self::ERROR_PLACEHOLDER_ROWS.saturating_sub(self.error_rows);
+        let wanted = Self::SPACER_ROWS + placeholder_rows;
+        wanted.min(self.spare_rows().saturating_sub(Self::PROMPT_FLOOR))
     }
 
     fn spare_rows(&self) -> usize {

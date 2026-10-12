@@ -823,13 +823,43 @@ mod tests {
     fn a_dialog_with_no_room_for_the_prompt_still_shows_its_cursor_row() {
         let (mut dialog, _service) =
             DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
-        let no_spare_rows = 5;
+        let no_spare_rows = 4;
 
         dialog.paste("one\ntwo\nthree");
 
         let shown = DialogFixture::text_at(&dialog, no_spare_rows);
         assert!(shown.contains("Prompt    three\n"));
         assert!(shown.ends_with(DialogFixture::PROMPT_HINTS));
+    }
+
+    #[test]
+    fn the_hints_keep_their_row_when_an_error_appears() {
+        let (mut dialog, _service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
+        let rows_without_an_error = DialogFixture::text(&dialog).lines().count();
+
+        dialog.fail("session fix-auth already exists".to_string());
+
+        assert_eq!(
+            DialogFixture::text(&dialog).lines().count(),
+            rows_without_an_error
+        );
+    }
+
+    #[test]
+    fn a_short_dialog_without_an_error_keeps_every_field() {
+        let (dialog, _service) =
+            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
+        let one_prompt_row = 5;
+
+        let shown = DialogFixture::text_at(&dialog, one_prompt_row);
+
+        assert_eq!(
+            shown,
+            format!(
+                "Name      fix-auth\nRepo      example-project\nAgent     claude\nPrompt\n{}",
+                DialogFixture::PROMPT_HINTS
+            )
+        );
     }
 
     #[test]
