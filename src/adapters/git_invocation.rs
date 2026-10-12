@@ -150,14 +150,21 @@ mod tests {
     #[test]
     fn git_never_prompts_even_when_the_environment_allows_it() {
         let allowing_prompts = [(OsString::from(TERMINAL_PROMPT), OsString::from("1"))];
+        let every_call_kind = [
+            GitInvocation::anywhere("status"),
+            GitInvocation::anywhere("diff").diffing(),
+            GitInvocation::anywhere("worktree").writing(),
+        ];
 
-        let command =
-            GitInvocation::anywhere("fetch").command(OsStr::new("git"), &allowing_prompts);
+        for invocation in every_call_kind {
+            let command = invocation.command(OsStr::new("git"), &allowing_prompts);
 
-        let terminal_prompt = command
-            .get_envs()
-            .find(|(name, _)| *name == TERMINAL_PROMPT)
-            .and_then(|(_, value)| value);
-        assert_eq!(terminal_prompt, Some(OsStr::new("0")));
+            let terminal_prompt = command
+                .get_envs()
+                .find(|(name, _)| *name == TERMINAL_PROMPT)
+                .and_then(|(_, value)| value);
+            let subcommand = invocation.subcommand();
+            assert_eq!(terminal_prompt, Some(OsStr::new("0")), "git {subcommand}");
+        }
     }
 }
