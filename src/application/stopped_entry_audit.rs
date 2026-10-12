@@ -27,16 +27,13 @@ impl StoppedEntryAudit {
         report: &mut DoctorReport,
     ) {
         let name = session.name();
-        let processes = self.host.processes_in(session.worktree_path(), &[]);
         let private_socket = self.multiplexer.socket();
         match EarlierServer::of(session, &private_socket) {
             Some(earlier) => {
+                let processes = self.host.processes_in(session.worktree_path(), &[]);
                 report.warning(earlier.audit(name.as_str(), &Self::worktree_processes(&processes)))
             }
-            None if !processes.is_empty() => {
-                report.warning(Self::lost_socket(session, &processes, &private_socket))
-            }
-            None => {}
+            None => self.audit_lost_socket(session, &private_socket, report),
         }
         if let Some(claimant) = reconciliation.claimant_of(session) {
             report.problem(format!(
@@ -44,6 +41,18 @@ impl StoppedEntryAudit {
                 claimant.tmux_name(),
                 session.worktree_path().display()
             ));
+        }
+    }
+
+    fn audit_lost_socket(&self, session: &Session, socket: &Path, report: &mut DoctorReport) {
+        if self.host.path_exists(socket) {
+            return;
+        }
+        let processes = self
+            .host
+            .processes_under_server(session.worktree_path(), socket);
+        if !processes.is_empty() {
+            report.warning(Self::lost_socket(session, &processes, socket));
         }
     }
 
@@ -60,7 +69,7 @@ impl StoppedEntryAudit {
     fn lost_socket(session: &Session, processes: &[ProcessInfo], socket: &Path) -> String {
         let directory = socket.parent().unwrap_or(socket).display();
         format!(
-            "session {} is stopped, but processes still run in its worktree {}: {}. The socket {} of Ringleader's tmux server may have been removed under the running server. Recreate {directory} with mode 0700, then send SIGUSR1 to the tmux server whose command line names that socket, which makes tmux recreate it.",
+            "session {} is stopped, but processes of Ringleader's tmux server still run in its worktree {}: {}. The socket {} is gone, so it was likely removed under the running server. Recreate {directory} with mode 0700, then send SIGUSR1 to the tmux server whose command line names that socket, which makes tmux recreate it.",
             session.name(),
             session.worktree_path().display(),
             ProcessInfo::listed(processes),

@@ -519,12 +519,30 @@ mod tests {
     }
 
     #[test]
-    fn a_stopped_private_entry_with_processes_in_its_worktree_gets_the_socket_fix() {
-        let fixture = DoctorFixture::healthy().with_host(ServiceFixture::with_worktree_process(
+    fn an_agent_of_a_private_server_whose_socket_is_gone_gets_the_socket_fix() {
+        let fixture = DoctorFixture::healthy().with_host(ServiceFixture::with_worktree_agent(
             &DoctorFixture::session(),
         ));
 
         assert!(DoctorFixture::has_warning(&fixture, "send SIGUSR1"));
+    }
+
+    #[test]
+    fn an_agent_of_a_private_server_still_on_its_socket_gets_no_socket_fix() {
+        let host = ServiceFixture::with_worktree_agent(&DoctorFixture::session())
+            .with_file(Path::new(FakeMultiplexer::SOCKET));
+        let fixture = DoctorFixture::healthy().with_host(host);
+
+        assert!(!DoctorFixture::has_warning(&fixture, "send SIGUSR1"));
+    }
+
+    #[test]
+    fn an_editor_open_in_a_stopped_worktree_gets_no_socket_fix() {
+        let fixture = DoctorFixture::healthy().with_host(ServiceFixture::with_worktree_process(
+            &DoctorFixture::session(),
+        ));
+
+        assert!(!DoctorFixture::has_warning(&fixture, "send SIGUSR1"));
     }
 
     #[test]
