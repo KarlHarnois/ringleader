@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use super::agent_typing::AgentTyping;
+use super::agent_hooks::AgentHooks;
 use super::ports::{HostProbe, Multiplexer, SessionRegistry, Workspace};
 use super::reconciliation::{ManagedRow, Reconciliation};
 use super::rename_request::RenameRequest;
@@ -14,7 +14,7 @@ pub struct SessionRenaming {
     multiplexer: Arc<dyn Multiplexer>,
     host: Arc<dyn HostProbe>,
     registry: Arc<dyn SessionRegistry>,
-    typing: AgentTyping,
+    hooks: AgentHooks,
 }
 
 impl SessionRenaming {
@@ -24,7 +24,7 @@ impl SessionRenaming {
             multiplexer: ports.tmux().multiplexer(),
             host: ports.repos().host(),
             registry: ports.state().registry(),
-            typing: AgentTyping::new(ports),
+            hooks: AgentHooks::new(ports),
         }
     }
 
@@ -115,7 +115,7 @@ impl SessionRenaming {
         if row.state().runs_agent()
             && let Some(agent) = config.agent(renamed.agent())
         {
-            self.typing.type_rename_input(renamed, agent);
+            self.hooks.after_rename(renamed, agent);
         }
     }
 

@@ -4,18 +4,18 @@ use super::ports::{Multiplexer, MultiplexerError};
 use super::service_ports::ServicePorts;
 use crate::domain::{Agent, Session};
 
-pub struct AgentTyping {
+pub struct AgentHooks {
     multiplexer: Arc<dyn Multiplexer>,
 }
 
-impl AgentTyping {
+impl AgentHooks {
     pub fn new(ports: &ServicePorts) -> Self {
         Self {
             multiplexer: ports.tmux().multiplexer(),
         }
     }
 
-    pub fn type_startup_input(&self, session: &Session, agent: &Agent) {
+    pub fn after_start(&self, session: &Session, agent: &Agent) {
         let lines = agent.startup_input(session.name());
         if lines.is_empty() {
             return;
@@ -26,7 +26,7 @@ impl AgentTyping {
         Self::log_skipped(session, typed);
     }
 
-    pub fn type_rename_input(&self, renamed: &Session, agent: &Agent) {
+    pub fn after_rename(&self, renamed: &Session, agent: &Agent) {
         let lines = agent.rename_input(renamed.name());
         if lines.is_empty() {
             return;

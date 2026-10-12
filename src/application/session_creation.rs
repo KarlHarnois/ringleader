@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use super::agent_typing::AgentTyping;
+use super::agent_hooks::AgentHooks;
 use super::creation_plan::{CreateRequest, CreationPlan};
 use super::ports::{Clock, HostProbe, Multiplexer, SessionRegistry, StartPoint, Workspace};
 use super::reconciliation::Reconciliation;
@@ -17,7 +17,7 @@ pub struct SessionCreation {
     host: Arc<dyn HostProbe>,
     registry: Arc<dyn SessionRegistry>,
     clock: Arc<dyn Clock>,
-    typing: AgentTyping,
+    hooks: AgentHooks,
 }
 
 impl SessionCreation {
@@ -28,7 +28,7 @@ impl SessionCreation {
             host: ports.repos().host(),
             registry: ports.state().registry(),
             clock: ports.state().clock(),
-            typing: AgentTyping::new(ports),
+            hooks: AgentHooks::new(ports),
         }
     }
 
@@ -57,7 +57,7 @@ impl SessionCreation {
             ServiceError::from(error)
                 .adding_context("the session runs, and the next observe adopts it from tmux")
         })?;
-        self.typing.type_startup_input(&session, plan.agent());
+        self.hooks.after_start(&session, plan.agent());
         Ok(session)
     }
 

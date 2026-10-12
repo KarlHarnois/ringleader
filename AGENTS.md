@@ -97,7 +97,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── session_renaming.rs   # SessionRenaming: rename_session with its branch rollback
     │   ├── rename_request.rs     # RenameRequest, the old and new names and whether the branch stays
     │   ├── session_restart.rs    # SessionRestart: restart of an Exited or Stopped session
-    │   ├── agent_typing.rs       # AgentTyping, types an agent's startup and rename input and logs a skip
+    │   ├── agent_hooks.rs        # AgentHooks, types an agent's startup and rename input after a start or a rename
     │   ├── worktree_inspection.rs # WorktreeInspection, the worktree checks restart, delete, and doctor share
     │   ├── session_deletion.rs   # SessionDeletion: delete_session steps 5 to 8 and forget
     │   ├── deletion_guards.rs    # DeletionGuards: delete_session steps 2 to 4
@@ -258,7 +258,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
 - Only the TUI installs the Ctrl-Q return binding. The CLI never touches tmux key bindings.
 - Blocking TUI operations (create, delete, rename, restart, and the delete measurement) run behind a busy message, and the event loop drops the key and paste events queued while they ran.
 - Logs go to `$XDG_STATE_HOME/ringleader/app.log` through `env_logger`, never to the terminal.
-- An agent's `startup_input` is typed after create and restart, waiting up to 10 seconds for its prompt. Its `rename_input` is typed after a rename only when the agent is at its prompt at that moment. An agent is at its prompt when its pane is out of copy mode, shows the cursor, and the text before the cursor on its row is a bare prompt marker, with no letters or digits. Copy mode would take the keys instead of the agent. Claude hides the cursor in its trust and permission dialogs, an agent still starting has drawn no marker, and an unsent draft puts its text before the cursor. A skipped or failed typing is logged and never fails the use case.
+- `AgentHooks` types an agent's `startup_input` after create and restart, waiting up to 10 seconds for its prompt, and its `rename_input` after a rename only when the agent is at its prompt at that moment. An agent is at its prompt when its pane is out of copy mode, shows the cursor, and the text before the cursor on its row is a bare prompt marker, with no letters or digits. Copy mode would take the keys instead of the agent. Claude hides the cursor in its trust and permission dialogs, an agent still starting has drawn no marker, and an unsent draft puts its text before the cursor. A skipped or failed typing is logged and never fails the use case.
 
 ## CLI exit codes
 

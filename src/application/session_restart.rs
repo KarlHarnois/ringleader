@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use super::agent_typing::AgentTyping;
+use super::agent_hooks::AgentHooks;
 use super::ports::{AgentLaunch, HostProbe, Multiplexer, SessionRegistry, SessionSpec};
 use super::reconciliation::{ManagedRow, Reconciliation};
 use super::service_error::ServiceError;
@@ -15,7 +15,7 @@ pub struct SessionRestart {
     multiplexer: Arc<dyn Multiplexer>,
     host: Arc<dyn HostProbe>,
     registry: Arc<dyn SessionRegistry>,
-    typing: AgentTyping,
+    hooks: AgentHooks,
 }
 
 impl SessionRestart {
@@ -25,7 +25,7 @@ impl SessionRestart {
             multiplexer: ports.tmux().multiplexer(),
             host: ports.repos().host(),
             registry: ports.state().registry(),
-            typing: AgentTyping::new(ports),
+            hooks: AgentHooks::new(ports),
         }
     }
 
@@ -47,7 +47,7 @@ impl SessionRestart {
         let agent = checks.agent_for_restart(session.agent())?;
         self.check_worktree(session)?;
         let restarted = self.revive(row, Self::launch(agent, session), reconciliation, config)?;
-        self.typing.type_startup_input(&restarted, agent);
+        self.hooks.after_start(&restarted, agent);
         Ok(restarted)
     }
 

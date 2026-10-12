@@ -1,4 +1,4 @@
-pub mod agent_typing;
+pub mod agent_hooks;
 pub mod creation_plan;
 pub mod default_repo;
 pub mod delete_impact;
