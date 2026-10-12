@@ -1,5 +1,9 @@
 # Ringleader
 
+[![CI](https://github.com/KarlHarnois/ringleader/actions/workflows/ci.yml/badge.svg)](https://github.com/KarlHarnois/ringleader/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Nix flake](https://img.shields.io/badge/nix-flake-5277C3?logo=nixos&logoColor=white)](#install)
+
 ```text
     ____  _____   __________    _________    ____  __________
    / __ \/  _/ | / / ____/ /   / ____/   |  / __ \/ ____/ __ \
