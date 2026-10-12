@@ -7,7 +7,7 @@ use ratatui::layout::{Constraint, Layout, Position, Rect};
 use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::widgets::{Clear, Paragraph, Widget};
-use ratatui_textarea::{CursorMove, DataCursor, TextArea, WrapMode};
+use ratatui_textarea::{CursorMove, TextArea, WrapMode};
 
 use super::dialog_labels::DialogLabels;
 use super::new_session_field::NewSessionField;
@@ -33,7 +33,6 @@ impl PromptField {
     const LINE_BREAK_KEY: char = 'j';
     const CURSOR_COLUMN_WIDTH: u16 = 1;
     const PROBE_HEIGHT: u16 = 1;
-    const TEXT_END: CursorMove = CursorMove::Jump(u16::MAX, u16::MAX);
 
     pub fn value(&self) -> String {
         self.editor.borrow().lines().join("\n")
@@ -92,18 +91,18 @@ impl PromptField {
     }
 
     fn scroll_back(editor: &mut TextArea<'static>, rows: u16) {
-        let DataCursor(row, column) = editor.cursor();
+        let cursor = editor.cursor();
         editor.scroll((-i16::try_from(rows).unwrap_or(i16::MAX), 0));
-        editor.move_cursor(CursorMove::Jump(
-            u16::try_from(row).unwrap_or(u16::MAX),
-            u16::try_from(column).unwrap_or(u16::MAX),
-        ));
+        if editor.cursor() != cursor {
+            editor.move_cursor(CursorMove::Forward);
+        }
     }
 
     fn wrapped_rows(editor: &TextArea<'static>, text: Rect) -> usize {
         let mut probe = editor.clone();
         (&probe).render(text, &mut Buffer::empty(text));
-        probe.move_cursor(Self::TEXT_END);
+        probe.move_cursor(CursorMove::Bottom);
+        probe.move_cursor(CursorMove::End);
         probe.screen_cursor().row + 1
     }
 

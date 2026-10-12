@@ -789,6 +789,24 @@ mod tests {
     }
 
     #[test]
+    fn typing_after_a_pasted_line_longer_than_u16_lands_at_its_end() {
+        let (mut dialog, service) =
+            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
+        let long_line = "x".repeat(usize::from(u16::MAX) * 2);
+        dialog.paste(&long_line);
+        let drawn = DialogFixture::text(&dialog);
+
+        DialogFixture::type_text(&mut dialog, &service, "Z");
+        let step = DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
+
+        assert!(drawn.contains("Prompt    xxx"));
+        assert_eq!(
+            DialogFixture::submitted(step).prompt(),
+            format!("{long_line}Z")
+        );
+    }
+
+    #[test]
     fn a_prompt_given_back_its_rows_shows_its_first_lines_again() {
         let (mut dialog, _service) =
             DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
