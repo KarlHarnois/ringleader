@@ -148,7 +148,7 @@ mod tests {
     const TERMINAL_PROMPT: &str = "GIT_TERMINAL_PROMPT";
 
     #[test]
-    fn git_never_prompts_even_when_the_environment_allows_it() {
+    fn every_call_kind_disables_terminal_prompts_despite_overrides() {
         let allowing_prompts = [(OsString::from(TERMINAL_PROMPT), OsString::from("1"))];
         let every_call_kind = [
             GitInvocation::anywhere("status"),
