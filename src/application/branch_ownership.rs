@@ -25,11 +25,10 @@ impl BranchOwnership {
             return Ok(());
         }
         Err(ServiceError::Conflict(format!(
-            "branch {} has no Ringleader marker, refusing to {} it; {}, {}",
+            "branch {} has no Ringleader marker, refusing to {} it; {}",
             session.branch(),
             mutation.verb(),
-            Self::marking_advice(session),
-            mutation.alternative()
+            mutation.advice(session)
         )))
     }
 
@@ -60,10 +59,13 @@ impl BranchMutation {
         }
     }
 
-    fn alternative(self) -> &'static str {
+    fn advice(self, session: &Session) -> String {
+        let marking = BranchOwnership::marking_advice(session);
         match self {
-            BranchMutation::Delete => "or delete with --forget to drop only the session",
-            BranchMutation::Rename => "or rename with --keep-branch",
+            BranchMutation::Delete => {
+                format!("{marking}, or delete with --forget to drop only the session")
+            }
+            BranchMutation::Rename => marking,
         }
     }
 }

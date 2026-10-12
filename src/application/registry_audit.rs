@@ -78,6 +78,7 @@ impl RegistryAudit {
                 report.problem(format!("session {name}: cannot read its branch: {error}"))
             }
         }
+        Self::audit_branch_name(session, report);
         if let Ok(Some(problem)) = self.inspection.leftover_problem(session) {
             report.problem(format!(
                 "session {name}: worktree {} {problem}, remove the directory by hand or run ringleader delete {name} --forget",
@@ -87,6 +88,17 @@ impl RegistryAudit {
         if state == SessionState::Stopped {
             self.audit_stopped(session, reconciliation, report);
         }
+    }
+
+    fn audit_branch_name(session: &Session, report: &mut DoctorReport) {
+        if session.has_branch_named_after_it() {
+            return;
+        }
+        report.warning(format!(
+            "session {}: branch {} differs from the session name, rename the session to bring them in line",
+            session.name(),
+            session.branch()
+        ));
     }
 
     fn audit_marker(&self, session: &Session, report: &mut DoctorReport) {

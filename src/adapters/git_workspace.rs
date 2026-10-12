@@ -171,6 +171,10 @@ impl Workspace for GitWorkspace {
         GitBranches::new(&self.git).list_managed(repo)
     }
 
+    fn is_branch_published(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError> {
+        GitBranches::new(&self.git).is_published(repo, branch)
+    }
+
     fn resolve_start_point(
         &self,
         repo: &Path,
@@ -326,6 +330,23 @@ mod tests {
             clone
         }
 
+        fn clone_with_branch(origin: &GitTestRepo) -> PathBuf {
+            let clone = Self::clone_of(origin, "clone");
+            let workspace = origin.workspace();
+            let start = workspace.resolve_start_point(&clone, None).unwrap();
+            workspace
+                .create_worktree(&clone, &origin.sibling("wt"), BRANCH, &start)
+                .unwrap();
+            clone
+        }
+
+        fn is_published(fixture: &GitTestRepo, repo: &Path) -> bool {
+            fixture
+                .workspace()
+                .is_branch_published(repo, BRANCH)
+                .unwrap()
+        }
+
         fn hook(fixture: &GitTestRepo, name: &str, script: &str) {
             let hooks = fixture.path().join(".git/hooks");
             fs::create_dir_all(&hooks).unwrap();
@@ -358,13 +379,8 @@ mod tests {
     #[test]
     fn a_new_branch_in_a_cloned_repo_has_no_upstream() {
         let origin = GitTestRepo::new();
-        let clone = WorktreeFixture::clone_of(&origin, "clone");
-        let workspace = origin.workspace();
-        let start = workspace.resolve_start_point(&clone, None).unwrap();
 
-        workspace
-            .create_worktree(&clone, &origin.sibling("wt"), BRANCH, &start)
-            .unwrap();
+        let clone = WorktreeFixture::clone_with_branch(&origin);
 
         let upstream = origin.try_git(
             &clone,
@@ -375,6 +391,47 @@ mod tests {
             ],
         );
         assert!(!upstream.status.success());
+    }
+
+    #[test]
+    fn a_branch_never_pushed_is_not_published() {
+        let origin = GitTestRepo::new();
+        let clone = WorktreeFixture::clone_with_branch(&origin);
+
+        assert!(!WorktreeFixture::is_published(&origin, &clone));
+    }
+
+    #[test]
+    fn a_pushed_branch_is_published() {
+        let origin = GitTestRepo::new();
+        let clone = WorktreeFixture::clone_with_branch(&origin);
+
+        origin.git(&clone, &["push", "-q", "origin", BRANCH]);
+
+        assert!(WorktreeFixture::is_published(&origin, &clone));
+    }
+
+    #[test]
+    fn a_remote_branch_nested_under_the_branch_name_does_not_publish_it() {
+        let origin = GitTestRepo::new();
+        let clone = WorktreeFixture::clone_with_branch(&origin);
+        let head = origin.git(&clone, &["rev-parse", "HEAD"]);
+
+        let nested = format!("refs/remotes/origin/{BRANCH}/draft");
+        origin.git(&clone, &["update-ref", &nested, &head]);
+
+        assert!(!WorktreeFixture::is_published(&origin, &clone));
+    }
+
+    #[test]
+    fn an_upstream_remote_publishes_the_branch() {
+        let fixture = GitTestRepo::new();
+        WorktreeFixture::created(&fixture);
+
+        let key = format!("branch.{BRANCH}.remote");
+        fixture.git(fixture.path(), &["config", &key, "origin"]);
+
+        assert!(WorktreeFixture::is_published(&fixture, fixture.path()));
     }
 
     #[test]

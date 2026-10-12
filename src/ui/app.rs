@@ -946,7 +946,7 @@ mod tests {
         assert_eq!(AppFixture::selected(&app).as_deref(), Some("fix-login"));
         assert_eq!(
             AppFixture::status_line(&app, 100),
-            " Renamed fix-auth to fix-login, branch fix-login."
+            " Renamed fix-auth to fix-login."
         );
     }
 

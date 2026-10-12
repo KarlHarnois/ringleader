@@ -56,7 +56,7 @@ prompt_args = ["{prompt}"]
 |---|---|
 | `n` | create a session |
 | `d` | delete the selected session |
-| `R` | rename the selected session |
+| `R` | rename the selected session and its branch |
 | `Enter` | attach to the selected session |
 | `t` | open a shell in the session's worktree |
 | `s` | restart an exited or stopped session |
@@ -73,7 +73,7 @@ ringleader list [--json]
 ringleader new --name <n> --repo <r> [--agent <a>] [--base-branch <b>] [--prompt <text>]
 ringleader delete <name> [--force] [--forget]
 ringleader attach <name>
-ringleader rename <old> <new> [--keep-branch]
+ringleader rename <old> <new>
 ringleader restart <name>
 ringleader repo add <path> [--name <n>] [--base-branch <b>]
 ringleader repo remove <name>

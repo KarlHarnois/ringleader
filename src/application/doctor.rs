@@ -423,6 +423,30 @@ mod tests {
     }
 
     #[test]
+    fn a_branch_that_differs_from_the_session_name_is_a_warning() {
+        let session = ServiceFixture::session_on_branch("fix-auth", "ringleader/fix-auth");
+        let fixture = ServiceFixture::new()
+            .with_sessions(std::slice::from_ref(&session))
+            .with_workspace(ServiceFixture::workspace_for(&[&session]))
+            .with_host(ServiceFixture::host_for(&[&session]));
+
+        assert!(DoctorFixture::has_warning(
+            &fixture,
+            "branch ringleader/fix-auth differs from the session name"
+        ));
+    }
+
+    #[test]
+    fn a_branch_named_after_its_session_is_no_warning() {
+        let fixture = DoctorFixture::healthy();
+
+        assert!(!DoctorFixture::has_warning(
+            &fixture,
+            "differs from the session name"
+        ));
+    }
+
+    #[test]
     fn a_leftover_worktree_directory_is_a_problem_with_advice() {
         let fixture =
             DoctorFixture::healthy().with_workspace(FakeWorkspace::default().with_branch(

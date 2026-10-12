@@ -17,6 +17,7 @@ struct WorkspaceState {
     worktrees: Vec<(PathBuf, WorktreeEntry)>,
     branches: Vec<FakeBranch>,
     markers: Vec<(PathBuf, String)>,
+    published: Vec<(PathBuf, String)>,
     dirty: HashMap<PathBuf, DirtyState>,
     unmerged: HashMap<String, VecDeque<UnmergedCommits>>,
     diffs: HashMap<PathBuf, DiffStat>,
@@ -69,6 +70,15 @@ impl FakeWorkspace {
             state
                 .markers
                 .retain(|(owner, name)| !(owner == repo && name == branch))
+        });
+        self
+    }
+
+    pub fn with_published_branch(self, repo: &Path, branch: &str) -> Self {
+        self.edit(|state| {
+            state
+                .published
+                .push((repo.to_path_buf(), branch.to_string()))
         });
         self
     }
@@ -442,6 +452,16 @@ impl Workspace for FakeWorkspace {
                 .filter(|branch| branch.repo == repo && state.is_marked(repo, &branch.name))
                 .map(|branch| branch.name.clone())
                 .collect()
+        }))
+    }
+
+    fn is_branch_published(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError> {
+        self.call("is_branch_published", branch.to_string())?;
+        Ok(self.edit(|state| {
+            state
+                .published
+                .iter()
+                .any(|(owner, name)| owner == repo && name == branch)
         }))
     }
 

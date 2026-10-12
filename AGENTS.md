@@ -96,7 +96,8 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── creation_plan.rs      # CreationPlan and CreateRequest
     │   ├── use_checks.rs         # UseChecks, the checks a create or a restart runs before acting
     │   ├── session_renaming.rs   # SessionRenaming: rename_session with its branch rollback
-    │   ├── rename_request.rs     # RenameRequest, the old and new names and whether the branch stays
+    │   ├── branch_renaming.rs    # BranchRenaming, moves a session's branch to its new name and back when the rename fails
+    │   ├── rename_request.rs     # RenameRequest, the old and new names
     │   ├── branch_availability.rs # BranchAvailability, refuses a branch name that exists or holds other branches, for create and rename
     │   ├── session_restart.rs    # SessionRestart: restart of an Exited or Stopped session
     │   ├── agent_hooks.rs        # AgentHooks, types an agent's startup and rename input after a start or a rename
@@ -264,6 +265,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
 - `ringleader` with no subcommand opens the TUI. Any subcommand runs the CLI and never starts the TUI. The hidden `__exec-agent` path loads no config, opens no log, and takes no lock.
 - The TUI takes the lifetime lock, and the mutating commands (`new`, `delete`, `rename`, `restart`, `repo add`, `repo remove`) take the write lock. `list`, `doctor`, `attach`, `repo list`, and `__exec-agent` take no lock.
 - Only the TUI installs the Ctrl-Q return binding. The CLI never touches tmux key bindings.
+- A session's branch is its name, and its tmux session is the tmux prefix followed by its name. Create and rename never record a branch that differs from the name, and rename always moves the branch with the name. Rename refuses a branch that has been pushed, because the remote branch and any pull request keep the old name, and it never moves the worktree, because the running agent and its transcripts are keyed by that path. A session recorded on another branch, from before the branch prefix was dropped, from an adopted tmux session, or from a tmux session renamed by hand, keeps working, `doctor` warns about it, and renaming it moves its branch to the new name.
 - Blocking TUI operations (create, delete, rename, restart, and the delete measurement) run behind a busy message, and the event loop drops the key and paste events queued while they ran.
 - A dialog's hint line lists only keys whose meaning is Ringleader's own, such as `Enter create`, `Ctrl-S create`, and `Esc cancel`, and the keys that choose from a list, such as `↑ ↓ j k choose`. It never lists text-editing keys like cursor movement, Ctrl-U, or Ctrl-W, because every terminal user already expects them. A new editing key goes into `TextField` with its usual terminal meaning, not into a hint.
 - Logs go to `$XDG_STATE_HOME/ringleader/app.log` through `env_logger`, never to the terminal.

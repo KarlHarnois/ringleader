@@ -10,6 +10,7 @@ pub struct GitBranches<'a> {
 
 impl<'a> GitBranches<'a> {
     const BRANCH_REFS: &'static str = "refs/heads";
+    const REMOTE_REFS: &'static str = "refs/remotes";
 
     pub fn new(git: &'a GitRunner) -> Self {
         Self { git }
@@ -95,6 +96,10 @@ impl<'a> GitBranches<'a> {
             .collect())
     }
 
+    pub fn is_published(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError> {
+        Ok(self.has_upstream(repo, branch)? || self.has_remote_copy(repo, branch)?)
+    }
+
     fn list_marked(&self, repo: &Path) -> Result<Vec<String>, WorkspaceError> {
         let list = GitInvocation::in_repo(repo, "config").args([
             "--local",
@@ -114,8 +119,31 @@ impl<'a> GitBranches<'a> {
             .collect())
     }
 
+    fn has_upstream(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError> {
+        let key = BranchSection::new(branch).upstream_remote_key();
+        let read = GitInvocation::in_repo(repo, "config").args(["--local", "--get", &key]);
+        Ok(self.git.lookup(&read)?.is_some())
+    }
+
+    fn has_remote_copy(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError> {
+        let remotes = self
+            .git
+            .run_checked(&GitInvocation::in_repo(repo, "remote"))?;
+        for remote in remotes.lines() {
+            let remote_ref = Self::remote_branch_ref(remote, branch);
+            if self.git.resolve(repo, &remote_ref)?.is_some() {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     fn branch_ref(branch: &str) -> String {
         format!("{}/{branch}", Self::BRANCH_REFS)
+    }
+
+    fn remote_branch_ref(remote: &str, branch: &str) -> String {
+        format!("{}/{remote}/{branch}", Self::REMOTE_REFS)
     }
 
     fn list_existing(&self, repo: &Path) -> Result<Vec<String>, WorkspaceError> {
@@ -145,6 +173,10 @@ impl<'a> BranchSection<'a> {
 
     fn name(&self) -> String {
         format!("branch.{}", self.branch)
+    }
+
+    fn upstream_remote_key(&self) -> String {
+        format!("{}.remote", self.name())
     }
 
     fn key_pattern(&self) -> String {
