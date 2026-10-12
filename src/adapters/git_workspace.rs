@@ -340,6 +340,15 @@ mod tests {
             clone
         }
 
+        fn commit_ahead(fixture: &GitTestRepo, repo: &Path, branch: &str) {
+            let tree = fixture.git(repo, &["rev-parse", "HEAD^{tree}"]);
+            let theirs = fixture.git(repo, &["commit-tree", "-p", "HEAD", "-m", "Theirs", &tree]);
+            fixture.git(
+                repo,
+                &["update-ref", &format!("refs/heads/{branch}"), &theirs],
+            );
+        }
+
         fn track(fixture: &GitTestRepo, remote: &str, branch: &str) {
             let section = format!("branch.{BRANCH}");
             let merge = format!("refs/heads/{branch}");
@@ -422,6 +431,37 @@ mod tests {
         origin.git(&clone, &["push", "-q", "origin", BRANCH]);
 
         assert!(WorktreeFixture::is_published(&origin, &clone));
+    }
+
+    #[test]
+    fn an_unrelated_remote_branch_of_the_same_name_does_not_publish_it() {
+        let origin = GitTestRepo::new();
+        WorktreeFixture::commit_ahead(&origin, origin.path(), BRANCH);
+
+        let clone = WorktreeFixture::clone_with_branch(&origin);
+
+        assert!(!WorktreeFixture::is_published(&origin, &clone));
+    }
+
+    #[test]
+    fn an_unborn_branch_is_not_published_despite_a_remote_copy() {
+        let fixture = GitTestRepo::unborn();
+        WorktreeFixture::created(&fixture);
+        let empty_tree = fixture.git(
+            fixture.path(),
+            &["hash-object", "-t", "tree", "-w", "/dev/null"],
+        );
+        let theirs = fixture.git(
+            fixture.path(),
+            &["commit-tree", "-m", "Theirs", &empty_tree],
+        );
+        let origin = fixture.sibling("origin").to_string_lossy().into_owned();
+        fixture.git(fixture.path(), &["remote", "add", "origin", &origin]);
+
+        let remote_ref = format!("refs/remotes/origin/{BRANCH}");
+        fixture.git(fixture.path(), &["update-ref", &remote_ref, &theirs]);
+
+        assert!(!WorktreeFixture::is_published(&fixture, fixture.path()));
     }
 
     #[test]

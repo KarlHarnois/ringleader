@@ -97,6 +97,9 @@ impl<'a> GitBranches<'a> {
     }
 
     pub fn is_published(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError> {
+        if !self.has_ref(repo, branch)? {
+            return Ok(false);
+        }
         Ok(self.tracks_a_remote_copy(repo, branch)? || self.has_remote_copy(repo, branch)?)
     }
 
@@ -139,11 +142,26 @@ impl<'a> GitBranches<'a> {
             .run_checked(&GitInvocation::in_repo(repo, "remote"))?;
         for remote in remotes.lines() {
             let remote_ref = Self::remote_branch_ref(remote, branch);
-            if self.git.resolve(repo, &remote_ref)?.is_some() {
+            let exists = self.git.resolve(repo, &remote_ref)?.is_some();
+            if exists && self.branch_contains(repo, branch, &remote_ref)? {
                 return Ok(true);
             }
         }
         Ok(false)
+    }
+
+    fn branch_contains(
+        &self,
+        repo: &Path,
+        branch: &str,
+        commit: &str,
+    ) -> Result<bool, WorkspaceError> {
+        let check = GitInvocation::in_repo(repo, "merge-base").args([
+            "--is-ancestor",
+            commit,
+            &Self::branch_ref(branch),
+        ]);
+        Ok(self.git.lookup(&check)?.is_some())
     }
 
     fn branch_ref(branch: &str) -> String {
