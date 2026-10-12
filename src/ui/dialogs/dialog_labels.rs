@@ -1,3 +1,4 @@
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,6 +24,17 @@ impl DialogLabels {
         } else {
             Self::FULL_WIDTH
         }
+    }
+
+    pub fn field_area(self, area: Rect) -> Rect {
+        let label_width = u16::try_from(self.width()).unwrap_or(u16::MAX);
+        let [_, field] =
+            Layout::horizontal([Constraint::Length(label_width), Constraint::Fill(1)]).areas(area);
+        field
+    }
+
+    pub fn field_width(self, area: Rect) -> usize {
+        usize::from(self.field_area(area).width)
     }
 
     pub fn labeled(self, label: &str, lines: Vec<Line<'static>>) -> Vec<Line<'static>> {
