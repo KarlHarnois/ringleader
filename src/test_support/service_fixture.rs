@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::{
-    FakeClock, FakeConfigSource, FakeHostProbe, FakeMultiplexer, FakeRepoScanner,
-    FakeReturnBinding, FakeSessionRegistry, FakeWorkspace,
+    FakeClock, FakeConfigSource, FakeHostProbe, FakeLeftoverBindings, FakeMultiplexer,
+    FakeRepoScanner, FakeSessionRegistry, FakeWorkspace,
 };
 use crate::application::ports::{ConfigError, WorktreeEntry};
 use crate::application::{
@@ -19,13 +19,13 @@ pub struct ServiceFixture {
     registry: Arc<FakeSessionRegistry>,
     workspace: Arc<FakeWorkspace>,
     multiplexer: Arc<FakeMultiplexer>,
-    binding: Arc<FakeReturnBinding>,
+    leftover_bindings: Arc<FakeLeftoverBindings>,
     config_source: Arc<FakeConfigSource>,
     scanner: Arc<FakeRepoScanner>,
     host: Arc<FakeHostProbe>,
     clock: Arc<FakeClock>,
     config_error: Option<ConfigError>,
-    inside_tmux: bool,
+    launch_directory: PathBuf,
     shell: String,
     home: Option<PathBuf>,
 }
@@ -46,13 +46,13 @@ impl ServiceFixture {
             registry: Arc::new(FakeSessionRegistry::empty()),
             workspace: Arc::new(FakeWorkspace::default()),
             multiplexer: Arc::new(FakeMultiplexer::new()),
-            binding: Arc::new(FakeReturnBinding::default()),
+            leftover_bindings: Arc::new(FakeLeftoverBindings::default()),
             config_source: Arc::new(FakeConfigSource::with_config(Self::config())),
             scanner: Arc::new(FakeRepoScanner::finding(vec![Self::repo()])),
             host: Arc::new(Self::host_for(&[])),
             clock: Arc::new(FakeClock::at(Self::NOW)),
             config_error: None,
-            inside_tmux: false,
+            launch_directory: PathBuf::from(Self::REPO),
             shell: Self::SHELL.to_string(),
             home: Some(PathBuf::from(Self::HOME)),
         }
@@ -83,9 +83,9 @@ impl ServiceFixture {
         }
     }
 
-    pub fn with_binding(self, binding: FakeReturnBinding) -> Self {
+    pub fn with_leftover_bindings(self, leftover_bindings: FakeLeftoverBindings) -> Self {
         Self {
-            binding: Arc::new(binding),
+            leftover_bindings: Arc::new(leftover_bindings),
             ..self
         }
     }
@@ -126,9 +126,9 @@ impl ServiceFixture {
         Self { home: None, ..self }
     }
 
-    pub fn inside_tmux(self) -> Self {
+    pub fn launched_in(self, directory: &Path) -> Self {
         Self {
-            inside_tmux: true,
+            launch_directory: directory.to_path_buf(),
             ..self
         }
     }
@@ -155,14 +155,6 @@ impl ServiceFixture {
 
     pub fn multiplexer(&self) -> &FakeMultiplexer {
         &self.multiplexer
-    }
-
-    pub fn binding(&self) -> &FakeReturnBinding {
-        &self.binding
-    }
-
-    pub fn shared_binding(&self) -> Arc<FakeReturnBinding> {
-        Arc::clone(&self.binding)
     }
 
     pub fn config_source(&self) -> &FakeConfigSource {
@@ -289,7 +281,7 @@ impl ServiceFixture {
                 self.scanner.clone(),
                 self.host.clone(),
             ),
-            TmuxPorts::new(self.multiplexer.clone(), self.binding.clone()),
+            TmuxPorts::new(self.multiplexer.clone(), self.leftover_bindings.clone()),
         )
     }
 
@@ -299,8 +291,7 @@ impl ServiceFixture {
             Some(error) => LoadedConfig::failed(config, error.clone()),
             None => LoadedConfig::valid(config),
         };
-        ServiceContext::new(loaded, Path::new(Self::REPO))
-            .with_inside_tmux(self.inside_tmux)
+        ServiceContext::new(loaded, &self.launch_directory)
             .with_home(self.home.as_deref())
             .with_shell(&self.shell)
     }

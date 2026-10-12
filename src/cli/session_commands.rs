@@ -5,7 +5,7 @@ use super::list_report::ListReport;
 use super::repo_argument::RepoArgument;
 use super::{CliSession, CommandStop, DeleteArgs, ListArgs, NewArgs, RenameArgs};
 use crate::application::{
-    CreateRequest, DeleteConfirmation, DeleteImpact, ReturnMode, ServiceError, SessionService,
+    CreateRequest, DeleteConfirmation, DeleteImpact, ServiceError, SessionService,
 };
 use crate::domain::BaseBranch;
 
@@ -100,7 +100,7 @@ impl<'a> SessionCommands<'a> {
     }
 
     pub fn attach(&mut self, name: &str) -> Result<u8, CommandStop> {
-        self.service.attach(name, ReturnMode::None)?;
+        self.service.attach(name)?;
         Ok(0)
     }
 
@@ -134,7 +134,7 @@ mod tests {
 
     use signal_hook::consts::{SIGHUP, SIGINT};
 
-    use crate::application::ports::{ConfigError, DirtyState, RegistryError};
+    use crate::application::ports::{AttachTarget, ConfigError, DirtyState, RegistryError};
     use crate::cli::CliExit;
     use crate::domain::{Repo, RepoName, Session};
     use crate::test_support::{
@@ -550,10 +550,31 @@ mod tests {
     }
 
     #[test]
-    fn attach_runs_without_touching_the_return_binding() {
+    fn attach_targets_the_agent_pane_as_the_tui_does() {
         let harness = CliHarness::new(CommandFixture::live());
 
         assert_eq!(harness.run(&["attach", "fix-auth"]), CliExit::Code(0));
-        assert!(harness.fixture().binding().calls().is_empty());
+        assert_eq!(
+            harness.fixture().multiplexer().attached(),
+            [AttachTarget::Agent("ringleader-fix-auth".to_string())]
+        );
+    }
+
+    #[test]
+    fn attach_from_a_pane_of_the_own_server_exits_three() {
+        let session = CommandFixture::session();
+        let fixture = CommandFixture::live().with_multiplexer(
+            FakeMultiplexer::new()
+                .with_live(ServiceFixture::waiting(&session))
+                .called_from_own_pane(),
+        );
+        let harness = CliHarness::new(fixture);
+
+        assert_eq!(harness.run(&["attach", "fix-auth"]), CliExit::Code(3));
+        assert!(
+            harness
+                .stderr()
+                .contains("run Ringleader from another terminal")
+        );
     }
 }

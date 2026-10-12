@@ -4,6 +4,7 @@ use std::sync::Arc;
 use super::creation_plan::CreateRequest;
 use super::delete_impact::{DeleteConfirmation, DeleteImpact};
 use super::delete_outcome::DeleteOutcome;
+use super::diagnostic_paths::DiagnosticPaths;
 use super::doctor::Doctor;
 use super::doctor_report::DoctorReport;
 use super::pending::Pending;
@@ -14,7 +15,7 @@ use super::repo_overrides::{AddRepoRequest, RepoAddition};
 use super::service_context::{LoadedConfig, ServiceContext};
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
-use super::session_access::{AttachOutcome, ReturnMode, SessionAccess, ShellOutcome};
+use super::session_access::{SessionAccess, ShellOutcome};
 use super::session_lifecycle::SessionLifecycle;
 use super::session_monitor::SessionMonitor;
 use crate::domain::{Config, DiffStat, Repo, Session, SessionSummary};
@@ -29,20 +30,18 @@ pub struct SessionService {
     access: SessionAccess,
     catalog: RepoCatalog,
     doctor: Doctor,
-    inside_tmux: bool,
-    state_directory: PathBuf,
+    paths: DiagnosticPaths,
 }
 
 impl SessionService {
     pub fn new(ports: ServicePorts, context: ServiceContext) -> Self {
         Self {
             monitor: SessionMonitor::new(&ports),
-            lifecycle: SessionLifecycle::new(&ports),
+            lifecycle: SessionLifecycle::new(&ports, context.launch_directory()),
             access: SessionAccess::new(&ports, context.shell()),
             catalog: RepoCatalog::new(&ports, &context),
             doctor: Doctor::new(&ports, context.diagnostics().clone()),
-            inside_tmux: context.is_inside_tmux(),
-            state_directory: context.diagnostics().state_directory().to_path_buf(),
+            paths: context.diagnostics().clone(),
             config: context.into_config(),
             entries: Vec::new(),
             registry: ports.state().registry(),
@@ -116,12 +115,12 @@ impl SessionService {
         self.catalog.remove_repo(name, self.config(), &self.entries)
     }
 
-    pub fn is_inside_tmux(&self) -> bool {
-        self.inside_tmux
+    pub fn paths(&self) -> &DiagnosticPaths {
+        &self.paths
     }
 
-    pub fn state_directory(&self) -> &Path {
-        &self.state_directory
+    pub fn refuse_own_pane(&self) -> Result<(), ServiceError> {
+        self.access.refuse_own_pane()
     }
 
     pub fn reload(&mut self) -> Result<(), ServiceError> {
@@ -207,18 +206,14 @@ impl SessionService {
         Ok(())
     }
 
-    pub fn attach(&mut self, name: &str, mode: ReturnMode) -> Result<AttachOutcome, ServiceError> {
+    pub fn attach(&mut self, name: &str) -> Result<(), ServiceError> {
         let reconciliation = self.reconcile()?;
-        self.access.attach(reconciliation.row(name)?, mode)
+        self.access.attach(reconciliation.row(name)?)
     }
 
-    pub fn open_shell(
-        &mut self,
-        name: &str,
-        mode: ReturnMode,
-    ) -> Result<ShellOutcome, ServiceError> {
+    pub fn open_shell(&mut self, name: &str) -> Result<ShellOutcome, ServiceError> {
         let reconciliation = self.reconcile()?;
-        self.access.open_shell(reconciliation.row(name)?, mode)
+        self.access.open_shell(reconciliation.row(name)?)
     }
 
     fn reconcile(&mut self) -> Result<Reconciliation, ServiceError> {
@@ -245,7 +240,7 @@ pub enum CorruptRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{FakeSessionRegistry, ServiceFixture};
+    use crate::test_support::{FakeMultiplexer, FakeSessionRegistry, ServiceFixture};
 
     #[test]
     fn config_returns_the_loaded_config() {
@@ -303,6 +298,16 @@ mod tests {
 
         assert!(service.reload().is_err());
         assert_eq!(service.config(), &ServiceFixture::config());
+    }
+
+    #[test]
+    fn a_caller_in_a_pane_of_the_own_server_is_refused_as_a_conflict() {
+        let fixture =
+            ServiceFixture::new().with_multiplexer(FakeMultiplexer::new().called_from_own_pane());
+
+        let error = fixture.service().refuse_own_pane().unwrap_err();
+
+        assert_eq!(error.exit_code(), 3);
     }
 
     #[test]

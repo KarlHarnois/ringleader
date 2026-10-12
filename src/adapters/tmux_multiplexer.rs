@@ -8,6 +8,7 @@ use super::tmux_launch::{Launched, TmuxLaunch};
 use super::tmux_listing::TmuxListing;
 use super::tmux_output::TmuxOutput;
 use super::tmux_scripts::TmuxScripts;
+use super::tmux_server_config::TmuxServerConfig;
 use crate::application::ports::{
     AgentLaunch, AttachTarget, Multiplexer, MultiplexerError, SessionSpec,
 };
@@ -16,19 +17,14 @@ use crate::domain::{SessionMetadata, SessionObservation};
 pub struct TmuxMultiplexer {
     tmux: TmuxCommand,
     launcher: LauncherCommand,
-    inside_tmux: bool,
 }
 
 impl TmuxMultiplexer {
     const EXIT_UNATTACHED_ON: &'static str = "1";
     const MISSING_SESSION: &'static str = "can't find session";
 
-    pub fn new(tmux: TmuxCommand, launcher: LauncherCommand, inside_tmux: bool) -> Self {
-        Self {
-            tmux,
-            launcher,
-            inside_tmux,
-        }
+    pub fn new(tmux: TmuxCommand, launcher: LauncherCommand) -> Self {
+        Self { tmux, launcher }
     }
 
     fn prepare(&self, launch: &AgentLaunch) -> Result<PreparedLaunch, MultiplexerError> {
@@ -54,10 +50,42 @@ impl TmuxMultiplexer {
         spec: &SessionSpec,
         prepared: &PreparedLaunch,
     ) -> Result<PathBuf, MultiplexerError> {
+        self.prepare_server(spec)?;
         let sequence = TmuxScripts::create_session(spec, prepared.words());
         let output = self.tmux.create(&sequence, spec.removed_env_names())?;
         let launched = TmuxLaunch::new(&self.tmux).run(&sequence, output)?;
-        self.finish_creation(&launched)
+        let socket = self.finish_creation(&launched)?;
+        self.require_return_binding(&launched)?;
+        Ok(socket)
+    }
+
+    fn prepare_server(&self, spec: &SessionSpec) -> Result<(), MultiplexerError> {
+        let render = TmuxServerConfig::new(spec.return_key()).render();
+        self.tmux
+            .server()
+            .prepare(&render)
+            .map_err(|error| MultiplexerError::ServerFiles {
+                detail: error.to_string(),
+            })
+    }
+
+    fn require_return_binding(&self, launched: &Launched) -> Result<(), MultiplexerError> {
+        let bound = self.binds_return_key();
+        if let Ok(true) = bound {
+            return Ok(());
+        }
+        TmuxLaunch::new(&self.tmux).roll_back(launched);
+        bound?;
+        let files = self.tmux.server();
+        Err(MultiplexerError::NoReturnBinding {
+            socket: files.socket().display().to_string(),
+            config: files.config().display().to_string(),
+        })
+    }
+
+    fn binds_return_key(&self) -> Result<bool, MultiplexerError> {
+        let output = self.tmux.query(&TmuxScripts::root_keys())?;
+        Ok(TmuxListing::new(&output).binds_detach())
     }
 
     fn revive_agent(
@@ -205,6 +233,22 @@ impl Multiplexer for TmuxMultiplexer {
         Err(TmuxError::failed("list-panes", &output).into())
     }
 
+    fn caller_in_own_pane(&self) -> Result<bool, MultiplexerError> {
+        let Some(terminal) = self.tmux.caller_terminal() else {
+            return Ok(false);
+        };
+        let output = self
+            .tmux
+            .query(&TmuxScripts::all_panes(TmuxListing::TTY_FORMAT))?;
+        if output.has("ringleader-tty") || output.succeeded() {
+            return Ok(TmuxListing::new(&output).shows_terminal(terminal));
+        }
+        if output.reports_no_sessions() {
+            return Ok(false);
+        }
+        Err(TmuxError::failed("list-panes", &output).into())
+    }
+
     fn caller_session(&self) -> Result<Option<String>, MultiplexerError> {
         let Some(pane) = self.tmux.caller_pane() else {
             return Ok(None);
@@ -237,11 +281,7 @@ impl Multiplexer for TmuxMultiplexer {
                 .unwrap_or_else(|| TmuxScripts::exact(tmux_name)),
             AttachTarget::Shell(window) => window.clone(),
         };
-        if !self.inside_tmux {
-            return self.attach_in_foreground(&resolved);
-        }
-        let output = self.tmux.change(&TmuxScripts::switch_client(&resolved))?;
-        Self::require_done("switch-client", &output)
+        self.attach_in_foreground(&resolved)
     }
 
     fn capture_pane(&self, tmux_name: &str) -> Result<String, MultiplexerError> {
@@ -334,6 +374,7 @@ mod tests {
 
     use super::*;
     use crate::adapters::Deadlines;
+    use crate::adapters::process_environment::ProcessEnvironment;
     use crate::adapters::tmux_sequence::TmuxSequence;
     use crate::domain::{RepoName, SessionRepo, SessionWorktree};
     use crate::test_support::TmuxTestServer;
@@ -433,6 +474,55 @@ mod tests {
         fn created_pane(&self, tmux_name: &str) -> String {
             self.server.pane_of(&format!("={tmux_name}:0.0"))
         }
+
+        fn on_terminal(&self, terminal: Option<&str>) -> TmuxMultiplexer {
+            let base = self.server.environment();
+            let environment =
+                ProcessEnvironment::new(base.variables().to_vec(), terminal.map(OsString::from));
+            TmuxMultiplexer::new(
+                self.server.command_with(&environment),
+                self.server.stand_in(),
+            )
+        }
+    }
+
+    struct UsersServer;
+
+    impl UsersServer {
+        fn snapshot(server: &TmuxTestServer) -> (String, String) {
+            (
+                server.text(&["list-keys"]),
+                server.text(&["list-sessions", "-F", "#{session_name} #{session_windows}"]),
+            )
+        }
+
+        fn caller_inside(fixture: &MultiplexerFixture, users: &TmuxTestServer) -> TmuxMultiplexer {
+            let pane = users.pane_of("=users-work:");
+            let tmux_value = format!("{},{},0", users.socket().display(), users.server_pid());
+            let environment = fixture
+                .server
+                .environment_with(&[("TMUX", &tmux_value), ("TMUX_PANE", &pane)]);
+            TmuxMultiplexer::new(
+                fixture.server.command_with(&environment),
+                fixture.server.stand_in(),
+            )
+        }
+
+        fn exercise(fixture: &MultiplexerFixture, multiplexer: &TmuxMultiplexer) {
+            multiplexer
+                .create_session(&fixture.spec("fix-auth"))
+                .unwrap();
+            multiplexer.observe_all().unwrap();
+            multiplexer.capture_pane("ringleader-fix-auth").unwrap();
+            multiplexer
+                .ensure_shell_window("ringleader-fix-auth", &fixture.worktree("fix-auth"), "sh")
+                .unwrap();
+            multiplexer.agent_pane("ringleader-fix-auth").unwrap();
+            multiplexer.caller_session().unwrap();
+            multiplexer.caller_in_own_pane().unwrap();
+            multiplexer.server_version().unwrap();
+            multiplexer.version().unwrap();
+        }
     }
 
     #[test]
@@ -499,7 +589,6 @@ mod tests {
         let multiplexer = TmuxMultiplexer::new(
             fixture.server.command_with(&environment),
             fixture.server.stand_in(),
-            false,
         );
         let worktree = fixture.server.directory().join("worktrees").join("café-☕");
         fs::create_dir_all(&worktree).unwrap();
@@ -667,7 +756,6 @@ mod tests {
                 .map(OsString::from)
                 .to_vec(),
             ),
-            false,
         );
         multiplexer
             .create_session(&fixture.spec("fix-auth"))
@@ -684,21 +772,16 @@ mod tests {
 
     #[test]
     fn a_server_with_exit_unattached_on_refuses_the_creation() {
-        let fixture = MultiplexerFixture::new();
-        let config = fixture.server.directory().join("exit-unattached.conf");
-        fs::write(&config, "set-option -g exit-unattached on\n").unwrap();
-        let multiplexer = TmuxMultiplexer::new(
-            fixture.server.command().with_config_file(&config),
-            fixture.server.stand_in(),
-            false,
-        );
+        let fixture = MultiplexerFixture::with_holder();
+        let _client = fixture.server.control_client("=holder:");
+        fixture
+            .server
+            .text(&["set-option", "-s", "exit-unattached", "on"]);
 
-        let error = multiplexer
-            .create_session(&fixture.spec("fix-auth"))
-            .unwrap_err();
+        let error = fixture.create("fix-auth").unwrap_err();
 
         assert_eq!(error, MultiplexerError::ExitUnattached);
-        assert!(error.to_string().contains("exit-unattached"));
+        assert_eq!(fixture.sessions(), ["holder"]);
     }
 
     #[test]
@@ -739,6 +822,107 @@ mod tests {
                 .sessions()
                 .contains(&"ringleader-renamed".to_string())
         );
+    }
+
+    #[test]
+    fn a_server_without_a_detach_binding_rolls_the_creation_back() {
+        let fixture = MultiplexerFixture {
+            server: TmuxTestServer::with_config("set -g prefix None\n"),
+        };
+        fixture.server.start_session("holder");
+
+        let error = fixture.create("fix-auth").unwrap_err();
+
+        assert!(matches!(error, MultiplexerError::NoReturnBinding { .. }));
+        assert!(
+            error
+                .to_string()
+                .contains(&fixture.server.config().display().to_string())
+        );
+        assert_eq!(fixture.sessions(), ["holder"]);
+    }
+
+    #[test]
+    fn a_creation_writes_the_generated_config() {
+        let fixture = MultiplexerFixture::new();
+        fs::remove_file(fixture.server.config()).unwrap();
+
+        fixture.create("fix-auth").unwrap();
+
+        assert!(
+            fs::read_to_string(fixture.server.config())
+                .unwrap()
+                .contains("detach-client")
+        );
+    }
+
+    #[test]
+    fn a_caller_whose_terminal_is_a_pane_of_the_server_is_in_its_own_pane() {
+        let fixture = MultiplexerFixture::with_holder();
+        let tty = fixture
+            .server
+            .text(&["display-message", "-p", "-t", "=holder:", "#{pane_tty}"]);
+
+        let inside = fixture
+            .on_terminal(Some(&tty))
+            .caller_in_own_pane()
+            .unwrap();
+
+        assert!(inside);
+    }
+
+    #[test]
+    fn a_caller_on_another_terminal_with_an_inherited_tmux_is_not_in_its_own_pane() {
+        let fixture = MultiplexerFixture::with_holder();
+        let multiplexer = fixture.on_terminal(Some("/dev/pts/4000001"));
+
+        assert!(!multiplexer.caller_in_own_pane().unwrap());
+    }
+
+    #[test]
+    fn a_caller_without_a_terminal_or_a_server_is_not_in_its_own_pane() {
+        let without_server = MultiplexerFixture::new();
+        let without_terminal = MultiplexerFixture::with_holder();
+
+        let on_terminal = without_server.on_terminal(Some("/dev/pts/4000001"));
+
+        assert!(!on_terminal.caller_in_own_pane().unwrap());
+        assert!(
+            !without_terminal
+                .on_terminal(None)
+                .caller_in_own_pane()
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn the_caller_session_ignores_a_pane_of_another_tmux_server() {
+        let fixture = MultiplexerFixture::with_holder();
+        let users_server = TmuxTestServer::with_session("users-work");
+        let pane = fixture.server.pane_of("=holder:");
+        let tmux_value = format!("{},1,0", users_server.socket().display());
+        let environment = fixture
+            .server
+            .environment_with(&[("TMUX", &tmux_value), ("TMUX_PANE", &pane)]);
+        let multiplexer = TmuxMultiplexer::new(
+            fixture.server.command_with(&environment),
+            fixture.server.stand_in(),
+        );
+
+        assert_eq!(multiplexer.caller_session().unwrap(), None);
+    }
+
+    #[test]
+    fn working_on_the_private_server_leaves_the_users_tmux_server_unchanged() {
+        let fixture = MultiplexerFixture::new();
+        let users_server = TmuxTestServer::with_config("bind-key -T root C-q send-keys x\n");
+        users_server.start_session("users-work");
+        let before = UsersServer::snapshot(&users_server);
+        let multiplexer = UsersServer::caller_inside(&fixture, &users_server);
+
+        UsersServer::exercise(&fixture, &multiplexer);
+
+        assert_eq!(UsersServer::snapshot(&users_server), before);
     }
 
     #[test]
@@ -943,50 +1127,7 @@ mod tests {
     }
 
     #[test]
-    fn attach_after_opening_the_shell_lands_on_the_agent_pane() {
-        let fixture = MultiplexerFixture::new();
-        fixture.create("fix-auth").unwrap();
-        let agent = fixture.tagged_panes("ringleader-fix-auth").pop().unwrap();
-        let multiplexer = fixture.server.inside_multiplexer();
-        let window = multiplexer
-            .ensure_shell_window("ringleader-fix-auth", &fixture.worktree("fix-auth"), "sh")
-            .unwrap();
-        let client = fixture.server.control_client(&window);
-
-        multiplexer
-            .attach(&AttachTarget::Agent("ringleader-fix-auth".to_string()))
-            .unwrap();
-
-        assert!(
-            fixture
-                .server
-                .wait_for(|| fixture.server.client_pane(&client) == agent)
-        );
-    }
-
-    #[test]
-    fn opening_the_shell_after_attach_lands_on_the_shell_window() {
-        let fixture = MultiplexerFixture::new();
-        fixture.create("fix-auth").unwrap();
-        let agent = fixture.tagged_panes("ringleader-fix-auth").pop().unwrap();
-        let multiplexer = fixture.server.inside_multiplexer();
-        let client = fixture.server.control_client(&agent);
-        let window = multiplexer
-            .ensure_shell_window("ringleader-fix-auth", &fixture.worktree("fix-auth"), "sh")
-            .unwrap();
-        let shell_pane = fixture.server.pane_of(&window);
-
-        multiplexer.attach(&AttachTarget::Shell(window)).unwrap();
-
-        assert!(
-            fixture
-                .server
-                .wait_for(|| fixture.server.client_pane(&client) == shell_pane)
-        );
-    }
-
-    #[test]
-    fn the_outside_attach_targets_the_agent_pane_id() {
+    fn the_attach_targets_the_agent_pane_id() {
         let argv = TmuxScripts::attach_session("%3").argv();
 
         assert_eq!(argv, ["attach-session", "-t", "%3"]);
@@ -1018,7 +1159,6 @@ mod tests {
                     .map(OsString::from)
                     .to_vec(),
             ),
-            false,
         );
         multiplexer
             .create_session(&fixture.spec("fix-auth"))
@@ -1037,11 +1177,13 @@ mod tests {
     fn the_caller_session_is_the_one_holding_the_pane_variable() {
         let fixture = MultiplexerFixture::with_holder();
         let pane = fixture.server.pane_of("=holder:");
-        let environment = fixture.server.environment_with(&[("TMUX_PANE", &pane)]);
+        let tmux_value = format!("{},1,0", fixture.server.socket().display());
+        let environment = fixture
+            .server
+            .environment_with(&[("TMUX", &tmux_value), ("TMUX_PANE", &pane)]);
         let multiplexer = TmuxMultiplexer::new(
             fixture.server.command_with(&environment),
             fixture.server.launcher(Vec::new()),
-            false,
         );
 
         assert_eq!(
@@ -1064,7 +1206,6 @@ mod tests {
                 .command_with(&environment)
                 .removing_env_names(&names),
             fixture.server.stand_in(),
-            false,
         );
         let spec = fixture.spec("fix-auth").removing_env_names(&names);
 
@@ -1089,7 +1230,6 @@ mod tests {
                 Deadlines::uniform(deadline),
             ),
             fixture.server.launcher(Vec::new()),
-            false,
         );
         let pid = fixture.server.server_pid();
         std::process::Command::new("kill")
@@ -1118,7 +1258,6 @@ mod tests {
                 Deadlines::uniform(Duration::from_secs(1)),
             ),
             fixture.server.stand_in(),
-            false,
         );
 
         let error = impatient

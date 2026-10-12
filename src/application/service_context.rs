@@ -7,7 +7,6 @@ use crate::domain::Config;
 pub struct ServiceContext {
     config: LoadedConfig,
     diagnostics: DiagnosticPaths,
-    inside_tmux: bool,
     launch_directory: PathBuf,
     home: Option<PathBuf>,
     shell: String,
@@ -18,17 +17,9 @@ impl ServiceContext {
         Self {
             config,
             diagnostics: DiagnosticPaths::default(),
-            inside_tmux: false,
             launch_directory: launch_directory.to_path_buf(),
             home: None,
             shell: "sh".to_string(),
-        }
-    }
-
-    pub fn with_inside_tmux(self, inside_tmux: bool) -> Self {
-        Self {
-            inside_tmux,
-            ..self
         }
     }
 
@@ -59,10 +50,6 @@ impl ServiceContext {
 
     pub fn home(&self) -> Option<&Path> {
         self.home.as_deref()
-    }
-
-    pub fn is_inside_tmux(&self) -> bool {
-        self.inside_tmux
     }
 
     pub fn shell(&self) -> &str {

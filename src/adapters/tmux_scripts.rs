@@ -158,10 +158,8 @@ impl TmuxScripts {
         TmuxSequence::new().command(["capture-pane", "-e", "-p", "-t", pane])
     }
 
-    pub fn switch_client(target: &str) -> TmuxSequence {
-        TmuxSequence::new()
-            .command(["switch-client", "-t", target])
-            .command(["display-message", "-p", TmuxLaunch::DONE_LABEL])
+    pub fn root_keys() -> TmuxSequence {
+        TmuxSequence::new().command(["list-keys", "-T", "root"])
     }
 
     pub fn attach_session(target: &str) -> TmuxSequence {

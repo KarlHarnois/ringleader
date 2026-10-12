@@ -43,5 +43,5 @@ pub use repo_overrides::{AddRepoRequest, RepoAddition};
 pub use service_context::{LoadedConfig, ServiceContext};
 pub use service_error::{ServiceError, Tool};
 pub use service_ports::{RepoPorts, ServicePorts, StatePorts, TmuxPorts};
-pub use session_access::{AttachOutcome, EphemeralShell, ReturnMode, ShellOutcome};
+pub use session_access::{EphemeralShell, ShellOutcome};
 pub use session_service::{CorruptRegistry, SessionService};

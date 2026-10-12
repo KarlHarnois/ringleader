@@ -7,9 +7,10 @@ use ratatui::text::Line;
 use super::dialogs::DialogStep;
 use super::text_fit::TextFit;
 use super::theme::Theme;
+use crate::domain::ReturnKey;
 
 pub struct HelpView {
-    sections: Vec<(&'static str, Vec<String>)>,
+    sections: Vec<(String, Vec<String>)>,
     scroll: usize,
     max_scroll: Cell<usize>,
 }
@@ -29,18 +30,20 @@ impl HelpView {
         ("q", "quit, the sessions keep running"),
     ];
     const KEY_WIDTH: usize = 12;
+    const FILE_LABEL_WIDTH: usize = 13;
     const CLOSING: &'static str = "↑ ↓ scroll · ? Esc q close";
 
-    pub fn new(config_path: &Path, log_path: &Path, tmux_prefix: &str) -> Self {
+    pub fn new(return_key: &ReturnKey, files: &[(&str, &Path)]) -> Self {
         let keys = Self::KEYS
             .iter()
             .map(|(key, action)| format!("{key:<width$}{action}", width = Self::KEY_WIDTH))
             .collect();
+        let key = return_key.display();
         let sections = vec![
-            ("Keys", keys),
-            ("Returning with Ctrl-Q", Self::return_key(tmux_prefix)),
-            ("Bell", Self::bell()),
-            ("Files", Self::files(config_path, log_path)),
+            ("Keys".to_string(), keys),
+            (format!("Returning with {key}"), Self::return_key(&key)),
+            ("Bell".to_string(), Self::bell()),
+            ("Files".to_string(), Self::files(files)),
         ];
         Self {
             sections,
@@ -66,7 +69,7 @@ impl HelpView {
     pub fn lines(&self, width: usize, height: usize, theme: &Theme) -> Vec<Line<'static>> {
         let mut content = Vec::new();
         for (heading, paragraphs) in &self.sections {
-            content.push(Line::styled(*heading, theme.emphasis()));
+            content.push(Line::styled(heading.clone(), theme.emphasis()));
             for paragraph in paragraphs {
                 content.extend(TextFit::new(paragraph).styled_lines(width, theme.base()));
             }
@@ -84,11 +87,10 @@ impl HelpView {
         self.scroll.min(self.max_scroll.get())
     }
 
-    fn return_key(tmux_prefix: &str) -> Vec<String> {
+    fn return_key(key: &str) -> Vec<String> {
         vec![
-            "Ctrl-Q returns here from a managed session. Outside tmux it detaches the client, and inside tmux it switches the client back to this pane.".to_string(),
-            format!("It works only in sessions whose name starts with the current tmux_prefix {tmux_prefix}. Everywhere else Ctrl-Q reaches the pane."),
-            "A terminal emulator started in the foreground of a tmux pane counts as inside tmux. Run env -u TMUX -u TMUX_PANE ringleader to force outside mode against the default server.".to_string(),
+            format!("{key} detaches from any session and brings you back here. Set return_key in the config to use another key."),
+            format!("Sessions run on Ringleader's own tmux server, whose socket is listed under Files. They have no prefix key, and the mouse is on. Inside your own tmux a session opens nested, so your tmux must not bind {key} in its root table."),
             "Open extra shells with t instead of splitting the agent window, since output in a split pane counts as agent activity.".to_string(),
         ]
     }
@@ -96,16 +98,21 @@ impl HelpView {
     fn bell() -> Vec<String> {
         vec![
             "With bell_on_waiting on, the bell rings when an agent goes from working to waiting, unless a client shows its agent window. An exit never rings.".to_string(),
-            "The bell is a BEL on this screen's own terminal, and an attach suspends or hides this screen, so the bell rings only while this screen shows.".to_string(),
+            "This screen is suspended while you are attached to a session, so the bell rings only while this screen shows.".to_string(),
         ]
     }
 
-    fn files(config_path: &Path, log_path: &Path) -> Vec<String> {
-        vec![
-            format!("Config   {}", config_path.display()),
-            format!("Log      {}", log_path.display()),
-            format!("Version  ringleader {}", env!("CARGO_PKG_VERSION")),
-        ]
+    fn files(files: &[(&str, &Path)]) -> Vec<String> {
+        let version = format!("ringleader {}", env!("CARGO_PKG_VERSION"));
+        files
+            .iter()
+            .map(|(label, path)| Self::file_line(label, &path.display().to_string()))
+            .chain([Self::file_line("Version", &version)])
+            .collect()
+    }
+
+    fn file_line(label: &str, value: &str) -> String {
+        format!("{label:<width$}{value}", width = Self::FILE_LABEL_WIDTH)
     }
 }
 
@@ -122,10 +129,21 @@ mod tests {
 
     impl HelpFixture {
         fn help() -> HelpView {
+            Self::help_for(&ReturnKey::default())
+        }
+
+        fn help_for(return_key: &ReturnKey) -> HelpView {
             HelpView::new(
-                Path::new("/config/ringleader/config.toml"),
-                Path::new("/state/ringleader/app.log"),
-                "ringleader-",
+                return_key,
+                &[
+                    ("Config", Path::new("/config/ringleader/config.toml")),
+                    ("Log", Path::new("/state/ringleader/app.log")),
+                    (
+                        "tmux socket",
+                        Path::new("/run/user/1000/ringleader/tmux/tmux.sock"),
+                    ),
+                    ("tmux config", Path::new("/state/ringleader/tmux.conf")),
+                ],
             )
         }
 
@@ -192,28 +210,30 @@ mod tests {
     }
 
     #[test]
-    fn the_help_names_the_config_and_log_paths_and_the_version() {
+    fn the_help_names_the_files_and_the_version() {
         let text = HelpFixture::text(&HelpFixture::help());
 
-        assert!(text.contains("Config   /config/ringleader/config.toml"));
-        assert!(text.contains("Log      /state/ringleader/app.log"));
+        assert!(text.contains("Config       /config/ringleader/config.toml"));
+        assert!(text.contains("Log          /state/ringleader/app.log"));
+        assert!(text.contains("tmux socket  /run/user/1000/ringleader/tmux/tmux.sock"));
+        assert!(text.contains("tmux config  /state/ringleader/tmux.conf"));
         assert!(text.contains(&format!(
-            "Version  ringleader {}",
+            "Version      ringleader {}",
             env!("CARGO_PKG_VERSION")
         )));
     }
 
     #[test]
-    fn the_help_explains_ctrl_q_and_the_inside_tmux_caveat() {
-        let text = HelpFixture::text(&HelpFixture::help());
+    fn the_help_explains_the_configured_return_key_and_nesting() {
+        let text = HelpFixture::text(&HelpFixture::help_for(&ReturnKey::parse("M-x").unwrap()));
 
-        assert!(text.contains("current tmux_prefix ringleader-"));
-        assert!(text.contains(
-            "A terminal emulator started in the foreground of a tmux pane counts as inside tmux."
-        ));
-        assert!(text.contains("env -u TMUX -u TMUX_PANE ringleader"));
+        assert!(text.contains("Returning with Alt-x"));
+        assert!(text.contains("Alt-x detaches from any session and brings you back here."));
+        assert!(text.contains("so your tmux must not bind Alt-x in its root table"));
         assert!(text.contains("Open extra shells with t instead of splitting the agent window"));
         assert!(text.contains("the bell rings only while this screen shows"));
+        assert!(!text.contains("tmux_prefix"));
+        assert!(!text.contains("env -u TMUX"));
     }
 
     #[test]

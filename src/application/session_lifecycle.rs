@@ -1,10 +1,10 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::creation_plan::CreateRequest;
 use super::delete_impact::{DeleteConfirmation, DeleteImpact};
 use super::delete_outcome::DeleteOutcome;
-use super::ports::Multiplexer;
+use super::ports::{HostProbe, Multiplexer};
 use super::reconciliation::{ManagedRow, Reconciliation};
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
@@ -12,10 +12,13 @@ use super::session_creation::SessionCreation;
 use super::session_deletion::SessionDeletion;
 use super::session_renaming::SessionRenaming;
 use super::session_restart::SessionRestart;
+use super::worktree_containment::WorktreeContainment;
 use crate::domain::{Config, Session, SessionState};
 
 pub struct SessionLifecycle {
     multiplexer: Arc<dyn Multiplexer>,
+    host: Arc<dyn HostProbe>,
+    launch_directory: PathBuf,
     creation: SessionCreation,
     renaming: SessionRenaming,
     deletion: SessionDeletion,
@@ -23,9 +26,11 @@ pub struct SessionLifecycle {
 }
 
 impl SessionLifecycle {
-    pub fn new(ports: &ServicePorts) -> Self {
+    pub fn new(ports: &ServicePorts, launch_directory: &Path) -> Self {
         Self {
             multiplexer: ports.tmux().multiplexer(),
+            host: ports.repos().host(),
+            launch_directory: launch_directory.to_path_buf(),
             creation: SessionCreation::new(ports),
             renaming: SessionRenaming::new(ports),
             deletion: SessionDeletion::new(ports),
@@ -98,7 +103,20 @@ impl SessionLifecycle {
                 "session {name} runs this Ringleader, delete it from another terminal"
             )));
         }
+        self.refuse_launch_inside(row.session())?;
         Ok(row)
+    }
+
+    fn refuse_launch_inside(&self, session: &Session) -> Result<(), ServiceError> {
+        let containment = WorktreeContainment::new(self.host.as_ref());
+        if !containment.holds(session.worktree_path(), &self.launch_directory) {
+            return Ok(());
+        }
+        Err(ServiceError::Conflict(format!(
+            "Ringleader runs from {}, inside the worktree of session {}, delete it from another directory",
+            self.launch_directory.display(),
+            session.name()
+        )))
     }
 
     fn managed_target<'r>(

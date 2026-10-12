@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use super::ports::{
-    Clock, ConfigSource, HostProbe, Multiplexer, RepoScanner, ReturnBinding, SessionRegistry,
+    Clock, ConfigSource, HostProbe, LeftoverBindings, Multiplexer, RepoScanner, SessionRegistry,
     Workspace,
 };
 
@@ -95,14 +95,17 @@ impl RepoPorts {
 
 pub struct TmuxPorts {
     multiplexer: Arc<dyn Multiplexer>,
-    binding: Arc<dyn ReturnBinding>,
+    leftover_bindings: Arc<dyn LeftoverBindings>,
 }
 
 impl TmuxPorts {
-    pub fn new(multiplexer: Arc<dyn Multiplexer>, binding: Arc<dyn ReturnBinding>) -> Self {
+    pub fn new(
+        multiplexer: Arc<dyn Multiplexer>,
+        leftover_bindings: Arc<dyn LeftoverBindings>,
+    ) -> Self {
         Self {
             multiplexer,
-            binding,
+            leftover_bindings,
         }
     }
 
@@ -110,7 +113,7 @@ impl TmuxPorts {
         Arc::clone(&self.multiplexer)
     }
 
-    pub fn binding(&self) -> Arc<dyn ReturnBinding> {
-        Arc::clone(&self.binding)
+    pub fn leftover_bindings(&self) -> Arc<dyn LeftoverBindings> {
+        Arc::clone(&self.leftover_bindings)
     }
 }

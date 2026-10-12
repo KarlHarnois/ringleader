@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
-use crate::domain::{Agent, SessionMetadata, SessionObservation, SessionSize};
+use crate::domain::{Agent, ReturnKey, SessionMetadata, SessionObservation, SessionSize};
 
 pub trait Multiplexer {
     fn create_session(&self, spec: &SessionSpec) -> Result<PathBuf, MultiplexerError>;
@@ -15,6 +15,7 @@ pub trait Multiplexer {
         worktree: &Path,
     ) -> Result<bool, MultiplexerError>;
     fn caller_session(&self) -> Result<Option<String>, MultiplexerError>;
+    fn caller_in_own_pane(&self) -> Result<bool, MultiplexerError>;
     fn observe_all(&self) -> Result<Vec<SessionObservation>, MultiplexerError>;
     fn attach(&self, target: &AttachTarget) -> Result<(), MultiplexerError>;
     fn capture_pane(&self, tmux_name: &str) -> Result<String, MultiplexerError>;
@@ -43,6 +44,7 @@ pub struct SessionSpec {
     launch: AgentLaunch,
     size: SessionSize,
     removed_env_names: Vec<String>,
+    return_key: ReturnKey,
 }
 
 impl SessionSpec {
@@ -53,6 +55,7 @@ impl SessionSpec {
             launch,
             size: SessionSize::default(),
             removed_env_names: Vec::new(),
+            return_key: ReturnKey::default(),
         }
     }
 
@@ -63,6 +66,13 @@ impl SessionSpec {
     pub fn removing_env_names(self, names: &[String]) -> Self {
         Self {
             removed_env_names: names.to_vec(),
+            ..self
+        }
+    }
+
+    pub fn with_return_key(self, return_key: &ReturnKey) -> Self {
+        Self {
+            return_key: return_key.clone(),
             ..self
         }
     }
@@ -89,6 +99,10 @@ impl SessionSpec {
 
     pub fn removed_env_names(&self) -> &[String] {
         &self.removed_env_names
+    }
+
+    pub fn return_key(&self) -> &ReturnKey {
+        &self.return_key
     }
 }
 
@@ -154,6 +168,12 @@ pub enum MultiplexerError {
         "the tmux server has exit-unattached on, which ends every detached session; turn it off to create sessions"
     )]
     ExitUnattached,
+    #[error(
+        "the tmux server at {socket} binds no key to detach-client, so its sessions could not be left; check {config} and the load errors that tmux -S {socket} show-messages prints"
+    )]
+    NoReturnBinding { socket: String, config: String },
+    #[error("cannot prepare the tmux server files: {detail}")]
+    ServerFiles { detail: String },
     #[error("cannot find the agent pane of tmux session {tmux_name}")]
     NoAgentPane { tmux_name: String },
     #[error("cannot write the agent handoff file: {detail}")]

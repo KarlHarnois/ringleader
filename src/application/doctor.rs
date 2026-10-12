@@ -3,7 +3,10 @@ use std::sync::Arc;
 
 use super::diagnostic_paths::DiagnosticPaths;
 use super::doctor_report::DoctorReport;
-use super::ports::{Clock, ConfigError, HostProbe, Multiplexer, SessionRegistry, Workspace};
+use super::ports::{
+    Clock, ConfigError, HostProbe, LeftoverBinding, LeftoverBindings, Multiplexer, SessionRegistry,
+    Workspace,
+};
 use super::registry_audit::RegistryAudit;
 use super::service_ports::ServicePorts;
 use super::session_reconciler::SessionReconciler;
@@ -17,6 +20,7 @@ pub struct Doctor {
     multiplexer: Arc<dyn Multiplexer>,
     host: Arc<dyn HostProbe>,
     registry: Arc<dyn SessionRegistry>,
+    leftover_bindings: Arc<dyn LeftoverBindings>,
     clock: Arc<dyn Clock>,
     paths: DiagnosticPaths,
 }
@@ -33,6 +37,7 @@ impl Doctor {
             multiplexer: ports.tmux().multiplexer(),
             host: ports.repos().host(),
             registry: ports.state().registry(),
+            leftover_bindings: ports.tmux().leftover_bindings(),
             clock: ports.state().clock(),
             paths,
         }
@@ -60,6 +65,7 @@ impl Doctor {
         self.check_config_writable(config_path, &mut report);
         self.check_writable("state directory", self.paths.state_directory(), &mut report);
         self.check_registry(config, valid_config, &mut report);
+        self.check_leftover_bindings(&mut report);
         report
     }
 
@@ -80,6 +86,34 @@ impl Doctor {
         if let Ok(Some(true)) = self.multiplexer.server_exit_unattached() {
             report.problem("the running tmux server has exit-unattached on, so creating a session fails; turn it off");
         }
+    }
+
+    fn check_leftover_bindings(&self, report: &mut DoctorReport) {
+        let path = self.leftover_bindings.path();
+        match self.leftover_bindings.read() {
+            Ok(bindings) => {
+                for binding in bindings {
+                    report.warning(Self::leftover_advice(&path, &binding));
+                }
+            }
+            Err(error) => report.warning(format!("leftover Ctrl-Q bindings: {error}")),
+        }
+    }
+
+    fn leftover_advice(path: &Path, binding: &LeftoverBinding) -> String {
+        let file = path.display();
+        let socket = binding.socket().display();
+        let fix = match binding.saved_line() {
+            Some(line) => format!(
+                "it saved your binding {line} from the tmux server at {socket}. If C-q there still runs Ringleader's binding, put that line in a file and run tmux -S {socket} source-file <file>"
+            ),
+            None => format!(
+                "the tmux server at {socket} had no C-q binding before. If C-q there still runs Ringleader's binding, run tmux -S {socket} unbind-key -T root C-q"
+            ),
+        };
+        format!(
+            "{file} is left from an earlier Ringleader that bound C-q on your tmux server: {fix}. Ringleader no longer changes that server, so delete {file} once it is done"
+        )
     }
 
     fn check_git(&self, report: &mut DoctorReport) {
@@ -197,10 +231,11 @@ mod tests {
     use std::path::Path;
 
     use super::*;
+    use crate::application::ports::LeftoverBindingsError;
     use crate::application::ports::{MultiplexerError, RegistryError};
     use crate::domain::{Repo, RepoName, Session};
     use crate::test_support::{
-        FakeMultiplexer, FakeSessionRegistry, FakeWorkspace, ServiceFixture,
+        FakeLeftoverBindings, FakeMultiplexer, FakeSessionRegistry, FakeWorkspace, ServiceFixture,
     };
 
     struct DoctorFixture;
@@ -434,7 +469,7 @@ mod tests {
     }
 
     #[test]
-    fn a_changed_naming_is_a_warning_about_ctrl_q() {
+    fn a_changed_naming_is_a_warning() {
         let config = ServiceFixture::config().with_naming(crate::domain::NamingScheme::new(
             Path::new(ServiceFixture::WORKTREE_ROOT),
             "ringleader/",
@@ -444,7 +479,7 @@ mod tests {
 
         assert!(DoctorFixture::has_warning(
             &fixture,
-            "Ctrl-Q does not return"
+            "tmux_prefix ringleader-, which differ from the config"
         ));
     }
 
@@ -482,6 +517,54 @@ mod tests {
             &fixture,
             FakeMultiplexer::SOCKET
         ));
+    }
+
+    #[test]
+    fn each_leftover_binding_is_a_warning_with_its_socket_and_hand_command() {
+        let fixture =
+            DoctorFixture::healthy().with_leftover_bindings(FakeLeftoverBindings::with(vec![
+                LeftoverBinding::new(
+                    Path::new("/tmp/tmux-1000/default"),
+                    Some("bind-key -T root C-q send-keys example"),
+                ),
+                LeftoverBinding::new(Path::new("/tmp/tmux-1000/work"), None),
+            ]));
+
+        let lines = DoctorFixture::lines(&fixture);
+
+        assert!(DoctorFixture::has_warning(
+            &fixture,
+            "your binding bind-key -T root C-q send-keys example from the tmux server at /tmp/tmux-1000/default"
+        ));
+        assert!(DoctorFixture::has_warning(
+            &fixture,
+            "tmux -S /tmp/tmux-1000/work unbind-key -T root C-q"
+        ));
+        assert!(
+            lines
+                .iter()
+                .filter(|line| line.contains(FakeLeftoverBindings::PATH))
+                .all(|line| line.starts_with("warning:"))
+        );
+        assert!(
+            fixture
+                .multiplexer()
+                .calls()
+                .iter()
+                .all(|call| !call.contains("/tmp/tmux-1000/work"))
+        );
+    }
+
+    #[test]
+    fn an_unreadable_bindings_file_is_a_warning() {
+        let fixture = DoctorFixture::healthy().with_leftover_bindings(
+            FakeLeftoverBindings::failing(LeftoverBindingsError::Corrupt {
+                path: Path::new(FakeLeftoverBindings::PATH).to_path_buf(),
+                detail: "expected value".to_string(),
+            }),
+        );
+
+        assert!(DoctorFixture::has_warning(&fixture, "is not valid JSON"));
     }
 
     #[test]

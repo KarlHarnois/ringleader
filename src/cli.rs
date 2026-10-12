@@ -166,6 +166,10 @@ impl Cli {
         self.command.is_none()
     }
 
+    pub fn is_doctor(&self) -> bool {
+        matches!(self.command, Some(CliCommand::Doctor(_)))
+    }
+
     pub fn is_mutating(&self) -> bool {
         matches!(
             self.command,

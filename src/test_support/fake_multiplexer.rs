@@ -22,6 +22,7 @@ struct MultiplexerState {
     pane_pids: HashMap<String, Vec<u32>>,
     sessions_on_other_sockets: Vec<(PathBuf, String, PathBuf)>,
     caller: Option<String>,
+    caller_in_own_pane: bool,
     captures: HashMap<String, String>,
     failures: HashMap<&'static str, MultiplexerError>,
     failed_create_still_creates: bool,
@@ -53,6 +54,7 @@ impl FakeMultiplexer {
                 pane_pids: HashMap::new(),
                 sessions_on_other_sockets: Vec::new(),
                 caller: None,
+                caller_in_own_pane: false,
                 captures: HashMap::new(),
                 failures: HashMap::new(),
                 failed_create_still_creates: false,
@@ -87,6 +89,11 @@ impl FakeMultiplexer {
 
     pub fn with_caller(self, tmux_name: &str) -> Self {
         self.edit(|state| state.caller = Some(tmux_name.to_string()));
+        self
+    }
+
+    pub fn called_from_own_pane(self) -> Self {
+        self.edit(|state| state.caller_in_own_pane = true);
         self
     }
 
@@ -247,6 +254,10 @@ impl Multiplexer for FakeMultiplexer {
 
     fn caller_session(&self) -> Result<Option<String>, MultiplexerError> {
         Ok(self.edit(|state| state.caller.clone()))
+    }
+
+    fn caller_in_own_pane(&self) -> Result<bool, MultiplexerError> {
+        Ok(self.edit(|state| state.caller_in_own_pane))
     }
 
     fn observe_all(&self) -> Result<Vec<SessionObservation>, MultiplexerError> {

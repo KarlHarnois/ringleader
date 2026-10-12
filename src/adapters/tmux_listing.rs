@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -18,7 +19,10 @@ impl<'a> TmuxListing<'a> {
     pub const AGENT_FORMAT: &'static str = "ringleader-agent #{pane_id} #{@ringleader_agent}";
     pub const PANE_PID_FORMAT: &'static str = "ringleader-pane-pid #{pane_dead} #{pane_pid}";
     pub const CLAIM_FORMAT: &'static str = "ringleader-claim\t#{session_name}\t#{@ringleader_meta}";
+    pub const TTY_FORMAT: &'static str = "ringleader-tty #{pane_tty}";
     const TAGGED: &'static str = "1";
+    const KEY_BINDING: &'static str = "bind-key";
+    const DETACH: &'static str = "detach-client";
 
     pub fn new(output: &'a TmuxOutput) -> Self {
         Self { output }
@@ -46,6 +50,19 @@ impl<'a> TmuxListing<'a> {
         self.output.labeled("ringleader-window").find_map(|row| {
             let (window, tag) = row.split_once(' ')?;
             (tag == Self::TAGGED).then(|| window.to_string())
+        })
+    }
+
+    pub fn shows_terminal(&self, terminal: &OsStr) -> bool {
+        self.output
+            .labeled("ringleader-tty")
+            .any(|tty| Path::new(tty) == Path::new(terminal))
+    }
+
+    pub fn binds_detach(&self) -> bool {
+        self.output.stdout().lines().any(|line| {
+            let words: Vec<&str> = line.split_whitespace().collect();
+            words.first() == Some(&Self::KEY_BINDING) && words.last() == Some(&Self::DETACH)
         })
     }
 

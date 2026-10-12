@@ -48,21 +48,19 @@ impl<'a> StatusBar<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StatusMessage {
     Info(String),
-    Warning(String),
     Error(String),
 }
 
 impl StatusMessage {
     pub fn text(&self) -> &str {
         match self {
-            Self::Info(text) | Self::Warning(text) | Self::Error(text) => text,
+            Self::Info(text) | Self::Error(text) => text,
         }
     }
 
     fn style(&self, theme: &Theme) -> Style {
         match self {
             Self::Info(_) => theme.base(),
-            Self::Warning(_) => theme.warning(),
             Self::Error(_) => theme.error(),
         }
     }
@@ -122,12 +120,11 @@ impl KeyHints {
 
 pub struct StatusNote<'a> {
     row: &'a SessionSummary,
-    tmux_prefix: &'a str,
 }
 
 impl<'a> StatusNote<'a> {
-    pub fn new(row: &'a SessionSummary, tmux_prefix: &'a str) -> Self {
-        Self { row, tmux_prefix }
+    pub fn new(row: &'a SessionSummary) -> Self {
+        Self { row }
     }
 
     pub fn text(&self) -> Option<String> {
@@ -138,12 +135,6 @@ impl<'a> StatusNote<'a> {
             .and_then(|session| session.advice())
         {
             return Some(advice);
-        }
-        if !tmux_name.starts_with(self.tmux_prefix) {
-            return Some(format!(
-                "Ctrl-Q does not return from {tmux_name}, whose name lacks the current tmux_prefix {}.",
-                self.tmux_prefix
-            ));
         }
         if self.row.state() == SessionState::Unmanaged {
             return Some(format!(
@@ -162,14 +153,12 @@ mod tests {
     use ratatui::backend::TestBackend;
 
     use super::*;
-    use crate::domain::{PairMismatch, Session, TmuxAddress, UnmanagedSession};
+    use crate::domain::{PairMismatch, UnmanagedSession};
     use crate::test_support::{FakeMultiplexer, ServiceFixture};
 
     struct BarFixture;
 
     impl BarFixture {
-        const PREFIX: &'static str = "ringleader-";
-
         fn render(status: StatusBar, width: u16) -> String {
             let mut terminal = Terminal::new(TestBackend::new(width, 1)).unwrap();
             terminal
@@ -184,14 +173,8 @@ mod tests {
         }
 
         fn note_for(row: &SessionSummary) -> String {
-            let note = StatusNote::new(row, Self::PREFIX).text();
+            let note = StatusNote::new(row).text();
             Self::render(StatusBar::new(Theme).with_note(note), 200)
-        }
-
-        fn renamed_prefix_session() -> Session {
-            let session = ServiceFixture::session("fix-auth");
-            let address = TmuxAddress::new("agents-fix-auth", session.socket_path());
-            session.rekeyed(session.name().clone(), session.metadata().clone(), address)
         }
     }
 
@@ -230,20 +213,6 @@ mod tests {
     }
 
     #[test]
-    fn a_selected_session_under_an_earlier_prefix_explains_that_ctrl_q_does_not_return() {
-        let row = SessionSummary::managed(
-            BarFixture::renamed_prefix_session(),
-            SessionState::Waiting,
-            false,
-        );
-
-        assert_eq!(
-            BarFixture::note_for(&row),
-            " Ctrl-Q does not return from agents-fix-auth, whose name lacks the current tmux_prefix ringleader-."
-        );
-    }
-
-    #[test]
     fn a_selected_shadowed_pair_shows_the_kill_session_advice() {
         let entry = ServiceFixture::session("fix-auth");
         let observation = ServiceFixture::waiting(&entry).without_metadata();
@@ -276,13 +245,13 @@ mod tests {
     }
 
     #[test]
-    fn a_selected_managed_session_under_the_current_prefix_has_no_note() {
+    fn a_selected_managed_session_has_no_note() {
         let row = SessionSummary::managed(
             ServiceFixture::session("fix-auth"),
             SessionState::Waiting,
             false,
         );
 
-        assert_eq!(StatusNote::new(&row, BarFixture::PREFIX).text(), None);
+        assert_eq!(StatusNote::new(&row).text(), None);
     }
 }

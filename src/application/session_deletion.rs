@@ -712,6 +712,22 @@ mod tests {
     }
 
     #[test]
+    fn delete_refuses_while_ringleader_runs_inside_the_worktree() {
+        let worktree = DeleteFixture::session().worktree_path().join("src");
+        let fixture = DeleteFixture::live_fixture().launched_in(&worktree);
+
+        let error = DeleteFixture::force(&mut fixture.service()).unwrap_err();
+
+        assert_eq!(error.exit_code(), 3);
+        assert!(
+            error
+                .to_string()
+                .contains("delete it from another directory")
+        );
+        assert!(fixture.multiplexer().state_changing_calls().is_empty());
+    }
+
+    #[test]
     fn a_locked_worktree_refuses_the_delete_and_leaves_the_session_running() {
         let session = DeleteFixture::session();
         let workspace = FakeWorkspace::default()

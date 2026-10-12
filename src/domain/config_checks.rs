@@ -3,6 +3,7 @@ use std::path::Path;
 use super::agent::Agent;
 use super::config_draft::ConfigDraft;
 use super::repo_name::RepoName;
+use super::return_key::ReturnKey;
 
 pub struct ConfigChecks<'a> {
     draft: &'a ConfigDraft,
@@ -35,6 +36,7 @@ impl<'a> ConfigChecks<'a> {
         self.check_prefix("tmux_prefix", self.draft.raw_tmux_prefix(), '-');
         self.check_prefix("branch_prefix", self.draft.raw_branch_prefix(), '/');
         self.check_absolute("worktree_root", self.draft.raw_worktree_root());
+        self.check_return_key();
         self.check_session_size();
         self.check_idle_seconds();
         self.check_scan_depth();
@@ -71,6 +73,16 @@ impl<'a> ConfigChecks<'a> {
             ));
         } else if !path.is_absolute() {
             self.fail(format!("{key}: `{text}` is not an absolute path"));
+        }
+    }
+
+    fn check_return_key(&mut self) {
+        let raw = self.draft.raw_return_key();
+        if ReturnKey::parse(raw).is_none() {
+            self.fail(format!(
+                "return_key: `{}` must be a tmux key such as C-q, M-x, or F12: optional C-, M-, and S- modifiers, then one printable character other than a quote or \\, or a key name",
+                raw.escape_default()
+            ));
         }
     }
 
@@ -270,6 +282,32 @@ mod tests {
     #[test]
     fn the_defaults_pass_every_check() {
         assert!(ChecksFixture::failures(&ChecksFixture::draft()).is_empty());
+    }
+
+    #[test]
+    fn return_keys_tmux_can_bind_pass() {
+        for key in ["C-q", "M-x", "F12", "~", "}", "C-}"] {
+            let draft = ChecksFixture::draft().return_key(key);
+
+            assert!(
+                ChecksFixture::failures(&draft).is_empty(),
+                "{key} should pass"
+            );
+        }
+    }
+
+    #[test]
+    fn return_keys_tmux_cannot_bind_fail_with_their_key_named() {
+        for key in ["", "C-", "'", "\\", " ", "\n"] {
+            ChecksFixture::fails_on(ChecksFixture::draft().return_key(key), "return_key");
+        }
+    }
+
+    #[test]
+    fn the_return_key_defaults_to_ctrl_q() {
+        let config = crate::domain::Config::new(&ChecksFixture::draft()).unwrap();
+
+        assert_eq!(config.return_key().to_string(), "C-q");
     }
 
     #[test]

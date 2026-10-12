@@ -21,6 +21,10 @@ impl TomlConfigSource {
 # worktree_root = "~/.local/share/ringleader/worktrees"
 branch_prefix = "ringleader/"
 tmux_prefix = "ringleader-"
+# The key that detaches from a session back to Ringleader. Sessions have no
+# prefix key, so this is the only way back. Inside your own tmux, it must not be
+# bound in your tmux's root table.
+return_key = "C-q"
 state_poll_ms = 1000
 preview_refresh_ms = 750
 diff_refresh_ms = 3000

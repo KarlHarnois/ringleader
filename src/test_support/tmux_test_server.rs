@@ -1,5 +1,5 @@
 use std::ffi::OsString;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Output, Stdio};
 use std::sync::mpsc::{self, Receiver};
@@ -8,16 +8,18 @@ use std::time::{Duration, Instant};
 
 use tempfile::TempDir;
 
+use crate::adapters::Deadlines;
 use crate::adapters::agent_handoff::AgentHandoff;
 use crate::adapters::agent_launcher::LauncherCommand;
 use crate::adapters::process_environment::ProcessEnvironment;
-use crate::adapters::tmux_command::TmuxCommand;
+use crate::adapters::tmux_command::{ServerFiles, TmuxCommand};
 use crate::adapters::tmux_multiplexer::TmuxMultiplexer;
-use crate::adapters::{BoundedCommand, Deadlines};
+use crate::adapters::tmux_server_config::TmuxServerConfig;
+use crate::domain::ReturnKey;
 
 pub struct TmuxTestServer {
     directory: TempDir,
-    socket: PathBuf,
+    files: ServerFiles,
 }
 
 impl TmuxTestServer {
@@ -26,12 +28,20 @@ impl TmuxTestServer {
     const POLL_INTERVAL: Duration = Duration::from_millis(20);
 
     pub fn new() -> Self {
+        Self::with_config(&TmuxServerConfig::new(&ReturnKey::default()).render())
+    }
+
+    pub fn with_config(config_text: &str) -> Self {
         let directory = tempfile::Builder::new()
             .prefix("rl")
             .tempdir_in("/tmp")
             .expect("a socket directory under /tmp");
-        let socket = directory.path().join("tmux.sock");
-        Self { directory, socket }
+        let files = ServerFiles::new(
+            &directory.path().join("tmux.sock"),
+            &directory.path().join("tmux.conf"),
+        );
+        std::fs::write(files.config(), config_text).expect("the test server config is written");
+        Self { directory, files }
     }
 
     pub fn with_session(name: &str) -> Self {
@@ -41,7 +51,11 @@ impl TmuxTestServer {
     }
 
     pub fn socket(&self) -> &Path {
-        &self.socket
+        self.files.socket()
+    }
+
+    pub fn config(&self) -> &Path {
+        self.files.config()
     }
 
     pub fn directory(&self) -> &Path {
@@ -82,12 +96,8 @@ impl TmuxTestServer {
         environment: &ProcessEnvironment,
         deadlines: Deadlines,
     ) -> TmuxCommand {
-        TmuxCommand::new(
-            &OsString::from("tmux"),
-            environment,
-            BoundedCommand::new(deadlines),
-        )
-        .on_test_server(&self.socket)
+        TmuxCommand::new(&OsString::from("tmux"), &self.files, environment)
+            .with_deadlines(deadlines)
     }
 
     pub fn server_pid(&self) -> String {
@@ -104,11 +114,7 @@ impl TmuxTestServer {
     }
 
     pub fn multiplexer(&self) -> TmuxMultiplexer {
-        TmuxMultiplexer::new(self.command(), self.stand_in(), false)
-    }
-
-    pub fn inside_multiplexer(&self) -> TmuxMultiplexer {
-        TmuxMultiplexer::new(self.command(), self.stand_in(), true)
+        TmuxMultiplexer::new(self.command(), self.stand_in())
     }
 
     pub fn stand_in(&self) -> LauncherCommand {
@@ -129,19 +135,26 @@ impl TmuxTestServer {
     }
 
     pub fn tmux(&self, args: &[&str]) -> Output {
-        let mut command = Command::new("tmux");
-        command
-            .env_clear()
-            .envs(self.environment().variables().iter().cloned())
-            .arg("-u")
-            .arg("-S")
-            .arg(&self.socket)
-            .args(["-f", "/dev/null"])
-            .args(args)
-            .current_dir(self.directory())
+        self.typed(args)
             .stdin(Stdio::null())
             .output()
             .expect("tmux runs")
+    }
+
+    pub fn source(&self, config_text: &str) -> Output {
+        let mut child = self
+            .typed(&["source-file", "-"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("tmux runs");
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin
+                .write_all(config_text.as_bytes())
+                .expect("tmux reads the config text");
+        }
+        child.wait_with_output().expect("tmux finishes")
     }
 
     pub fn text(&self, args: &[&str]) -> String {
@@ -162,19 +175,6 @@ impl TmuxTestServer {
         self.text(&args);
     }
 
-    pub fn wait_until_gone(&self) {
-        let deadline = Instant::now() + Self::SETTLE_LIMIT;
-        while Instant::now() < deadline {
-            let output = self.tmux(&["has-session"]);
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            if stderr.contains("no server running on") || stderr.contains("error connecting to") {
-                return;
-            }
-            thread::sleep(Self::POLL_INTERVAL);
-        }
-        panic!("the tmux test server did not exit");
-    }
-
     pub fn wait_for(&self, condition: impl Fn() -> bool) -> bool {
         let deadline = Instant::now() + Self::SETTLE_LIMIT;
         while Instant::now() < deadline {
@@ -187,13 +187,8 @@ impl TmuxTestServer {
     }
 
     pub fn control_client(&self, target: &str) -> ControlClient {
-        let mut child = Command::new("tmux")
-            .env_clear()
-            .envs(self.environment().variables().iter().cloned())
-            .arg("-u")
-            .arg("-S")
-            .arg(&self.socket)
-            .args(["-f", "/dev/null", "-C", "attach-session", "-t", target])
+        let mut child = self
+            .typed(&["-C", "attach-session", "-t", target])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -232,6 +227,21 @@ impl TmuxTestServer {
     pub fn press(&self, client: &ControlClient, key: &str) {
         let name = self.client_name(client);
         self.text(&["send-keys", "-K", "-c", &name, key]);
+    }
+
+    fn typed(&self, args: &[&str]) -> Command {
+        let mut command = Command::new("tmux");
+        command
+            .env_clear()
+            .envs(self.environment().variables().iter().cloned())
+            .arg("-u")
+            .arg("-S")
+            .arg(self.socket())
+            .arg("-f")
+            .arg(self.config())
+            .args(args)
+            .current_dir(self.directory());
+        command
     }
 
     fn client_named_by_pid(&self, pid: &str) -> Option<String> {

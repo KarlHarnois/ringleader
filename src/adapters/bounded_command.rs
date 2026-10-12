@@ -1,4 +1,4 @@
-use std::io::{self, Write};
+use std::io;
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::thread;
@@ -40,13 +40,8 @@ impl BoundedCommand {
     }
 
     fn spawn(&self, mut command: Command, call: &Call) -> Result<Child, CommandError> {
-        let stdin = if call.input.is_some() {
-            Stdio::piped()
-        } else {
-            Stdio::null()
-        };
         command
-            .stdin(stdin)
+            .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         // SAFETY: the closure runs in the forked child before exec and only calls setsid,
@@ -57,14 +52,10 @@ impl BoundedCommand {
                 _ => Ok(()),
             });
         }
-        let mut child = command.spawn().map_err(|error| CommandError::Spawn {
+        command.spawn().map_err(|error| CommandError::Spawn {
             subcommand: call.subcommand.clone(),
             detail: error.to_string(),
-        })?;
-        if let (Some(input), Some(mut stdin)) = (&call.input, child.stdin.take()) {
-            let _ = stdin.write_all(input);
-        }
-        Ok(child)
+        })
     }
 
     fn wait_until(child: &mut Child, deadline: Instant) -> Option<ExitStatus> {
@@ -158,7 +149,6 @@ impl Deadlines {
 pub struct Call {
     subcommand: String,
     kind: CallKind,
-    input: Option<Vec<u8>>,
 }
 
 impl Call {
@@ -166,14 +156,6 @@ impl Call {
         Self {
             subcommand: subcommand.to_string(),
             kind,
-            input: None,
-        }
-    }
-
-    pub fn with_input(self, input: &[u8]) -> Self {
-        Self {
-            input: Some(input.to_vec()),
-            ..self
         }
     }
 }
@@ -229,17 +211,6 @@ mod tests {
 
         let child_session = ChildFixture::session_field(&output.stdout_text());
         assert_ne!(child_session, ChildFixture::session_of_this_process());
-    }
-
-    #[test]
-    fn the_input_reaches_the_child_and_stdin_closes() {
-        let call = ChildFixture::call().with_input(b"bind-key -T root C-q\n");
-
-        let output = ChildFixture::bounded(Duration::from_secs(5))
-            .run(ChildFixture::shell("cat"), &call)
-            .unwrap();
-
-        assert_eq!(output.stdout_text(), "bind-key -T root C-q\n");
     }
 
     #[test]

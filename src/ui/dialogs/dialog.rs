@@ -53,12 +53,18 @@ impl Dialog {
     }
 
     fn help(service: &SessionService) -> Self {
-        let log_path = service.state_directory().join(AppLog::FILE_NAME);
-        let tmux_prefix = service.config().naming().tmux_prefix();
+        let paths = service.paths();
+        let config_path = service.config_path();
+        let log_path = paths.state_directory().join(AppLog::FILE_NAME);
+        let files = [
+            ("Config", config_path.as_path()),
+            ("Log", log_path.as_path()),
+            ("tmux socket", paths.tmux_socket()),
+            ("tmux config", paths.tmux_config()),
+        ];
         Self::Help(Box::new(HelpView::new(
-            &service.config_path(),
-            &log_path,
-            tmux_prefix,
+            service.config().return_key(),
+            &files,
         )))
     }
 

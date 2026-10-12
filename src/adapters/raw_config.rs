@@ -11,6 +11,7 @@ pub struct RawConfig {
     worktree_root: Option<PathBuf>,
     branch_prefix: Option<String>,
     tmux_prefix: Option<String>,
+    return_key: Option<String>,
     state_poll_ms: Option<u64>,
     preview_refresh_ms: Option<u64>,
     diff_refresh_ms: Option<u64>,
@@ -42,6 +43,9 @@ impl RawConfig {
         }
         if let Some(prefix) = &self.tmux_prefix {
             draft = draft.tmux_prefix(prefix);
+        }
+        if let Some(key) = &self.return_key {
+            draft = draft.return_key(key);
         }
         for repo in self.repos {
             draft = draft.repo(repo.into_draft(home));

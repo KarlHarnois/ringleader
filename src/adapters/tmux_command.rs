@@ -1,11 +1,13 @@
 use std::ffi::{OsStr, OsString};
-use std::fs;
-use std::os::unix::fs::MetadataExt;
+use std::fs::{self, DirBuilder};
+use std::io;
+use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use super::bounded_command::{BoundedCommand, Call, CallKind};
-use super::caller_process::CallerProcess;
+use super::bounded_command::{BoundedCommand, Call, CallKind, Deadlines};
+use super::durable_file::DurableFile;
+use super::host_path::HostPath;
 use super::process_environment::ProcessEnvironment;
 use super::tmux_error::TmuxError;
 use super::tmux_output::TmuxOutput;
@@ -14,20 +16,20 @@ use super::tmux_sequence::TmuxSequence;
 #[derive(Debug, Clone)]
 pub struct TmuxCommand {
     program: OsString,
-    socket: Option<PathBuf>,
-    config: Option<PathBuf>,
+    server: ServerFiles,
     environment: ProcessEnvironment,
+    caller: CallerIdentity,
     bounded: BoundedCommand,
 }
 
 impl TmuxCommand {
-    pub fn new(program: &OsStr, environment: &ProcessEnvironment, bounded: BoundedCommand) -> Self {
+    pub fn new(program: &OsStr, server: &ServerFiles, environment: &ProcessEnvironment) -> Self {
         Self {
             program: program.to_os_string(),
-            socket: None,
-            config: None,
-            environment: environment.clone(),
-            bounded,
+            server: server.clone(),
+            environment: environment.without(&CallerIdentity::variables()),
+            caller: CallerIdentity::of(environment),
+            bounded: BoundedCommand::new(Deadlines::standard()),
         }
     }
 
@@ -39,37 +41,33 @@ impl TmuxCommand {
     }
 
     #[cfg(test)]
-    pub fn on_test_server(self, socket: &Path) -> Self {
+    pub fn with_deadlines(self, deadlines: Deadlines) -> Self {
         Self {
-            socket: Some(socket.to_path_buf()),
-            config: Some(PathBuf::from("/dev/null")),
+            bounded: BoundedCommand::new(deadlines),
             ..self
         }
     }
 
-    #[cfg(test)]
-    pub fn with_config_file(self, config: &Path) -> Self {
-        Self {
-            config: Some(config.to_path_buf()),
-            ..self
-        }
+    pub fn server(&self) -> &ServerFiles {
+        &self.server
     }
 
     pub fn on_socket(&self, socket: &Path) -> Self {
         Self {
-            socket: Some(socket.to_path_buf()),
+            server: ServerFiles::new(socket, &self.server.config),
             ..self.clone()
         }
     }
 
     pub fn caller_pane(&self) -> Option<String> {
-        self.environment
-            .get("TMUX_PANE")
-            .map(|pane| pane.to_string_lossy().into_owned())
+        let socket = self.caller.socket()?;
+        self.caller
+            .pane()
+            .filter(|_| self.server.is_reached_through(&socket))
     }
 
-    pub fn runs_inside_tmux(&self) -> bool {
-        self.environment.contains("TMUX")
+    pub fn caller_terminal(&self) -> Option<&OsStr> {
+        self.environment.terminal()
     }
 
     pub fn query(&self, sequence: &TmuxSequence) -> Result<TmuxOutput, TmuxError> {
@@ -84,15 +82,6 @@ impl TmuxCommand {
             sequence,
             Call::new(&Self::label(sequence), CallKind::TmuxChange),
         )
-    }
-
-    pub fn change_with_input(
-        &self,
-        sequence: &TmuxSequence,
-        input: &[u8],
-    ) -> Result<TmuxOutput, TmuxError> {
-        let call = Call::new(&Self::label(sequence), CallKind::TmuxChange).with_input(input);
-        self.run(sequence, call)
     }
 
     pub fn create(
@@ -120,34 +109,6 @@ impl TmuxCommand {
         Ok(text.trim().trim_start_matches("tmux ").to_string())
     }
 
-    pub fn is_inside_client(&self, caller: &CallerProcess) -> bool {
-        if !self.runs_inside_tmux() {
-            return false;
-        }
-        let Some(pane) = self.caller_pane() else {
-            return true;
-        };
-        self.pane_shows_caller(&pane, caller).unwrap_or(false)
-    }
-
-    fn pane_shows_caller(&self, pane: &str, caller: &CallerProcess) -> Option<bool> {
-        let lookup = TmuxSequence::new().command([
-            "display-message",
-            "-p",
-            "-t",
-            pane,
-            "ringleader-pane #{pane_id} #{pane_pid} #{pane_tty}",
-        ]);
-        let output = self.query(&lookup).ok()?;
-        let mut values = output.first("ringleader-pane")?.splitn(3, ' ');
-        let (pane_id, pane_pid, pane_tty) = (values.next()?, values.next()?, values.next()?);
-        if pane_id != pane {
-            return Some(false);
-        }
-        let terminal = fs::metadata(pane_tty).ok()?.rdev();
-        Some(caller.descends_in_foreground(pane_pid.parse().ok()?, terminal))
-    }
-
     fn run(&self, sequence: &TmuxSequence, call: Call) -> Result<TmuxOutput, TmuxError> {
         let output = self
             .bounded
@@ -169,12 +130,8 @@ impl TmuxCommand {
         if !sequence.starts_server() {
             command.arg("-N");
         }
-        if let Some(socket) = &self.socket {
-            command.arg("-S").arg(socket);
-        }
-        if let Some(config) = &self.config {
-            command.arg("-f").arg(config);
-        }
+        command.arg("-S").arg(&self.server.socket);
+        command.arg("-f").arg(&self.server.config);
         command.args(sequence.argv());
         command
     }
@@ -184,180 +141,188 @@ impl TmuxCommand {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServerFiles {
+    socket: PathBuf,
+    config: PathBuf,
+}
+
+impl ServerFiles {
+    const DIRECTORY_MODE: u32 = 0o700;
+
+    pub fn new(socket: &Path, config: &Path) -> Self {
+        Self {
+            socket: socket.to_path_buf(),
+            config: config.to_path_buf(),
+        }
+    }
+
+    pub fn socket(&self) -> &Path {
+        &self.socket
+    }
+
+    pub fn config(&self) -> &Path {
+        &self.config
+    }
+
+    pub fn prepare(&self, config_text: &str) -> io::Result<()> {
+        let socket_directory = self.socket.parent().unwrap_or(Path::new("/"));
+        DirBuilder::new()
+            .recursive(true)
+            .mode(Self::DIRECTORY_MODE)
+            .create(socket_directory)?;
+        if let Some(config_directory) = self.config.parent() {
+            fs::create_dir_all(config_directory)?;
+        }
+        DurableFile::new(&self.config).write(config_text.as_bytes())
+    }
+
+    fn is_reached_through(&self, socket: &Path) -> bool {
+        HostPath::new(socket).canonical_lenient() == HostPath::new(&self.socket).canonical_lenient()
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct CallerIdentity {
+    tmux: Option<OsString>,
+    pane: Option<String>,
+}
+
+impl CallerIdentity {
+    const TMUX: &'static str = "TMUX";
+    const TMUX_PANE: &'static str = "TMUX_PANE";
+    const FIELD_SEPARATOR: char = ',';
+
+    fn variables() -> Vec<String> {
+        vec![Self::TMUX.to_string(), Self::TMUX_PANE.to_string()]
+    }
+
+    fn of(environment: &ProcessEnvironment) -> Self {
+        Self {
+            tmux: environment.get(Self::TMUX).map(OsStr::to_os_string),
+            pane: environment
+                .get(Self::TMUX_PANE)
+                .map(|pane| pane.to_string_lossy().into_owned()),
+        }
+    }
+
+    fn socket(&self) -> Option<PathBuf> {
+        let value = self.tmux.as_ref()?.to_string_lossy().into_owned();
+        let socket = value.split(Self::FIELD_SEPARATOR).next()?;
+        (!socket.is_empty()).then(|| PathBuf::from(socket))
+    }
+
+    fn pane(&self) -> Option<String> {
+        self.pane.clone()
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::os::unix::fs::PermissionsExt;
+
     use super::*;
-    use crate::adapters::caller_process::ProcessStat;
     use crate::test_support::TmuxTestServer;
 
-    struct PaneFixture {
-        server: TmuxTestServer,
-        pane: String,
-        pane_pid: u32,
-        terminal: u64,
-    }
+    struct CallerFixture;
 
-    impl PaneFixture {
-        const SELF_PID: u32 = 4_000_001;
-        const UNUSED_TERMINAL_MAJOR: u64 = 250 << 8;
-        const NESTED_TERMINAL: u64 = Self::UNUSED_TERMINAL_MAJOR | 1;
-        const OTHER_TERMINAL: u64 = Self::UNUSED_TERMINAL_MAJOR | 2;
-
-        fn live() -> Self {
-            let server = TmuxTestServer::with_session("holder");
-            let values = server.text(&[
-                "display-message",
-                "-p",
-                "-t",
-                "=holder:",
-                "#{pane_id} #{pane_pid} #{pane_tty}",
-            ]);
-            let mut parts = values.split(' ');
-            let pane = parts.next().unwrap().to_string();
-            let pane_pid = parts.next().unwrap().parse().unwrap();
-            let terminal = fs::metadata(parts.next().unwrap()).unwrap().rdev();
-            Self {
-                server,
-                pane,
-                pane_pid,
-                terminal,
-            }
+    impl CallerFixture {
+        fn tmux_value(socket: &Path) -> String {
+            format!("{},4000001,0", socket.display())
         }
 
-        fn command(&self, pane: Option<&str>) -> TmuxCommand {
-            let tmux_value = format!(
-                "{},{},0",
-                self.server.socket().display(),
-                self.server.server_pid()
-            );
-            let mut extra = vec![("TMUX", tmux_value.as_str())];
-            if let Some(pane) = pane {
-                extra.push(("TMUX_PANE", pane));
-            }
-            self.server
-                .command_with(&self.server.environment_with(&extra))
+        fn command(server: &TmuxTestServer, socket: &Path) -> TmuxCommand {
+            let tmux_value = Self::tmux_value(socket);
+            let environment =
+                server.environment_with(&[("TMUX", &tmux_value), ("TMUX_PANE", "%0")]);
+            server.command_with(&environment)
         }
 
-        fn inside(&self, chain: Vec<ProcessStat>) -> bool {
-            self.command(Some(&self.pane))
-                .is_inside_client(&CallerProcess::from_chain(chain))
-        }
-
-        fn pane_process(&self, foreground: bool) -> ProcessStat {
-            let group = i64::from(self.pane_pid);
-            let foreground_group = if foreground { group } else { group + 1 };
-            ProcessStat::new(self.pane_pid, group, self.terminal, foreground_group)
-        }
-
-        fn process(pid: u32, terminal: u64, foreground: bool) -> ProcessStat {
-            let group = i64::from(pid);
-            let foreground_group = if foreground { group } else { group + 1 };
-            ProcessStat::new(pid, group, terminal, foreground_group)
+        fn arguments(command: &Command) -> Vec<String> {
+            command
+                .get_args()
+                .map(|argument| argument.to_string_lossy().into_owned())
+                .collect()
         }
     }
 
     #[test]
-    fn this_process_in_the_foreground_of_the_pane_is_inside() {
-        let fixture = PaneFixture::live();
-        let chain = vec![
-            PaneFixture::process(PaneFixture::SELF_PID, fixture.terminal, true),
-            fixture.pane_process(false),
-        ];
-
-        assert!(fixture.inside(chain));
-    }
-
-    #[test]
-    fn a_foreground_ancestor_whose_child_is_on_a_nested_terminal_is_inside() {
-        let fixture = PaneFixture::live();
-        let chain = vec![
-            PaneFixture::process(PaneFixture::SELF_PID, PaneFixture::NESTED_TERMINAL, true),
-            PaneFixture::process(PaneFixture::SELF_PID + 1, 0, false),
-            PaneFixture::process(PaneFixture::SELF_PID + 2, fixture.terminal, true),
-            fixture.pane_process(false),
-        ];
-
-        assert!(fixture.inside(chain));
-    }
-
-    #[test]
-    fn a_foreground_pane_process_whose_child_has_a_nested_terminal_is_inside() {
-        let fixture = PaneFixture::live();
-        let chain = vec![
-            PaneFixture::process(PaneFixture::SELF_PID, PaneFixture::NESTED_TERMINAL, true),
-            fixture.pane_process(true),
-        ];
-
-        assert!(fixture.inside(chain));
-    }
-
-    #[test]
-    fn tmux_without_a_pane_variable_is_inside() {
-        let fixture = PaneFixture::live();
-
-        let inside = fixture
-            .command(None)
-            .is_inside_client(&CallerProcess::from_chain(Vec::new()));
-
-        assert!(inside);
-    }
-
-    #[test]
-    fn a_background_ancestor_below_the_pane_is_outside() {
-        let fixture = PaneFixture::live();
-        let chain = vec![
-            PaneFixture::process(PaneFixture::SELF_PID, PaneFixture::OTHER_TERMINAL, true),
-            PaneFixture::process(PaneFixture::SELF_PID + 1, fixture.terminal, false),
-            fixture.pane_process(true),
-        ];
-
-        assert!(!fixture.inside(chain));
-    }
-
-    #[test]
-    fn a_background_ancestor_below_a_foreground_subshell_is_outside() {
-        let fixture = PaneFixture::live();
-        let chain = vec![
-            PaneFixture::process(PaneFixture::SELF_PID, PaneFixture::OTHER_TERMINAL, true),
-            PaneFixture::process(PaneFixture::SELF_PID + 1, fixture.terminal, false),
-            PaneFixture::process(PaneFixture::SELF_PID + 2, fixture.terminal, true),
-            fixture.pane_process(false),
-        ];
-
-        assert!(!fixture.inside(chain));
-    }
-
-    #[test]
-    fn an_unrelated_terminal_is_outside() {
-        let fixture = PaneFixture::live();
-        let chain = vec![
-            PaneFixture::process(PaneFixture::SELF_PID, PaneFixture::OTHER_TERMINAL, true),
-            PaneFixture::process(PaneFixture::SELF_PID + 1, PaneFixture::OTHER_TERMINAL, true),
-        ];
-
-        assert!(!fixture.inside(chain));
-    }
-
-    #[test]
-    fn a_stale_pane_variable_is_outside() {
-        let fixture = PaneFixture::live();
-        let chain = vec![
-            PaneFixture::process(PaneFixture::SELF_PID, fixture.terminal, true),
-            fixture.pane_process(false),
-        ];
-
-        let inside = fixture
-            .command(Some("%999"))
-            .is_inside_client(&CallerProcess::from_chain(chain));
-
-        assert!(!inside);
-    }
-
-    #[test]
-    fn no_tmux_variable_is_outside() {
+    fn every_call_names_the_private_socket_and_config() {
         let server = TmuxTestServer::new();
 
-        assert!(!server.command().is_inside_client(&CallerProcess::read()));
+        let attach = server.command().foreground(&TmuxSequence::new().command([
+            "attach-session",
+            "-t",
+            "%3",
+        ]));
+
+        let arguments = CallerFixture::arguments(&attach);
+        let socket = server.socket().display().to_string();
+        let config = server.config().display().to_string();
+        assert_eq!(
+            arguments,
+            [
+                "-u",
+                "-N",
+                "-S",
+                &socket,
+                "-f",
+                &config,
+                "attach-session",
+                "-t",
+                "%3"
+            ]
+        );
+    }
+
+    #[test]
+    fn the_attach_child_never_inherits_the_callers_tmux_variables() {
+        let server = TmuxTestServer::new();
+        let command = CallerFixture::command(&server, server.socket());
+
+        let attach = command.foreground(&TmuxSequence::new().command(["attach-session"]));
+
+        let names: Vec<&OsStr> = attach.get_envs().map(|(name, _)| name).collect();
+        assert!(!names.contains(&OsStr::new("TMUX")));
+        assert!(!names.contains(&OsStr::new("TMUX_PANE")));
+        assert!(names.contains(&OsStr::new("PATH")));
+    }
+
+    #[test]
+    fn the_caller_pane_comes_from_a_tmux_variable_naming_the_private_socket() {
+        let server = TmuxTestServer::new();
+
+        let pane = CallerFixture::command(&server, server.socket()).caller_pane();
+
+        assert_eq!(pane.as_deref(), Some("%0"));
+    }
+
+    #[test]
+    fn a_pane_of_another_tmux_server_is_never_the_caller_pane() {
+        let server = TmuxTestServer::new();
+        let users_socket = server.directory().join("users-tmux.sock");
+
+        let pane = CallerFixture::command(&server, &users_socket).caller_pane();
+
+        assert_eq!(pane, None);
+    }
+
+    #[test]
+    fn preparing_the_server_files_makes_a_private_socket_directory_and_the_config() {
+        let directory = tempfile::tempdir().unwrap();
+        let socket = directory.path().join("run/ringleader/tmux/tmux.sock");
+        let config = directory.path().join("state/ringleader/tmux.conf");
+
+        ServerFiles::new(&socket, &config)
+            .prepare("example\n")
+            .unwrap();
+
+        let mode = fs::metadata(socket.parent().unwrap())
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o700);
+        assert_eq!(fs::read_to_string(&config).unwrap(), "example\n");
     }
 
     #[test]

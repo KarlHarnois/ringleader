@@ -48,9 +48,9 @@ impl HomeState {
         PreviewPanel::new(self.sessions.selected(), self.preview.capture(), theme)
     }
 
-    pub fn note(&self, tmux_prefix: &str) -> Option<String> {
+    pub fn note(&self) -> Option<String> {
         let row = self.sessions.selected()?;
-        StatusNote::new(row, tmux_prefix).text()
+        StatusNote::new(row).text()
     }
 
     pub fn resize(&mut self, width: u16, height: u16, service: &SessionService) {

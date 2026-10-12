@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use super::host_path::HostPath;
 use super::process_environment::ProcessEnvironment;
 
 pub struct XdgPaths {
@@ -54,7 +55,95 @@ impl XdgPaths {
     }
 
     pub fn handoff_directory(&self) -> PathBuf {
+        self.runtime_application_directory().join("handoff")
+    }
+
+    pub fn tmux_socket(&self) -> PathBuf {
+        let directory = self.runtime_application_directory().join("tmux");
+        HostPath::new(&directory)
+            .canonical_lenient()
+            .join("tmux.sock")
+    }
+
+    pub fn tmux_config(&self) -> PathBuf {
+        self.state_directory().join("tmux.conf")
+    }
+
+    fn runtime_application_directory(&self) -> PathBuf {
         let base = self.runtime_directory.as_ref().unwrap_or(&self.state_home);
-        base.join(Self::APPLICATION).join("handoff")
+        base.join(Self::APPLICATION)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::OsString;
+
+    use super::*;
+
+    struct PathsFixture;
+
+    impl PathsFixture {
+        fn with(pairs: &[(&str, &str)]) -> XdgPaths {
+            let variables = pairs
+                .iter()
+                .map(|(name, value)| (OsString::from(name), OsString::from(value)))
+                .collect();
+            XdgPaths::from_environment(&ProcessEnvironment::new(variables, None))
+        }
+    }
+
+    #[test]
+    fn the_tmux_socket_lives_in_the_runtime_directory() {
+        let paths = PathsFixture::with(&[
+            ("XDG_RUNTIME_DIR", "/example-runtime"),
+            ("XDG_STATE_HOME", "/example-state"),
+        ]);
+
+        assert_eq!(
+            paths.tmux_socket(),
+            Path::new("/example-runtime/ringleader/tmux/tmux.sock")
+        );
+    }
+
+    #[test]
+    fn an_unset_or_relative_runtime_directory_falls_back_to_the_state_directory() {
+        for runtime in [None, Some("relative-runtime")] {
+            let mut pairs = vec![("XDG_STATE_HOME", "/example-state")];
+            pairs.extend(runtime.map(|value| ("XDG_RUNTIME_DIR", value)));
+
+            let socket = PathsFixture::with(&pairs).tmux_socket();
+
+            assert_eq!(
+                socket,
+                Path::new("/example-state/ringleader/tmux/tmux.sock")
+            );
+        }
+    }
+
+    #[test]
+    fn the_tmux_config_sits_beside_the_other_state_files() {
+        let paths = PathsFixture::with(&[("XDG_STATE_HOME", "/example-state")]);
+
+        assert_eq!(
+            paths.tmux_config(),
+            Path::new("/example-state/ringleader/tmux.conf")
+        );
+    }
+
+    #[test]
+    fn a_symlinked_runtime_directory_is_resolved() {
+        let directory = tempfile::tempdir().unwrap();
+        let real = std::fs::canonicalize(directory.path())
+            .unwrap()
+            .join("real");
+        std::fs::create_dir(&real).unwrap();
+        let link = directory.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        let socket =
+            PathsFixture::with(&[("XDG_RUNTIME_DIR", &link.to_string_lossy())]).tmux_socket();
+
+        assert_eq!(socket, real.join("ringleader/tmux/tmux.sock"));
     }
 }

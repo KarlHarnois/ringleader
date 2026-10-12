@@ -5,10 +5,12 @@ use super::agent::Agent;
 use super::config_draft::ConfigDraft;
 use super::naming_scheme::NamingScheme;
 use super::repo::Repo;
+use super::return_key::ReturnKey;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
     naming: NamingScheme,
+    return_key: ReturnKey,
     intervals: RefreshIntervals,
     activity_idle_seconds: u64,
     session_size: SessionSize,
@@ -26,6 +28,7 @@ impl Config {
         }
         Ok(Self {
             naming: draft.naming(),
+            return_key: draft.return_key_value(),
             intervals: draft.intervals(),
             activity_idle_seconds: draft.activity_idle_seconds_value(),
             session_size: draft.session_size_value(),
@@ -39,6 +42,7 @@ impl Config {
     pub fn defaults(worktree_root: &Path) -> Self {
         Self {
             naming: NamingScheme::new(worktree_root, "ringleader/", "ringleader-"),
+            return_key: ReturnKey::default(),
             intervals: RefreshIntervals::default(),
             activity_idle_seconds: 3,
             session_size: SessionSize::default(),
@@ -66,6 +70,10 @@ impl Config {
 
     pub fn naming(&self) -> &NamingScheme {
         &self.naming
+    }
+
+    pub fn return_key(&self) -> &ReturnKey {
+        &self.return_key
     }
 
     pub fn intervals(&self) -> RefreshIntervals {
