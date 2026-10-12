@@ -409,6 +409,22 @@ mod tests {
     }
 
     #[test]
+    fn the_ladder_prefers_the_origin_default_branch_over_a_stale_local_master() {
+        let origin = GitTestRepo::new();
+        let clone = WorktreeFixture::clone_of(&origin, "clone");
+        origin.git(&clone, &["branch", "-m", GitTestRepo::BRANCH, "master"]);
+        let origin_main = origin.commit(origin.path(), "merged.md");
+        origin.git(&clone, &["fetch", "-q", "origin"]);
+
+        let start = origin
+            .workspace()
+            .resolve_start_point(&clone, None)
+            .unwrap();
+
+        assert_eq!(start, StartPoint::Commit(origin_main));
+    }
+
+    #[test]
     fn an_unborn_head_resolves_to_an_orphan_worktree() {
         let fixture = GitTestRepo::unborn();
         let workspace = fixture.workspace();
