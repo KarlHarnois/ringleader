@@ -82,8 +82,10 @@ impl CreationPlan {
         agent: &Agent,
         config: &Config,
     ) -> Result<Self, InvalidName> {
+        let name = SessionName::new(&request.name)?;
         Ok(Self {
-            name: SessionName::new(&request.name)?,
+            argv: agent.launch_argv(&name, &request.prompt),
+            name,
             repo: request.repo.clone(),
             base_branch: request
                 .base_branch
@@ -91,7 +93,6 @@ impl CreationPlan {
                 .or_else(|| request.repo.base_branch().cloned()),
             naming: config.naming().clone(),
             agent: agent.clone(),
-            argv: agent.launch_argv(&request.prompt),
             removed_env_names: config.agent_env_union(),
             size: config.session_size(),
         })
@@ -104,6 +105,10 @@ impl CreationPlan {
 
     pub fn name(&self) -> &SessionName {
         &self.name
+    }
+
+    pub fn agent(&self) -> &Agent {
+        &self.agent
     }
 
     pub fn repo_path(&self) -> &Path {

@@ -24,6 +24,7 @@ signal-hook = "0.4.4"
 thiserror = "2.0.21"
 toml = "1.1.6"
 toml_edit = "0.25.15"
+unicode-width = "0.2.2"
 
 [dev-dependencies]
 tempfile = "3.27.0"

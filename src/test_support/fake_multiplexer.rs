@@ -14,11 +14,18 @@ pub struct FakeMultiplexer {
 
 type CallHook = Arc<dyn Fn() + Send + Sync>;
 
+struct TypedLine {
+    method: &'static str,
+    tmux_name: String,
+    line: String,
+}
+
 struct MultiplexerState {
     socket: PathBuf,
     live: Vec<SessionObservation>,
     specs: Vec<SessionSpec>,
     launches: Vec<AgentLaunch>,
+    typed: Vec<TypedLine>,
     pane_pids: HashMap<String, Vec<u32>>,
     sessions_on_other_sockets: Vec<(PathBuf, String, PathBuf)>,
     caller: Option<String>,
@@ -35,11 +42,13 @@ struct MultiplexerState {
 
 impl FakeMultiplexer {
     pub const SOCKET: &'static str = "/tmp/tmux-1000/default";
-    pub const STATE_CHANGING: [&'static str; 5] = [
+    pub const STATE_CHANGING: [&'static str; 7] = [
         "create_session",
         "kill_session",
         "rename_session",
         "respawn_agent",
+        "type_when_ready",
+        "type_if_ready",
         "ensure_shell_window",
     ];
 
@@ -51,6 +60,7 @@ impl FakeMultiplexer {
                 live: Vec::new(),
                 specs: Vec::new(),
                 launches: Vec::new(),
+                typed: Vec::new(),
                 pane_pids: HashMap::new(),
                 sessions_on_other_sockets: Vec::new(),
                 caller: None,
@@ -160,6 +170,25 @@ impl FakeMultiplexer {
         self.edit(|state| state.launches.clone())
     }
 
+    pub fn typed_when_ready(&self, tmux_name: &str) -> Vec<String> {
+        self.typed_by("type_when_ready", tmux_name)
+    }
+
+    pub fn typed_if_ready(&self, tmux_name: &str) -> Vec<String> {
+        self.typed_by("type_if_ready", tmux_name)
+    }
+
+    fn typed_by(&self, method: &str, tmux_name: &str) -> Vec<String> {
+        self.edit(|state| {
+            state
+                .typed
+                .iter()
+                .filter(|typed| typed.method == method && typed.tmux_name == tmux_name)
+                .map(|typed| typed.line.clone())
+                .collect()
+        })
+    }
+
     pub fn live_names(&self) -> Vec<String> {
         self.edit(|state| {
             state
@@ -204,6 +233,14 @@ impl MultiplexerState {
             .with_agent_pane(AgentPane::live(0))
             .with_metadata(metadata.clone());
         self.live.push(observation);
+    }
+
+    fn type_lines(&mut self, method: &'static str, tmux_name: &str, lines: &[String]) {
+        self.typed.extend(lines.iter().map(|line| TypedLine {
+            method,
+            tmux_name: tmux_name.to_string(),
+            line: line.clone(),
+        }));
     }
 
     fn find_live(&self, tmux_name: &str) -> Option<&SessionObservation> {
@@ -294,6 +331,18 @@ impl Multiplexer for FakeMultiplexer {
                 state.live.push(live.with_agent_pane(AgentPane::live(0)));
             }
         });
+        Ok(())
+    }
+
+    fn type_when_ready(&self, tmux_name: &str, lines: &[String]) -> Result<(), MultiplexerError> {
+        self.call("type_when_ready", tmux_name)?;
+        self.edit(|state| state.type_lines("type_when_ready", tmux_name, lines));
+        Ok(())
+    }
+
+    fn type_if_ready(&self, tmux_name: &str, lines: &[String]) -> Result<(), MultiplexerError> {
+        self.call("type_if_ready", tmux_name)?;
+        self.edit(|state| state.type_lines("type_if_ready", tmux_name, lines));
         Ok(())
     }
 

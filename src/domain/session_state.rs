@@ -12,6 +12,10 @@ impl SessionState {
         previous == SessionState::Working && current == SessionState::Waiting
     }
 
+    pub fn runs_agent(self) -> bool {
+        matches!(self, SessionState::Working | SessionState::Waiting)
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             SessionState::Working => "working",
@@ -29,6 +33,16 @@ mod tests {
     use super::*;
 
     const ALL_STATES: [SessionState; 5] = [Working, Waiting, Exited, Stopped, Unmanaged];
+
+    #[test]
+    fn only_working_and_waiting_run_the_agent() {
+        let running: Vec<SessionState> = ALL_STATES
+            .into_iter()
+            .filter(|state| state.runs_agent())
+            .collect();
+
+        assert_eq!(running, [Working, Waiting]);
+    }
 
     #[test]
     fn working_followed_by_waiting_is_the_bell_edge() {

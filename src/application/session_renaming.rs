@@ -1,13 +1,15 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use super::agent_hooks::AgentHooks;
 use super::branch_availability::BranchAvailability;
 use super::branch_ownership::{BranchMutation, BranchOwnership};
 use super::ports::{HostProbe, Multiplexer, SessionRegistry, Workspace};
 use super::reconciliation::{ManagedRow, Reconciliation};
+use super::rename_request::RenameRequest;
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
-use crate::domain::{Session, SessionName};
+use crate::domain::{Config, Session, SessionName};
 
 pub struct SessionRenaming {
     ownership: BranchOwnership,
@@ -16,6 +18,7 @@ pub struct SessionRenaming {
     multiplexer: Arc<dyn Multiplexer>,
     host: Arc<dyn HostProbe>,
     registry: Arc<dyn SessionRegistry>,
+    hooks: AgentHooks,
 }
 
 impl SessionRenaming {
@@ -27,19 +30,20 @@ impl SessionRenaming {
             multiplexer: ports.tmux().multiplexer(),
             host: ports.repos().host(),
             registry: ports.state().registry(),
+            hooks: AgentHooks::new(ports),
         }
     }
 
     pub fn rename(
         &self,
         row: &ManagedRow,
-        new: &str,
-        keep_branch: bool,
+        request: &RenameRequest,
         reconciliation: &Reconciliation,
+        config: &Config,
     ) -> Result<Session, ServiceError> {
-        let renamed = self.renamed_session(row.session(), new, keep_branch)?;
-        self.check_rename_availability(row, &renamed, reconciliation, keep_branch)?;
-        if !keep_branch {
+        let renamed = self.renamed_session(row.session(), request)?;
+        self.check_rename_availability(row, &renamed, reconciliation, request.keeps_branch())?;
+        if !request.keeps_branch() {
             self.ownership
                 .refuse_unmarked(row.session(), BranchMutation::Rename)?;
         }
@@ -50,17 +54,17 @@ impl SessionRenaming {
         }
         let entries = reconciliation.entries_with(row.session().name().as_str(), renamed.clone());
         self.persist_rename(row, &entries, &renaming)?;
+        self.tell_agent_its_name(row, &renamed, config);
         Ok(renamed)
     }
 
     fn renamed_session(
         &self,
         session: &Session,
-        new: &str,
-        keep_branch: bool,
+        request: &RenameRequest,
     ) -> Result<Session, ServiceError> {
-        let name = SessionName::new(new)?;
-        let branch = if keep_branch {
+        let name = SessionName::new(request.new_name())?;
+        let branch = if request.keeps_branch() {
             session.branch().to_string()
         } else {
             session.naming().branch_name(&name)
@@ -111,6 +115,14 @@ impl SessionRenaming {
                 )))
             }
             Err(error) => Err(renaming.roll_back(error.into())),
+        }
+    }
+
+    fn tell_agent_its_name(&self, row: &ManagedRow, renamed: &Session, config: &Config) {
+        if row.state().runs_agent()
+            && let Some(agent) = config.agent(renamed.agent())
+        {
+            self.hooks.after_rename(renamed, agent);
         }
     }
 
@@ -187,6 +199,7 @@ mod tests {
 
     use super::*;
     use crate::application::ports::{BranchMarker, MultiplexerError};
+    use crate::domain::Agent;
     use crate::test_support::{FakeMultiplexer, FakeSessionRegistry, ServiceFixture};
 
     struct RenameFixture;
@@ -243,6 +256,82 @@ mod tests {
                 .has_branch(Path::new(ServiceFixture::REPO), "fix-login")
         );
         assert_eq!(fixture.multiplexer().live_names(), ["ringleader-fix-login"]);
+        assert_eq!(fixture.registry().sessions(), vec![renamed]);
+    }
+
+    #[test]
+    fn a_running_agent_is_told_its_new_name() {
+        let fixture =
+            RenameFixture::live(&["fix-auth"]).with_config(ServiceFixture::config_with_input());
+
+        fixture
+            .service()
+            .rename_session("fix-auth", "fix-login", false)
+            .unwrap();
+
+        assert_eq!(
+            fixture.multiplexer().typed_if_ready("ringleader-fix-login"),
+            ["/rename fix-login"]
+        );
+    }
+
+    #[test]
+    fn an_exited_agent_is_not_told_its_new_name() {
+        let session = ServiceFixture::session("fix-auth");
+        let fixture = RenameFixture::stopped("fix-auth")
+            .with_config(ServiceFixture::config_with_input())
+            .with_multiplexer(FakeMultiplexer::new().with_live(ServiceFixture::exited(&session)));
+
+        fixture
+            .service()
+            .rename_session("fix-auth", "fix-login", false)
+            .unwrap();
+
+        assert!(
+            fixture
+                .multiplexer()
+                .typed_if_ready("ringleader-fix-login")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn an_agent_no_longer_configured_is_not_told_its_new_name() {
+        let another_agent =
+            Agent::new("opencode", "opencode").with_rename_input(&["/rename {name}".to_string()]);
+        let fixture = RenameFixture::live(&["fix-auth"])
+            .with_config(ServiceFixture::config().with_agents(vec![another_agent]));
+
+        fixture
+            .service()
+            .rename_session("fix-auth", "fix-login", false)
+            .unwrap();
+
+        assert!(
+            fixture
+                .multiplexer()
+                .calls()
+                .iter()
+                .all(|call| !call.starts_with("type_if_ready"))
+        );
+    }
+
+    #[test]
+    fn an_agent_away_from_its_prompt_keeps_the_rename() {
+        let fixture =
+            RenameFixture::live(&["fix-auth"]).with_config(ServiceFixture::config_with_input());
+        fixture.multiplexer().fail(
+            "type_if_ready",
+            MultiplexerError::AgentNotReady {
+                tmux_name: "ringleader-fix-login".to_string(),
+            },
+        );
+
+        let renamed = fixture
+            .service()
+            .rename_session("fix-auth", "fix-login", false)
+            .unwrap();
+
         assert_eq!(fixture.registry().sessions(), vec![renamed]);
     }
 

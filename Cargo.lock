@@ -1422,6 +1422,7 @@ dependencies = [
  "thiserror 2.0.21",
  "toml",
  "toml_edit",
+ "unicode-width",
 ]
 
 [[package]]

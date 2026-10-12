@@ -1,3 +1,4 @@
+pub mod agent_hooks;
 pub mod branch_availability;
 pub mod branch_ownership;
 pub mod creation_plan;
@@ -14,6 +15,7 @@ pub mod pending;
 pub mod ports;
 pub mod reconciliation;
 pub mod registry_audit;
+pub mod rename_request;
 pub mod repo_catalog;
 pub mod repo_merge;
 pub mod repo_overrides;

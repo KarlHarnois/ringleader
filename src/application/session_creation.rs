@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use super::agent_hooks::AgentHooks;
 use super::branch_availability::BranchAvailability;
 use super::creation_plan::{CreateRequest, CreationPlan};
 use super::ports::{Clock, HostProbe, Multiplexer, SessionRegistry, StartPoint, Workspace};
@@ -18,6 +19,7 @@ pub struct SessionCreation {
     host: Arc<dyn HostProbe>,
     registry: Arc<dyn SessionRegistry>,
     clock: Arc<dyn Clock>,
+    hooks: AgentHooks,
 }
 
 impl SessionCreation {
@@ -29,6 +31,7 @@ impl SessionCreation {
             host: ports.repos().host(),
             registry: ports.state().registry(),
             clock: ports.state().clock(),
+            hooks: AgentHooks::new(ports),
         }
     }
 
@@ -55,6 +58,7 @@ impl SessionCreation {
             ServiceError::from(error)
                 .adding_context("the session runs, and the next observe adopts it from tmux")
         })?;
+        self.hooks.after_start(&session, plan.agent());
         Ok(session)
     }
 
@@ -318,6 +322,61 @@ mod tests {
 
         let launch = fixture.multiplexer().launches().pop().unwrap();
         assert_eq!(launch.argv(), ["claude", "fix the tests; then stop"]);
+    }
+
+    #[test]
+    fn create_passes_the_session_name_to_the_agent() {
+        let fixture = ServiceFixture::new().with_config(ServiceFixture::config_with_input());
+
+        CreateFixture::create(&fixture, CreateFixture::request("Fix Auth")).unwrap();
+
+        let launch = fixture.multiplexer().launches().pop().unwrap();
+        assert_eq!(launch.argv(), ["claude", "--name", "fix-auth"]);
+    }
+
+    #[test]
+    fn create_types_the_startup_input_into_the_new_session() {
+        let fixture = ServiceFixture::new().with_config(ServiceFixture::config_with_input());
+
+        CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap();
+
+        assert_eq!(
+            fixture
+                .multiplexer()
+                .typed_when_ready("ringleader-fix-auth"),
+            ["/color"]
+        );
+    }
+
+    #[test]
+    fn create_types_nothing_for_an_agent_without_startup_input() {
+        let fixture = ServiceFixture::new();
+
+        CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap();
+
+        assert!(
+            fixture
+                .multiplexer()
+                .calls()
+                .iter()
+                .all(|call| !call.starts_with("type_when_ready"))
+        );
+    }
+
+    #[test]
+    fn an_agent_that_never_reaches_its_prompt_still_gets_its_session_recorded() {
+        let fixture = ServiceFixture::new()
+            .with_config(ServiceFixture::config_with_input())
+            .with_multiplexer(FakeMultiplexer::new().failing(
+                "type_when_ready",
+                MultiplexerError::AgentNotReady {
+                    tmux_name: "ringleader-fix-auth".to_string(),
+                },
+            ));
+
+        let session = CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap();
+
+        assert_eq!(fixture.registry().sessions(), vec![session]);
     }
 
     #[test]
