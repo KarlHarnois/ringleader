@@ -33,6 +33,10 @@ impl NamingScheme {
         &self.tmux_prefix
     }
 
+    pub fn shares_layout_with(&self, other: &NamingScheme) -> bool {
+        self.worktree_root == other.worktree_root && self.branch_prefix == other.branch_prefix
+    }
+
     pub fn tmux_session_name(&self, name: &SessionName) -> String {
         format!("{}{}", self.tmux_prefix, name)
     }

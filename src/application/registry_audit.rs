@@ -147,11 +147,17 @@ impl RegistryAudit {
         }
         let recorded = session.naming();
         let current = config.naming();
-        if recorded != current {
+        if !recorded.shares_layout_with(current) {
             report.warning(format!(
-                "session {name} was created under worktree_root {}, branch_prefix {}, and tmux_prefix {}, which differ from the config",
+                "session {name} was created under worktree_root {} and branch_prefix {}, which differ from the config",
                 recorded.worktree_root().display(),
-                recorded.branch_prefix(),
+                recorded.branch_prefix()
+            ));
+        }
+        if recorded.tmux_prefix() != current.tmux_prefix() {
+            report.info(format!(
+                "session {name} keeps its tmux name {} from the earlier prefix {}",
+                session.tmux_name(),
                 recorded.tmux_prefix()
             ));
         }
