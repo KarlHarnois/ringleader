@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::{
-    FakeClock, FakeConfigSource, FakeHostProbe, FakeLeftoverBindings, FakeMultiplexer,
-    FakeRepoScanner, FakeSessionRegistry, FakeWorkspace,
+    FakeClock, FakeConfigSource, FakeHostProbe, FakeMultiplexer, FakeRepoScanner,
+    FakeSessionRegistry, FakeWorkspace,
 };
 use crate::application::ports::{ConfigError, WorktreeEntry};
 use crate::application::{
@@ -19,7 +19,6 @@ pub struct ServiceFixture {
     registry: Arc<FakeSessionRegistry>,
     workspace: Arc<FakeWorkspace>,
     multiplexer: Arc<FakeMultiplexer>,
-    leftover_bindings: Arc<FakeLeftoverBindings>,
     config_source: Arc<FakeConfigSource>,
     scanner: Arc<FakeRepoScanner>,
     host: Arc<FakeHostProbe>,
@@ -50,7 +49,6 @@ impl ServiceFixture {
             registry: Arc::new(FakeSessionRegistry::empty()),
             workspace: Arc::new(FakeWorkspace::default()),
             multiplexer: Arc::new(FakeMultiplexer::new()),
-            leftover_bindings: Arc::new(FakeLeftoverBindings::default()),
             config_source: Arc::new(FakeConfigSource::with_config(Self::config())),
             scanner: Arc::new(FakeRepoScanner::finding(vec![Self::repo()])),
             host: Arc::new(Self::host_for(&[])),
@@ -84,13 +82,6 @@ impl ServiceFixture {
     pub fn with_multiplexer(self, multiplexer: FakeMultiplexer) -> Self {
         Self {
             multiplexer: Arc::new(multiplexer),
-            ..self
-        }
-    }
-
-    pub fn with_leftover_bindings(self, leftover_bindings: FakeLeftoverBindings) -> Self {
-        Self {
-            leftover_bindings: Arc::new(leftover_bindings),
             ..self
         }
     }
@@ -315,7 +306,7 @@ impl ServiceFixture {
                 self.scanner.clone(),
                 self.host.clone(),
             ),
-            TmuxPorts::new(self.multiplexer.clone(), self.leftover_bindings.clone()),
+            TmuxPorts::new(self.multiplexer.clone()),
         )
     }
 

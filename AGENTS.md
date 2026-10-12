@@ -134,7 +134,6 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │       ├── unmerged_commits.rs   # UnmergedCommits, commits on no other ref with the tip and HEAD
     │       ├── multiplexer.rs        # Multiplexer trait
     │       ├── agent_launch.rs       # AgentLaunch, the argv, environment, and worktree an agent starts with
-    │       ├── leftover_bindings.rs  # LeftoverBindings trait, the bindings.json an earlier Ringleader left
     │       ├── config_source.rs      # ConfigSource trait
     │       ├── repo_scanner.rs       # RepoScanner trait
     │       ├── host_probe.rs         # HostProbe trait
@@ -180,8 +179,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── tmux_listing.rs       # TmuxListing, parses list-panes, list-windows, list-keys, and server rows
     │   ├── tmux_multiplexer.rs   # TmuxMultiplexer
     │   ├── private_server.rs     # PrivateServer, the private server's config files, return binding check, state, and config reapply
-    │   ├── tmux_server_config.rs # TmuxServerConfig, the generated config of the private tmux server, its hash, and the script that reapplies it
-    │   └── leftover_bindings_file.rs # LeftoverBindingsFile, reads the bindings.json an earlier Ringleader left
+    │   └── tmux_server_config.rs # TmuxServerConfig, the generated config of the private tmux server, its hash, and the script that reapplies it
     ├── ui/
     │   ├── mod.rs
     │   ├── app.rs                  # App
@@ -232,7 +230,6 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
         ├── fake_session_registry.rs # FakeSessionRegistry
         ├── fake_workspace.rs        # FakeWorkspace
         ├── fake_multiplexer.rs      # FakeMultiplexer
-        ├── fake_leftover_bindings.rs # FakeLeftoverBindings
         ├── fake_config_source.rs    # FakeConfigSource
         ├── fake_repo_scanner.rs     # FakeRepoScanner
         ├── fake_host_probe.rs       # FakeHostProbe

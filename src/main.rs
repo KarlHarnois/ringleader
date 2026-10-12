@@ -25,7 +25,6 @@ use adapters::directory_repo_scanner::DirectoryRepoScanner;
 use adapters::file_lock::FileLock;
 use adapters::git_runner::GitRunner;
 use adapters::json_session_registry::JsonSessionRegistry;
-use adapters::leftover_bindings_file::LeftoverBindingsFile;
 use adapters::process_environment::{ProcessEnvironment, ProgramPaths};
 use adapters::server_files::ServerFiles;
 use adapters::signal_flags::SignalFlags;
@@ -278,10 +277,7 @@ impl CompositionRoot {
             )),
             Arc::new(SystemHostProbe::new(&self.environment)),
         );
-        let tmux_ports = TmuxPorts::new(
-            Arc::new(TmuxMultiplexer::new(tmux, self.launcher())),
-            Arc::new(LeftoverBindingsFile::new(&state_directory)),
-        );
+        let tmux_ports = TmuxPorts::new(Arc::new(TmuxMultiplexer::new(tmux, self.launcher())));
         let context = ServiceContext::new(loaded, &self.launch_directory)
             .with_home(self.paths.home())
             .with_diagnostics(self.diagnostics())

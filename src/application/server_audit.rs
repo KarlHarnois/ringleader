@@ -1,9 +1,8 @@
-use std::path::Path;
 use std::sync::Arc;
 
 use super::diagnostic_paths::DiagnosticPaths;
 use super::doctor_report::DoctorReport;
-use super::ports::{HostProbe, LeftoverBinding, LeftoverBindings, Multiplexer, ServerState};
+use super::ports::{HostProbe, Multiplexer, ServerState};
 use super::service_ports::ServicePorts;
 use super::tool_version::ToolVersion;
 use crate::domain::ReturnKey;
@@ -11,7 +10,6 @@ use crate::domain::ReturnKey;
 pub struct ServerAudit {
     multiplexer: Arc<dyn Multiplexer>,
     host: Arc<dyn HostProbe>,
-    leftover_bindings: Arc<dyn LeftoverBindings>,
     paths: DiagnosticPaths,
 }
 
@@ -22,7 +20,6 @@ impl ServerAudit {
         Self {
             multiplexer: ports.tmux().multiplexer(),
             host: ports.repos().host(),
-            leftover_bindings: ports.tmux().leftover_bindings(),
             paths: paths.clone(),
         }
     }
@@ -40,7 +37,6 @@ impl ServerAudit {
             self.check_return_key(return_key, report);
             self.check_drift(return_key, report);
         }
-        self.check_leftover_bindings(report);
     }
 
     fn check_location(&self, report: &mut DoctorReport) {
@@ -132,45 +128,14 @@ impl ServerAudit {
             report.warning("Ringleader's tmux server runs an older generated config; the TUI at start and after r, and ringleader new and restart, apply the current one");
         }
     }
-
-    fn check_leftover_bindings(&self, report: &mut DoctorReport) {
-        let path = self.leftover_bindings.path();
-        match self.leftover_bindings.read() {
-            Ok(bindings) => {
-                for binding in bindings {
-                    report.warning(Self::leftover_advice(&path, &binding));
-                }
-            }
-            Err(error) => report.warning(format!("leftover Ctrl-Q bindings: {error}")),
-        }
-    }
-
-    fn leftover_advice(path: &Path, binding: &LeftoverBinding) -> String {
-        let file = path.display();
-        let socket = binding.socket().display();
-        let fix = match binding.saved_line() {
-            Some(line) => format!(
-                "it saved your binding {line} from the tmux server at {socket}. If C-q there still runs Ringleader's binding, put that line in a file and run tmux -S {socket} source-file <file>"
-            ),
-            None => format!(
-                "the tmux server at {socket} had no C-q binding before. If C-q there still runs Ringleader's binding, run tmux -S {socket} unbind-key -T root C-q"
-            ),
-        };
-        format!(
-            "{file} is left from an earlier Ringleader that bound C-q on your tmux server: {fix}. Ringleader no longer changes that server, so delete {file} once it is done"
-        )
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::path::Path;
 
-    use super::*;
-    use crate::application::ports::{DirectoryAccess, LeftoverBindingsError, MultiplexerError};
-    use crate::test_support::{
-        FakeHostProbe, FakeLeftoverBindings, FakeMultiplexer, ServiceFixture,
-    };
+    use crate::application::ports::{DirectoryAccess, MultiplexerError};
+    use crate::test_support::{FakeHostProbe, FakeMultiplexer, ServiceFixture};
 
     struct AuditFixture;
 
@@ -389,52 +354,6 @@ mod tests {
             &ServiceFixture::new(),
             "warning:",
             "older generated config"
-        ));
-    }
-
-    #[test]
-    fn each_leftover_binding_is_a_warning_with_its_socket_and_hand_command() {
-        let fixture =
-            ServiceFixture::new().with_leftover_bindings(FakeLeftoverBindings::with(vec![
-                LeftoverBinding::new(
-                    Path::new("/tmp/tmux-1000/default"),
-                    Some("bind-key -T root C-q send-keys example"),
-                ),
-                LeftoverBinding::new(Path::new("/tmp/tmux-1000/work"), None),
-            ]));
-
-        assert!(AuditFixture::line_with(
-            &fixture,
-            "warning:",
-            "your binding bind-key -T root C-q send-keys example from the tmux server at /tmp/tmux-1000/default"
-        ));
-        assert!(AuditFixture::line_with(
-            &fixture,
-            "warning:",
-            "tmux -S /tmp/tmux-1000/work unbind-key -T root C-q"
-        ));
-        assert!(
-            fixture
-                .multiplexer()
-                .calls()
-                .iter()
-                .all(|call| !call.contains("/tmp/tmux-1000/work"))
-        );
-    }
-
-    #[test]
-    fn an_unreadable_bindings_file_is_a_warning() {
-        let fixture = ServiceFixture::new().with_leftover_bindings(FakeLeftoverBindings::failing(
-            LeftoverBindingsError::Corrupt {
-                path: PathBuf::from(FakeLeftoverBindings::PATH),
-                detail: "expected value".to_string(),
-            },
-        ));
-
-        assert!(AuditFixture::line_with(
-            &fixture,
-            "warning:",
-            "is not valid JSON"
         ));
     }
 }
