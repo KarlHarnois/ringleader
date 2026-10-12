@@ -102,11 +102,7 @@ impl SessionDeletion {
             return Err(ServiceError::Conflict(format!(
                 "processes still run in {}: {}; kept the worktree, the branch, and the session, which is now stopped",
                 session.worktree_path().display(),
-                remaining
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join(", ")
+                ProcessInfo::listed(&remaining)
             )));
         }
         self.refuse_new_commits(session, measurement)

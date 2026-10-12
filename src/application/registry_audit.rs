@@ -122,7 +122,7 @@ impl RegistryAudit {
         }
         format!(
             "processes still run in its worktree: {}",
-            Self::listed(processes)
+            ProcessInfo::listed(processes)
         )
     }
 
@@ -132,14 +132,9 @@ impl RegistryAudit {
             "session {} is stopped, but processes still run in its worktree {}: {}. The socket {} of Ringleader's tmux server may have been removed under the running server. Recreate {directory} with mode 0700, then send SIGUSR1 to the tmux server whose command line names that socket, which makes tmux recreate it.",
             session.name(),
             session.worktree_path().display(),
-            Self::listed(processes),
+            ProcessInfo::listed(processes),
             socket.display()
         )
-    }
-
-    fn listed(processes: &[ProcessInfo]) -> String {
-        let listed: Vec<String> = processes.iter().map(ToString::to_string).collect();
-        listed.join(", ")
     }
 
     fn audit_against_config(session: &Session, config: &Config, report: &mut DoctorReport) {

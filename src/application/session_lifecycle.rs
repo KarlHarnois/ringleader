@@ -163,18 +163,13 @@ impl SessionLifecycle {
             "session {} is stopped, but processes still run in its worktree {}: {}. End them first.",
             session.name(),
             session.worktree_path().display(),
-            Self::listed(&processes)
+            ProcessInfo::listed(&processes)
         );
         let earlier = EarlierServer::of(session, &self.multiplexer.socket());
         Err(ServiceError::Conflict(match earlier {
             Some(earlier) => format!("{busy} {}", earlier.refusal(session.name().as_str())),
             None => busy,
         }))
-    }
-
-    fn listed(processes: &[ProcessInfo]) -> String {
-        let listed: Vec<String> = processes.iter().map(ToString::to_string).collect();
-        listed.join(", ")
     }
 
     fn refuse_if_claimed(

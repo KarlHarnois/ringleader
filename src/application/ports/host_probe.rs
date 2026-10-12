@@ -60,6 +60,11 @@ impl ProcessInfo {
         self.pid
     }
 
+    pub fn listed(processes: &[ProcessInfo]) -> String {
+        let shown: Vec<String> = processes.iter().map(ToString::to_string).collect();
+        shown.join(", ")
+    }
+
     #[cfg(test)]
     pub fn command(&self) -> &str {
         &self.command
