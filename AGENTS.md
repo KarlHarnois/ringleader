@@ -109,6 +109,8 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── worktree_containment.rs # WorktreeContainment, shared by delete step 3 and reconciliation
     │   ├── session_monitor.rs    # SessionMonitor: reconcile, observe, diffs, preview
     │   ├── session_reconciler.rs # SessionReconciler, pairs registry entries with live tmux sessions
+    │   ├── metadata_check.rs     # MetadataCheck, whether a live session's metadata fits a naming scheme and claims an entry
+    │   ├── unregistered_placement.rs # UnregisteredPlacement, adopts a live session no entry pairs with or labels it Unmanaged
     │   ├── reconciliation.rs     # Reconciliation, the reconciled entries and rows
     │   ├── session_access.rs     # SessionAccess: attach and open_shell, and the refusal from a pane of the private server
     │   ├── repo_catalog.rs       # RepoCatalog: discover, find, add, and remove repos
