@@ -140,3 +140,24 @@ impl GitLocation {
         option
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TERMINAL_PROMPT: &str = "GIT_TERMINAL_PROMPT";
+
+    #[test]
+    fn git_never_prompts_even_when_the_environment_allows_it() {
+        let allowing_prompts = [(OsString::from(TERMINAL_PROMPT), OsString::from("1"))];
+
+        let command =
+            GitInvocation::anywhere("fetch").command(OsStr::new("git"), &allowing_prompts);
+
+        let terminal_prompt = command
+            .get_envs()
+            .find(|(name, _)| *name == TERMINAL_PROMPT)
+            .and_then(|(_, value)| value);
+        assert_eq!(terminal_prompt, Some(OsStr::new("0")));
+    }
+}
