@@ -10,7 +10,8 @@ pub struct TableColumns {
 impl TableColumns {
     pub const MINIMUM_NAME_WIDTH: usize = 12;
     const INDICATOR_WIDTH: usize = 1;
-    const GAP: usize = 1;
+    const INDICATOR_GAP: &'static str = " ";
+    const COLUMN_GAP: &'static str = "  ";
     const NAME_TITLE: &'static str = "Name";
     const BRANCH_TITLE: &'static str = "Branch";
     const DIFF_TITLE: &'static str = "Diff";
@@ -54,20 +55,27 @@ impl TableColumns {
     }
 
     pub fn row(&self, name: &str, branch: &str, diff: &str) -> String {
-        let mut text = format!(" {}", Self::fit_text(name, self.name));
+        let mut text = format!("{}{}", Self::INDICATOR_GAP, Self::fit_text(name, self.name));
         if let Some(width) = self.branch {
-            text.push_str(&format!(" {}", Self::fit_text(branch, width)));
+            text.push_str(Self::COLUMN_GAP);
+            text.push_str(&Self::fit_text(branch, width));
         }
         if let Some(width) = self.diff {
-            text.push_str(&format!(" {}", Self::fit_text(diff, width)));
+            text.push_str(Self::COLUMN_GAP);
+            text.push_str(&Self::fit_text(diff, width));
         }
         let width = self.inner_width.saturating_sub(Self::INDICATOR_WIDTH);
         format!("{text:<width$}")
     }
 
     fn width(&self) -> usize {
-        let optional = |column: Option<usize>| column.map_or(0, |width| width + Self::GAP);
-        Self::INDICATOR_WIDTH + Self::GAP + self.name + optional(self.branch) + optional(self.diff)
+        let optional =
+            |column: Option<usize>| column.map_or(0, |width| width + Self::COLUMN_GAP.len());
+        Self::INDICATOR_WIDTH
+            + Self::INDICATOR_GAP.len()
+            + self.name
+            + optional(self.branch)
+            + optional(self.diff)
     }
 
     fn fit_text(text: &str, width: usize) -> String {
@@ -108,16 +116,16 @@ mod tests {
 
     #[test]
     fn a_wide_table_shows_name_branch_and_diff() {
-        let row = ColumnsFixture::row(46, ColumnsFixture::NAME);
+        let row = ColumnsFixture::row(48, ColumnsFixture::NAME);
 
-        assert_eq!(row, " fix-auth     ringleader/fix-auth +124 -31 ?2");
+        assert_eq!(row, " fix-auth      ringleader/fix-auth  +124 -31 ?2");
     }
 
     #[test]
     fn a_tight_table_drops_the_branch_first() {
         let row = ColumnsFixture::row(40, ColumnsFixture::NAME);
 
-        assert_eq!(row.trim_end(), " fix-auth     +124 -31 ?2");
+        assert_eq!(row.trim_end(), " fix-auth      +124 -31 ?2");
     }
 
     #[test]
@@ -147,7 +155,7 @@ mod tests {
 
         assert_eq!(
             columns.header().trim_end(),
-            "  Name         Branch              Diff"
+            "  Name          Branch               Diff"
         );
     }
 }
