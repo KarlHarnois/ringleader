@@ -449,22 +449,35 @@ mod tests {
     }
 
     #[test]
-    fn an_orphaned_worktree_and_branch_are_warnings() {
+    fn an_orphaned_worktree_and_marked_branch_are_warnings() {
         let session = DoctorFixture::session();
         let orphan = ServiceFixture::session("orphan");
+        let repo = Path::new(ServiceFixture::REPO);
         let fixture = DoctorFixture::healthy().with_workspace(
-            ServiceFixture::workspace_for(&[&session, &orphan]).with_branch(
-                Path::new(ServiceFixture::REPO),
-                "ringleader/lonely",
-                ServiceFixture::TIP,
-            ),
+            ServiceFixture::workspace_for(&[&session, &orphan])
+                .with_branch(repo, "lonely", ServiceFixture::TIP)
+                .with_marker(repo, "lonely"),
         );
 
         assert!(DoctorFixture::has_warning(&fixture, "orphaned worktree"));
         assert!(DoctorFixture::has_warning(
             &fixture,
-            "orphaned branch ringleader/lonely"
+            "orphaned branch lonely"
         ));
+    }
+
+    #[test]
+    fn an_unmarked_branch_without_a_worktree_is_no_orphan() {
+        let session = DoctorFixture::session();
+        let fixture = DoctorFixture::healthy().with_workspace(
+            ServiceFixture::workspace_for(&[&session]).with_branch(
+                Path::new(ServiceFixture::REPO),
+                "feature",
+                ServiceFixture::TIP,
+            ),
+        );
+
+        assert!(!DoctorFixture::has_warning(&fixture, "orphaned branch"));
     }
 
     #[test]

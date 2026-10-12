@@ -159,8 +159,8 @@ impl Workspace for GitWorkspace {
         GitBranches::new(&self.git).is_managed(repo, branch)
     }
 
-    fn list_branches(&self, repo: &Path, prefix: &str) -> Result<Vec<String>, WorkspaceError> {
-        GitBranches::new(&self.git).list(repo, prefix)
+    fn list_managed_branches(&self, repo: &Path) -> Result<Vec<String>, WorkspaceError> {
+        GitBranches::new(&self.git).list_managed(repo)
     }
 
     fn resolve_start_point(
@@ -1186,17 +1186,36 @@ mod tests {
     }
 
     #[test]
-    fn list_branches_lists_only_prefixed_branches() {
+    fn listing_managed_branches_lists_marked_branches_that_exist() {
+        let fixture = GitTestRepo::new();
+        WorktreeFixture::marked(&fixture);
+        let workspace = fixture.workspace();
+        fixture.git(fixture.path(), &["branch", "feature"]);
+        fixture.git(fixture.path(), &["branch", "Feature/v1.2"]);
+        workspace
+            .mark_branch_managed(fixture.path(), "Feature/v1.2")
+            .unwrap();
+        workspace
+            .mark_branch_managed(fixture.path(), "gone")
+            .unwrap();
+
+        let mut branches = workspace.list_managed_branches(fixture.path()).unwrap();
+
+        branches.sort();
+        assert_eq!(branches, ["Feature/v1.2", BRANCH]);
+    }
+
+    #[test]
+    fn listing_managed_branches_without_markers_is_empty() {
         let fixture = GitTestRepo::new();
         WorktreeFixture::created(&fixture);
-        fixture.git(fixture.path(), &["branch", "feature"]);
 
         let branches = fixture
             .workspace()
-            .list_branches(fixture.path(), "ringleader/")
+            .list_managed_branches(fixture.path())
             .unwrap();
 
-        assert_eq!(branches, [BRANCH]);
+        assert!(branches.is_empty());
     }
 
     #[test]

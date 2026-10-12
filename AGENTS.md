@@ -122,6 +122,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── tool_version.rs       # ToolVersion, the major and minor numbers of a tmux or git version
     │   ├── doctor_report.rs      # DoctorReport, the doctor's info, warning, and problem lines
     │   ├── registry_audit.rs     # RegistryAudit, the doctor's checks of each registry entry
+    │   ├── orphan_audit.rs       # OrphanAudit, the doctor's search for worktrees and marked branches no session claims
     │   └── ports/
     │       ├── mod.rs
     │       ├── session_registry.rs   # SessionRegistry trait
@@ -157,7 +158,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── git_runner.rs         # GitRunner, runs a GitInvocation through BoundedCommand
     │   ├── git_invocation.rs     # GitInvocation, one git call with its child environment
     │   ├── git_porcelain.rs      # GitPorcelain, parses git's machine-readable output
-    │   ├── git_branches.rs       # GitBranches: compare-and-swap delete, rename, listing
+    │   ├── git_branches.rs       # GitBranches: compare-and-swap delete, rename, and the managed-branch marker
     │   ├── start_point_resolver.rs # StartPointResolver, the base branch ladder
     │   ├── submodule_commits.rs  # SubmoduleCommits, the submodule walk of unmerged_commits
     │   ├── system_clock.rs       # SystemClock, reads `SystemTime`

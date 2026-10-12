@@ -5,13 +5,34 @@ pub struct BranchMarker<'a> {
 impl<'a> BranchMarker<'a> {
     pub const VARIABLE: &'static str = "ringleaderManaged";
     pub const VALUE: &'static str = "true";
+    const SECTION: &'static str = "branch";
 
     pub fn new(branch: &'a str) -> Self {
         Self { branch }
     }
 
+    pub fn from_key(key: &'a str) -> Option<Self> {
+        let (section, variable) = key.rsplit_once('.')?;
+        let branch = section.strip_prefix(Self::SECTION)?.strip_prefix('.')?;
+        variable
+            .eq_ignore_ascii_case(Self::VARIABLE)
+            .then_some(Self { branch })
+    }
+
+    pub fn listing_pattern() -> String {
+        format!(
+            "^{}\\..*\\.{}$",
+            Self::SECTION,
+            Self::VARIABLE.to_ascii_lowercase()
+        )
+    }
+
+    pub fn branch(&self) -> &'a str {
+        self.branch
+    }
+
     pub fn key(&self) -> String {
-        format!("branch.{}.{}", self.branch, Self::VARIABLE)
+        format!("{}.{}.{}", Self::SECTION, self.branch, Self::VARIABLE)
     }
 }
 
@@ -25,5 +46,22 @@ mod tests {
             BranchMarker::new("fix-auth").key(),
             "branch.fix-auth.ringleaderManaged"
         );
+    }
+
+    #[test]
+    fn a_listed_key_names_its_branch_with_dots_and_case_kept() {
+        let marker = BranchMarker::from_key("branch.Feature/v1.2.ringleadermanaged").unwrap();
+
+        assert_eq!(marker.branch(), "Feature/v1.2");
+    }
+
+    #[test]
+    fn a_key_of_another_variable_is_no_marker() {
+        assert!(BranchMarker::from_key("branch.fix-auth.remote").is_none());
+    }
+
+    #[test]
+    fn a_key_of_another_section_is_no_marker() {
+        assert!(BranchMarker::from_key("remote.fix-auth.ringleadermanaged").is_none());
     }
 }

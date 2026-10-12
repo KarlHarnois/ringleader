@@ -9,6 +9,8 @@ pub struct GitBranches<'a> {
 }
 
 impl<'a> GitBranches<'a> {
+    const BRANCH_REFS: &'static str = "refs/heads";
+
     pub fn new(git: &'a GitRunner) -> Self {
         Self { git }
     }
@@ -73,16 +75,46 @@ impl<'a> GitBranches<'a> {
         Ok(value.is_some_and(|found| found.first_line() == BranchMarker::VALUE))
     }
 
-    pub fn list(&self, repo: &Path, prefix: &str) -> Result<Vec<String>, WorkspaceError> {
-        let pattern = format!("refs/heads/{}", prefix.trim_end_matches('/'));
-        let list =
-            GitInvocation::in_repo(repo, "for-each-ref").args(["--format=%(refname)", &pattern]);
+    pub fn list_managed(&self, repo: &Path) -> Result<Vec<String>, WorkspaceError> {
+        let marked = self.list_marked(repo)?;
+        if marked.is_empty() {
+            return Ok(marked);
+        }
+        let existing = self.list_existing(repo)?;
+        Ok(marked
+            .into_iter()
+            .filter(|branch| existing.contains(branch))
+            .collect())
+    }
+
+    fn list_marked(&self, repo: &Path) -> Result<Vec<String>, WorkspaceError> {
+        let list = GitInvocation::in_repo(repo, "config").args([
+            "--local",
+            "--get-regexp",
+            &BranchMarker::listing_pattern(),
+        ]);
+        let Some(listing) = self.git.lookup(&list)? else {
+            return Ok(Vec::new());
+        };
+        Ok(listing
+            .lines()
+            .iter()
+            .filter_map(|line| line.split_once(' '))
+            .filter(|(_, value)| *value == BranchMarker::VALUE)
+            .filter_map(|(key, _)| BranchMarker::from_key(key))
+            .map(|marker| marker.branch().to_string())
+            .collect())
+    }
+
+    fn list_existing(&self, repo: &Path) -> Result<Vec<String>, WorkspaceError> {
+        let list = GitInvocation::in_repo(repo, "for-each-ref")
+            .args(["--format=%(refname)", Self::BRANCH_REFS]);
         let listing = self.git.run_checked(&list)?;
         Ok(listing
             .lines()
             .iter()
-            .filter_map(|line| line.strip_prefix("refs/heads/"))
-            .filter(|branch| branch.starts_with(prefix))
+            .filter_map(|line| line.strip_prefix(Self::BRANCH_REFS))
+            .filter_map(|branch| branch.strip_prefix('/'))
             .map(str::to_string)
             .collect())
     }

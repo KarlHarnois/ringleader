@@ -1,9 +1,8 @@
-use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::doctor_report::DoctorReport;
-use super::ports::{HostProbe, Multiplexer, Workspace};
+use super::orphan_audit::OrphanAudit;
+use super::ports::{Multiplexer, Workspace};
 use super::reconciliation::Reconciliation;
 use super::service_ports::ServicePorts;
 use super::worktree_inspection::WorktreeInspection;
@@ -11,18 +10,18 @@ use crate::domain::{Config, Session, SessionState};
 
 pub struct RegistryAudit {
     inspection: WorktreeInspection,
+    orphans: OrphanAudit,
     workspace: Arc<dyn Workspace>,
     multiplexer: Arc<dyn Multiplexer>,
-    host: Arc<dyn HostProbe>,
 }
 
 impl RegistryAudit {
     pub fn new(ports: &ServicePorts) -> Self {
         Self {
             inspection: WorktreeInspection::new(ports),
+            orphans: OrphanAudit::new(ports),
             workspace: ports.repos().workspace(),
             multiplexer: ports.tmux().multiplexer(),
-            host: ports.repos().host(),
         }
     }
 
@@ -47,7 +46,7 @@ impl RegistryAudit {
             }
         }
         if let Some(config) = config {
-            self.report_orphans(reconciliation.entries(), config, report);
+            self.orphans.audit(reconciliation.entries(), config, report);
         }
     }
 
@@ -137,50 +136,6 @@ impl RegistryAudit {
                 recorded.branch_prefix(),
                 recorded.tmux_prefix()
             ));
-        }
-    }
-
-    fn report_orphans(&self, entries: &[Session], config: &Config, report: &mut DoctorReport) {
-        let claimed: BTreeSet<PathBuf> = entries
-            .iter()
-            .map(|entry| self.host.canonical_or_given(entry.worktree_path()))
-            .collect();
-        let root = config.naming().worktree_root();
-        for directory in self.workspace.list_worktree_dirs(root).unwrap_or_default() {
-            if !claimed.contains(&self.host.canonical_or_given(&directory)) {
-                report.warning(format!(
-                    "orphaned worktree {}, no session claims it",
-                    directory.display()
-                ));
-            }
-        }
-        let repos: BTreeSet<PathBuf> = entries
-            .iter()
-            .map(|entry| entry.repo_path().to_path_buf())
-            .chain(config.repos().iter().map(|repo| repo.path().to_path_buf()))
-            .collect();
-        for repo in repos {
-            self.report_orphan_branches(&repo, config.naming().branch_prefix(), report);
-        }
-    }
-
-    fn report_orphan_branches(&self, repo: &Path, prefix: &str, report: &mut DoctorReport) {
-        let (Ok(branches), Ok(worktrees)) = (
-            self.workspace.list_branches(repo, prefix),
-            self.workspace.list_worktrees(repo),
-        ) else {
-            return;
-        };
-        for branch in branches {
-            if worktrees
-                .iter()
-                .all(|entry| entry.branch() != Some(branch.as_str()))
-            {
-                report.warning(format!(
-                    "orphaned branch {branch} in {}, no worktree has it",
-                    repo.display()
-                ));
-            }
         }
     }
 }

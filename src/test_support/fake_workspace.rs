@@ -408,13 +408,13 @@ impl Workspace for FakeWorkspace {
         Ok(self.edit(|state| state.is_marked(repo, branch)))
     }
 
-    fn list_branches(&self, repo: &Path, prefix: &str) -> Result<Vec<String>, WorkspaceError> {
-        self.call("list_branches", prefix.to_string())?;
+    fn list_managed_branches(&self, repo: &Path) -> Result<Vec<String>, WorkspaceError> {
+        self.call("list_managed_branches", repo.display().to_string())?;
         Ok(self.edit(|state| {
             state
                 .branches
                 .iter()
-                .filter(|branch| branch.repo == repo && branch.name.starts_with(prefix))
+                .filter(|branch| branch.repo == repo && state.is_marked(repo, &branch.name))
                 .map(|branch| branch.name.clone())
                 .collect()
         }))
