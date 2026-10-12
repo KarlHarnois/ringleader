@@ -9,7 +9,6 @@ use crate::domain::{Agent, ConfigDraft, RepoDraft};
 #[serde(default)]
 pub struct RawConfig {
     worktree_root: Option<PathBuf>,
-    branch_prefix: Option<String>,
     tmux_prefix: Option<String>,
     state_poll_ms: Option<u64>,
     preview_refresh_ms: Option<u64>,
@@ -36,9 +35,6 @@ impl RawConfig {
         let mut draft = self.timing_into(defaults);
         if let Some(root) = &self.worktree_root {
             draft = draft.worktree_root(&home.path(root));
-        }
-        if let Some(prefix) = &self.branch_prefix {
-            draft = draft.branch_prefix(prefix);
         }
         if let Some(prefix) = &self.tmux_prefix {
             draft = draft.tmux_prefix(prefix);

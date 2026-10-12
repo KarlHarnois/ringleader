@@ -19,7 +19,6 @@ impl TomlConfigSource {
     pub const TEMPLATE: &'static str = r#"# Absolute or ~/ paths only. Environment variables are not expanded.
 # Defaults to $XDG_DATA_HOME/ringleader/worktrees.
 # worktree_root = "~/.local/share/ringleader/worktrees"
-branch_prefix = "ringleader/"
 tmux_prefix = "ringleader-"
 state_poll_ms = 1000
 preview_refresh_ms = 750
@@ -276,9 +275,16 @@ mod tests {
 
     #[test]
     fn a_config_without_agents_loads_with_no_agents() {
-        let fixture = SourceFixture::with_text("branch_prefix = \"ringleader/\"\n");
+        let fixture = SourceFixture::with_text("tmux_prefix = \"ringleader-\"\n");
 
         assert!(fixture.source().load().unwrap().agents().is_empty());
+    }
+
+    #[test]
+    fn a_leftover_branch_prefix_key_is_ignored() {
+        let fixture = SourceFixture::with_text("branch_prefix = \"ringleader/\"\n");
+
+        assert!(fixture.source().load().is_ok());
     }
 
     #[test]

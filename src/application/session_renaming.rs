@@ -2,6 +2,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::agent_hooks::AgentHooks;
+use super::branch_availability::BranchAvailability;
+use super::branch_ownership::{BranchMutation, BranchOwnership};
 use super::ports::{HostProbe, Multiplexer, SessionRegistry, Workspace};
 use super::reconciliation::{ManagedRow, Reconciliation};
 use super::rename_request::RenameRequest;
@@ -10,6 +12,8 @@ use super::service_ports::ServicePorts;
 use crate::domain::{Config, Session, SessionName};
 
 pub struct SessionRenaming {
+    ownership: BranchOwnership,
+    branches: BranchAvailability,
     workspace: Arc<dyn Workspace>,
     multiplexer: Arc<dyn Multiplexer>,
     host: Arc<dyn HostProbe>,
@@ -20,6 +24,8 @@ pub struct SessionRenaming {
 impl SessionRenaming {
     pub fn new(ports: &ServicePorts) -> Self {
         Self {
+            ownership: BranchOwnership::new(ports),
+            branches: BranchAvailability::new(ports),
             workspace: ports.repos().workspace(),
             multiplexer: ports.tmux().multiplexer(),
             host: ports.repos().host(),
@@ -37,6 +43,10 @@ impl SessionRenaming {
     ) -> Result<Session, ServiceError> {
         let renamed = self.renamed_session(row.session(), request)?;
         self.check_rename_availability(row, &renamed, reconciliation, request.keeps_branch())?;
+        if !request.keeps_branch() {
+            self.ownership
+                .refuse_unmarked(row.session(), BranchMutation::Rename)?;
+        }
         let renaming = BranchRenaming::new(self, row.session(), &renamed);
         renaming.apply()?;
         if row.is_live() {
@@ -79,14 +89,11 @@ impl SessionRenaming {
                 renamed.name()
             )));
         }
-        let repo = row.session().repo_path();
-        if !keep_branch && self.workspace.branch_exists(repo, renamed.branch())? {
-            return Err(ServiceError::Conflict(format!(
-                "branch {} already exists",
-                renamed.branch()
-            )));
+        if keep_branch {
+            return Ok(());
         }
-        Ok(())
+        self.branches
+            .refuse_taken(row.session().repo_path(), renamed.branch())
     }
 
     fn rename_tmux_session(
@@ -191,7 +198,7 @@ mod tests {
     use std::path::Path;
 
     use super::*;
-    use crate::application::ports::MultiplexerError;
+    use crate::application::ports::{BranchMarker, MultiplexerError};
     use crate::domain::Agent;
     use crate::test_support::{FakeMultiplexer, FakeSessionRegistry, ServiceFixture};
 
@@ -216,6 +223,14 @@ mod tests {
                 .with_multiplexer(multiplexer)
         }
 
+        fn unmarked(name: &str) -> ServiceFixture {
+            let session = ServiceFixture::session(name);
+            let repo = Path::new(ServiceFixture::REPO);
+            Self::stopped(name).with_workspace(
+                ServiceFixture::workspace_for(&[&session]).without_marker(repo, session.branch()),
+            )
+        }
+
         fn stopped(name: &str) -> ServiceFixture {
             let session = ServiceFixture::session(name);
             ServiceFixture::new()
@@ -238,7 +253,7 @@ mod tests {
         assert!(
             fixture
                 .workspace()
-                .has_branch(Path::new(ServiceFixture::REPO), "ringleader/fix-login")
+                .has_branch(Path::new(ServiceFixture::REPO), "fix-login")
         );
         assert_eq!(fixture.multiplexer().live_names(), ["ringleader-fix-login"]);
         assert_eq!(fixture.registry().sessions(), vec![renamed]);
@@ -321,6 +336,50 @@ mod tests {
     }
 
     #[test]
+    fn rename_moves_the_marker_with_the_branch() {
+        let fixture = RenameFixture::live(&["fix-auth"]);
+
+        let renamed = fixture
+            .service()
+            .rename_session("fix-auth", "fix-login", false)
+            .unwrap();
+
+        let repo = Path::new(ServiceFixture::REPO);
+        let original = ServiceFixture::session("fix-auth");
+        assert!(fixture.workspace().has_marker(repo, renamed.branch()));
+        assert!(!fixture.workspace().has_marker(repo, original.branch()));
+    }
+
+    #[test]
+    fn rename_refuses_an_unmarked_branch_with_the_marking_command() {
+        let fixture = RenameFixture::unmarked("fix-auth");
+        let session = ServiceFixture::session("fix-auth");
+        let command =
+            BranchMarker::new(session.branch()).marking_command(Path::new(ServiceFixture::REPO));
+
+        let error = fixture
+            .service()
+            .rename_session("fix-auth", "fix-login", false)
+            .unwrap_err();
+
+        assert!(error.to_string().contains(&command));
+        assert!(error.to_string().contains("--keep-branch"));
+        assert!(fixture.workspace().state_changing_calls().is_empty());
+    }
+
+    #[test]
+    fn rename_with_keep_branch_renames_a_session_on_an_unmarked_branch() {
+        let fixture = RenameFixture::unmarked("fix-auth");
+
+        let renamed = fixture
+            .service()
+            .rename_session("fix-auth", "fix-login", true)
+            .unwrap();
+
+        assert_eq!(renamed.name().as_str(), "fix-login");
+    }
+
+    #[test]
     fn rename_with_keep_branch_leaves_the_branch() {
         let fixture = RenameFixture::live(&["fix-auth"]);
 
@@ -329,7 +388,7 @@ mod tests {
             .rename_session("fix-auth", "fix-login", true)
             .unwrap();
 
-        assert_eq!(renamed.branch(), "ringleader/fix-auth");
+        assert_eq!(renamed.branch(), "fix-auth");
         assert!(
             fixture
                 .workspace()
@@ -356,8 +415,8 @@ mod tests {
             .unwrap_err();
 
         let repo = Path::new(ServiceFixture::REPO);
-        assert!(fixture.workspace().has_branch(repo, "ringleader/fix-auth"));
-        assert!(!fixture.workspace().has_branch(repo, "ringleader/fix-login"));
+        assert!(fixture.workspace().has_branch(repo, "fix-auth"));
+        assert!(!fixture.workspace().has_branch(repo, "fix-login"));
     }
 
     #[test]
@@ -379,7 +438,7 @@ mod tests {
         assert!(
             fixture
                 .workspace()
-                .has_branch(Path::new(ServiceFixture::REPO), "ringleader/fix-login")
+                .has_branch(Path::new(ServiceFixture::REPO), "fix-login")
         );
         assert_eq!(fixture.registry().save_count(), 0);
     }
@@ -414,7 +473,7 @@ mod tests {
         assert!(
             fixture
                 .workspace()
-                .has_branch(Path::new(ServiceFixture::REPO), "ringleader/fix-auth")
+                .has_branch(Path::new(ServiceFixture::REPO), "fix-auth")
         );
     }
 
@@ -443,6 +502,30 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(error.exit_code(), 3);
+    }
+
+    #[test]
+    fn rename_refuses_a_name_that_holds_other_branches() {
+        let session = ServiceFixture::session("fix-auth");
+        let fixture = RenameFixture::stopped("fix-auth").with_workspace(
+            ServiceFixture::workspace_for(&[&session]).with_branch(
+                Path::new(ServiceFixture::REPO),
+                "fix-login/draft",
+                ServiceFixture::TIP,
+            ),
+        );
+
+        let error = fixture
+            .service()
+            .rename_session("fix-auth", "fix-login", false)
+            .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("branch fix-login clashes with existing branch fix-login/draft")
+        );
+        assert!(fixture.workspace().state_changing_calls().is_empty());
     }
 
     #[test]

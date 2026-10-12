@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use super::branch_ownership::{BranchMutation, BranchOwnership};
 use super::delete_impact::DeleteImpact;
 use super::ports::{HostProbe, Multiplexer, UnmergedCommits, Workspace, WorktreeEntry};
 use super::reconciliation::ManagedRow;
@@ -11,6 +12,7 @@ use crate::domain::{Session, SessionState};
 
 pub struct DeletionGuards {
     inspection: WorktreeInspection,
+    ownership: BranchOwnership,
     workspace: Arc<dyn Workspace>,
     multiplexer: Arc<dyn Multiplexer>,
     host: Arc<dyn HostProbe>,
@@ -20,6 +22,7 @@ impl DeletionGuards {
     pub fn new(ports: &ServicePorts) -> Self {
         Self {
             inspection: WorktreeInspection::new(ports),
+            ownership: BranchOwnership::new(ports),
             workspace: ports.repos().workspace(),
             multiplexer: ports.tmux().multiplexer(),
             host: ports.repos().host(),
@@ -27,8 +30,10 @@ impl DeletionGuards {
     }
 
     pub fn measure(&self, row: &ManagedRow) -> Result<Measurement, ServiceError> {
-        self.refuse_unmeasurable(row.session())?;
         let session = row.session();
+        self.refuse_unmeasurable(session)?;
+        self.ownership
+            .refuse_unmarked(session, BranchMutation::Delete)?;
         let dirty = self.workspace.dirty_state(session.worktree_path())?;
         let commits = self.workspace.unmerged_commits(
             session.repo_path(),
@@ -50,7 +55,7 @@ impl DeletionGuards {
     }
 
     pub fn check_removable(&self, session: &Session) -> Result<(), ServiceError> {
-        self.refuse_outside_recorded_naming(session)?;
+        self.refuse_outside_worktree_root(session)?;
         self.refuse_what_git_refuses(session)
     }
 
@@ -93,21 +98,14 @@ impl DeletionGuards {
         Ok(BranchPresence::Missing)
     }
 
-    fn refuse_outside_recorded_naming(&self, session: &Session) -> Result<(), ServiceError> {
-        let naming = session.naming();
+    fn refuse_outside_worktree_root(&self, session: &Session) -> Result<(), ServiceError> {
+        let root = session.naming().worktree_root();
         let containment = WorktreeContainment::new(self.host.as_ref());
-        if !containment.contains(naming.worktree_root(), session.worktree_path()) {
+        if !containment.contains(root, session.worktree_path()) {
             return Err(ServiceError::Conflict(format!(
                 "worktree {} is not inside the worktree root {}, refusing to delete it",
                 session.worktree_path().display(),
-                naming.worktree_root().display()
-            )));
-        }
-        if !naming.owns_branch(session.branch()) {
-            return Err(ServiceError::Conflict(format!(
-                "branch {} does not start with {}, refusing to delete it",
-                session.branch(),
-                naming.branch_prefix()
+                root.display()
             )));
         }
         Ok(())

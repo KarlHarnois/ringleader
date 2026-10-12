@@ -405,8 +405,21 @@ mod tests {
         assert!(DoctorFixture::has_problem(&fixture, "is missing"));
         assert!(DoctorFixture::has_problem(
             &fixture,
-            "branch ringleader/fix-auth is missing"
+            "branch fix-auth is missing"
         ));
+    }
+
+    #[test]
+    fn an_unmarked_registry_branch_is_a_warning_with_the_marking_command() {
+        let session = DoctorFixture::session();
+        let repo = Path::new(ServiceFixture::REPO);
+        let fixture = DoctorFixture::healthy().with_workspace(
+            ServiceFixture::workspace_for(&[&session]).without_marker(repo, session.branch()),
+        );
+        let command =
+            crate::application::ports::BranchMarker::new(session.branch()).marking_command(repo);
+
+        assert!(DoctorFixture::has_warning(&fixture, &command));
     }
 
     #[test]
@@ -414,7 +427,7 @@ mod tests {
         let fixture =
             DoctorFixture::healthy().with_workspace(FakeWorkspace::default().with_branch(
                 Path::new(ServiceFixture::REPO),
-                "ringleader/fix-auth",
+                "fix-auth",
                 ServiceFixture::TIP,
             ));
 
@@ -437,7 +450,6 @@ mod tests {
     fn a_changed_naming_is_a_warning_about_ctrl_q() {
         let config = ServiceFixture::config().with_naming(crate::domain::NamingScheme::new(
             Path::new(ServiceFixture::WORKTREE_ROOT),
-            "ringleader/",
             "rl-",
         ));
         let fixture = DoctorFixture::healthy().with_config(config);
@@ -449,22 +461,35 @@ mod tests {
     }
 
     #[test]
-    fn an_orphaned_worktree_and_branch_are_warnings() {
+    fn an_orphaned_worktree_and_marked_branch_are_warnings() {
         let session = DoctorFixture::session();
         let orphan = ServiceFixture::session("orphan");
+        let repo = Path::new(ServiceFixture::REPO);
         let fixture = DoctorFixture::healthy().with_workspace(
-            ServiceFixture::workspace_for(&[&session, &orphan]).with_branch(
-                Path::new(ServiceFixture::REPO),
-                "ringleader/lonely",
-                ServiceFixture::TIP,
-            ),
+            ServiceFixture::workspace_for(&[&session, &orphan])
+                .with_branch(repo, "lonely", ServiceFixture::TIP)
+                .with_marker(repo, "lonely"),
         );
 
         assert!(DoctorFixture::has_warning(&fixture, "orphaned worktree"));
         assert!(DoctorFixture::has_warning(
             &fixture,
-            "orphaned branch ringleader/lonely"
+            "orphaned branch lonely"
         ));
+    }
+
+    #[test]
+    fn an_unmarked_branch_without_a_worktree_is_no_orphan() {
+        let session = DoctorFixture::session();
+        let fixture = DoctorFixture::healthy().with_workspace(
+            ServiceFixture::workspace_for(&[&session]).with_branch(
+                Path::new(ServiceFixture::REPO),
+                "feature",
+                ServiceFixture::TIP,
+            ),
+        );
+
+        assert!(!DoctorFixture::has_warning(&fixture, "orphaned branch"));
     }
 
     #[test]
