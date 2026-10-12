@@ -18,6 +18,7 @@ pub mod leftover_bindings_file;
 pub mod live_process;
 pub mod metadata_json;
 pub mod mount_table;
+pub mod private_server;
 pub mod process_environment;
 pub mod raw_config;
 pub mod server_files;

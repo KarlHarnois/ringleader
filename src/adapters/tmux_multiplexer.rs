@@ -2,13 +2,13 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use super::agent_launcher::{LauncherCommand, PreparedLaunch};
+use super::private_server::PrivateServer;
 use super::tmux_command::TmuxCommand;
 use super::tmux_error::TmuxError;
 use super::tmux_launch::{Launched, TmuxLaunch};
-use super::tmux_listing::{RunningConfig, TmuxListing};
+use super::tmux_listing::TmuxListing;
 use super::tmux_output::TmuxOutput;
 use super::tmux_scripts::TmuxScripts;
-use super::tmux_server_config::TmuxServerConfig;
 use crate::application::ports::{
     AgentLaunch, AttachTarget, Multiplexer, MultiplexerError, ServerConfig, ServerState,
     SessionSpec,
@@ -50,41 +50,14 @@ impl TmuxMultiplexer {
         spec: &SessionSpec,
         prepared: &PreparedLaunch,
     ) -> Result<PathBuf, MultiplexerError> {
-        self.write_server_files(&self.server_config_for(spec.return_key()))?;
+        let server = PrivateServer::new(&self.tmux);
+        server.write_files(spec.return_key())?;
         let sequence = TmuxScripts::create_session(spec, prepared.words());
         let output = self.tmux.create(&sequence, spec.removed_env_names())?;
         let launched = TmuxLaunch::new(&self.tmux).run(&sequence, output)?;
         let socket = self.finish_creation(&launched)?;
-        self.require_return_binding(&launched)?;
+        server.require_return_binding(&launched)?;
         Ok(socket)
-    }
-
-    fn write_server_files(&self, render: &TmuxServerConfig) -> Result<(), MultiplexerError> {
-        self.tmux
-            .server()
-            .prepare(&render.render())
-            .map_err(|error| MultiplexerError::ServerFiles {
-                detail: error.to_string(),
-            })
-    }
-
-    fn require_return_binding(&self, launched: &Launched) -> Result<(), MultiplexerError> {
-        let bound = self.binds_return_key();
-        if let Ok(true) = bound {
-            return Ok(());
-        }
-        TmuxLaunch::new(&self.tmux).roll_back(launched);
-        bound?;
-        let files = self.tmux.server();
-        Err(MultiplexerError::NoReturnBinding {
-            socket: files.socket().display().to_string(),
-            config: files.config().display().to_string(),
-        })
-    }
-
-    fn binds_return_key(&self) -> Result<bool, MultiplexerError> {
-        let output = self.tmux.query(&TmuxScripts::root_keys())?;
-        Ok(TmuxListing::new(&output).binds_detach())
     }
 
     fn revive_agent(
@@ -176,27 +149,6 @@ impl TmuxMultiplexer {
             subcommand: "attach-session".to_string(),
             detail: format!("tmux attach-session ended with wait status {status}"),
         })
-    }
-
-    fn server_config_for(&self, return_key: &ReturnKey) -> TmuxServerConfig {
-        TmuxServerConfig::new(return_key).sourcing(self.tmux.server().user_config())
-    }
-
-    fn runs_render(&self, render: &TmuxServerConfig) -> Result<bool, MultiplexerError> {
-        let running = self.running_config()?;
-        Ok(running.is_some_and(|running| running.hash() == render.hash()))
-    }
-
-    fn running_config(&self) -> Result<Option<RunningConfig>, MultiplexerError> {
-        let query = TmuxScripts::server_value(&TmuxListing::config_format());
-        let output = self.tmux.query(&query)?;
-        if let Some(running) = TmuxListing::new(&output).running_config() {
-            return Ok(Some(running));
-        }
-        if output.reports_no_server() {
-            return Ok(None);
-        }
-        Err(TmuxError::failed("display-message", &output).into())
     }
 
     fn require_done(subcommand: &str, output: &TmuxOutput) -> Result<(), MultiplexerError> {
@@ -336,50 +288,18 @@ impl Multiplexer for TmuxMultiplexer {
     }
 
     fn server_state(&self) -> Result<Option<ServerState>, MultiplexerError> {
-        let output = self.tmux.query(&TmuxScripts::server_state())?;
-        if let Some(state) = TmuxListing::new(&output).server_state() {
-            return Ok(Some(state));
-        }
-        if output.reports_no_server() {
-            return Ok(None);
-        }
-        Err(TmuxError::failed("display-message", &output).into())
+        PrivateServer::new(&self.tmux).state()
     }
 
     fn server_config(
         &self,
         return_key: &ReturnKey,
     ) -> Result<Option<ServerConfig>, MultiplexerError> {
-        let Some(running) = self.running_config()? else {
-            return Ok(None);
-        };
-        let current = running.hash() == self.server_config_for(return_key).hash();
-        Ok(Some(ServerConfig::new(current, running.return_key())))
+        PrivateServer::new(&self.tmux).config(return_key)
     }
 
     fn apply_config(&self, return_key: &ReturnKey) -> Result<(), MultiplexerError> {
-        let running = self.running_config()?;
-        let previous_key = running
-            .as_ref()
-            .and_then(RunningConfig::return_key)
-            .filter(|previous| *previous != return_key);
-        let render = self.server_config_for(return_key);
-        self.write_server_files(&render)?;
-        let sequence = TmuxServerConfig::reapply_script(previous_key);
-        let output = self
-            .tmux
-            .change_with_input(&sequence, render.render().as_bytes())?;
-        if output.succeeded() {
-            return Ok(());
-        }
-        if self.runs_render(&render)? {
-            log::warn!(
-                "the tmux server applied Ringleader's config, but a line, likely in the user tmux file, failed: {}",
-                output.stderr()
-            );
-            return Ok(());
-        }
-        Err(TmuxError::failed("source-file", &output).into())
+        PrivateServer::new(&self.tmux).apply(return_key)
     }
 
     fn version(&self) -> Result<String, MultiplexerError> {
@@ -406,18 +326,16 @@ impl From<TmuxError> for MultiplexerError {
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::{OsStr, OsString};
+    use std::ffi::OsString;
     use std::fs;
-    use std::os::unix::fs::PermissionsExt;
     use std::os::unix::net::UnixListener;
     use std::time::{Duration, Instant};
 
     use super::*;
     use crate::adapters::Deadlines;
     use crate::adapters::process_environment::ProcessEnvironment;
-    use crate::adapters::server_files::ServerFiles;
     use crate::adapters::tmux_sequence::TmuxSequence;
-    use crate::domain::{RepoName, ReturnKey, SessionRepo, SessionWorktree};
+    use crate::domain::{RepoName, SessionRepo, SessionWorktree};
     use crate::test_support::TmuxTestServer;
 
     const HOOKED: &str = "run-shell \"echo hooked; exit 1\"";
@@ -514,13 +432,6 @@ mod tests {
 
         fn created_pane(&self, tmux_name: &str) -> String {
             self.server.pane_of(&format!("={tmux_name}:0.0"))
-        }
-
-        fn sourcing(&self, user_file: &Path) -> TmuxMultiplexer {
-            let files =
-                ServerFiles::new(self.server.socket(), self.server.config()).sourcing(user_file);
-            let tmux = TmuxCommand::new(OsStr::new("tmux"), &files, &self.server.environment());
-            TmuxMultiplexer::new(tmux, self.server.stand_in())
         }
 
         fn on_terminal(&self, terminal: Option<&str>) -> TmuxMultiplexer {
@@ -984,59 +895,6 @@ mod tests {
     }
 
     #[test]
-    fn the_server_state_gives_the_version_and_the_session_count() {
-        let fixture = MultiplexerFixture::with_holder();
-        fixture.server.start_session("second");
-
-        let state = fixture
-            .server
-            .multiplexer()
-            .server_state()
-            .unwrap()
-            .unwrap();
-
-        assert!(state.version().starts_with('3'));
-        assert_eq!(state.sessions(), 2);
-    }
-
-    #[test]
-    fn a_live_server_without_sessions_holds_zero_sessions() {
-        let fixture = MultiplexerFixture::with_holder();
-        fixture
-            .server
-            .text(&["set-option", "-s", "exit-empty", "off"]);
-        fixture.server.text(&["kill-session", "-t", "=holder:"]);
-
-        let state = fixture
-            .server
-            .multiplexer()
-            .server_state()
-            .unwrap()
-            .unwrap();
-
-        assert_eq!(state.sessions(), 0);
-    }
-
-    #[test]
-    fn an_absent_server_has_no_state() {
-        let fixture = MultiplexerFixture::new();
-
-        assert_eq!(fixture.server.multiplexer().server_state().unwrap(), None);
-    }
-
-    #[test]
-    fn a_socket_without_access_is_an_error_and_not_an_absent_server() {
-        let fixture = MultiplexerFixture::with_holder();
-        let directory = fixture.server.directory();
-        fs::set_permissions(directory, fs::Permissions::from_mode(0o000)).unwrap();
-
-        let state = fixture.server.multiplexer().server_state();
-
-        fs::set_permissions(directory, fs::Permissions::from_mode(0o700)).unwrap();
-        assert!(state.is_err(), "{state:?}");
-    }
-
-    #[test]
     fn a_tmux_variable_naming_another_server_is_a_caller_in_other_tmux() {
         let fixture = MultiplexerFixture::new();
         let other = format!(
@@ -1056,80 +914,6 @@ mod tests {
         });
 
         assert_eq!(callers, [true, false, false]);
-    }
-
-    #[test]
-    fn a_server_started_with_the_render_matches_it() {
-        let fixture = MultiplexerFixture::with_holder();
-
-        let running = fixture
-            .server
-            .multiplexer()
-            .server_config(&ReturnKey::default())
-            .unwrap()
-            .unwrap();
-
-        assert!(running.is_current());
-        assert_eq!(running.return_key(), Some(&ReturnKey::default()));
-    }
-
-    #[test]
-    fn applying_another_return_key_rebinds_and_records_the_new_render() {
-        let fixture = MultiplexerFixture::with_holder();
-        let multiplexer = fixture.server.multiplexer();
-        let alt_x = ReturnKey::parse("M-x").unwrap();
-        let before = multiplexer.server_config(&alt_x).unwrap().unwrap();
-
-        multiplexer.apply_config(&alt_x).unwrap();
-
-        let keys = fixture.server.text(&["list-keys", "-T", "root"]);
-        let detaching: Vec<&str> = keys
-            .lines()
-            .filter(|line| line.ends_with(" detach-client"))
-            .filter_map(|line| line.split_whitespace().nth(3))
-            .collect();
-        let after = multiplexer.server_config(&alt_x).unwrap().unwrap();
-        let written = fs::read_to_string(fixture.server.config()).unwrap();
-        assert!(written.contains("bind-key -T root 'M-x' detach-client"));
-        assert!(!before.is_current());
-        assert_eq!(detaching, ["M-x"]);
-        assert!(after.is_current());
-        assert_eq!(
-            fixture
-                .server
-                .text(&["show-options", "-g", "-v", "@ringleader_config"]),
-            TmuxServerConfig::new(&alt_x).hash()
-        );
-    }
-
-    #[test]
-    fn an_error_in_the_user_file_still_applies_the_new_return_key() {
-        let fixture = MultiplexerFixture::new();
-        let user_file = fixture.server.directory().join("user.conf");
-        fs::write(&user_file, "set -g histroy-limit 5000\n").unwrap();
-        let multiplexer = fixture.sourcing(&user_file);
-        multiplexer
-            .create_session(&fixture.spec("fix-auth"))
-            .unwrap();
-        let alt_x = ReturnKey::parse("M-x").unwrap();
-
-        multiplexer.apply_config(&alt_x).unwrap();
-
-        let running = multiplexer.server_config(&alt_x).unwrap().unwrap();
-        assert!(running.is_current());
-    }
-
-    #[test]
-    fn an_absent_server_has_no_config_to_compare() {
-        let fixture = MultiplexerFixture::new();
-
-        let running = fixture
-            .server
-            .multiplexer()
-            .server_config(&ReturnKey::default())
-            .unwrap();
-
-        assert_eq!(running, None);
     }
 
     #[test]

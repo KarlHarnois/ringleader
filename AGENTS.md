@@ -178,6 +178,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── tmux_launch.rs        # TmuxLaunch, ringleader-created and ringleader-done handling, rollback, tag move
     │   ├── tmux_listing.rs       # TmuxListing, parses list-panes, list-windows, list-keys, and server rows
     │   ├── tmux_multiplexer.rs   # TmuxMultiplexer
+    │   ├── private_server.rs     # PrivateServer, the private server's config files, return binding check, state, and config reapply
     │   ├── tmux_server_config.rs # TmuxServerConfig, the generated config of the private tmux server, its hash, and the script that reapplies it
     │   └── leftover_bindings_file.rs # LeftoverBindingsFile, reads the bindings.json an earlier Ringleader left
     ├── ui/
