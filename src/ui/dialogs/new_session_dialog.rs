@@ -250,6 +250,7 @@ mod tests {
             "Type to search · ↑ ↓ ctrl-j ctrl-k choose · Enter pick · Esc back";
         const SEVEN_LINE_PROMPT: &'static str = "one\ntwo\nthree\nfour\nfive\nsix\nseven";
         const FULL_HEIGHT: usize = 20;
+        const SHORT_HEIGHT: usize = 12;
         const ONE_ROW_FIELDS: usize = 3;
         const NO_SPARE_ROWS_HEIGHT: usize = NewSessionDialog::FIXED_LINES + Self::ONE_ROW_FIELDS;
 
@@ -668,7 +669,10 @@ mod tests {
         DialogFixture::search(&mut dialog, &service, "gate");
         DialogFixture::settle(&mut dialog, |text| text.contains("1/1 repos under ~"));
 
-        assert!(DialogFixture::shown_at(&dialog, 12).ends_with(DialogFixture::SEARCH_HINTS));
+        assert!(
+            DialogFixture::shown_at(&dialog, DialogFixture::SHORT_HEIGHT)
+                .ends_with(DialogFixture::SEARCH_HINTS)
+        );
     }
 
     #[test]
@@ -681,7 +685,10 @@ mod tests {
             "fatal: invalid reference ".repeat(6)
         ));
 
-        assert!(DialogFixture::shown_at(&dialog, 12).ends_with(DialogFixture::PROMPT_HINTS));
+        assert!(
+            DialogFixture::shown_at(&dialog, DialogFixture::SHORT_HEIGHT)
+                .ends_with(DialogFixture::PROMPT_HINTS)
+        );
     }
 
     #[test]
