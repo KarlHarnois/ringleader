@@ -97,7 +97,3 @@ Every command accepts `--config <path>` and `--log-level <level>`. The log is at
 ## Git credentials
 
 Git can never prompt in the terminal during a Ringleader operation. Credentials that git needs during checkout must come from a credential helper, an askpass program, or `ssh-agent`.
-
-## License
-
-MIT

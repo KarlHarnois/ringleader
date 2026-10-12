@@ -1,6 +1,6 @@
 # Ringleader agent guide
 
-This file is the living reference for agents working in this repository. `docs/plans/v1-bootstrap.md` is the v1 plan, kept as a historical record, and `docs/plans/v1-implementation-log.md` records the decisions made while implementing it. Neither replaces this file.
+This file is the living reference for agents working in this repository.
 
 ## Ground rules
 
@@ -52,10 +52,6 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
 ├── .github/workflows/ci.yml
 ├── README.md               # human readers, terse
 ├── AGENTS.md               # agent repo documentation, living
-├── docs/
-│   └── plans/
-│       ├── v1-bootstrap.md  # v1 plan, historical record
-│       └── v1-implementation-log.md  # decisions made while implementing the v1 plan
 ├── tests/fixtures/         # fake config, registry, tmux and git output
 └── src/
     ├── main.rs             # fn main and CompositionRoot
@@ -167,12 +163,12 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── live_process.rs       # LiveProcess, one /proc entry
     │   ├── signal_flags.rs       # SignalFlags, the SIGHUP, SIGINT, SIGTERM, and SIGQUIT flags
     │   ├── durable_file.rs       # DurableFile, synced temp file renamed over the target
-    │   ├── tmux_command.rs       # TmuxCommand, socket and config args, `-u` and `-N`, child environment, labeled output, exact targets, `#` and `;` escaping, CallerProcess
+    │   ├── tmux_command.rs       # TmuxCommand, socket and config args, `-u` and `-N`, child environment, labeled output, `#` and `;` escaping, CallerProcess
     │   ├── caller_process.rs     # CallerProcess, the parent chain is_inside_client reads from /proc
     │   ├── tmux_error.rs         # TmuxError
     │   ├── tmux_sequence.rs      # TmuxSequence, `;`-separated commands with `#` and `;` escaping
     │   ├── tmux_output.rs        # TmuxOutput, labeled lines and the zero-session errors
-    │   ├── tmux_scripts.rs       # TmuxScripts, every tmux command sequence the multiplexer sends
+    │   ├── tmux_scripts.rs       # TmuxScripts, every tmux command sequence the multiplexer sends, exact targets, start directories
     │   ├── tmux_launch.rs        # TmuxLaunch, ringleader-created and ringleader-done handling, rollback, tag move
     │   ├── tmux_listing.rs       # TmuxListing, parses list-panes, list-windows, and list-clients rows and @ringleader_meta
     │   ├── tmux_multiplexer.rs   # TmuxMultiplexer
@@ -245,13 +241,14 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
 - `domain` never imports `crossterm`, `ratatui`, `std::process`, or any adapter.
 - `application` defines traits and use cases, never shells out, never touches the filesystem directly, and never reads the system clock. Ports are traits in `application/ports/`, and adapters implement them.
 - `ui` calls the `SessionService` facade only. `SessionLifecycle`, `SessionMonitor`, `SessionAccess`, `RepoCatalog`, and `Doctor` are composed by the facade and are not called from `ui` or `cli.rs`.
-- One primary type per file, named after it in snake case. Supporting types owned by the primary type live in the same file. Unit tests live inline. `mod.rs` declares and re-exports only. The tree in this file is the file contract: every listed file exists and holds its one type, and primary types are never merged into one file. Source files target under 200 lines excluding tests. When one outgrows that, extract its largest behavior-bearing type into its own file. A commit that adds a file under `src/` that the tree does not list, or moves, renames, or removes a listed file, updates the tree in this file in the same commit.
+- One primary type per file, named after it in snake case. Supporting types owned by the primary type live in the same file. Unit tests live inline. `mod.rs` declares and re-exports only. The tree in this file is the file contract: every listed file exists and holds its one type, and primary types are never merged into one file. Source files target under 200 lines excluding tests, and the files under `src/test_support/` count as tests. When one outgrows that, extract its largest behavior-bearing type into its own file. A file may stay over the target when its primary type is the only behavior-bearing type left in it. The types the next rule places in `cli.rs` and `app.rs` stay there even when that keeps the file over the target. Never split one type's own behavior across new collaborators only to meet the target. A commit that adds a file under `src/` that the tree does not list, or moves, renames, or removes a listed file, updates the tree in this file in the same commit.
 - `cli.rs` owns the clap argument structs (`ListArgs`, `NewArgs`, and so on) as support types of `Cli`. They get no files of their own. The binding guard and the exit notice are support types of `App` in `app.rs`.
 - Prefer a separate file for a type that is used across modules, carries behavior or invariants, and changes for its own reasons. Merging files later is mechanical, and splitting a file that grew is disruptive. The reverse also holds: do not invent files for types that need none.
 - `src/test_support/` is `#[cfg(test)]` only and never appears in the binary. It holds the hand-written doubles and fixtures that tests across modules share.
 - Other support types, such as a parser result, a doctor finding, a session spec, or a dialog's in-progress state, live in their primary type's file and get no tree entry.
 - No code below `main` calls `std::env::current_exe`, reads the process environment (including `$TMUX`, `$TMUX_PANE`, `$HOME`, and `$SHELL`) or the process cwd, resolves XDG paths, or asks which terminal standard input is. `main` reads them once and injects them, with environment values in the `ProcessEnvironment` snapshot. `ProcessEnvironment::capture` reads the terminal name of standard input with `libc::ttyname_r` on descriptor 0, in the type's only `unsafe` block.
 - Every `unsafe` block carries one `// SAFETY:` comment that states why the call is sound, and is confined to one adapter method.
+- Every tmux target is exact: `=<session>:` from `TmuxScripts::exact`, a window id, or a pane id. Never pass a bare `-t <name>`, because tmux resolves a name with no exact match by prefix, so `fix` would reach `fix-auth`. Every `new-session`, `new-window`, and `respawn-window` passes the worktree through `TmuxScripts::start_in`, because without `-c` tmux starts the pane in the caller's directory and still exits 0.
 
 ## Wiring
 
@@ -291,4 +288,3 @@ A command interrupted by a signal before its use case starts never runs it, and 
 
 - `README.md` stays terse and human-facing: what Ringleader is, install, first run, keys, the CLI synopsis, and the exit codes. No architecture and no agent instructions.
 - The repository holds no `CLAUDE.md` or `CLAUDE.local.md`, because either would hide this file from Claude Code. If one is ever needed, its first line is `@AGENTS.md`.
-- Plans for future work go in one file per effort at `docs/plans/YYYY-MM-DD-slug.md`, with a `> Status:` header of `active`, `completed`, or `abandoned`.
