@@ -107,13 +107,6 @@ impl RegistryAudit {
                 recorded.branch_prefix()
             ));
         }
-        if recorded.tmux_prefix() != current.tmux_prefix() {
-            report.info(format!(
-                "session {name} keeps its tmux name {} from the earlier prefix {}",
-                session.tmux_name(),
-                recorded.tmux_prefix()
-            ));
-        }
     }
 
     fn report_orphans(&self, entries: &[Session], config: &Config, report: &mut DoctorReport) {

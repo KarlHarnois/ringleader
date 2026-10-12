@@ -38,10 +38,6 @@ To inspect the sessions with tmux itself, run `tmux -S "$XDG_RUNTIME_DIR/ringlea
 
 Your own `~/.tmux.conf` never loads on Ringleader's server. Put preferences such as `history-limit`, colors, or copy-mode keys in `~/.config/ringleader/tmux.conf` instead. Ringleader's server loads that file first, so the return key, the missing prefix key, and its other settings still apply. Changes to that file apply when the server next starts, which happens after its last session ends.
 
-## Upgrading
-
-The `tmux_prefix` setting no longer does anything: new sessions are always named `ringleader-<name>`.
-
 ## Agent environment
 
 An agent starts with a fixed baseline of variables such as `PATH` and `HOME`. Its `env` list copies more variables from the environment Ringleader runs in, and its `set_env` table sets fixed values. A `set_env` value is used as written, except that a leading `~/` expands to your home. Variables such as `$HOME` are not expanded. The values sit in plain text in the config, so pass secrets through `env` instead. To run Claude Code under two accounts, add one agent per account and pick it when you create a session:

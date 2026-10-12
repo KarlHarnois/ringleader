@@ -417,35 +417,6 @@ mod tests {
     }
 
     #[test]
-    fn an_entry_recorded_under_an_earlier_tmux_prefix_is_an_info_line() {
-        let session = DoctorFixture::session();
-        let naming = crate::domain::NamingScheme::new(
-            Path::new(ServiceFixture::WORKTREE_ROOT),
-            "ringleader/",
-            "agents-",
-        );
-        let tmux = crate::domain::TmuxAddress::new("agents-fix-auth", session.socket_path());
-        let recorded = Session::new(
-            session.name().clone(),
-            session.metadata().clone(),
-            crate::domain::Registration::new(tmux, naming, ServiceFixture::CREATED_AT),
-        );
-        let fixture = DoctorFixture::healthy().with_sessions(&[recorded]);
-
-        let lines = DoctorFixture::lines(&fixture);
-
-        assert!(lines.contains(
-            &"info: session fix-auth keeps its tmux name agents-fix-auth from the earlier prefix agents-"
-                .to_string()
-        ));
-        assert!(
-            !lines
-                .iter()
-                .any(|line| line.contains("differ from the config"))
-        );
-    }
-
-    #[test]
     fn an_entry_under_another_branch_prefix_is_a_warning() {
         let session = DoctorFixture::session();
         let naming = crate::domain::NamingScheme::for_new_sessions(
