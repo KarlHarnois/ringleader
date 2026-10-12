@@ -20,6 +20,7 @@ pub mod mount_table;
 pub mod private_server;
 pub mod process_environment;
 pub mod raw_config;
+pub mod running_config;
 pub mod server_files;
 pub mod signal_flags;
 pub mod start_point_resolver;
