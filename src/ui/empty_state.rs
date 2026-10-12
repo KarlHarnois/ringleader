@@ -105,7 +105,7 @@ mod tests {
 
         let logo_bottom = rows
             .iter()
-            .position(|row| row.contains(EmptyState::LOGO[4]));
+            .position(|row| row.contains(EmptyState::logo_bottom_row()));
         let message = rows.iter().position(|row| row.contains("No sessions yet."));
         assert_eq!(message, logo_bottom.map(|bottom| bottom + 2));
     }
