@@ -392,6 +392,24 @@ mod tests {
     }
 
     #[test]
+    fn rename_onto_a_pushed_unmarked_current_branch_succeeds() {
+        let session = ServiceFixture::session_on_branch("auth", "fix-auth");
+        let repo = Path::new(ServiceFixture::REPO);
+        let fixture = RenameFixture::on_branch("auth", "fix-auth").with_workspace(
+            ServiceFixture::workspace_for(&[&session])
+                .with_published_branch(repo, "fix-auth")
+                .without_marker(repo, "fix-auth"),
+        );
+
+        let renamed = fixture
+            .service()
+            .rename_session("auth", "fix-auth")
+            .unwrap();
+
+        assert_eq!(renamed.name().as_str(), "fix-auth");
+    }
+
+    #[test]
     fn a_failed_tmux_rename_rolls_the_branch_back() {
         let fixture = RenameFixture::live(&["fix-auth"]);
         fixture.multiplexer().fail(
