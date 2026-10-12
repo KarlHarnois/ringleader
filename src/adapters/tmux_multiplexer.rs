@@ -50,7 +50,7 @@ impl TmuxMultiplexer {
         spec: &SessionSpec,
         prepared: &PreparedLaunch,
     ) -> Result<PathBuf, MultiplexerError> {
-        self.prepare_server(spec)?;
+        self.write_server_files(&self.server_config_for(spec.return_key()))?;
         let sequence = TmuxScripts::create_session(spec, prepared.words());
         let output = self.tmux.create(&sequence, spec.removed_env_names())?;
         let launched = TmuxLaunch::new(&self.tmux).run(&sequence, output)?;
@@ -59,11 +59,10 @@ impl TmuxMultiplexer {
         Ok(socket)
     }
 
-    fn prepare_server(&self, spec: &SessionSpec) -> Result<(), MultiplexerError> {
-        let render = self.server_config_for(spec.return_key()).render();
+    fn write_server_files(&self, render: &TmuxServerConfig) -> Result<(), MultiplexerError> {
         self.tmux
             .server()
-            .prepare(&render)
+            .prepare(&render.render())
             .map_err(|error| MultiplexerError::ServerFiles {
                 detail: error.to_string(),
             })
@@ -365,6 +364,7 @@ impl Multiplexer for TmuxMultiplexer {
             .and_then(RunningConfig::return_key)
             .filter(|previous| *previous != return_key);
         let render = self.server_config_for(return_key);
+        self.write_server_files(&render)?;
         let sequence = TmuxServerConfig::reapply_script(previous_key);
         let output = self
             .tmux
@@ -1089,6 +1089,8 @@ mod tests {
             .filter_map(|line| line.split_whitespace().nth(3))
             .collect();
         let after = multiplexer.server_config(&alt_x).unwrap().unwrap();
+        let written = fs::read_to_string(fixture.server.config()).unwrap();
+        assert!(written.contains("bind-key -T root 'M-x' detach-client"));
         assert!(!before.is_current());
         assert_eq!(detaching, ["M-x"]);
         assert!(after.is_current());
