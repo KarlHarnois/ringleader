@@ -8,7 +8,7 @@ use super::agent_picker::AgentPicker;
 use super::dialog_labels::DialogLabels;
 use super::new_session_field::NewSessionField;
 use super::new_session_layout::NewSessionLayout;
-use super::prompt_field::PromptField;
+use super::prompt_field::{PromptField, PromptStyle};
 use super::repo_picker::RepoPicker;
 use super::text_field::TextField;
 use crate::ui::text_fit::TextFit;
@@ -57,8 +57,8 @@ impl<'a> NewSessionView<'a> {
         let upper = self.upper_lines(labels.field_width(area), layout.repo_room(), labels, theme);
         let [upper_area, prompt_area, error_area, hints_area] = layout.areas(upper.len());
         self.render_upper(frame, upper_area, upper);
-        let prompt_style = self.focus_style(NewSessionField::Prompt, theme);
-        self.prompt.render(frame, prompt_area, labels, prompt_style);
+        self.prompt
+            .render(frame, prompt_area, labels, self.prompt_style(theme));
         frame.render_widget(Paragraph::new(errors), error_area);
         frame.render_widget(Line::styled(self.hints(), theme.dim()), hints_area);
     }
@@ -127,6 +127,14 @@ impl<'a> NewSessionView<'a> {
             theme.selected()
         } else {
             theme.base()
+        }
+    }
+
+    fn prompt_style(&self, theme: &Theme) -> PromptStyle {
+        if self.focus == NewSessionField::Prompt {
+            PromptStyle::focused(theme)
+        } else {
+            PromptStyle::unfocused(theme)
         }
     }
 

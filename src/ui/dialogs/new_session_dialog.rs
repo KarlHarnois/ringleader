@@ -267,6 +267,16 @@ mod tests {
             screen.content().iter().any(Self::is_cursor)
         }
 
+        fn underlined(dialog: &NewSessionDialog) -> String {
+            let screen = Self::screen(dialog, Self::FULL_HEIGHT);
+            screen
+                .content()
+                .iter()
+                .filter(|cell| cell.modifier.contains(Modifier::UNDERLINED))
+                .map(Cell::symbol)
+                .collect()
+        }
+
         fn is_cursor(cell: &Cell) -> bool {
             cell.modifier.contains(Modifier::REVERSED)
         }
@@ -720,7 +730,25 @@ mod tests {
     }
 
     #[test]
-    fn a_selection_in_the_prompt_shows_like_the_cursor_and_hides_with_it() {
+    fn a_selection_in_the_prompt_is_underlined_apart_from_the_cursor() {
+        let (mut dialog, service) =
+            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
+        DialogFixture::type_text(&mut dialog, &service, "fix the tests");
+        for _ in 0.."the tests".len() {
+            DialogFixture::press(&mut dialog, &service, KeyCode::Left);
+        }
+        let select_right = KeyEvent::new(KeyCode::Right, KeyModifiers::SHIFT);
+
+        for _ in 0.."the".len() {
+            dialog.handle_key(&select_right, &service);
+        }
+
+        assert_eq!(DialogFixture::underlined(&dialog), "the");
+        assert!(DialogFixture::text_with_cursor(&dialog).contains("Prompt    fix the█tests\n"));
+    }
+
+    #[test]
+    fn a_selection_in_the_prompt_hides_with_the_cursor() {
         let (mut dialog, service) =
             DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
         DialogFixture::type_text(&mut dialog, &service, "fix the tests");
@@ -728,11 +756,12 @@ mod tests {
         for _ in 0.."tests".len() {
             dialog.handle_key(&select_left, &service);
         }
-        let focused = DialogFixture::text_with_cursor(&dialog);
+        let focused = DialogFixture::underlined(&dialog);
 
         DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
 
-        assert!(focused.contains("Prompt    fix the █████\n"));
+        assert_eq!(focused, "tests");
+        assert_eq!(DialogFixture::underlined(&dialog), "");
         assert!(!DialogFixture::shows_a_cursor(&dialog));
     }
 

@@ -11,6 +11,7 @@ use ratatui_textarea::{CursorMove, DataCursor, TextArea, WrapMode};
 
 use super::dialog_labels::DialogLabels;
 use super::new_session_field::NewSessionField;
+use crate::ui::theme::Theme;
 
 pub struct PromptField {
     editor: RefCell<TextArea<'static>>,
@@ -58,12 +59,12 @@ impl PromptField {
         Self::wrapped_rows(&self.editor.borrow(), Self::text_area(field)).min(Self::MOST_ROWS)
     }
 
-    pub fn render(&self, frame: &mut Frame, area: Rect, labels: DialogLabels, focus_style: Style) {
+    pub fn render(&self, frame: &mut Frame, area: Rect, labels: DialogLabels, style: PromptStyle) {
         let label = labels.labeled(NewSessionField::Prompt.label(), vec![Line::default()]);
         frame.render_widget(Paragraph::new(label), area);
         let field = labels.field_area(area);
-        self.render_text(frame, Self::text_area(field), focus_style);
-        self.paint_cursor(frame.buffer_mut(), field, focus_style);
+        self.render_text(frame, Self::text_area(field), style.selection);
+        self.paint_cursor(frame.buffer_mut(), field, self.cursor_style(style));
     }
 
     fn breaks_line(key: &KeyEvent) -> bool {
@@ -127,6 +128,22 @@ impl PromptField {
         text
     }
 
+    fn cursor_style(&self, style: PromptStyle) -> Style {
+        if self.cursor_is_selected() {
+            style.cursor_over_selection()
+        } else {
+            style.cursor
+        }
+    }
+
+    fn cursor_is_selected(&self) -> bool {
+        let editor = self.editor.borrow();
+        let DataCursor(row, column) = editor.cursor();
+        editor
+            .selection_range()
+            .is_some_and(|(start, end)| start == (row, column) && start != end)
+    }
+
     fn paint_cursor(&self, buffer: &mut Buffer, field: Rect, cursor_style: Style) {
         let position = self.cursor_position(Self::text_area(field));
         if field.contains(position) {
@@ -144,5 +161,31 @@ impl PromptField {
             text.x.saturating_add(column),
             text.y.saturating_add(row.saturating_sub(top_row)),
         )
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct PromptStyle {
+    cursor: Style,
+    selection: Style,
+}
+
+impl PromptStyle {
+    pub fn focused(theme: &Theme) -> Self {
+        Self {
+            cursor: theme.selected(),
+            selection: theme.selected_text(),
+        }
+    }
+
+    pub fn unfocused(theme: &Theme) -> Self {
+        Self {
+            cursor: theme.base(),
+            selection: theme.base(),
+        }
+    }
+
+    fn cursor_over_selection(self) -> Style {
+        self.cursor.patch(self.selection)
     }
 }
