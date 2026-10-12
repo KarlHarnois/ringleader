@@ -183,6 +183,11 @@ impl TmuxMultiplexer {
         TmuxServerConfig::new(return_key).sourcing(self.tmux.server().user_config())
     }
 
+    fn runs_render(&self, render: &TmuxServerConfig) -> Result<bool, MultiplexerError> {
+        let running = self.running_config()?;
+        Ok(running.is_some_and(|running| running.hash() == render.hash()))
+    }
+
     fn running_config(&self) -> Result<Option<RunningConfig>, MultiplexerError> {
         let query = TmuxScripts::server_value(TmuxListing::CONFIG_FORMAT);
         let output = self.tmux.query(&query)?;
@@ -359,10 +364,19 @@ impl Multiplexer for TmuxMultiplexer {
             .as_ref()
             .and_then(RunningConfig::return_key)
             .filter(|previous| *previous != return_key);
-        let render = self.server_config_for(return_key).render();
+        let render = self.server_config_for(return_key);
         let sequence = TmuxScripts::reapply(previous_key);
-        let output = self.tmux.change_with_input(&sequence, render.as_bytes())?;
+        let output = self
+            .tmux
+            .change_with_input(&sequence, render.render().as_bytes())?;
         if output.succeeded() {
+            return Ok(());
+        }
+        if self.runs_render(&render)? {
+            log::warn!(
+                "the tmux server applied Ringleader's config, but a line, likely in the user tmux file, failed: {}",
+                output.stderr()
+            );
             return Ok(());
         }
         Err(TmuxError::failed("source-file", &output).into())
@@ -392,7 +406,7 @@ impl From<TmuxError> for MultiplexerError {
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::OsString;
+    use std::ffi::{OsStr, OsString};
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
     use std::os::unix::net::UnixListener;
@@ -401,6 +415,7 @@ mod tests {
     use super::*;
     use crate::adapters::Deadlines;
     use crate::adapters::process_environment::ProcessEnvironment;
+    use crate::adapters::tmux_command::ServerFiles;
     use crate::adapters::tmux_sequence::TmuxSequence;
     use crate::domain::{RepoName, ReturnKey, SessionRepo, SessionWorktree};
     use crate::test_support::TmuxTestServer;
@@ -499,6 +514,13 @@ mod tests {
 
         fn created_pane(&self, tmux_name: &str) -> String {
             self.server.pane_of(&format!("={tmux_name}:0.0"))
+        }
+
+        fn sourcing(&self, user_file: &Path) -> TmuxMultiplexer {
+            let files =
+                ServerFiles::new(self.server.socket(), self.server.config()).sourcing(user_file);
+            let tmux = TmuxCommand::new(OsStr::new("tmux"), &files, &self.server.environment());
+            TmuxMultiplexer::new(tmux, self.server.stand_in())
         }
 
         fn on_terminal(&self, terminal: Option<&str>) -> TmuxMultiplexer {
@@ -1052,6 +1074,23 @@ mod tests {
                 .text(&["show-options", "-g", "-v", "@ringleader_config"]),
             TmuxServerConfig::new(&alt_x).hash()
         );
+    }
+
+    #[test]
+    fn an_error_in_the_user_file_still_applies_the_new_return_key() {
+        let fixture = MultiplexerFixture::new();
+        let user_file = fixture.server.directory().join("user.conf");
+        fs::write(&user_file, "set -g histroy-limit 5000\n").unwrap();
+        let multiplexer = fixture.sourcing(&user_file);
+        multiplexer
+            .create_session(&fixture.spec("fix-auth"))
+            .unwrap();
+        let alt_x = ReturnKey::parse("M-x").unwrap();
+
+        multiplexer.apply_config(&alt_x).unwrap();
+
+        let running = multiplexer.server_config(&alt_x).unwrap().unwrap();
+        assert!(running.is_current());
     }
 
     #[test]
