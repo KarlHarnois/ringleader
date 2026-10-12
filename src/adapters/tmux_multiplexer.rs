@@ -332,8 +332,7 @@ impl Multiplexer for TmuxMultiplexer {
     }
 
     fn server_state(&self) -> Result<Option<ServerState>, MultiplexerError> {
-        let query = TmuxScripts::server_value(TmuxListing::SERVER_FORMAT);
-        let output = self.tmux.query(&query)?;
+        let output = self.tmux.query(&TmuxScripts::server_state())?;
         if let Some(state) = TmuxListing::new(&output).server_state() {
             return Ok(Some(state));
         }
@@ -951,7 +950,25 @@ mod tests {
             .unwrap();
 
         assert!(state.version().starts_with('3'));
-        assert_eq!(state.sessions(), Some(2));
+        assert_eq!(state.sessions(), 2);
+    }
+
+    #[test]
+    fn a_live_server_without_sessions_holds_zero_sessions() {
+        let fixture = MultiplexerFixture::with_holder();
+        fixture
+            .server
+            .text(&["set-option", "-s", "exit-empty", "off"]);
+        fixture.server.text(&["kill-session", "-t", "=holder:"]);
+
+        let state = fixture
+            .server
+            .multiplexer()
+            .server_state()
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(state.sessions(), 0);
     }
 
     #[test]

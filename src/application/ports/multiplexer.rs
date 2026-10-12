@@ -155,11 +155,11 @@ impl AgentLaunch {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerState {
     version: String,
-    sessions: Option<u32>,
+    sessions: usize,
 }
 
 impl ServerState {
-    pub fn new(version: &str, sessions: Option<u32>) -> Self {
+    pub fn new(version: &str, sessions: usize) -> Self {
         Self {
             version: version.to_string(),
             sessions,
@@ -170,7 +170,7 @@ impl ServerState {
         &self.version
     }
 
-    pub fn sessions(&self) -> Option<u32> {
+    pub fn sessions(&self) -> usize {
         self.sessions
     }
 }

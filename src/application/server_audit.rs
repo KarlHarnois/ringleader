@@ -99,13 +99,11 @@ impl ServerAudit {
     fn report_running(state: &ServerState, client: Option<&str>, report: &mut DoctorReport) {
         let version = state.version();
         ToolVersion::new(version).audit("tmux server", Self::MINIMUM_TMUX, report);
-        let sessions = state.sessions().map_or_else(
-            || "an unknown number of".to_string(),
-            |count| count.to_string(),
-        );
-        report.info(format!(
-            "Ringleader's tmux server holds {sessions} sessions"
-        ));
+        let sessions = match state.sessions() {
+            1 => "1 session".to_string(),
+            count => format!("{count} sessions"),
+        };
+        report.info(format!("Ringleader's tmux server holds {sessions}"));
         if let Some(client) = client.filter(|client| *client != version) {
             report.warning(format!(
                 "Ringleader's tmux server runs tmux {version} but the client is tmux {client}, so the server predates a tmux upgrade; once its sessions are idle, end it with kill-server so the next session starts a new one"
@@ -319,7 +317,7 @@ mod tests {
         let lines = AuditFixture::lines(&ServiceFixture::new());
 
         assert!(lines.contains(&"info: tmux server 3.6a".to_string()));
-        assert!(lines.contains(&"info: Ringleader's tmux server holds 1 sessions".to_string()));
+        assert!(lines.contains(&"info: Ringleader's tmux server holds 1 session".to_string()));
     }
 
     #[test]

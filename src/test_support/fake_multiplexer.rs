@@ -64,7 +64,7 @@ impl FakeMultiplexer {
                 attached: Vec::new(),
                 calls: Vec::new(),
                 client_version: "3.6a".to_string(),
-                server: Some(ServerState::new("3.6a", Some(1))),
+                server: Some(ServerState::new("3.6a", 1)),
                 config_current: true,
                 server_return_key: Some(ReturnKey::default()),
             }),
@@ -113,7 +113,7 @@ impl FakeMultiplexer {
     pub fn with_versions(self, client: &str, server: Option<&str>) -> Self {
         self.edit(|state| {
             state.client_version = client.to_string();
-            state.server = server.map(|version| ServerState::new(version, Some(1)));
+            state.server = server.map(|version| ServerState::new(version, 1));
         });
         self
     }

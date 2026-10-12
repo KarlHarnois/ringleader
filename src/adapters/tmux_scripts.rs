@@ -150,6 +150,14 @@ impl TmuxScripts {
         TmuxSequence::new().command(["display-message", "-p", "-t", pane, format])
     }
 
+    pub fn server_state() -> TmuxSequence {
+        Self::server_value(TmuxListing::SERVER_FORMAT).command([
+            "list-sessions",
+            "-F",
+            TmuxListing::SESSION_FORMAT,
+        ])
+    }
+
     pub fn server_value(format: &str) -> TmuxSequence {
         TmuxSequence::new().command(["display-message", "-p", format])
     }

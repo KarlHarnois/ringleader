@@ -20,7 +20,8 @@ impl<'a> TmuxListing<'a> {
     pub const AGENT_FORMAT: &'static str = "ringleader-agent #{pane_id} #{@ringleader_agent}";
     pub const PANE_PID_FORMAT: &'static str = "ringleader-pane-pid #{pane_dead} #{pane_pid}";
     pub const TTY_FORMAT: &'static str = "ringleader-tty #{pane_tty}";
-    pub const SERVER_FORMAT: &'static str = "ringleader-server #{version} #{server_sessions}";
+    pub const SERVER_FORMAT: &'static str = "ringleader-server #{version}";
+    pub const SESSION_FORMAT: &'static str = "ringleader-session";
     pub const CONFIG_FORMAT: &'static str =
         "ringleader-config #{@ringleader_config} #{@ringleader_return_key}";
     const TAGGED: &'static str = "1";
@@ -57,9 +58,9 @@ impl<'a> TmuxListing<'a> {
     }
 
     pub fn server_state(&self) -> Option<ServerState> {
-        let values = self.output.first("ringleader-server")?;
-        let (version, sessions) = values.split_once(' ').unwrap_or((values, ""));
-        Some(ServerState::new(version, sessions.parse().ok()))
+        let version = self.output.first("ringleader-server")?;
+        let sessions = self.output.labeled(Self::SESSION_FORMAT).count();
+        Some(ServerState::new(version, sessions))
     }
 
     pub fn running_config(&self) -> Option<RunningConfig> {
