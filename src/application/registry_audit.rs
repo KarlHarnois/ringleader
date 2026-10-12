@@ -69,7 +69,7 @@ impl RegistryAudit {
             .workspace
             .branch_exists(session.repo_path(), session.branch())
         {
-            Ok(true) => self.audit_marker(session, report),
+            Ok(true) => self.audit_existing_branch(session, report),
             Ok(false) => report.problem(format!(
                 "session {name}: branch {} is missing",
                 session.branch()
@@ -78,7 +78,6 @@ impl RegistryAudit {
                 report.problem(format!("session {name}: cannot read its branch: {error}"))
             }
         }
-        Self::audit_branch_name(session, report);
         if let Ok(Some(problem)) = self.inspection.leftover_problem(session) {
             report.problem(format!(
                 "session {name}: worktree {} {problem}, remove the directory by hand or run ringleader delete {name} --forget",
@@ -90,27 +89,34 @@ impl RegistryAudit {
         }
     }
 
-    fn audit_branch_name(session: &Session, report: &mut DoctorReport) {
-        if session.has_branch_named_after_it() {
-            return;
-        }
-        report.warning(format!(
-            "session {}: branch {} differs from the session name, rename the session to bring them in line",
-            session.name(),
-            session.branch()
-        ));
-    }
-
-    fn audit_marker(&self, session: &Session, report: &mut DoctorReport) {
-        if let Ok(false) = self
+    fn audit_existing_branch(&self, session: &Session, report: &mut DoctorReport) {
+        match self
             .workspace
             .is_branch_managed(session.repo_path(), session.branch())
         {
-            report.warning(format!(
+            Ok(true) => self.audit_branch_name(session, report),
+            Ok(false) => report.warning(format!(
                 "session {}: branch {} has no Ringleader marker, so delete and rename refuse it; {}",
                 session.name(),
                 session.branch(),
                 BranchOwnership::marking_advice(session)
+            )),
+            Err(_) => {}
+        }
+    }
+
+    fn audit_branch_name(&self, session: &Session, report: &mut DoctorReport) {
+        if session.has_branch_named_after_it() {
+            return;
+        }
+        if let Ok(false) = self
+            .workspace
+            .is_branch_published(session.repo_path(), session.branch())
+        {
+            report.warning(format!(
+                "session {}: branch {} differs from the session name, rename the session to bring them in line",
+                session.name(),
+                session.branch()
             ));
         }
     }

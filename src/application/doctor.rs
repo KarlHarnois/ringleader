@@ -210,6 +210,17 @@ mod tests {
             ServiceFixture::session("fix-auth")
         }
 
+        fn legacy_session() -> Session {
+            ServiceFixture::session_on_branch("fix-auth", "ringleader/fix-auth")
+        }
+
+        fn with_session(session: &Session, workspace: FakeWorkspace) -> ServiceFixture {
+            ServiceFixture::new()
+                .with_sessions(std::slice::from_ref(session))
+                .with_workspace(workspace)
+                .with_host(ServiceFixture::host_for(&[session]))
+        }
+
         fn healthy() -> ServiceFixture {
             let session = Self::session();
             ServiceFixture::new()
@@ -424,15 +435,42 @@ mod tests {
 
     #[test]
     fn a_branch_that_differs_from_the_session_name_is_a_warning() {
-        let session = ServiceFixture::session_on_branch("fix-auth", "ringleader/fix-auth");
-        let fixture = ServiceFixture::new()
-            .with_sessions(std::slice::from_ref(&session))
-            .with_workspace(ServiceFixture::workspace_for(&[&session]))
-            .with_host(ServiceFixture::host_for(&[&session]));
+        let session = DoctorFixture::legacy_session();
+        let fixture =
+            DoctorFixture::with_session(&session, ServiceFixture::workspace_for(&[&session]));
 
         assert!(DoctorFixture::has_warning(
             &fixture,
             "branch ringleader/fix-auth differs from the session name"
+        ));
+    }
+
+    #[test]
+    fn a_pushed_branch_that_differs_from_the_session_name_is_no_warning() {
+        let session = DoctorFixture::legacy_session();
+        let repo = Path::new(ServiceFixture::REPO);
+        let workspace = ServiceFixture::workspace_for(&[&session])
+            .with_published_branch(repo, session.branch());
+        let fixture = DoctorFixture::with_session(&session, workspace);
+
+        assert!(!DoctorFixture::has_warning(
+            &fixture,
+            "differs from the session name"
+        ));
+    }
+
+    #[test]
+    fn an_unmarked_branch_that_differs_from_the_session_name_gets_only_the_marker_warning() {
+        let session = DoctorFixture::legacy_session();
+        let repo = Path::new(ServiceFixture::REPO);
+        let workspace =
+            ServiceFixture::workspace_for(&[&session]).without_marker(repo, session.branch());
+        let fixture = DoctorFixture::with_session(&session, workspace);
+
+        assert!(DoctorFixture::has_warning(&fixture, "no Ringleader marker"));
+        assert!(!DoctorFixture::has_warning(
+            &fixture,
+            "differs from the session name"
         ));
     }
 
