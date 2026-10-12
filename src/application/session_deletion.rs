@@ -735,6 +735,20 @@ mod tests {
     }
 
     #[test]
+    fn forget_drops_a_session_on_an_unmarked_branch() {
+        let fixture =
+            DeleteFixture::live_fixture().with_workspace(DeleteFixture::unmarked_workspace());
+
+        fixture
+            .service()
+            .delete_session("fix-auth", &DeleteConfirmation::force().forgetting())
+            .unwrap();
+
+        assert!(fixture.registry().sessions().is_empty());
+        assert!(fixture.workspace().state_changing_calls().is_empty());
+    }
+
+    #[test]
     fn a_refused_unmarked_delete_changes_nothing() {
         let fixture =
             DeleteFixture::live_fixture().with_workspace(DeleteFixture::unmarked_workspace());
