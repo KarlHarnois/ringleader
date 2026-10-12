@@ -92,10 +92,6 @@ Every command accepts `--config <path>` and `--log-level <level>`. The log is at
 | 2 | no session with that name |
 | 3 | conflict: a refused guard, an unmanaged session, a session that is live and healthy, or a held lock |
 
-## Git credentials
-
-Git can never prompt in the terminal during a Ringleader operation. Credentials that git needs during checkout must come from a credential helper, an askpass program, or `ssh-agent`.
-
 ## License
 
 MIT
