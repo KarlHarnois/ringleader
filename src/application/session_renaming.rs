@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use super::branch_availability::BranchAvailability;
 use super::branch_ownership::{BranchMutation, BranchOwnership};
 use super::ports::{HostProbe, Multiplexer, SessionRegistry, Workspace};
 use super::reconciliation::{ManagedRow, Reconciliation};
@@ -10,6 +11,7 @@ use crate::domain::{Session, SessionName};
 
 pub struct SessionRenaming {
     ownership: BranchOwnership,
+    branches: BranchAvailability,
     workspace: Arc<dyn Workspace>,
     multiplexer: Arc<dyn Multiplexer>,
     host: Arc<dyn HostProbe>,
@@ -20,6 +22,7 @@ impl SessionRenaming {
     pub fn new(ports: &ServicePorts) -> Self {
         Self {
             ownership: BranchOwnership::new(ports),
+            branches: BranchAvailability::new(ports),
             workspace: ports.repos().workspace(),
             multiplexer: ports.tmux().multiplexer(),
             host: ports.repos().host(),
@@ -82,14 +85,11 @@ impl SessionRenaming {
                 renamed.name()
             )));
         }
-        let repo = row.session().repo_path();
-        if !keep_branch && self.workspace.branch_exists(repo, renamed.branch())? {
-            return Err(ServiceError::Conflict(format!(
-                "branch {} already exists",
-                renamed.branch()
-            )));
+        if keep_branch {
+            return Ok(());
         }
-        Ok(())
+        self.branches
+            .refuse_taken(row.session().repo_path(), renamed.branch())
     }
 
     fn rename_tmux_session(
@@ -413,6 +413,30 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(error.exit_code(), 3);
+    }
+
+    #[test]
+    fn rename_refuses_a_name_that_holds_other_branches() {
+        let session = ServiceFixture::session("fix-auth");
+        let fixture = RenameFixture::stopped("fix-auth").with_workspace(
+            ServiceFixture::workspace_for(&[&session]).with_branch(
+                Path::new(ServiceFixture::REPO),
+                "fix-login/draft",
+                ServiceFixture::TIP,
+            ),
+        );
+
+        let error = fixture
+            .service()
+            .rename_session("fix-auth", "fix-login", false)
+            .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("branch fix-login clashes with existing branch fix-login/draft")
+        );
+        assert!(fixture.workspace().state_changing_calls().is_empty());
     }
 
     #[test]

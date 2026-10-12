@@ -151,6 +151,14 @@ impl Workspace for GitWorkspace {
         Ok(entries.iter().any(|entry| entry.branch() == Some(branch)))
     }
 
+    fn first_branch_under(
+        &self,
+        repo: &Path,
+        branch: &str,
+    ) -> Result<Option<String>, WorkspaceError> {
+        GitBranches::new(&self.git).first_under(repo, branch)
+    }
+
     fn mark_branch_managed(&self, repo: &Path, branch: &str) -> Result<(), WorkspaceError> {
         GitBranches::new(&self.git).mark_managed(repo, branch)
     }
@@ -1236,6 +1244,32 @@ mod tests {
             .unwrap();
 
         assert!(branches.is_empty());
+    }
+
+    #[test]
+    fn the_first_branch_under_a_name_is_found() {
+        let fixture = GitTestRepo::new();
+        fixture.git(fixture.path(), &["branch", "feature/login"]);
+
+        let nested = fixture
+            .workspace()
+            .first_branch_under(fixture.path(), "feature")
+            .unwrap();
+
+        assert_eq!(nested.as_deref(), Some("feature/login"));
+    }
+
+    #[test]
+    fn a_branch_sharing_only_the_start_of_a_name_is_not_under_it() {
+        let fixture = GitTestRepo::new();
+        fixture.git(fixture.path(), &["branch", "feature-login"]);
+
+        let nested = fixture
+            .workspace()
+            .first_branch_under(fixture.path(), "feature")
+            .unwrap();
+
+        assert_eq!(nested, None);
     }
 
     #[test]

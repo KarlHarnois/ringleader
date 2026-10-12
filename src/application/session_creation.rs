@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use super::branch_availability::BranchAvailability;
 use super::creation_plan::{CreateRequest, CreationPlan};
 use super::ports::{Clock, HostProbe, Multiplexer, SessionRegistry, StartPoint, Workspace};
 use super::reconciliation::Reconciliation;
@@ -11,6 +12,7 @@ use super::worktree_rollback::WorktreeRollback;
 use crate::domain::{Config, Session};
 
 pub struct SessionCreation {
+    branches: BranchAvailability,
     workspace: Arc<dyn Workspace>,
     multiplexer: Arc<dyn Multiplexer>,
     host: Arc<dyn HostProbe>,
@@ -21,6 +23,7 @@ pub struct SessionCreation {
 impl SessionCreation {
     pub fn new(ports: &ServicePorts) -> Self {
         Self {
+            branches: BranchAvailability::new(ports),
             workspace: ports.repos().workspace(),
             multiplexer: ports.tmux().multiplexer(),
             host: ports.repos().host(),
@@ -85,16 +88,7 @@ impl SessionCreation {
             )));
         }
         self.check_worktree_available(plan, reconciliation)?;
-        if self
-            .workspace
-            .branch_exists(plan.repo_path(), &plan.branch())?
-        {
-            return Err(ServiceError::Conflict(format!(
-                "branch {} already exists",
-                plan.branch()
-            )));
-        }
-        Ok(())
+        self.branches.refuse_taken(plan.repo_path(), &plan.branch())
     }
 
     fn check_worktree_available(
@@ -434,6 +428,26 @@ mod tests {
             CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap_err();
 
         assert!(error.to_string().contains("branch fix-auth already exists"));
+        CreateFixture::assert_nothing_touched(&fixture);
+    }
+
+    #[test]
+    fn create_refuses_a_name_that_holds_other_branches() {
+        let fixture = ServiceFixture::new().with_workspace(FakeWorkspace::default().with_branch(
+            Path::new(ServiceFixture::REPO),
+            "fix-auth/draft",
+            ServiceFixture::TIP,
+        ));
+
+        let error =
+            CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap_err();
+
+        assert_eq!(error.exit_code(), 3);
+        assert!(
+            error
+                .to_string()
+                .contains("branch fix-auth clashes with existing branch fix-auth/draft")
+        );
         CreateFixture::assert_nothing_touched(&fixture);
     }
 

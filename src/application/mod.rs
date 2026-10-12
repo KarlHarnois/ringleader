@@ -1,3 +1,4 @@
+pub mod branch_availability;
 pub mod branch_ownership;
 pub mod creation_plan;
 pub mod default_repo;

@@ -22,6 +22,17 @@ impl<'a> GitBranches<'a> {
             .is_some())
     }
 
+    pub fn first_under(&self, repo: &Path, branch: &str) -> Result<Option<String>, WorkspaceError> {
+        let directory = format!("{}/{branch}/", Self::BRANCH_REFS);
+        let list = GitInvocation::in_repo(repo, "for-each-ref").args([
+            "--count=1",
+            "--format=%(refname:lstrip=2)",
+            &directory,
+        ]);
+        let listing = self.git.run_checked(&list)?;
+        Ok(listing.lines().first().map(|line| line.to_string()))
+    }
+
     pub fn delete(
         &self,
         repo: &Path,

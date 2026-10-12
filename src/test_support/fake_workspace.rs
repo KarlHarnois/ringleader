@@ -406,6 +406,22 @@ impl Workspace for FakeWorkspace {
         }))
     }
 
+    fn first_branch_under(
+        &self,
+        repo: &Path,
+        branch: &str,
+    ) -> Result<Option<String>, WorkspaceError> {
+        self.call("first_branch_under", branch.to_string())?;
+        let directory = format!("{branch}/");
+        Ok(self.edit(|state| {
+            state
+                .branches
+                .iter()
+                .find(|nested| nested.repo == repo && nested.name.starts_with(&directory))
+                .map(|nested| nested.name.clone())
+        }))
+    }
+
     fn mark_branch_managed(&self, repo: &Path, branch: &str) -> Result<(), WorkspaceError> {
         self.call("mark_branch_managed", branch.to_string())?;
         self.edit(|state| state.add_marker(repo, branch));
