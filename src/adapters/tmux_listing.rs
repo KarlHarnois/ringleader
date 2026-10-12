@@ -16,11 +16,12 @@ impl<'a> TmuxListing<'a> {
     pub const WINDOW_FORMAT: &'static str = "ringleader-window #{window_id} #{@ringleader_shell}";
     pub const AGENT_FORMAT: &'static str = "ringleader-agent #{pane_id} #{@ringleader_agent}";
     pub const PANE_PID_FORMAT: &'static str = "ringleader-pane-pid #{pane_dead} #{pane_pid}";
-    pub const TTY_FORMAT: &'static str = "ringleader-tty #{pane_tty}";
+    pub const TTY_FORMAT: &'static str = "ringleader-tty #{pane_dead} #{pane_tty}";
     pub const SERVER_FORMAT: &'static str = "ringleader-server #{version}";
     pub const SESSION_FORMAT: &'static str = "ringleader-session";
     const CONFIG_LABEL: &'static str = "ringleader-config";
     const TAGGED: &'static str = "1";
+    const DEAD: &'static str = "1";
     const KEY_BINDING: &'static str = "bind-key";
     const DETACH: &'static str = "detach-client";
 
@@ -80,7 +81,9 @@ impl<'a> TmuxListing<'a> {
     pub fn shows_terminal(&self, terminal: &OsStr) -> bool {
         self.output
             .labeled("ringleader-tty")
-            .any(|tty| Path::new(tty) == Path::new(terminal))
+            .filter_map(|row| row.split_once(' '))
+            .filter(|(dead, _)| *dead != Self::DEAD)
+            .any(|(_, tty)| Path::new(tty) == Path::new(terminal))
     }
 
     pub fn binds_detach(&self) -> bool {

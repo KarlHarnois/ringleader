@@ -906,6 +906,30 @@ mod tests {
     }
 
     #[test]
+    fn the_terminal_an_exited_agent_pane_freed_is_not_its_own_pane() {
+        let fixture = MultiplexerFixture::new();
+        fixture.create("fix-auth").unwrap();
+        let agent = fixture.tagged_panes("ringleader-fix-auth").pop().unwrap();
+        fixture
+            .server
+            .text(&["respawn-pane", "-k", "-t", &agent, "true"]);
+        let exited = fixture
+            .server
+            .wait_for(|| fixture.observation("ringleader-fix-auth").pane_dead());
+        let tty = fixture
+            .server
+            .text(&["display-message", "-p", "-t", &agent, "#{pane_tty}"]);
+
+        let inside = fixture
+            .on_terminal(Some(&tty))
+            .caller_in_own_pane()
+            .unwrap();
+
+        assert!(exited);
+        assert!(!inside);
+    }
+
+    #[test]
     fn a_caller_on_another_terminal_with_an_inherited_tmux_is_not_in_its_own_pane() {
         let fixture = MultiplexerFixture::with_holder();
         let multiplexer = fixture.on_terminal(Some("/dev/pts/4000001"));
