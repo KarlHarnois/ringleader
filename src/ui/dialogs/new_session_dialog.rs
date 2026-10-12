@@ -846,6 +846,41 @@ mod tests {
     }
 
     #[test]
+    fn a_short_dialog_keeps_the_selected_agent_in_view() {
+        let agents = (1..=5)
+            .map(|number| Agent::new(&format!("agent-{number}"), "sh"))
+            .collect();
+        let fixture = DialogFixture::launched_in_repo()
+            .with_config(ServiceFixture::config().with_agents(agents));
+        let (mut dialog, service) = DialogFixture::opened(&fixture);
+        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
+        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
+
+        for _ in 0..4 {
+            DialogFixture::press(&mut dialog, &service, KeyCode::Char('j'));
+        }
+
+        let shown = DialogFixture::text_at(&dialog, DialogFixture::COMPACT_HEIGHT);
+        assert!(shown.contains("agent-4 · no prompt\n          agent-5 · no prompt\nPrompt"));
+        assert!(shown.ends_with(DialogFixture::AGENT_HINTS));
+    }
+
+    #[test]
+    fn a_dialog_too_short_for_the_search_keeps_its_first_match_in_view() {
+        let (mut dialog, service) =
+            DialogFixture::opened(&DialogFixture::launched_among_gateways());
+        DialogFixture::search(&mut dialog, &service, "gate");
+        DialogFixture::settle(&mut dialog, |text| text.contains("20/20 repos under ~"));
+        let rows_without_the_name = 6;
+
+        dialog.fail(DialogFixture::worktree_error(1));
+
+        let shown = DialogFixture::text_at(&dialog, rows_without_the_name);
+        assert!(shown.starts_with("Repo      Find: gate█\n"));
+        assert!(shown.contains("~/work/gateway-01\nPrompt"));
+    }
+
+    #[test]
     fn a_short_dialog_gives_the_rows_kept_for_an_error_to_a_tall_prompt() {
         let (mut dialog, _service) =
             DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());

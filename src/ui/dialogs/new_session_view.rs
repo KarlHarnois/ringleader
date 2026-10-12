@@ -56,7 +56,7 @@ impl<'a> NewSessionView<'a> {
         let layout = self.layout(area, labels, errors.len(), theme);
         let upper = self.upper_lines(labels.field_width(area), layout.repo_room(), labels, theme);
         let [upper_area, prompt_area, error_area, hints_area] = layout.areas(upper.len());
-        frame.render_widget(Paragraph::new(upper), upper_area);
+        self.render_upper(frame, upper_area, upper);
         let cursor_style = self.focus_style(NewSessionField::Prompt, theme);
         self.prompt.render(frame, prompt_area, labels, cursor_style);
         frame.render_widget(Paragraph::new(errors), error_area);
@@ -93,6 +93,23 @@ impl<'a> NewSessionView<'a> {
         lines.extend(labels.labeled(NewSessionField::Repo.label(), repo_lines));
         lines.extend(labels.labeled(NewSessionField::Agent.label(), agent_lines));
         lines
+    }
+
+    fn render_upper(&self, frame: &mut Frame, area: Rect, lines: Vec<Line<'static>>) {
+        let rows_through_focus = self.rows_through_focus(lines.len());
+        let hidden_rows = rows_through_focus.saturating_sub(usize::from(area.height));
+        let scroll = u16::try_from(hidden_rows).unwrap_or(u16::MAX);
+        frame.render_widget(Paragraph::new(lines).scroll((scroll, 0)), area);
+    }
+
+    fn rows_through_focus(&self, upper_rows: usize) -> usize {
+        let agent_rows = self.agents.height(self.agents_expanded());
+        match self.focus {
+            NewSessionField::Name => Self::NAME_ROWS,
+            NewSessionField::Repo => upper_rows.saturating_sub(agent_rows),
+            NewSessionField::Agent => upper_rows,
+            NewSessionField::Prompt => 0,
+        }
     }
 
     fn error_lines(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
