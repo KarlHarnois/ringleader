@@ -788,6 +788,20 @@ mod tests {
     }
 
     #[test]
+    fn delete_refuses_while_ringleader_runs_from_the_worktree_root() {
+        let fixture = DeleteFixture::live_fixture().launched_in(&DeleteFixture::worktree());
+
+        let error = DeleteFixture::force(&mut fixture.service()).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("delete it from another directory")
+        );
+        assert!(fixture.multiplexer().state_changing_calls().is_empty());
+    }
+
+    #[test]
     fn delete_refuses_an_unmarked_branch_with_the_marking_command() {
         let fixture =
             DeleteFixture::live_fixture().with_workspace(DeleteFixture::unmarked_workspace());
