@@ -182,7 +182,7 @@ mod tests {
     use std::path::Path;
 
     use super::*;
-    use crate::application::ports::{BranchMarker, MultiplexerError, WorkspaceError};
+    use crate::application::ports::{MultiplexerError, Workspace, WorkspaceError};
     use crate::domain::Agent;
     use crate::test_support::{FakeMultiplexer, FakeSessionRegistry, ServiceFixture};
 
@@ -404,8 +404,9 @@ mod tests {
     fn rename_refuses_an_unmarked_branch_with_the_marking_command() {
         let fixture = RenameFixture::unmarked("fix-auth");
         let session = ServiceFixture::session("fix-auth");
-        let command =
-            BranchMarker::new(session.branch()).marking_command(Path::new(ServiceFixture::REPO));
+        let command = fixture
+            .workspace()
+            .branch_marking_command(Path::new(ServiceFixture::REPO), session.branch());
 
         let error = fixture
             .service()

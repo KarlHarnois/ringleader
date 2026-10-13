@@ -200,7 +200,7 @@ mod tests {
     use super::*;
     use crate::application::deletion_guards::BranchPresence;
     use crate::application::ports::{
-        BranchMarker, DirtyState, MultiplexerError, UnmergedCommits, WorkspaceError, WorktreeEntry,
+        DirtyState, MultiplexerError, UnmergedCommits, Workspace, WorkspaceError, WorktreeEntry,
     };
     use crate::application::session_service::SessionService;
     use crate::domain::{AgentPane, NamingScheme, Registration, TmuxAddress};
@@ -249,8 +249,10 @@ mod tests {
                 .without_marker(Self::repo(), session.branch())
         }
 
-        fn marking_command() -> String {
-            BranchMarker::new(Self::session().branch()).marking_command(Self::repo())
+        fn marking_command(fixture: &ServiceFixture) -> String {
+            fixture
+                .workspace()
+                .branch_marking_command(Self::repo(), Self::session().branch())
         }
 
         fn dirty_workspace(files: u64) -> FakeWorkspace {
@@ -766,7 +768,7 @@ mod tests {
         assert!(
             error
                 .to_string()
-                .contains(&DeleteFixture::marking_command())
+                .contains(&DeleteFixture::marking_command(&fixture))
         );
     }
 
@@ -810,7 +812,7 @@ mod tests {
         assert!(
             error
                 .to_string()
-                .contains(&DeleteFixture::marking_command())
+                .contains(&DeleteFixture::marking_command(&fixture))
         );
     }
 

@@ -1,5 +1,4 @@
 pub mod agent_launch;
-pub mod branch_marker;
 pub mod clock;
 pub mod config_source;
 pub mod dirty_state;
@@ -14,7 +13,6 @@ pub mod unmerged_commits;
 pub mod workspace;
 
 pub use agent_launch::AgentLaunch;
-pub use branch_marker::BranchMarker;
 pub use clock::Clock;
 pub use config_source::{ConfigError, ConfigSource};
 pub use dirty_state::DirtyState;

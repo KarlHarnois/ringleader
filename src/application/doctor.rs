@@ -188,7 +188,7 @@ mod tests {
     use std::path::Path;
 
     use super::*;
-    use crate::application::ports::{MultiplexerError, RegistryError};
+    use crate::application::ports::{MultiplexerError, RegistryError, Workspace};
     use crate::domain::{Repo, RepoName, Session};
     use crate::test_support::{
         FakeMultiplexer, FakeSessionRegistry, FakeWorkspace, ServiceFixture,
@@ -407,8 +407,9 @@ mod tests {
         let fixture = DoctorFixture::healthy().with_workspace(
             ServiceFixture::workspace_for(&[&session]).without_marker(repo, session.branch()),
         );
-        let command =
-            crate::application::ports::BranchMarker::new(session.branch()).marking_command(repo);
+        let command = fixture
+            .workspace()
+            .branch_marking_command(repo, session.branch());
 
         assert!(DoctorFixture::has_warning(&fixture, &command));
     }
