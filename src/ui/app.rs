@@ -342,20 +342,12 @@ mod tests {
         }
 
         fn merge_missing_the_agent() -> ServiceFixture {
-            let session = ServiceFixture::session("fix-auth");
             let conflicts = MergeOutcome::Conflicted(vec!["src/auth.rs".to_string()]);
-            let not_ready = MultiplexerError::AgentNotReady {
-                tmux_name: session.tmux_name().to_string(),
-            };
-            Self::deletable()
-                .with_workspace(
-                    ServiceFixture::workspace_for(&[&session]).with_upstream_merge(conflicts),
-                )
-                .with_multiplexer(
-                    FakeMultiplexer::new()
-                        .with_live(ServiceFixture::waiting(&session))
-                        .failing("type_if_ready", not_ready),
-                )
+            ServiceFixture::merging(
+                "fix-auth",
+                conflicts,
+                ServiceFixture::refusing_typing("fix-auth"),
+            )
         }
 
         fn status_line(app: &App, width: u16) -> String {

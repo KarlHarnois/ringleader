@@ -228,16 +228,8 @@ mod tests {
             Self::observed(ServiceFixture::waiting(&Self::session()))
         }
 
-        fn with_failing_tmux(fixture: ServiceFixture, operation: &'static str) -> ServiceFixture {
-            fixture.with_multiplexer(
-                FakeMultiplexer::new()
-                    .with_live(ServiceFixture::waiting(&Self::session()))
-                    .failing(operation, Self::not_ready()),
-            )
-        }
-
         fn ending(outcome: MergeOutcome) -> ServiceFixture {
-            Self::waiting().with_workspace(Self::workspace().with_upstream_merge(outcome))
+            ServiceFixture::merging(Self::NAME, outcome, FakeMultiplexer::new())
         }
 
         fn workspace() -> FakeWorkspace {
@@ -262,12 +254,6 @@ mod tests {
                 .calls()
                 .iter()
                 .any(|call| call.starts_with("merge_upstream"))
-        }
-
-        fn not_ready() -> MultiplexerError {
-            MultiplexerError::AgentNotReady {
-                tmux_name: Self::TMUX_NAME.to_string(),
-            }
         }
     }
 
@@ -347,7 +333,11 @@ mod tests {
 
     #[test]
     fn an_agent_that_leaves_its_prompt_during_the_merge_is_reported() {
-        let fixture = MergeFixture::with_failing_tmux(MergeFixture::conflicted(), "type_if_ready");
+        let fixture = ServiceFixture::merging(
+            MergeFixture::NAME,
+            MergeFixture::conflicts(),
+            ServiceFixture::refusing_typing(MergeFixture::NAME),
+        );
 
         let report = MergeFixture::merge(&fixture).unwrap();
 

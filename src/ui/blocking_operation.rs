@@ -123,7 +123,7 @@ impl OperationOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::application::ports::{MergeOutcome, MultiplexerError};
+    use crate::application::ports::MergeOutcome;
     use crate::test_support::{FakeMultiplexer, ServiceFixture};
 
     struct MergeOperationFixture;
@@ -132,22 +132,8 @@ mod tests {
         const NAME: &'static str = "fix-auth";
 
         fn conflicted(multiplexer: FakeMultiplexer) -> ServiceFixture {
-            let session = ServiceFixture::session(Self::NAME);
             let conflicts = MergeOutcome::Conflicted(vec!["src/auth.rs".to_string()]);
-            ServiceFixture::new()
-                .with_sessions(std::slice::from_ref(&session))
-                .with_workspace(
-                    ServiceFixture::workspace_for(&[&session]).with_upstream_merge(conflicts),
-                )
-                .with_host(ServiceFixture::host_for(&[&session]))
-                .with_multiplexer(multiplexer.with_live(ServiceFixture::waiting(&session)))
-        }
-
-        fn agent_away_from_its_prompt() -> FakeMultiplexer {
-            let not_ready = MultiplexerError::AgentNotReady {
-                tmux_name: "ringleader-fix-auth".to_string(),
-            };
-            FakeMultiplexer::new().failing("type_if_ready", not_ready)
+            ServiceFixture::merging(Self::NAME, conflicts, multiplexer)
         }
 
         fn run(fixture: &ServiceFixture) -> OperationOutcome {
@@ -182,8 +168,9 @@ mod tests {
 
     #[test]
     fn conflicts_the_agent_was_not_told_about_are_a_warning() {
-        let fixture =
-            MergeOperationFixture::conflicted(MergeOperationFixture::agent_away_from_its_prompt());
+        let fixture = MergeOperationFixture::conflicted(ServiceFixture::refusing_typing(
+            MergeOperationFixture::NAME,
+        ));
 
         let outcome = MergeOperationFixture::run(&fixture);
 
