@@ -185,6 +185,8 @@ pub enum WorkspaceError {
         "{worktree} has no origin/HEAD, origin/main, or origin/master, set base_branch for its repo"
     )]
     NoUpstream { worktree: PathBuf },
+    #[error("{worktree} has a merge in progress, finish or abort it before merging again")]
+    MergeInProgress { worktree: PathBuf },
     #[error("{cause}; ran git merge --abort, so the worktree is back where it was")]
     MergeAborted { cause: String },
     #[error(

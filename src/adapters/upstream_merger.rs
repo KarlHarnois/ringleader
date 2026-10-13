@@ -24,12 +24,22 @@ impl<'a> UpstreamMerger<'a> {
         worktree: &Path,
         base_branch: Option<&BaseBranch>,
     ) -> Result<UpstreamMerge, WorkspaceError> {
+        self.refuse_merge_in_progress(worktree)?;
         let branch = self.upstream_branch(worktree, base_branch)?;
         self.fetch(worktree, &branch)?;
         let origin_ref = branch.origin_ref();
         let commit = self.commit_of(worktree, &origin_ref)?;
         let outcome = self.merge_unless_contained(worktree, &origin_ref, &commit)?;
         Ok(UpstreamMerge::new(&branch.origin_suggestion(), outcome))
+    }
+
+    fn refuse_merge_in_progress(&self, worktree: &Path) -> Result<(), WorkspaceError> {
+        if self.is_merging(worktree)? {
+            return Err(WorkspaceError::MergeInProgress {
+                worktree: worktree.to_path_buf(),
+            });
+        }
+        Ok(())
     }
 
     fn upstream_branch(
@@ -119,7 +129,7 @@ impl<'a> UpstreamMerger<'a> {
         worktree: &Path,
         failure: WorkspaceError,
     ) -> Result<WorkspaceError, WorkspaceError> {
-        if self.git.resolve(worktree, Self::MERGE_HEAD)?.is_none() {
+        if !self.is_merging(worktree)? {
             return Ok(failure);
         }
         let abort = GitInvocation::in_worktree(worktree, "merge")
@@ -129,6 +139,10 @@ impl<'a> UpstreamMerger<'a> {
         Ok(WorkspaceError::MergeAborted {
             cause: failure.to_string(),
         })
+    }
+
+    fn is_merging(&self, worktree: &Path) -> Result<bool, WorkspaceError> {
+        Ok(self.git.resolve(worktree, Self::MERGE_HEAD)?.is_some())
     }
 }
 
@@ -273,6 +287,12 @@ mod tests {
             self.commit_on_branch(Self::SHARED_FILE);
         }
 
+        fn keep_our_side_without_committing(&self) {
+            self.origin
+                .git(&self.worktree, &["checkout", "--ours", Self::SHARED_FILE]);
+            self.origin.git(&self.worktree, &["add", Self::SHARED_FILE]);
+        }
+
         fn conflicted_paths(merge: &UpstreamMerge) -> Vec<String> {
             match merge.outcome() {
                 MergeOutcome::Conflicted(paths) => paths.clone(),
@@ -399,6 +419,24 @@ mod tests {
         );
         assert!(!fixture.is_merging());
         assert!(fixture.is_clean());
+    }
+
+    #[test]
+    fn a_merge_already_in_progress_is_refused_and_kept() {
+        let fixture = MergeFixture::new();
+        fixture.conflicting_edits();
+        fixture.merge().unwrap();
+        fixture.keep_our_side_without_committing();
+
+        let error = fixture.merge().unwrap_err();
+
+        assert_eq!(
+            error,
+            WorkspaceError::MergeInProgress {
+                worktree: fixture.worktree.clone()
+            }
+        );
+        assert!(fixture.is_merging());
     }
 
     #[test]
