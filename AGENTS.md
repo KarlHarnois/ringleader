@@ -62,6 +62,83 @@ A new capability that `application`, `ui`, or `cli` needs from outside the proce
 
 The one exception is a driving adapter's own channel to the user: the terminal for the TUI, including the shell it runs there, and the standard streams for the CLI. That I/O stays in `ui` or `cli`, behind a trait beside its real implementation or a std `Read` or `Write`, with its fake in `src/test_support/`. The TUI owns `InputSource`, `ScreenMode`, and `ShellRunner` this way, and the CLI writes through the `Write` streams `CliOutput` holds. A test seam inside `adapters`, like `AgentLauncher`'s `ExecSeam`, has the same shape with its fake in the adapter's own tests.
 
+## Metrics
+
+Local, on-demand code-health tools. CI never builds or runs them. Do not add them
+to `checks`, to the default dev shell, or to `.github/workflows/ci.yml`. The flake
+builds them as `apps` so `nix flake check` only evaluates them, and puts them in
+the `metrics` dev shell, which extends the default one. That evaluation still
+downloads the four upstream inputs, so if one can no longer be fetched, CI's
+flake check fails until its input is repinned or removed. `dryer`, `crapper`, and
+`mutator` write snapshots under `.metrics/`, which is gitignored.
+Run them from the repository root, and pass `dryer` and `crapper` the `src` path.
+A pathless run also walks nested checkouts such as `.claude/worktrees` and scores
+every copy under the same namespaces, and `crapper` reruns coverage for each.
+`dryer --changed` compares the changed files only with each other, so it misses
+code copied from an unchanged file.
+
+```sh
+nix develop .#metrics -c dryer src             # duplicate candidates; writes .metrics/dry.edn
+nix develop .#metrics -c crapper src           # CC plus coverage plus CRAP; writes .metrics/crap.edn
+nix develop .#metrics -c mutator --max-workers 2 --timeout-factor 60 src/<module>.rs
+nix run .#dryer -- src                         # the apps also work outside any dev shell
+nix run .#crapper -- --help
+nix run .#mutator -- --help
+```
+
+`mutator` runs every covered mutant and many tests start real tmux servers. Never
+run it whole-repo. Name one module or file, and keep `--max-workers 2` and
+`--timeout-factor 60`. Each run builds the crate from scratch in new worker
+directories under `target/mutation-workers/`, and a mutant that times out counts
+as killed. The default factor of 10 times the warm baseline ends those builds
+early, so every mutant reads as killed before a test runs. Parallel cold builds
+slow each other, so raise the factor before the worker count. Once a
+snapshot exists, a rerun only runs survivors and sites in changed functions, so a
+kill recorded by a timeout stays. After a run with a smaller factor, rerun that
+file once with `--mutate-all`.
+Never pass `--changed` with a path: it drops the path and mutates every changed
+file in `git status`. `crapper` and `mutator` need `cargo-llvm-cov`
+and the LLVM tools named by `LLVM_COV` and `LLVM_PROFDATA`, which the `metrics`
+shell and the apps set. When `cargo llvm-cov` fails, whether from a missing tool
+or one failing test, every function scores 0% coverage and the run still exits 0.
+Check the output for `Rust coverage will score 0%` before trusting the snapshot.
+Do not pass `mutator` a filtered `--test-command`. Many modules are tested only
+through their callers, so a module-path filter runs zero tests, exits 0, and lets
+every mutant survive.
+
+uml-viewer reads `.metrics/crap.edn` and `.metrics/mutate/`. It ignores
+`.metrics/dry.edn`, so `dryer` output stays a text report and never reaches the
+diagram. It needs a display and downloads Maven dependencies on first run. Write
+the policy to the gitignored `.uml-viewer/ringleader.policy.edn`:
+
+```edn
+{:title "Ringleader"
+ :sources [{:lang :rust :root "src" :prefix "ringleader"}]
+ :hierarchical true
+ :out ".uml-viewer/ringleader.edn"}
+```
+
+Leave the policy-level `:prefix` unset. The overlay joins a `crate::module::Type`
+snapshot to the module class through the class id's crate path, and stripping the
+crate name from the id breaks that join. `$UML_VIEWER_DEPS`, set by the `metrics`
+shell, points the Clojure CLI at the `uml-viewer` flake input. Inside
+`nix develop .#metrics`, generate the IR, then open the viewer:
+
+```sh
+clojure -Sdeps "$UML_VIEWER_DEPS" -M:ir .uml-viewer/ringleader.policy.edn
+viewer_tmux_dir=$(mktemp -d /tmp/uml.XXXXXX)
+env -u TMUX -u TMUX_PANE TMUX_TMPDIR="$viewer_tmux_dir" \
+  clojure -Sdeps "$UML_VIEWER_DEPS" -M:run --restart .uml-viewer/ringleader.edn
+rm -rf "$viewer_tmux_dir"
+```
+
+Always pass `--restart`. Without it the viewer starts `grok --yolo --trust` as its
+companion in a new session on the user's tmux server, and opens on a blank canvas
+until that companion answers. `--restart` skips the companion and loads the EDN
+at once. It still looks for a companion with `tmux has-session`, so the `env`
+prefix sends those lookups to an empty private directory, removed after the
+viewer exits.
+
 ## Layout
 
 ```
@@ -70,7 +147,7 @@ The one exception is a driving adapter's own channel to the user: the terminal f
 ├── Cargo.lock
 ├── rustfmt.toml            # max_width = 100
 ├── LICENSE                 # MIT
-├── .gitignore              # /target, /result, /result-*, /.direnv
+├── .gitignore              # /target, /result, /result-*, /.direnv, /.claude/worktrees, /.metrics, /.uml-viewer, /uml-viewer-log.txt
 ├── flake.nix
 ├── flake.lock
 ├── .envrc                  # direnv: use flake, loads the dev shell
