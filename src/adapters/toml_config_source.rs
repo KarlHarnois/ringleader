@@ -24,7 +24,9 @@ impl TomlConfigSource {
 # your tmux's prefix or bound in its root table.
 return_key = "C-q"
 # Keys that switch to the next or previous session in name order, wrapping at
-# either end. Inside your own tmux, they must not be bound in its root table.
+# either end. Inside your own tmux, they must not be bound in its root table,
+# and its escape-time must be low, such as 10, or Esc followed by j, k, or an
+# arrow switches sessions.
 # A removed key that tmux binds in copy mode, other than M-Up and M-Down,
 # stays unbound there until Ringleader's tmux server restarts.
 next_session_keys = ["M-j", "M-Down"]

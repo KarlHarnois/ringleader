@@ -110,15 +110,22 @@ impl ServerAudit {
         for (setting, key) in key_bindings.by_setting() {
             if key.shadows_agent_input() {
                 report.warning(format!(
-                    "{setting} {key} is a key agents need, and in a session Ringleader's tmux takes it before the agent sees it; pick a key agents leave alone, such as an Alt or function key"
+                    "{setting} {key} is a key agents need, and in a session Ringleader's tmux takes it before the agent sees it; pick a key agents leave alone, such as a function key"
                 ));
             }
         }
         if self.multiplexer.caller_in_other_tmux() {
-            report.info(format!(
-                "this runs inside your own tmux, so sessions open nested; your tmux must not use {} in its root table, which doctor cannot check without reading your tmux server",
-                Self::outer_key_rule(key_bindings)
-            ));
+            Self::report_nested_keys(key_bindings, report);
+        }
+    }
+
+    fn report_nested_keys(key_bindings: &KeyBindings, report: &mut DoctorReport) {
+        report.info(format!(
+            "this runs inside your own tmux, so sessions open nested; your tmux must not use {} in its root table, which doctor cannot check without reading your tmux server",
+            Self::outer_key_rule(key_bindings)
+        ));
+        if key_bindings.all().any(HotKey::has_alt) {
+            report.info("Alt keys are bound, so set your tmux's escape-time low, such as tmux 3.5's default of 10; your tmux reads Esc and a key typed within its escape-time as one Alt key, so Esc then another key could fire one of these bindings instead of reaching the agent");
         }
     }
 
@@ -391,6 +398,30 @@ mod tests {
             "info:",
             "your tmux must not use Ctrl-Q as its prefix or bind it in its root table"
         ));
+    }
+
+    #[test]
+    fn inside_another_tmux_alt_keys_need_a_low_escape_time() {
+        let fixture =
+            ServiceFixture::new().with_multiplexer(FakeMultiplexer::new().called_from_other_tmux());
+
+        assert!(AuditFixture::line_with(
+            &fixture,
+            "info:",
+            "set your tmux's escape-time low"
+        ));
+    }
+
+    #[test]
+    fn inside_another_tmux_keys_without_alt_draw_no_escape_time_note() {
+        let none: [&str; 0] = [];
+        let draft = AuditFixture::draft()
+            .next_session_keys(&["F7"])
+            .previous_session_keys(&none);
+        let fixture = AuditFixture::with_draft(draft)
+            .with_multiplexer(FakeMultiplexer::new().called_from_other_tmux());
+
+        assert!(!AuditFixture::line_with(&fixture, "info:", "escape-time"));
     }
 
     #[test]

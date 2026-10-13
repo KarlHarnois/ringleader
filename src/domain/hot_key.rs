@@ -42,6 +42,10 @@ impl HotKey {
             .collect()
     }
 
+    pub fn has_alt(&self) -> bool {
+        self.has(Modifier::Meta)
+    }
+
     pub fn shadows_agent_input(&self) -> bool {
         Self::AGENT_KEYS.contains(&self.tmux_name().as_str()) || self.is_typed_character()
     }
