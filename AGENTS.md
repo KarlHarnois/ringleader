@@ -100,7 +100,7 @@ Grok companion in tmux.
 ├── Cargo.lock
 ├── rustfmt.toml            # max_width = 100
 ├── LICENSE                 # MIT
-├── .gitignore              # /target, /result, /result-*, /.direnv
+├── .gitignore              # /target, /result, /result-*, /.direnv, /.claude/worktrees, /.metrics, /.uml-viewer
 ├── flake.nix
 ├── flake.lock
 ├── .envrc                  # direnv: use flake, loads the dev shell
