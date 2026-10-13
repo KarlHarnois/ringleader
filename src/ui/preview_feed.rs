@@ -2,6 +2,7 @@ use std::time::Instant;
 
 use super::home_view::LayoutTier;
 use super::preview_panel::PreviewCapture;
+use super::preview_text::PreviewText;
 use crate::application::{Pending, ServiceError, SessionService};
 use crate::domain::{SessionState, SessionSummary};
 
@@ -113,7 +114,7 @@ impl SessionCapture {
 
     fn of(tmux_name: &str, captured: &Result<String, ServiceError>) -> Self {
         let capture = match captured {
-            Ok(text) => PreviewCapture::Text(text.clone()),
+            Ok(text) => PreviewCapture::Text(PreviewText::parse(text)),
             Err(error) => PreviewCapture::Unavailable(error.to_string()),
         };
         Self::new(tmux_name, capture)

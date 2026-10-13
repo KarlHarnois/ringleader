@@ -318,7 +318,7 @@ viewer exits.
     │   ├── state_indicator.rs      # StateIndicator, the glyph and color of a session state
     │   ├── table_columns.rs        # TableColumns, column widths and dropping
     │   ├── preview_panel.rs        # PreviewPanel, the Full tier's preview
-    │   ├── preview_text.rs         # PreviewText, the captured rows that fit the preview
+    │   ├── preview_text.rs         # PreviewText, a capture's rows parsed once, and the ones that fit the preview
     │   ├── help_view.rs            # HelpView
     │   ├── label_column.rs         # LabelColumn, the help's padded label and the indent of its wrapped rows
     │   ├── legend.rs               # Legend, the help's symbols and their meanings, wrapped under a label
