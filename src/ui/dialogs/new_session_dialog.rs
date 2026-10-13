@@ -470,7 +470,7 @@ mod tests {
         assert_eq!(
             hints,
             [
-                "Enter next field · Ctrl-S create · Esc cancel",
+                "Enter next field · Ctrl-S create · Shift-Tab mode · Esc cancel",
                 "Type to find a repo · Enter next field · Ctrl-S create · Esc cancel",
                 DialogFixture::AGENT_HINTS,
                 DialogFixture::PROMPT_HINTS,
@@ -768,7 +768,7 @@ mod tests {
 
         assert_eq!(
             DialogFixture::hints(&dialog),
-            "Enter next field · Ctrl-S create · Esc cancel"
+            "Enter next field · Ctrl-S create · Shift-Tab mode · Esc cancel"
         );
         assert_eq!(DialogFixture::submitted(step).prompt(), "fix");
     }
