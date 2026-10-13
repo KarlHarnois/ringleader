@@ -167,6 +167,14 @@ mostly the cold worker build.
    the rows, not the exit code: 3 means a mutant survived anywhere in the file,
    and uncovered sites still exit 0.
 
+Some functions only run with a real terminal or the process's own arguments,
+which the Tests rules keep out of tests, such as `CompositionRoot` in
+`src/main.rs`, `TmuxMultiplexer::attach_in_foreground`, and
+`ProcessEnvironment::standard_input_terminal`. When a change edits one, move its
+logic into functions that tests reach until it has complexity 2 or less, the
+most that scores 8 or less at 0% coverage. Then tell the project owner which of
+its sites step 4 still reports as uncovered.
+
 An edit to production code during these steps restarts them from step 1. An
 edit to tests only reruns step 4 for that file without `--reuse-coverage`,
 because the new tests changed the coverage.
