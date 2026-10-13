@@ -521,6 +521,32 @@ mod tests {
     }
 
     #[test]
+    fn a_pushed_branch_that_diverged_from_its_remote_copy_is_published() {
+        let origin = GitTestRepo::new();
+        let clone = WorktreeFixture::clone_with_work(&origin);
+        origin.git(&clone, &["push", "-q", "origin", BRANCH]);
+
+        WorktreeFixture::commit_on_top_of(&origin, origin.path(), BRANCH);
+        origin.commit(&origin.sibling("wt"), "more.txt");
+        origin.git(&clone, &["fetch", "-q", "origin"]);
+
+        assert!(WorktreeFixture::is_published(&origin, &clone));
+    }
+
+    #[test]
+    fn a_pushed_branch_with_an_amended_tip_is_published() {
+        let origin = GitTestRepo::new();
+        let clone = WorktreeFixture::clone_with_work(&origin);
+        let worktree = origin.sibling("wt");
+        origin.commit(&worktree, "second.txt");
+        origin.git(&clone, &["push", "-q", "origin", BRANCH]);
+
+        origin.git(&worktree, &["commit", "-q", "--amend", "-m", "Amended"]);
+
+        assert!(WorktreeFixture::is_published(&origin, &clone));
+    }
+
+    #[test]
     fn a_branch_pushed_only_to_a_second_remote_is_published() {
         let origin = GitTestRepo::new();
         let clone = WorktreeFixture::clone_with_work(&origin);

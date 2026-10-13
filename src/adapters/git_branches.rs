@@ -199,25 +199,20 @@ impl<'a> GitBranches<'a> {
         branch: &str,
         remote_ref: &str,
     ) -> Result<bool, WorkspaceError> {
-        match self.shared_tip(repo, &Self::branch_ref(branch), remote_ref)? {
+        match self.merge_base(repo, &Self::branch_ref(branch), remote_ref)? {
             Some(shared) => self.is_ahead_of_the_default_branches(repo, &shared),
             None => Ok(false),
         }
     }
 
-    fn shared_tip(
+    fn merge_base(
         &self,
         repo: &Path,
         local_ref: &str,
         remote_ref: &str,
     ) -> Result<Option<String>, WorkspaceError> {
-        if self.is_ancestor(repo, remote_ref, local_ref)? {
-            return Ok(Some(remote_ref.to_string()));
-        }
-        if self.is_ancestor(repo, local_ref, remote_ref)? {
-            return Ok(Some(local_ref.to_string()));
-        }
-        Ok(None)
+        let find = GitInvocation::in_repo(repo, "merge-base").args([local_ref, remote_ref]);
+        self.git.resolved_from(&find)
     }
 
     fn is_ahead_of_the_default_branches(
@@ -233,20 +228,6 @@ impl<'a> GitBranches<'a> {
             &default_branches,
         ]);
         Ok(!self.git.run_checked(&list)?.first_line().is_empty())
-    }
-
-    fn is_ancestor(
-        &self,
-        repo: &Path,
-        ancestor: &str,
-        descendant: &str,
-    ) -> Result<bool, WorkspaceError> {
-        let check = GitInvocation::in_repo(repo, "merge-base").args([
-            "--is-ancestor",
-            ancestor,
-            descendant,
-        ]);
-        Ok(self.git.lookup(&check)?.is_some())
     }
 
     fn branch_ref(branch: &str) -> String {
