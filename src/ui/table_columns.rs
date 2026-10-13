@@ -102,8 +102,9 @@ impl TableColumns {
         let optional = [self.agent, self.pull_request, self.diff]
             .into_iter()
             .flatten();
-        let optional_width: usize = optional.map(|width| width + Self::COLUMN_GAP.len()).sum();
-        Self::INDICATOR_WIDTH + Self::INDICATOR_GAP.len() + self.name + optional_width
+        let column_gap = Self::COLUMN_GAP.chars().count();
+        let optional_width: usize = optional.map(|width| width + column_gap).sum();
+        Self::INDICATOR_WIDTH + Self::INDICATOR_GAP.chars().count() + self.name + optional_width
     }
 
     fn fit_text(text: &str, width: usize) -> String {
