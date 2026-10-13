@@ -65,9 +65,11 @@ impl Dialog {
             ("tmux config", paths.tmux_config()),
         ];
         let home = HomePath::new(service.home_directory());
-        Self::Help(Box::new(
-            HelpView::new(&service.shown_return_key(), &files).with_home(home),
-        ))
+        Self::Help(Box::new(HelpView::new(
+            &service.shown_return_key(),
+            &files,
+            home,
+        )))
     }
 
     pub fn poll(&mut self) {

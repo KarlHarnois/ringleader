@@ -47,7 +47,7 @@ impl HelpView {
     const LABEL_WIDTH: usize = 13;
     const CLOSING: &'static str = "↑ ↓ scroll · ? Esc q close";
 
-    pub fn new(return_key: &ReturnKey, files: &[(&str, &Path)]) -> Self {
+    pub fn new(return_key: &ReturnKey, files: &[(&str, &Path)], home: HomePath) -> Self {
         let files = files
             .iter()
             .map(|(label, path)| (label.to_string(), path.to_path_buf()))
@@ -55,14 +55,10 @@ impl HelpView {
         Self {
             return_key: return_key.display(),
             files,
-            home: HomePath::default(),
+            home,
             scroll: 0,
             max_scroll: Cell::new(0),
         }
-    }
-
-    pub fn with_home(self, home: HomePath) -> Self {
-        Self { home, ..self }
     }
 
     pub fn handle_key(&mut self, key: &KeyEvent) -> DialogStep {
@@ -198,8 +194,8 @@ mod tests {
                         Path::new("/home/example/.local/state/ringleader/tmux.conf"),
                     ),
                 ],
+                HomePath::new(Some(Path::new(Self::HOME))),
             )
-            .with_home(HomePath::new(Some(Path::new(Self::HOME))))
         }
 
         fn screen(help: HelpView, width: u16, height: u16) -> String {
