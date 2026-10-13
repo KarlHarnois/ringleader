@@ -68,8 +68,9 @@ and the LLVM tools named by `LLVM_COV` and `LLVM_PROFDATA`, which the `metrics`
 shell and the apps set. When `cargo llvm-cov` fails, whether from a missing tool
 or one failing test, every function scores 0% coverage and the run still exits 0.
 Check the output for `Rust coverage will score 0%` before trusting the snapshot.
-This crate is bin-only, so a scoped `mutator` test command is
-`--test-command "cargo test --bin ringleader <module::path>"`.
+Do not pass `mutator` a filtered `--test-command`. Many modules are tested only
+through their callers, so a module-path filter runs zero tests, exits 0, and lets
+every mutant survive.
 
 uml-viewer reads `.metrics/crap.edn` and `.metrics/mutate/`. It ignores
 `.metrics/dry.edn`, so `dryer` output stays a text report and never reaches the
