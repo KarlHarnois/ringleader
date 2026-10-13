@@ -158,7 +158,6 @@
               tools.crapperTool
               tools.mutatorTool
             ];
-            UML_VIEWER_SRC = "${uml-viewer}";
             UML_VIEWER_DEPS = ''
               {:deps {uml-viewer/uml-viewer {:local/root "${uml-viewer}"} quil/quil {:mvn/version "4.3.1563"}}
                :aliases {:ir {:main-opts ["-m" "uml-viewer.main.ir-generator"]}
