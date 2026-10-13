@@ -320,6 +320,15 @@ mod tests {
                 .wait_until(|| log.lock().unwrap().iter().any(|item| item == event))
         }
 
+        fn recorded_before(log: &Arc<Mutex<Vec<String>>>, earlier: &str, later: &str) -> bool {
+            let events = log.lock().unwrap();
+            let position = |event: &str| events.iter().position(|item| item == event);
+            matches!(
+                (position(earlier), position(later)),
+                (Some(first), Some(second)) if first < second
+            )
+        }
+
         fn wait_for_typing_call(multiplexer: &FakeMultiplexer, limit: Duration) -> bool {
             Deadline::after(limit).wait_until(|| {
                 multiplexer
@@ -457,10 +466,14 @@ mod tests {
     #[test]
     fn the_write_lock_is_released_before_the_startup_input_is_waited_on() {
         let log = Arc::new(Mutex::new(Vec::new()));
+        let create_log = Arc::clone(&log);
         let typing_log = Arc::clone(&log);
         let gate = Arc::new(Gate::closed());
         let multiplexer = FakeMultiplexer::new()
             .with_typing_gate(Arc::clone(&gate))
+            .on_call("create_session", move || {
+                create_log.lock().unwrap().push("create".to_string());
+            })
             .on_call("type_when_ready", move || {
                 typing_log.lock().unwrap().push("typing".to_string());
             });
@@ -483,6 +496,10 @@ mod tests {
         assert!(
             LockFlowFixture::wait_for(&log, "release", Duration::from_secs(1)),
             "the write lock was still held when the typing wait began"
+        );
+        assert!(
+            LockFlowFixture::recorded_before(&log, "create", "release"),
+            "the write lock was released before the use case ran"
         );
         gate.open_now();
         assert_eq!(handle.join().unwrap(), CliExit::Code(0));
