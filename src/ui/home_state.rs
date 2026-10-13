@@ -116,6 +116,10 @@ impl HomeState {
         Ok(())
     }
 
+    pub fn returned_from(&mut self, name: &str) {
+        self.bell.forget(name);
+    }
+
     pub fn select(&mut self, name: &str, service: &SessionService) {
         self.change_selection(service, |sessions| sessions.select(name));
     }

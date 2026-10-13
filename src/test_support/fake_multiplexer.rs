@@ -191,6 +191,11 @@ impl FakeMultiplexer {
         self.edit(|state| state.failures.insert(operation, error));
     }
 
+    pub fn replace_live(&self, observation: SessionObservation) {
+        self.end_session(observation.tmux_name());
+        self.edit(|state| state.live.push(observation));
+    }
+
     pub fn end_session(&self, tmux_name: &str) {
         self.edit(|state| state.live.retain(|live| live.tmux_name() != tmux_name));
     }

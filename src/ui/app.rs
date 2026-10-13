@@ -82,6 +82,7 @@ impl App {
 
     pub fn attach(&mut self, name: &str) {
         let outcome = self.service.attach(name);
+        self.home.returned_from(name);
         self.observe();
         if let Err(error) = outcome {
             self.report_failure(error);
@@ -90,6 +91,7 @@ impl App {
 
     pub fn open_shell(&mut self, name: &str) -> Option<EphemeralShell> {
         let outcome = self.service.open_shell(name);
+        self.home.returned_from(name);
         self.observe();
         match outcome {
             Ok(ShellOutcome::Ephemeral(shell)) => return Some(shell),
@@ -219,7 +221,9 @@ mod tests {
     use super::*;
     use crate::application::ports::{ConfigError, MultiplexerError, UnmergedCommits};
     use crate::domain::{Config, ConfigDraft, DiffStat, PullRequestState};
-    use crate::test_support::{FakeMultiplexer, FakePullRequests, ServiceFixture, UiHarness};
+    use crate::test_support::{
+        CapturedWriter, FakeMultiplexer, FakePullRequests, ServiceFixture, UiHarness,
+    };
 
     struct AppFixture;
 
@@ -250,6 +254,38 @@ mod tests {
                         .with_live(ServiceFixture::waiting(&second))
                         .blocking_typing(),
                 )
+        }
+
+        fn two_working_sessions_that_ring() -> ServiceFixture {
+            let first = ServiceFixture::session("dark-mode");
+            let second = ServiceFixture::session("fix-auth");
+            let draft = ConfigDraft::new(Path::new(ServiceFixture::WORKTREE_ROOT))
+                .bell_on_waiting(true)
+                .agent(ServiceFixture::agent());
+            ServiceFixture::new()
+                .with_config(Config::new(&draft).unwrap())
+                .with_sessions(&[first.clone(), second.clone()])
+                .with_workspace(ServiceFixture::workspace_for(&[&first, &second]))
+                .with_host(ServiceFixture::host_for(&[&first, &second]))
+                .with_multiplexer(
+                    FakeMultiplexer::new()
+                        .with_live(ServiceFixture::working(&first))
+                        .with_live(ServiceFixture::working(&second)),
+                )
+        }
+
+        fn ringing(fixture: &ServiceFixture, bell: &CapturedWriter) -> App {
+            let mut app = App::new(fixture.service(), Box::new(bell.clone()), Instant::now());
+            app.resize(100, 28);
+            app.on_tick(Instant::now());
+            app
+        }
+
+        fn finish_working(fixture: &ServiceFixture, name: &str) {
+            let session = ServiceFixture::session(name);
+            fixture
+                .multiplexer()
+                .replace_live(ServiceFixture::waiting(&session));
         }
 
         fn started(fixture: &ServiceFixture, width: u16, height: u16) -> App {
@@ -539,6 +575,44 @@ mod tests {
             AppFixture::flattened_screen(&app, 100, 28)
                 .contains("Restarted fix-auth. Also recreated the socket")
         );
+    }
+
+    #[test]
+    fn returning_from_an_attach_does_not_ring_for_the_session_just_left() {
+        let fixture = AppFixture::two_working_sessions_that_ring();
+        let bell = CapturedWriter::default();
+        let mut app = AppFixture::ringing(&fixture, &bell);
+        AppFixture::finish_working(&fixture, "fix-auth");
+
+        app.attach("fix-auth");
+
+        assert_eq!(bell.text(), "");
+    }
+
+    #[test]
+    fn returning_from_an_attach_still_rings_for_another_session_that_finished() {
+        let fixture = AppFixture::two_working_sessions_that_ring();
+        let bell = CapturedWriter::default();
+        let mut app = AppFixture::ringing(&fixture, &bell);
+        AppFixture::finish_working(&fixture, "fix-auth");
+        AppFixture::finish_working(&fixture, "dark-mode");
+
+        app.attach("fix-auth");
+
+        assert_eq!(bell.text(), "\u{7}");
+    }
+
+    #[test]
+    fn returning_from_a_shell_window_does_not_ring_for_its_session() {
+        let fixture = AppFixture::two_working_sessions_that_ring();
+        let bell = CapturedWriter::default();
+        let mut app = AppFixture::ringing(&fixture, &bell);
+        AppFixture::finish_working(&fixture, "fix-auth");
+
+        let shell = app.open_shell("fix-auth");
+
+        assert!(shell.is_none());
+        assert_eq!(bell.text(), "");
     }
 
     #[test]
