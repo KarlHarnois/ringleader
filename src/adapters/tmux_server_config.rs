@@ -1,3 +1,4 @@
+use super::key_switch::KeySwitch;
 use super::tmux_sequence::TmuxSequence;
 use crate::domain::ReturnKey;
 
@@ -7,7 +8,8 @@ pub struct TmuxServerConfig {
 
 impl TmuxServerConfig {
     const RESET: &'static str = "set -su terminal-features";
-    const RETURN_TABLES: [&'static str; 3] = ["root", "copy-mode", "copy-mode-vi"];
+    pub const COPY_TABLES: [&'static str; 2] = ["copy-mode", "copy-mode-vi"];
+    const ROOT_TABLE: &'static str = "root";
     const SETTINGS: [&'static str; 16] = [
         "set -g prefix None",
         "set -g prefix2 None",
@@ -38,9 +40,13 @@ impl TmuxServerConfig {
         }
     }
 
-    pub fn reapply_script(previous_key: Option<&ReturnKey>) -> TmuxSequence {
-        let unbound = previous_key.map_or_else(TmuxSequence::new, Self::unbinding);
-        unbound.command(["source-file", "-"])
+    pub fn return_tables() -> impl Iterator<Item = &'static str> {
+        std::iter::once(Self::ROOT_TABLE).chain(Self::COPY_TABLES)
+    }
+
+    pub fn reapply_script(switch: Option<&KeySwitch>) -> TmuxSequence {
+        let switched = switch.map_or_else(TmuxSequence::new, KeySwitch::script);
+        switched.command(["source-file", "-"])
     }
 
     pub fn render(&self) -> String {
@@ -81,19 +87,9 @@ impl TmuxServerConfig {
         })
     }
 
-    fn unbinding(key: &ReturnKey) -> TmuxSequence {
-        let key = key.to_string();
-        Self::RETURN_TABLES
-            .iter()
-            .fold(TmuxSequence::new(), |sequence, table| {
-                sequence.command(["unbind-key", "-q", "-T", table, &key])
-            })
-    }
-
     fn return_bindings(&self) -> Vec<String> {
         let key = self.return_key.tmux_spelling();
-        Self::RETURN_TABLES
-            .iter()
+        Self::return_tables()
             .map(|table| format!("bind-key -T {table} {key} detach-client"))
             .collect()
     }
