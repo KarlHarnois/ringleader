@@ -1,4 +1,4 @@
-tmux_prefix = "ringleader-"
+return_key = "C-q"
 state_poll_ms = 1000
 preview_refresh_ms = 750
 diff_refresh_ms = 3000

@@ -1,14 +1,13 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use super::ports::{AttachTarget, HostProbe, Multiplexer, ReturnBinding};
+use super::ports::{AttachTarget, HostProbe, Multiplexer};
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
 use crate::domain::{Session, SessionState, SessionSummary};
 
 pub struct SessionAccess {
     multiplexer: Arc<dyn Multiplexer>,
-    binding: Arc<dyn ReturnBinding>,
     host: Arc<dyn HostProbe>,
     shell: String,
 }
@@ -17,34 +16,34 @@ impl SessionAccess {
     pub fn new(ports: &ServicePorts, shell: &str) -> Self {
         Self {
             multiplexer: ports.tmux().multiplexer(),
-            binding: ports.tmux().binding(),
             host: ports.repos().host(),
             shell: shell.to_string(),
         }
     }
 
-    pub fn attach(
-        &self,
-        row: &SessionSummary,
-        mode: ReturnMode,
-    ) -> Result<AttachOutcome, ServiceError> {
+    pub fn refuse_own_pane(&self) -> Result<(), ServiceError> {
+        if self.multiplexer.caller_in_own_pane()? {
+            return Err(ServiceError::Conflict(
+                "this terminal is a pane of Ringleader's own tmux server, run Ringleader from another terminal".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn attach(&self, row: &SessionSummary) -> Result<(), ServiceError> {
         if row.state() == SessionState::Stopped {
             return Err(ServiceError::Conflict(format!(
                 "session {} is stopped, restart it first",
                 row.name()
             )));
         }
-        let outcome = self.prepare_return(mode)?;
+        self.refuse_own_pane()?;
         self.multiplexer
             .attach(&AttachTarget::Agent(row.tmux_name().to_string()))?;
-        Ok(outcome)
+        Ok(())
     }
 
-    pub fn open_shell(
-        &self,
-        row: &SessionSummary,
-        mode: ReturnMode,
-    ) -> Result<ShellOutcome, ServiceError> {
+    pub fn open_shell(&self, row: &SessionSummary) -> Result<ShellOutcome, ServiceError> {
         let session = row.session().ok_or_else(|| {
             ServiceError::Invalid(format!(
                 "session {} is unmanaged and has no trusted worktree for a shell",
@@ -56,14 +55,14 @@ impl SessionAccess {
             let shell = EphemeralShell::new(&self.shell, session.worktree_path());
             return Ok(ShellOutcome::Ephemeral(shell));
         }
-        let outcome = self.prepare_return(mode)?;
+        self.refuse_own_pane()?;
         let window = self.multiplexer.ensure_shell_window(
             session.tmux_name(),
             session.worktree_path(),
             &self.shell,
         )?;
         self.multiplexer.attach(&AttachTarget::Shell(window))?;
-        Ok(ShellOutcome::Attached(outcome))
+        Ok(ShellOutcome::Attached)
     }
 
     fn check_worktree(&self, session: &Session) -> Result<(), ServiceError> {
@@ -75,43 +74,11 @@ impl SessionAccess {
             session.worktree_path().display()
         )))
     }
-
-    fn prepare_return(&self, mode: ReturnMode) -> Result<AttachOutcome, ServiceError> {
-        if mode == ReturnMode::None {
-            return Ok(AttachOutcome::default());
-        }
-        match self.binding.install() {
-            Ok(()) => Ok(AttachOutcome::default()),
-            Err(error) if error.is_timeout() => {
-                Err(ServiceError::Failed(format!("{error}, attach cancelled")))
-            }
-            Err(error) => Ok(AttachOutcome {
-                binding_warning: Some(error.to_string()),
-            }),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReturnMode {
-    InstallReturnBinding,
-    None,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct AttachOutcome {
-    binding_warning: Option<String>,
-}
-
-impl AttachOutcome {
-    pub fn binding_warning(&self) -> Option<&str> {
-        self.binding_warning.as_deref()
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShellOutcome {
-    Attached(AttachOutcome),
+    Attached,
     Ephemeral(EphemeralShell),
 }
 
@@ -141,8 +108,7 @@ impl EphemeralShell {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::application::ports::BindingError;
-    use crate::test_support::{FakeMultiplexer, FakeReturnBinding, ServiceFixture};
+    use crate::test_support::{FakeMultiplexer, ServiceFixture};
 
     struct AttachFixture;
 
@@ -175,10 +141,7 @@ mod tests {
     fn attach_targets_the_agent_pane_of_the_session() {
         let fixture = AttachFixture::live();
 
-        fixture
-            .service()
-            .attach("fix-auth", ReturnMode::None)
-            .unwrap();
+        fixture.service().attach("fix-auth").unwrap();
 
         assert_eq!(
             fixture.multiplexer().attached(),
@@ -187,72 +150,32 @@ mod tests {
     }
 
     #[test]
-    fn attach_from_the_cli_never_touches_the_return_binding() {
-        let fixture = AttachFixture::live();
+    fn attach_from_a_pane_of_the_own_server_is_a_conflict() {
+        let session = ServiceFixture::session("fix-auth");
+        let fixture = ServiceFixture::new()
+            .with_sessions(std::slice::from_ref(&session))
+            .with_multiplexer(
+                FakeMultiplexer::new()
+                    .with_live(ServiceFixture::waiting(&session))
+                    .called_from_own_pane(),
+            );
 
-        fixture
-            .service()
-            .attach("fix-auth", ReturnMode::None)
-            .unwrap();
+        let error = fixture.service().attach("fix-auth").unwrap_err();
 
-        assert!(fixture.binding().calls().is_empty());
-    }
-
-    #[test]
-    fn attach_from_the_tui_installs_the_return_binding_first() {
-        let fixture = AttachFixture::live();
-
-        fixture
-            .service()
-            .attach("fix-auth", ReturnMode::InstallReturnBinding)
-            .unwrap();
-
-        assert_eq!(fixture.binding().calls(), ["install"]);
-    }
-
-    #[test]
-    fn a_timed_out_install_cancels_the_attach() {
-        let fixture = AttachFixture::live().with_binding(
-            FakeReturnBinding::default().failing_install(BindingError::TimedOut {
-                subcommand: "bind-key".to_string(),
-                seconds: 10,
-            }),
+        assert_eq!(error.exit_code(), 3);
+        assert!(
+            error
+                .to_string()
+                .contains("run Ringleader from another terminal")
         );
-
-        let error = fixture
-            .service()
-            .attach("fix-auth", ReturnMode::InstallReturnBinding)
-            .unwrap_err();
-
-        assert!(error.to_string().contains("attach cancelled"));
         assert!(fixture.multiplexer().attached().is_empty());
-    }
-
-    #[test]
-    fn a_failed_install_still_attaches_and_reports_the_warning() {
-        let fixture = AttachFixture::live().with_binding(
-            FakeReturnBinding::default().failing_install(BindingError::Unavailable {
-                reason: "TMUX_PANE is not set".to_string(),
-            }),
-        );
-
-        let outcome = fixture
-            .service()
-            .attach("fix-auth", ReturnMode::InstallReturnBinding)
-            .unwrap();
-
-        assert!(outcome.binding_warning().unwrap().contains("TMUX_PANE"));
-        assert_eq!(fixture.multiplexer().attached().len(), 1);
     }
 
     #[test]
     fn attach_refuses_a_stopped_session() {
         let fixture = ServiceFixture::new().with_sessions(&[ServiceFixture::session("fix-auth")]);
 
-        let error = fixture
-            .service()
-            .attach("fix-auth", ReturnMode::None)
-            .unwrap_err();
+        let error = fixture.service().attach("fix-auth").unwrap_err();
 
         assert!(error.to_string().contains("stopped"));
     }
@@ -261,12 +184,9 @@ mod tests {
     fn a_shell_in_a_live_session_attaches_to_its_shell_window() {
         let fixture = ShellFixture::live();
 
-        let outcome = fixture
-            .service()
-            .open_shell("fix-auth", ReturnMode::None)
-            .unwrap();
+        let outcome = fixture.service().open_shell("fix-auth").unwrap();
 
-        assert_eq!(outcome, ShellOutcome::Attached(AttachOutcome::default()));
+        assert_eq!(outcome, ShellOutcome::Attached);
         assert_eq!(
             fixture.multiplexer().attached(),
             [AttachTarget::Shell("@9".to_string())]
@@ -274,13 +194,26 @@ mod tests {
     }
 
     #[test]
+    fn a_shell_from_a_pane_of_the_own_server_is_a_conflict() {
+        let session = ServiceFixture::session("fix-auth");
+        let fixture = ShellFixture::live().with_multiplexer(
+            FakeMultiplexer::new()
+                .with_live(ServiceFixture::waiting(&session))
+                .called_from_own_pane(),
+        );
+
+        let error = fixture.service().open_shell("fix-auth").unwrap_err();
+
+        assert_eq!(error.exit_code(), 3);
+        assert!(fixture.multiplexer().state_changing_calls().is_empty());
+        assert!(fixture.multiplexer().attached().is_empty());
+    }
+
+    #[test]
     fn a_shell_in_a_live_session_runs_the_configured_shell() {
         let fixture = ShellFixture::live();
 
-        fixture
-            .service()
-            .open_shell("fix-auth", ReturnMode::None)
-            .unwrap();
+        fixture.service().open_shell("fix-auth").unwrap();
 
         assert!(
             fixture.multiplexer().calls().contains(
@@ -290,28 +223,13 @@ mod tests {
     }
 
     #[test]
-    fn a_shell_from_the_tui_installs_the_return_binding_first() {
-        let fixture = ShellFixture::live();
-
-        fixture
-            .service()
-            .open_shell("fix-auth", ReturnMode::InstallReturnBinding)
-            .unwrap();
-
-        assert_eq!(fixture.binding().calls(), ["install"]);
-    }
-
-    #[test]
     fn a_shell_in_a_stopped_session_is_an_ephemeral_shell_in_its_worktree() {
         let session = ServiceFixture::session("fix-auth");
         let fixture = ServiceFixture::new()
             .with_sessions(std::slice::from_ref(&session))
             .with_host(ServiceFixture::host_for(&[&session]));
 
-        let outcome = fixture
-            .service()
-            .open_shell("fix-auth", ReturnMode::None)
-            .unwrap();
+        let outcome = fixture.service().open_shell("fix-auth").unwrap();
 
         assert_eq!(
             outcome,
@@ -330,10 +248,7 @@ mod tests {
             .with_sessions(std::slice::from_ref(&session))
             .with_multiplexer(FakeMultiplexer::new().with_live(ServiceFixture::waiting(&session)));
 
-        let error = fixture
-            .service()
-            .open_shell("fix-auth", ReturnMode::None)
-            .unwrap_err();
+        let error = fixture.service().open_shell("fix-auth").unwrap_err();
 
         assert!(
             error
@@ -351,10 +266,7 @@ mod tests {
             FakeMultiplexer::new().with_live(ServiceFixture::waiting(&stranger).without_metadata()),
         );
 
-        let error = fixture
-            .service()
-            .open_shell("mystery", ReturnMode::None)
-            .unwrap_err();
+        let error = fixture.service().open_shell("mystery").unwrap_err();
 
         assert!(error.to_string().contains("unmanaged"));
         assert!(fixture.multiplexer().attached().is_empty());
@@ -367,11 +279,6 @@ mod tests {
             FakeMultiplexer::new().with_live(ServiceFixture::waiting(&stranger).without_metadata()),
         );
 
-        assert!(
-            fixture
-                .service()
-                .attach("mystery", ReturnMode::None)
-                .is_ok()
-        );
+        assert!(fixture.service().attach("mystery").is_ok());
     }
 }

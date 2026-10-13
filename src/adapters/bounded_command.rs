@@ -40,10 +40,9 @@ impl BoundedCommand {
     }
 
     fn spawn(&self, mut command: Command, call: &Call) -> Result<Child, CommandError> {
-        let stdin = if call.input.is_some() {
-            Stdio::piped()
-        } else {
-            Stdio::null()
+        let stdin = match call.input {
+            Some(_) => Stdio::piped(),
+            None => Stdio::null(),
         };
         command
             .stdin(stdin)

@@ -11,7 +11,6 @@ use super::blocking_operation::BlockingOperation;
 use super::shell_runner::{ChildShell, ShellRunner};
 use super::terminal_guard::TerminalState;
 use crate::adapters::signal_flags::SignalFlags;
-use crate::application::EphemeralShell;
 
 pub trait InputSource {
     fn next_event(&mut self, timeout: Duration) -> io::Result<Option<Event>>;
@@ -137,32 +136,16 @@ where
     }
 
     fn attach(&mut self, app: &mut App, name: &str) -> io::Result<()> {
-        if app.is_inside_tmux() {
-            app.attach(name);
-            return Ok(());
-        }
         self.screen.restore();
         app.attach(name);
         self.resume()
     }
 
     fn open_shell(&mut self, app: &mut App, name: &str) -> io::Result<()> {
-        if app.is_inside_tmux() {
-            return match app.open_shell(name) {
-                Some(shell) => self.run_shell(app, &shell),
-                None => Ok(()),
-            };
-        }
         self.screen.restore();
         if let Some(shell) = app.open_shell(name) {
             app.shell_finished(self.shells.run(&shell));
         }
-        self.resume()
-    }
-
-    fn run_shell(&mut self, app: &mut App, shell: &EphemeralShell) -> io::Result<()> {
-        self.screen.restore();
-        app.shell_finished(self.shells.run(shell));
         self.resume()
     }
 
@@ -194,7 +177,7 @@ mod tests {
     use crossterm::event::KeyCode;
     use signal_hook::consts::SIGHUP;
 
-    use super::*;
+    use crate::application::EphemeralShell;
     use crate::application::ports::AttachTarget;
     use crate::test_support::{
         FakeMultiplexer, FixtureBackend, RecordingShells, ScriptedInput, ServiceFixture, UiHarness,
@@ -277,7 +260,7 @@ mod tests {
     }
 
     #[test]
-    fn an_outside_attach_suspends_the_screen_and_redraws_fully_on_resume() {
+    fn an_attach_suspends_the_screen_and_redraws_fully_on_resume() {
         let session = ServiceFixture::session("fix-auth");
         let fixture = ServiceFixture::new()
             .with_sessions(std::slice::from_ref(&session))
@@ -383,7 +366,7 @@ mod tests {
     }
 
     #[test]
-    fn t_outside_tmux_attaches_to_the_shell_window_behind_a_suspended_screen() {
+    fn t_attaches_to_the_shell_window_behind_a_suspended_screen() {
         let fixture = ShellLoopFixture::live();
         let harness = UiHarness::new();
         let mut app = UiHarness::app(&fixture);
@@ -397,20 +380,6 @@ mod tests {
             fixture.multiplexer().attached(),
             [AttachTarget::Shell("@9".to_string())]
         );
-    }
-
-    #[test]
-    fn t_inside_tmux_switches_to_the_shell_window_without_suspending_the_screen() {
-        let fixture = ShellLoopFixture::live().inside_tmux();
-        let harness = UiHarness::new();
-        let mut app = UiHarness::app(&fixture);
-        let mut event_loop =
-            harness.event_loop(ScriptedInput::events(vec![UiHarness::character('t')]));
-
-        event_loop.run(&mut app).unwrap();
-
-        assert_eq!(harness.screen_switches(), ["enter"]);
-        assert_eq!(fixture.multiplexer().attached().len(), 1);
     }
 
     #[test]
@@ -434,22 +403,6 @@ mod tests {
         );
         assert_eq!(harness.screen_switches(), ["enter", "leave", "enter"]);
         assert_eq!(event_loop.backend().clears(), 1);
-    }
-
-    #[test]
-    fn t_on_a_stopped_session_inside_tmux_suspends_the_screen_for_the_shell() {
-        let fixture = ShellLoopFixture::stopped().inside_tmux();
-        let harness = UiHarness::new();
-        let shells = RecordingShells::default();
-        let mut app = UiHarness::app(&fixture);
-        let mut event_loop = harness
-            .event_loop(ScriptedInput::events(vec![UiHarness::character('t')]))
-            .with_shells(Box::new(shells.clone()));
-
-        event_loop.run(&mut app).unwrap();
-
-        assert_eq!(shells.runs().len(), 1);
-        assert_eq!(harness.screen_switches(), ["enter", "leave", "enter"]);
     }
 
     #[test]
