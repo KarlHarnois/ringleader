@@ -1,5 +1,6 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
+use super::list_selection::ListSelection;
 use super::repo_group::RepoGroup;
 use super::session_table::SessionTable;
 use super::session_tree::{SessionTree, TreeLine};
@@ -9,7 +10,8 @@ use crate::domain::{DiffStat, PullRequest, SessionSummary};
 #[derive(Debug, Default)]
 pub struct SessionList {
     rows: Vec<SessionSummary>,
-    selection: Option<String>,
+    selection: Option<ListSelection>,
+    folded: HashSet<RepoGroup>,
 }
 
 impl SessionList {
@@ -18,16 +20,20 @@ impl SessionList {
     }
 
     pub fn table(&self, tick: u64, theme: Theme) -> SessionTable<'_> {
-        SessionTable::new(self.tree(), self.selection.as_deref(), tick, theme)
+        SessionTable::new(self.tree(), self.selection.as_ref(), tick, theme)
     }
 
     pub fn selected_name(&self) -> Option<&str> {
         self.selected().map(SessionSummary::name)
     }
 
+    pub fn heading_selected(&self) -> bool {
+        matches!(self.selection, Some(ListSelection::Repo(_)))
+    }
+
     pub fn visible_managed(&self, room: usize) -> Vec<String> {
         let tree = self.tree();
-        let visible = tree.visible(self.selection.as_deref(), room);
+        let visible = tree.visible(self.selection.as_ref(), room);
         visible
             .filter_map(TreeLine::row)
             .filter(|row| row.session().is_some())
@@ -66,40 +72,71 @@ impl SessionList {
     }
 
     pub fn selected(&self) -> Option<&SessionSummary> {
-        let selected = self.selection.as_deref()?;
-        self.rows.iter().find(|row| row.name() == selected)
+        match self.selection.as_ref()? {
+            ListSelection::Session(name) => self.row(name),
+            ListSelection::Repo(_) => None,
+        }
     }
 
     pub fn show(&mut self, mut rows: Vec<SessionSummary>) {
         rows.sort_by_cached_key(|row| (RepoGroup::of(row), row.state(), row.name().to_string()));
         self.rows = rows;
-        if self.selected().is_none() {
-            self.selection = self.rows.first().map(|row| row.name().to_string());
-        }
+        self.selection = self.repaired_selection();
     }
 
     pub fn select(&mut self, name: &str) {
-        if self.rows.iter().any(|row| row.name() == name) {
-            self.selection = Some(name.to_string());
-        }
+        let Some(group) = self.row(name).map(RepoGroup::of) else {
+            return;
+        };
+        self.folded.remove(&group);
+        self.selection = Some(ListSelection::Session(name.to_string()));
     }
 
     pub fn move_selection(&mut self, offset: isize) {
-        let current = self.selected_index().unwrap_or(0);
-        let last = self.rows.len().saturating_sub(1);
-        let target = current.saturating_add_signed(offset).min(last);
-        if let Some(row) = self.rows.get(target) {
-            self.selection = Some(row.name().to_string());
+        if let Some(selection) = self.selection_moved_by(offset) {
+            self.selection = Some(selection);
+        }
+    }
+
+    pub fn toggle_fold(&mut self) {
+        let Some(ListSelection::Repo(group)) = &self.selection else {
+            return;
+        };
+        if !self.folded.remove(group) {
+            self.folded.insert(group.clone());
         }
     }
 
     fn tree(&self) -> SessionTree<'_> {
-        SessionTree::new(&self.rows)
+        SessionTree::new(&self.rows, &self.folded)
     }
 
-    fn selected_index(&self) -> Option<usize> {
-        let selected = self.selection.as_deref()?;
-        self.rows.iter().position(|row| row.name() == selected)
+    fn repaired_selection(&self) -> Option<ListSelection> {
+        let tree = self.tree();
+        let first_line = || tree.lines().first().map(TreeLine::selection);
+        let Some(selection) = &self.selection else {
+            return first_line();
+        };
+        if tree.position_of(selection).is_some() {
+            return Some(selection.clone());
+        }
+        self.folded_heading_of(selection).or_else(first_line)
+    }
+
+    fn folded_heading_of(&self, selection: &ListSelection) -> Option<ListSelection> {
+        let ListSelection::Session(name) = selection else {
+            return None;
+        };
+        let group = self.row(name).map(RepoGroup::of)?;
+        Some(ListSelection::Repo(group))
+    }
+
+    fn selection_moved_by(&self, offset: isize) -> Option<ListSelection> {
+        let tree = self.tree();
+        let current = tree.selected_line(self.selection.as_ref());
+        let last = tree.lines().len().saturating_sub(1);
+        let target = current.saturating_add_signed(offset).min(last);
+        tree.lines().get(target).map(TreeLine::selection)
     }
 }
 
@@ -119,6 +156,20 @@ mod tests {
         fn row_in(name: &str, repo: &str, state: SessionState) -> SessionSummary {
             let session = ServiceFixture::session_at(name, repo, ServiceFixture::CREATED_AT);
             SessionSummary::managed(session, state, false)
+        }
+
+        fn two_repos() -> Vec<SessionSummary> {
+            vec![
+                Self::row_in("a-one", "/repos/alpha", SessionState::Waiting),
+                Self::row_in("b-two", "/repos/alpha", SessionState::Waiting),
+                Self::row_in("c-three", "/repos/beta", SessionState::Waiting),
+            ]
+        }
+
+        fn showing(rows: Vec<SessionSummary>) -> SessionList {
+            let mut list = SessionList::default();
+            list.show(rows);
+            list
         }
 
         fn names(list: &SessionList) -> Vec<&str> {
@@ -230,15 +281,96 @@ mod tests {
 
     #[test]
     fn heading_lines_count_against_the_room_for_diffs() {
-        let mut list = SessionList::default();
-        list.show(vec![
-            ListFixture::row_in("a-one", "/repos/alpha", SessionState::Waiting),
-            ListFixture::row_in("b-two", "/repos/alpha", SessionState::Waiting),
-            ListFixture::row_in("c-three", "/repos/beta", SessionState::Waiting),
-        ]);
+        let mut list = ListFixture::showing(ListFixture::two_repos());
         list.select("c-three");
 
         assert_eq!(list.visible_managed(2), ["c-three"]);
+    }
+
+    #[test]
+    fn folded_sessions_are_not_offered_for_diffs() {
+        let mut list = ListFixture::showing(ListFixture::two_repos());
+
+        list.toggle_fold();
+
+        assert_eq!(list.visible_managed(10), ["c-three"]);
+    }
+
+    #[test]
+    fn a_grouped_list_starts_on_its_first_heading() {
+        let list = ListFixture::showing(ListFixture::two_repos());
+
+        assert!(list.heading_selected());
+        assert_eq!(list.selected(), None);
+    }
+
+    #[test]
+    fn moving_down_from_a_repo_s_last_session_reaches_the_next_heading() {
+        let mut list = ListFixture::showing(ListFixture::two_repos());
+        list.select("b-two");
+
+        list.move_selection(1);
+        let on_heading = list.heading_selected();
+        list.move_selection(1);
+
+        assert!(on_heading);
+        assert_eq!(list.selected_name(), Some("c-three"));
+    }
+
+    #[test]
+    fn folding_does_nothing_on_a_session() {
+        let mut list = ListFixture::showing(ListFixture::two_repos());
+        list.select("a-one");
+
+        list.toggle_fold();
+
+        assert_eq!(list.visible_managed(10), ["a-one", "b-two", "c-three"]);
+    }
+
+    #[test]
+    fn folding_twice_unfolds_the_repo() {
+        let mut list = ListFixture::showing(ListFixture::two_repos());
+
+        list.toggle_fold();
+        list.toggle_fold();
+
+        assert_eq!(list.visible_managed(10), ["a-one", "b-two", "c-three"]);
+    }
+
+    #[test]
+    fn a_selected_session_in_a_folded_repo_gives_way_to_its_heading() {
+        let mut list = ListFixture::showing(ListFixture::two_repos());
+        list.toggle_fold();
+        list.show(ListFixture::two_repos()[..2].to_vec());
+
+        list.show(ListFixture::two_repos());
+        let on_heading = list.heading_selected();
+        list.toggle_fold();
+
+        assert!(on_heading);
+        assert_eq!(list.visible_managed(10), ["a-one", "b-two", "c-three"]);
+    }
+
+    #[test]
+    fn a_vanished_heading_falls_back_to_the_first_line() {
+        let mut list = ListFixture::showing(ListFixture::two_repos());
+        list.select("c-three");
+        list.move_selection(-1);
+
+        list.show(ListFixture::two_repos()[..2].to_vec());
+
+        assert_eq!(list.selected_name(), Some("a-one"));
+    }
+
+    #[test]
+    fn selecting_a_session_unfolds_its_repo() {
+        let mut list = ListFixture::showing(ListFixture::two_repos());
+        list.toggle_fold();
+
+        list.select("b-two");
+
+        assert_eq!(list.selected_name(), Some("b-two"));
+        assert_eq!(list.visible_managed(10), ["a-one", "b-two", "c-three"]);
     }
 
     #[test]

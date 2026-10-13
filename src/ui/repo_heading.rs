@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use ratatui::text::Span;
 
 use super::repo_group::RepoGroup;
@@ -8,6 +10,7 @@ use crate::domain::{SessionState, SessionSummary};
 pub struct RepoHeading<'a> {
     group: RepoGroup,
     number: usize,
+    folded: bool,
     rows: &'a [SessionSummary],
 }
 
@@ -15,13 +18,31 @@ impl<'a> RepoHeading<'a> {
     const LAST_NUMBERED: usize = 9;
     const UNNUMBERED: &'static str = " ";
     const UNFOLDED: char = '▾';
+    const FOLDED: char = '▸';
 
     pub fn new(number: usize, rows: &'a [SessionSummary]) -> Self {
         Self {
             group: rows.first().map_or(RepoGroup::Other, RepoGroup::of),
             number,
+            folded: false,
             rows,
         }
+    }
+
+    pub fn folded_among(self, folded: &HashSet<RepoGroup>) -> Self {
+        let folded = folded.contains(&self.group);
+        Self { folded, ..self }
+    }
+
+    pub fn group(&self) -> &RepoGroup {
+        &self.group
+    }
+
+    pub fn shown_rows(&self) -> &'a [SessionSummary] {
+        if self.folded {
+            return &[];
+        }
+        self.rows
     }
 
     pub fn spans(&self, tick: u64, theme: &Theme) -> Vec<Span<'static>> {
@@ -33,7 +54,7 @@ impl<'a> RepoHeading<'a> {
     fn title_spans(&self, theme: &Theme) -> Vec<Span<'static>> {
         vec![
             Span::styled(self.number_label(), theme.dim()),
-            Span::styled(format!(" {} ", Self::UNFOLDED), theme.base()),
+            Span::styled(format!(" {} ", self.arrow()), theme.base()),
             Span::styled(self.group.to_string(), theme.emphasis()),
             Span::styled(" ", theme.base()),
             Span::styled(format!("({})", self.rows.len()), theme.dim()),
@@ -54,6 +75,13 @@ impl<'a> RepoHeading<'a> {
         let indicator = StateIndicator::new(state, tick);
         let text = format!("{}{count}", indicator.glyph());
         (count > 0).then(|| Span::styled(text, indicator.style(theme)))
+    }
+
+    fn arrow(&self) -> char {
+        if self.folded {
+            return Self::FOLDED;
+        }
+        Self::UNFOLDED
     }
 
     fn number_label(&self) -> String {
@@ -96,6 +124,17 @@ mod tests {
         let heading = RepoHeading::new(1, &rows);
 
         assert_eq!(HeadingFixture::text(&heading), "1 ▾ alpha (4)  ⠋1 ●2 ○1");
+    }
+
+    #[test]
+    fn a_folded_heading_shows_the_folded_arrow_and_no_rows() {
+        let rows = [HeadingFixture::row("docs", SessionState::Waiting)];
+        let folded = HashSet::from([RepoGroup::of(&rows[0])]);
+
+        let heading = RepoHeading::new(1, &rows).folded_among(&folded);
+
+        assert_eq!(HeadingFixture::text(&heading), "1 ▸ alpha (1)  ●1");
+        assert!(heading.shown_rows().is_empty());
     }
 
     #[test]

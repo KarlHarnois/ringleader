@@ -299,7 +299,8 @@ viewer exits.
     │   ├── app.rs                  # App
     │   ├── action_gate.rs          # ActionGate, which actions the selected row allows
     │   ├── home_state.rs           # HomeState, the polled rows, selection, and preview
-    │   ├── session_list.rs         # SessionList, rows sorted by repo, state, and name, and name-based selection
+    │   ├── session_list.rs         # SessionList, rows sorted by repo, state, and name, the selected session or heading, and the folded repos
+    │   ├── list_selection.rs       # ListSelection, the selected session or repo heading
     │   ├── preview_feed.rs         # PreviewFeed, the preview capture and its timer
     │   ├── diff_queue.rs           # DiffQueue, round-robin diffs of visible rows
     │   ├── pull_request_feed.rs    # PullRequestFeed, the pull requests of visible rows and their timer

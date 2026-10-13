@@ -1,5 +1,7 @@
+use std::collections::HashSet;
 use std::iter::once;
 
+use super::list_selection::ListSelection;
 use super::repo_group::RepoGroup;
 use super::repo_heading::RepoHeading;
 use crate::domain::SessionSummary;
@@ -10,11 +12,11 @@ pub struct SessionTree<'a> {
 }
 
 impl<'a> SessionTree<'a> {
-    pub fn new(rows: &'a [SessionSummary]) -> Self {
+    pub fn new(rows: &'a [SessionSummary], folded: &HashSet<RepoGroup>) -> Self {
         let groups: Vec<&'a [SessionSummary]> = rows.chunk_by(Self::share_a_group).collect();
         let lines = match groups.len() {
             0 | 1 => Self::flat_lines(rows),
-            _ => Self::grouped_lines(groups),
+            _ => Self::grouped_lines(groups, folded),
         };
         Self { rows, lines }
     }
@@ -23,7 +25,6 @@ impl<'a> SessionTree<'a> {
         self.rows
     }
 
-    #[cfg(test)]
     pub fn lines(&self) -> &[TreeLine<'a>] {
         &self.lines
     }
@@ -34,20 +35,23 @@ impl<'a> SessionTree<'a> {
 
     pub fn visible(
         &self,
-        selection: Option<&str>,
+        selection: Option<&ListSelection>,
         room: usize,
     ) -> impl Iterator<Item = &TreeLine<'a>> {
-        let selected_line = selection
-            .and_then(|name| self.position_of(name))
-            .unwrap_or(0);
-        let first = (selected_line + 1).saturating_sub(room);
+        let first = (self.selected_line(selection) + 1).saturating_sub(room);
         self.lines.iter().skip(first).take(room)
     }
 
-    pub fn position_of(&self, name: &str) -> Option<usize> {
+    pub fn selected_line(&self, selection: Option<&ListSelection>) -> usize {
+        selection
+            .and_then(|selection| self.position_of(selection))
+            .unwrap_or(0)
+    }
+
+    pub fn position_of(&self, selection: &ListSelection) -> Option<usize> {
         self.lines
             .iter()
-            .position(|line| line.row().is_some_and(|row| row.name() == name))
+            .position(|line| line.selection() == *selection)
     }
 
     fn share_a_group(first: &SessionSummary, second: &SessionSummary) -> bool {
@@ -59,16 +63,19 @@ impl<'a> SessionTree<'a> {
         rows.iter().map(flat).collect()
     }
 
-    fn grouped_lines(groups: Vec<&'a [SessionSummary]>) -> Vec<TreeLine<'a>> {
+    fn grouped_lines(
+        groups: Vec<&'a [SessionSummary]>,
+        folded: &HashSet<RepoGroup>,
+    ) -> Vec<TreeLine<'a>> {
         let numbered = groups.into_iter().zip(1..);
-        numbered
-            .flat_map(|(rows, number)| Self::group_lines(number, rows))
-            .collect()
+        let headings =
+            numbered.map(|(rows, number)| RepoHeading::new(number, rows).folded_among(folded));
+        headings.flat_map(Self::group_lines).collect()
     }
 
-    fn group_lines(number: usize, rows: &'a [SessionSummary]) -> Vec<TreeLine<'a>> {
-        let heading = TreeLine::Heading(RepoHeading::new(number, rows));
-        once(heading).chain(Self::branch_lines(rows)).collect()
+    fn group_lines(heading: RepoHeading<'a>) -> Vec<TreeLine<'a>> {
+        let branches = Self::branch_lines(heading.shown_rows());
+        once(TreeLine::Heading(heading)).chain(branches).collect()
     }
 
     fn branch_lines(rows: &'a [SessionSummary]) -> Vec<TreeLine<'a>> {
@@ -100,6 +107,13 @@ impl<'a> TreeLine<'a> {
         match self {
             Self::Session { row, .. } => Some(row),
             Self::Heading(_) => None,
+        }
+    }
+
+    pub fn selection(&self) -> ListSelection {
+        match self {
+            Self::Session { row, .. } => ListSelection::Session(row.name().to_string()),
+            Self::Heading(heading) => ListSelection::Repo(heading.group().clone()),
         }
     }
 
@@ -170,7 +184,7 @@ mod tests {
             TreeFixture::row("fix-auth", "/repos/alpha"),
         ];
 
-        let tree = SessionTree::new(&rows);
+        let tree = SessionTree::new(&rows, &HashSet::new());
 
         assert_eq!(
             TreeFixture::shapes(&tree),
@@ -183,7 +197,7 @@ mod tests {
     fn two_repos_give_a_heading_then_middle_and_last_branches() {
         let rows = TreeFixture::two_repos();
 
-        let tree = SessionTree::new(&rows);
+        let tree = SessionTree::new(&rows, &HashSet::new());
 
         assert_eq!(
             TreeFixture::shapes(&tree),
@@ -199,12 +213,36 @@ mod tests {
     }
 
     #[test]
+    fn a_folded_group_yields_only_its_heading() {
+        let rows = TreeFixture::two_repos();
+        let folded = HashSet::from([RepoGroup::of(&rows[0])]);
+
+        let tree = SessionTree::new(&rows, &folded);
+
+        assert_eq!(
+            TreeFixture::shapes(&tree),
+            ["heading", "heading", "Last docs"]
+        );
+    }
+
+    #[test]
+    fn a_single_repo_ignores_its_fold() {
+        let rows = [TreeFixture::row("dark-mode", "/repos/alpha")];
+        let folded = HashSet::from([RepoGroup::of(&rows[0])]);
+
+        let tree = SessionTree::new(&rows, &folded);
+
+        assert_eq!(TreeFixture::shapes(&tree), ["Flat dark-mode"]);
+    }
+
+    #[test]
     fn the_selection_stays_on_screen_when_headings_use_up_lines() {
         let rows = TreeFixture::two_repos();
-        let tree = SessionTree::new(&rows);
+        let tree = SessionTree::new(&rows, &HashSet::new());
+        let docs = ListSelection::Session("docs".to_string());
 
         let visible: Vec<String> = tree
-            .visible(Some("docs"), 2)
+            .visible(Some(&docs), 2)
             .map(TreeFixture::shape)
             .collect();
 

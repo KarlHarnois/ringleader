@@ -143,6 +143,8 @@ impl<'a> CenteredText<'a> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
@@ -150,6 +152,7 @@ mod tests {
     use crate::domain::{DiffStat, SessionState, SessionSummary};
     use crate::test_support::ServiceFixture;
     use crate::ui::empty_state::EmptyState;
+    use crate::ui::list_selection::ListSelection;
     use crate::ui::session_tree::SessionTree;
     use crate::ui::theme::Theme;
 
@@ -174,15 +177,12 @@ mod tests {
         fn render(rows: &[SessionSummary], width: u16, height: u16) -> String {
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
             let selected = rows.first();
+            let selection = selected.map(|row| ListSelection::Session(row.name().to_string()));
+            let tree = || SessionTree::new(rows, &HashSet::new());
             terminal
                 .draw(|frame| {
                     HomeView::new(
-                        SessionTable::new(
-                            SessionTree::new(rows),
-                            selected.map(SessionSummary::name),
-                            0,
-                            Theme,
-                        ),
+                        SessionTable::new(tree(), selection.as_ref(), 0, Theme),
                         PreviewPanel::new(selected, None, Theme),
                         StatusBar::new(Theme),
                     )

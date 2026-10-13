@@ -6,6 +6,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use super::colored_row::ColoredRow;
 use super::empty_state::EmptyState;
 use super::home_view::LayoutTier;
+use super::list_selection::ListSelection;
 use super::session_tree::{SessionTree, TreeBranch, TreeLine};
 use super::state_indicator::StateIndicator;
 use super::table_columns::TableColumns;
@@ -14,7 +15,7 @@ use crate::domain::{DiffStat, SessionSummary};
 
 pub struct SessionTable<'a> {
     tree: SessionTree<'a>,
-    selection: Option<&'a str>,
+    selection: Option<&'a ListSelection>,
     tick: u64,
     theme: Theme,
     tier: LayoutTier,
@@ -23,7 +24,12 @@ pub struct SessionTable<'a> {
 impl<'a> SessionTable<'a> {
     const NO_DIFF: &'static str = "—";
 
-    pub fn new(tree: SessionTree<'a>, selection: Option<&'a str>, tick: u64, theme: Theme) -> Self {
+    pub fn new(
+        tree: SessionTree<'a>,
+        selection: Option<&'a ListSelection>,
+        tick: u64,
+        theme: Theme,
+    ) -> Self {
         Self {
             tree,
             selection,
@@ -116,8 +122,7 @@ impl<'a> SessionTable<'a> {
     }
 
     fn is_selected(&self, line: &TreeLine) -> bool {
-        line.row()
-            .is_some_and(|row| self.selection == Some(row.name()))
+        self.selection == Some(&line.selection())
     }
 
     fn reversed(&self, spans: &[Span], width: usize) -> Line<'static> {
@@ -192,6 +197,8 @@ impl<'a> SessionTable<'a> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::style::{Color, Modifier};
@@ -199,6 +206,7 @@ mod tests {
     use super::*;
     use crate::domain::{DiffStat, PullRequestState, SessionState, UnmanagedSession};
     use crate::test_support::ServiceFixture;
+    use crate::ui::repo_group::RepoGroup;
 
     struct TableFixture;
 
@@ -234,11 +242,21 @@ mod tests {
             tick: u64,
             height: u16,
         ) -> Terminal<TestBackend> {
+            let selection = selection.map(|name| ListSelection::Session(name.to_string()));
+            Self::render_selecting(rows, selection.as_ref(), tick, height)
+        }
+
+        fn render_selecting(
+            rows: &[SessionSummary],
+            selection: Option<&ListSelection>,
+            tick: u64,
+            height: u16,
+        ) -> Terminal<TestBackend> {
             let mut terminal = Terminal::new(TestBackend::new(50, height)).unwrap();
+            let tree = || SessionTree::new(rows, &HashSet::new());
             terminal
                 .draw(|frame| {
-                    SessionTable::new(SessionTree::new(rows), selection, tick, Theme)
-                        .render(frame, frame.area())
+                    SessionTable::new(tree(), selection, tick, Theme).render(frame, frame.area())
                 })
                 .unwrap();
             terminal
@@ -470,6 +488,19 @@ mod tests {
     }
 
     #[test]
+    fn a_selected_heading_is_reversed_across_the_whole_width() {
+        let rows = TableFixture::two_repos();
+        let alpha = ListSelection::Repo(RepoGroup::of(&rows[0]));
+
+        let terminal = TableFixture::render_selecting(&rows, Some(&alpha), 0, 8);
+        let buffer = terminal.backend().buffer();
+
+        assert!(buffer[(1, 2)].modifier.contains(Modifier::REVERSED));
+        assert!(buffer[(48, 2)].modifier.contains(Modifier::REVERSED));
+        assert!(!buffer[(1, 3)].modifier.contains(Modifier::REVERSED));
+    }
+
+    #[test]
     fn the_column_header_is_indented_past_the_branches() {
         let terminal = TableFixture::render(&TableFixture::two_repos(), None, 0, 8);
 
@@ -483,7 +514,7 @@ mod tests {
 
         terminal
             .draw(|frame| {
-                SessionTable::new(SessionTree::new(&rows), None, 0, Theme)
+                SessionTable::new(SessionTree::new(&rows, &HashSet::new()), None, 0, Theme)
                     .for_tier(LayoutTier::Minimal)
                     .render(frame, frame.area())
             })
@@ -498,7 +529,8 @@ mod tests {
 
         terminal
             .draw(|frame| {
-                SessionTable::new(SessionTree::new(&[]), None, 0, Theme).render(frame, frame.area())
+                SessionTable::new(SessionTree::new(&[], &HashSet::new()), None, 0, Theme)
+                    .render(frame, frame.area())
             })
             .unwrap();
 
