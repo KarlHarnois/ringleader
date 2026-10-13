@@ -431,6 +431,18 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_upstream_drop_still_records_the_rename() {
+        let fixture = RenameFixture::stopped_with_failing_git("fix-auth", "drop_stale_upstream");
+
+        let renamed = fixture
+            .service()
+            .rename_session("fix-auth", "fix-login")
+            .unwrap();
+
+        assert_eq!(fixture.registry().sessions(), vec![renamed]);
+    }
+
+    #[test]
     fn a_failed_pushed_check_refuses_the_rename() {
         let fixture = RenameFixture::stopped_with_failing_git("fix-auth", "is_branch_published");
 
