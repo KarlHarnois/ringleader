@@ -137,10 +137,11 @@ impl App {
 
     fn handle_key(&mut self, key: &KeyEvent) -> AppRequest {
         self.status.show(None);
-        let selected = self.home.sessions().selected();
-        match ActionGate::new(selected, self.service.read_only_reason()).action_for(key) {
+        match self.gate().action_for(key) {
             KeyAction::Request(request) => return self.request(request),
             KeyAction::Move(offset) => self.home.move_selection(offset, &self.service),
+            KeyAction::Fold => self.home.toggle_fold(&self.service),
+            KeyAction::JumpToRepo(number) => self.home.jump_to_repo(number, &self.service),
             KeyAction::Open(opening) => {
                 self.dialogs.open(Dialog::open(opening, &self.service));
             }
@@ -149,6 +150,15 @@ impl App {
             KeyAction::Ignore => {}
         }
         AppRequest::Continue
+    }
+
+    fn gate(&self) -> ActionGate<'_> {
+        let sessions = self.home.sessions();
+        let config_error = self.service.read_only_reason();
+        if sessions.heading_selected() {
+            return ActionGate::on_heading(config_error);
+        }
+        ActionGate::new(sessions.selected(), config_error)
     }
 
     fn request(&mut self, request: AppRequest) -> AppRequest {
@@ -230,6 +240,19 @@ mod tests {
                         .with_live(ServiceFixture::waiting(&second))
                         .with_capture("ringleader-dark-mode", "dark mode output")
                         .with_capture("ringleader-fix-auth", "fix auth output"),
+                )
+        }
+
+        fn two_repos() -> ServiceFixture {
+            let docs =
+                ServiceFixture::session_at("docs", "/repos/alpha", ServiceFixture::CREATED_AT);
+            let fix_auth = ServiceFixture::session("fix-auth");
+            ServiceFixture::new()
+                .with_sessions(&[docs.clone(), fix_auth.clone()])
+                .with_multiplexer(
+                    FakeMultiplexer::new()
+                        .with_live(ServiceFixture::waiting(&docs))
+                        .with_live(ServiceFixture::waiting(&fix_auth)),
                 )
         }
 
@@ -431,6 +454,33 @@ mod tests {
         assert_eq!(after_h.as_deref(), Some("dark-mode"));
         assert_eq!(after_right.as_deref(), Some("fix-auth"));
         assert_eq!(AppFixture::selected(&app).as_deref(), Some("dark-mode"));
+    }
+
+    #[test]
+    fn space_folds_the_selected_repo() {
+        let fixture = AppFixture::two_repos();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press(&mut app, ' ');
+
+        let screen = AppFixture::screen(&app, 100, 28);
+        assert!(screen.contains("1 ▸ alpha (1)"));
+        assert!(!screen.contains("docs"));
+        assert!(screen.contains("fix-auth"));
+    }
+
+    #[test]
+    fn a_digit_jumps_to_that_repo_and_previews_its_first_session() {
+        let fixture = AppFixture::two_repos();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press(&mut app, '2');
+
+        assert_eq!(AppFixture::selected(&app).as_deref(), Some("fix-auth"));
+        assert_eq!(
+            AppFixture::captures(&fixture).last().unwrap(),
+            "capture_pane ringleader-fix-auth"
+        );
     }
 
     #[test]

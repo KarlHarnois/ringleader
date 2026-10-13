@@ -24,11 +24,15 @@ pub struct HelpView {
 impl HelpView {
     pub const TITLE: &'static str = concat!(" Help · ringleader ", env!("CARGO_PKG_VERSION"), " ");
     const KEYS_HEADING: &'static str = "Keys";
-    const KEYS: [(&'static str, &'static str); 9] = [
+    const KEYS: [(&'static str, &'static str); 11] = [
         ("n", "create a session"),
         ("d", "delete the selected session"),
         ("R", "rename the selected session and its branch"),
-        ("Enter", "attach to the selected session"),
+        (
+            "Enter",
+            "attach to the selected session, or fold the selected repo",
+        ),
+        ("Space", "fold or unfold the selected repo"),
         ("t", "open a shell in the selected session's worktree"),
         ("s", "restart an exited or stopped session"),
         (
@@ -36,6 +40,7 @@ impl HelpView {
             "reload the config and the registry and refresh diffs and PRs",
         ),
         ("↑ ↓ j k h l", "move the selection"),
+        ("1-9", "jump to a repo"),
         ("q", "quit, the sessions keep running"),
     ];
     const RETURN_ACTION: &'static str = "detach from a session and return here";
@@ -191,6 +196,8 @@ mod tests {
         const SHORT_WIDTH: usize = 56;
         const SHORT_HEIGHT: usize = 8;
         const PAST_THE_END: usize = 50;
+        const TALL_NARROW_SIZE: (u16, u16) = (79, 30);
+        const TMUX_CONFIG_ROW: &'static str = "tmux config  ~/.local/state/ringleader/tmux.conf";
 
         fn help() -> HelpView {
             Self::help_for(&ReturnKey::default())
@@ -222,10 +229,22 @@ mod tests {
         }
 
         fn screen(help: HelpView, width: u16, height: u16) -> String {
+            Self::dialog_screen(&Dialog::Help(Box::new(help)), width, height)
+        }
+
+        fn screen_scrolled_to_the_end(width: u16, height: u16) -> String {
+            let mut dialog = Dialog::Help(Box::new(Self::help()));
+            Self::dialog_screen(&dialog, width, height);
+            let Dialog::Help(help) = &mut dialog else {
+                unreachable!()
+            };
+            Self::press_times(help, KeyCode::Down, Self::PAST_THE_END);
+            Self::dialog_screen(&dialog, width, height)
+        }
+
+        fn dialog_screen(dialog: &Dialog, width: u16, height: u16) -> String {
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-            terminal
-                .draw(|frame| Dialog::Help(Box::new(help)).render(frame, &Theme))
-                .unwrap();
+            terminal.draw(|frame| dialog.render(frame, &Theme)).unwrap();
             let buffer = terminal.backend().buffer();
             buffer
                 .content()
@@ -314,18 +333,19 @@ mod tests {
     }
 
     #[test]
-    fn the_whole_help_fits_the_smallest_full_size_dialog() {
+    fn the_smallest_full_size_dialog_scrolls_down_to_the_last_file() {
         let (width, height) = LayoutTier::smallest_full_size();
 
-        let screen = HelpFixture::screen(HelpFixture::help(), width, height);
+        let first_page = HelpFixture::screen(HelpFixture::help(), width, height);
+        let last_page = HelpFixture::screen_scrolled_to_the_end(width, height);
 
-        assert!(screen.contains("Keys"));
-        assert!(screen.contains("tmux config  ~/.local/state/ringleader/tmux.conf"));
+        assert!(!first_page.contains(HelpFixture::TMUX_CONFIG_ROW));
+        assert!(last_page.contains(HelpFixture::TMUX_CONFIG_ROW));
     }
 
     #[test]
     fn a_help_that_fits_offers_no_scroll_keys() {
-        let (width, height) = LayoutTier::smallest_full_size();
+        let (width, height) = HelpFixture::TALL_NARROW_SIZE;
 
         let screen = HelpFixture::screen(HelpFixture::help(), width, height);
 
