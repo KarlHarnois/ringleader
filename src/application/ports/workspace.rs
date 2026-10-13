@@ -25,6 +25,12 @@ pub trait Workspace: Send + Sync {
         expected_tip: Option<&str>,
     ) -> Result<(), WorkspaceError>;
     fn rename_branch(&self, location: &Path, old: &str, new: &str) -> Result<(), WorkspaceError>;
+    fn drop_stale_upstream(
+        &self,
+        location: &Path,
+        old: &str,
+        new: &str,
+    ) -> Result<(), WorkspaceError>;
     fn branch_exists(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError>;
     fn first_branch_under(
         &self,
@@ -34,6 +40,7 @@ pub trait Workspace: Send + Sync {
     fn mark_branch_managed(&self, repo: &Path, branch: &str) -> Result<(), WorkspaceError>;
     fn is_branch_managed(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError>;
     fn list_managed_branches(&self, repo: &Path) -> Result<Vec<String>, WorkspaceError>;
+    fn is_branch_published(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError>;
     fn resolve_start_point(
         &self,
         repo: &Path,

@@ -69,10 +69,15 @@ impl Session {
         &self.registration.naming
     }
 
-    pub fn renamed(&self, name: SessionName, branch: &str) -> Self {
+    pub fn has_branch_named_after_it(&self) -> bool {
+        self.branch() == self.naming().branch_name(&self.name)
+    }
+
+    pub fn renamed(&self, name: SessionName) -> Self {
         let tmux_name = self.naming().tmux_session_name(&name);
+        let branch = self.naming().branch_name(&name);
         Self {
-            metadata: self.metadata.with_branch(branch),
+            metadata: self.metadata.with_branch(&branch),
             registration: self
                 .registration
                 .on_tmux(TmuxAddress::new(&tmux_name, self.socket_path())),
@@ -173,23 +178,48 @@ mod tests {
                 Registration::new(tmux, naming, 1_700_000_000),
             )
         }
+
+        fn fix_login() -> SessionName {
+            SessionName::new("fix-login").unwrap()
+        }
     }
 
     #[test]
     fn renaming_derives_the_tmux_name_from_the_recorded_prefix() {
         let session = SessionFixture::fix_auth();
 
-        let renamed = session.renamed(SessionName::new("fix-login").unwrap(), "fix-login");
+        let renamed = session.renamed(SessionFixture::fix_login());
 
         assert_eq!(renamed.tmux_name(), "ringleader-fix-login");
+    }
+
+    #[test]
+    fn renaming_names_the_branch_after_the_new_name() {
+        let session = SessionFixture::fix_auth();
+
+        let renamed = session.renamed(SessionFixture::fix_login());
+
         assert_eq!(renamed.branch(), "fix-login");
+        assert!(renamed.has_branch_named_after_it());
+    }
+
+    #[test]
+    fn a_branch_from_before_the_prefix_was_dropped_is_not_named_after_the_session() {
+        let session = SessionFixture::fix_auth();
+        let legacy = Session::new(
+            session.name().clone(),
+            session.metadata().with_branch("ringleader/fix-auth"),
+            session.registration.clone(),
+        );
+
+        assert!(!legacy.has_branch_named_after_it());
     }
 
     #[test]
     fn renaming_keeps_the_worktree_path() {
         let session = SessionFixture::fix_auth();
 
-        let renamed = session.renamed(SessionName::new("fix-login").unwrap(), "fix-login");
+        let renamed = session.renamed(SessionFixture::fix_login());
 
         assert_eq!(renamed.worktree_path(), session.worktree_path());
     }

@@ -237,6 +237,16 @@ impl ServiceFixture {
         Self::session_at(name, Self::REPO, Self::CREATED_AT)
     }
 
+    pub fn session_on_branch(name: &str, branch: &str) -> Session {
+        let session = Self::session(name);
+        let tmux = TmuxAddress::new(session.tmux_name(), session.socket_path());
+        session.rekeyed(
+            session.name().clone(),
+            session.metadata().with_branch(branch),
+            tmux,
+        )
+    }
+
     pub fn session_at(name: &str, repo_path: &str, created_at: u64) -> Session {
         let name = SessionName::new(name).unwrap();
         let naming = Self::naming();

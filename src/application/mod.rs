@@ -1,6 +1,7 @@
 pub mod agent_hooks;
 pub mod branch_availability;
 pub mod branch_ownership;
+pub mod branch_renaming;
 pub mod busy_worktree;
 pub mod creation_plan;
 pub mod default_repo;

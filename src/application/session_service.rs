@@ -213,14 +213,9 @@ impl SessionService {
         Ok(outcome)
     }
 
-    pub fn rename_session(
-        &mut self,
-        old: &str,
-        new: &str,
-        keep_branch: bool,
-    ) -> Result<Session, ServiceError> {
+    pub fn rename_session(&mut self, old: &str, new: &str) -> Result<Session, ServiceError> {
         let reconciliation = self.reconcile()?;
-        let request = RenameRequest::new(old, new, keep_branch);
+        let request = RenameRequest::new(old, new);
         let renamed = self
             .lifecycle
             .rename(&reconciliation, &request, self.config())?;

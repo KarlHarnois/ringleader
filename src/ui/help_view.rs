@@ -27,7 +27,7 @@ impl HelpView {
     const KEYS: [(&'static str, &'static str); 9] = [
         ("n", "create a session"),
         ("d", "delete the selected session"),
-        ("R", "rename the selected session"),
+        ("R", "rename the selected session and its branch"),
         ("Enter", "attach to the selected session"),
         ("t", "open a shell in the selected session's worktree"),
         ("s", "restart an exited or stopped session"),

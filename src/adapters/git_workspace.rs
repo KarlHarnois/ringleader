@@ -143,6 +143,15 @@ impl Workspace for GitWorkspace {
         GitBranches::new(&self.git).rename(location, old, new)
     }
 
+    fn drop_stale_upstream(
+        &self,
+        location: &Path,
+        old: &str,
+        new: &str,
+    ) -> Result<(), WorkspaceError> {
+        GitBranches::new(&self.git).drop_stale_upstream(location, old, new)
+    }
+
     fn branch_exists(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError> {
         if GitBranches::new(&self.git).has_ref(repo, branch)? {
             return Ok(true);
@@ -169,6 +178,10 @@ impl Workspace for GitWorkspace {
 
     fn list_managed_branches(&self, repo: &Path) -> Result<Vec<String>, WorkspaceError> {
         GitBranches::new(&self.git).list_managed(repo)
+    }
+
+    fn is_branch_published(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError> {
+        GitBranches::new(&self.git).is_published(repo, branch)
     }
 
     fn resolve_start_point(
@@ -272,6 +285,8 @@ mod tests {
     struct WorktreeFixture;
 
     impl WorktreeFixture {
+        const LATER_DATE: &'static str = "2090-01-01T00:00:00Z";
+
         fn target(fixture: &GitTestRepo) -> PathBuf {
             fixture.sibling("worktrees").join("fix-auth")
         }
@@ -326,6 +341,139 @@ mod tests {
             clone
         }
 
+        fn clone_with_branch(origin: &GitTestRepo) -> PathBuf {
+            let clone = Self::clone_of(origin, "clone");
+            let workspace = origin.workspace();
+            let start = workspace.resolve_start_point(&clone, None).unwrap();
+            workspace
+                .create_worktree(&clone, &origin.sibling("wt"), BRANCH, &start)
+                .unwrap();
+            clone
+        }
+
+        fn clone_with_work(origin: &GitTestRepo) -> PathBuf {
+            let clone = Self::clone_with_branch(origin);
+            origin.commit(&origin.sibling("wt"), "work.txt");
+            clone
+        }
+
+        fn merge_into_the_default_branch(fixture: &GitTestRepo, branch: &str) {
+            let repo = fixture.path();
+            fixture.git(repo, &["checkout", "-q", "-b", branch]);
+            fixture.commit(repo, "merged.md");
+            fixture.git(repo, &["checkout", "-q", GitTestRepo::BRANCH]);
+            fixture.git(repo, &["merge", "-q", "--no-ff", "-m", "Merge", branch]);
+        }
+
+        fn update_the_branch_from_the_default_branch(fixture: &GitTestRepo, branch: &str) {
+            let repo = fixture.path();
+            fixture.commit(repo, "news.md");
+            Self::make_the_tip_the_newest_merge_base(fixture, repo);
+            fixture.git(repo, &["checkout", "-q", branch]);
+            fixture.git(
+                repo,
+                &[
+                    "merge",
+                    "-q",
+                    "--no-ff",
+                    "-m",
+                    "Update branch",
+                    GitTestRepo::BRANCH,
+                ],
+            );
+            fixture.git(repo, &["checkout", "-q", GitTestRepo::BRANCH]);
+        }
+
+        fn make_the_tip_the_newest_merge_base(fixture: &GitTestRepo, repo: &Path) {
+            let restamp = format!(
+                "GIT_COMMITTER_DATE={} git -C '{}' commit -q --amend --no-edit",
+                Self::LATER_DATE,
+                repo.display()
+            );
+            fixture.shell(&restamp);
+        }
+
+        fn clone_with_pruned_upstream(origin: &GitTestRepo) -> PathBuf {
+            let clone = Self::clone_with_branch(origin);
+            origin.git(&clone, &["push", "-q", "-u", "origin", BRANCH]);
+            origin.git(origin.path(), &["branch", "-q", "-D", BRANCH]);
+            origin.git(&clone, &["fetch", "-q", "--prune", "origin"]);
+            clone
+        }
+
+        fn track_the_base_branch(origin: &GitTestRepo, clone: &Path) {
+            let base = format!("origin/{}", GitTestRepo::BRANCH);
+            origin.git(clone, &["branch", "-q", "--set-upstream-to", &base, BRANCH]);
+        }
+
+        fn rename_in_clone(origin: &GitTestRepo) {
+            origin
+                .workspace()
+                .rename_branch(&origin.sibling("wt"), BRANCH, RENAMED)
+                .unwrap();
+        }
+
+        fn drop_stale_upstream_in_clone(origin: &GitTestRepo) {
+            origin
+                .workspace()
+                .drop_stale_upstream(&origin.sibling("wt"), BRANCH, RENAMED)
+                .unwrap();
+        }
+
+        fn upstream_merge(fixture: &GitTestRepo, repo: &Path, branch: &str) -> Option<String> {
+            let key = format!("branch.{branch}.merge");
+            let read = fixture.try_git(repo, &["config", "--get", &key]);
+            let merge = String::from_utf8_lossy(&read.stdout).trim().to_string();
+            read.status.success().then_some(merge)
+        }
+
+        fn fetch_only_the_default_branch(fixture: &GitTestRepo, clone: &Path) {
+            let refspec = format!(
+                "+refs/heads/{0}:refs/remotes/origin/{0}",
+                GitTestRepo::BRANCH
+            );
+            fixture.git(clone, &["config", "remote.origin.fetch", &refspec]);
+        }
+
+        fn commit_ahead(fixture: &GitTestRepo, repo: &Path, branch: &str) {
+            let tree = fixture.git(repo, &["rev-parse", "HEAD^{tree}"]);
+            let theirs = fixture.git(repo, &["commit-tree", "-p", "HEAD", "-m", "Theirs", &tree]);
+            fixture.git(
+                repo,
+                &["update-ref", &format!("refs/heads/{branch}"), &theirs],
+            );
+        }
+
+        fn commit_on_top_of(fixture: &GitTestRepo, repo: &Path, branch: &str) {
+            let tip = format!("refs/heads/{branch}");
+            let tree = fixture.git(repo, &["rev-parse", &format!("{tip}^{{tree}}")]);
+            let suggestion = fixture.git(
+                repo,
+                &["commit-tree", "-p", &tip, "-m", "Suggestion", &tree],
+            );
+            fixture.git(repo, &["update-ref", &tip, &suggestion]);
+        }
+
+        fn start_from_the_remote_copy(fixture: &GitTestRepo, clone: &Path) {
+            let copy = fixture.git(clone, &["rev-parse", &format!("origin/{BRANCH}")]);
+            fixture
+                .workspace()
+                .create_worktree(
+                    clone,
+                    &fixture.sibling("wt"),
+                    BRANCH,
+                    &StartPoint::Commit(copy),
+                )
+                .unwrap();
+        }
+
+        fn is_published(fixture: &GitTestRepo, repo: &Path) -> bool {
+            fixture
+                .workspace()
+                .is_branch_published(repo, BRANCH)
+                .unwrap()
+        }
+
         fn hook(fixture: &GitTestRepo, name: &str, script: &str) {
             let hooks = fixture.path().join(".git/hooks");
             fs::create_dir_all(&hooks).unwrap();
@@ -358,13 +506,8 @@ mod tests {
     #[test]
     fn a_new_branch_in_a_cloned_repo_has_no_upstream() {
         let origin = GitTestRepo::new();
-        let clone = WorktreeFixture::clone_of(&origin, "clone");
-        let workspace = origin.workspace();
-        let start = workspace.resolve_start_point(&clone, None).unwrap();
 
-        workspace
-            .create_worktree(&clone, &origin.sibling("wt"), BRANCH, &start)
-            .unwrap();
+        let clone = WorktreeFixture::clone_with_branch(&origin);
 
         let upstream = origin.try_git(
             &clone,
@@ -375,6 +518,225 @@ mod tests {
             ],
         );
         assert!(!upstream.status.success());
+    }
+
+    #[test]
+    fn a_branch_never_pushed_is_not_published() {
+        let origin = GitTestRepo::new();
+        let clone = WorktreeFixture::clone_with_branch(&origin);
+
+        assert!(!WorktreeFixture::is_published(&origin, &clone));
+    }
+
+    #[test]
+    fn a_pushed_branch_is_published() {
+        let origin = GitTestRepo::new();
+        let clone = WorktreeFixture::clone_with_work(&origin);
+
+        origin.git(&clone, &["push", "-q", "origin", BRANCH]);
+
+        assert!(WorktreeFixture::is_published(&origin, &clone));
+    }
+
+    #[test]
+    fn a_pushed_branch_whose_remote_copy_moved_ahead_is_published() {
+        let origin = GitTestRepo::new();
+        let clone = WorktreeFixture::clone_with_work(&origin);
+        origin.git(&clone, &["push", "-q", "origin", BRANCH]);
+
+        WorktreeFixture::commit_on_top_of(&origin, origin.path(), BRANCH);
+        origin.git(&clone, &["fetch", "-q", "origin"]);
+
+        assert!(WorktreeFixture::is_published(&origin, &clone));
+    }
+
+    #[test]
+    fn a_pushed_branch_that_diverged_from_its_remote_copy_is_published() {
+        let origin = GitTestRepo::new();
+        let clone = WorktreeFixture::clone_with_work(&origin);
+        origin.git(&clone, &["push", "-q", "origin", BRANCH]);
+
+        WorktreeFixture::commit_on_top_of(&origin, origin.path(), BRANCH);
+        origin.commit(&origin.sibling("wt"), "more.txt");
+        origin.git(&clone, &["fetch", "-q", "origin"]);
+
+        assert!(WorktreeFixture::is_published(&origin, &clone));
+    }
+
+    #[test]
+    fn a_pushed_branch_that_merged_the_default_branch_on_both_sides_is_published() {
+        let origin = GitTestRepo::new();
+        let clone = WorktreeFixture::clone_with_work(&origin);
+        origin.git(&clone, &["push", "-q", "origin", BRANCH]);
+        WorktreeFixture::update_the_branch_from_the_default_branch(&origin, BRANCH);
+        origin.git(&clone, &["fetch", "-q", "origin"]);
+
+        let default_copy = format!("origin/{}", GitTestRepo::BRANCH);
+        let merge = [
+            "merge",
+            "-q",
+            "--no-ff",
+            "-m",
+            "Merge the default branch",
+            &default_copy,
+        ];
+        origin.git(&origin.sibling("wt"), &merge);
+
+        assert!(WorktreeFixture::is_published(&origin, &clone));
+    }
+
+    #[test]
+    fn a_pushed_branch_with_an_amended_tip_is_published() {
+        let origin = GitTestRepo::new();
+        let clone = WorktreeFixture::clone_with_work(&origin);
+        let worktree = origin.sibling("wt");
+        origin.commit(&worktree, "second.txt");
+        origin.git(&clone, &["push", "-q", "origin", BRANCH]);
+
+        origin.git(&worktree, &["commit", "-q", "--amend", "-m", "Amended"]);
+
+        assert!(WorktreeFixture::is_published(&origin, &clone));
+    }
+
+    #[test]
+    fn a_branch_pushed_only_to_a_second_remote_is_published() {
+        let origin = GitTestRepo::new();
+        let clone = WorktreeFixture::clone_with_work(&origin);
+        let fork = origin.path().to_string_lossy().into_owned();
+        origin.git(&clone, &["remote", "add", "fork", &fork]);
+
+        origin.git(&clone, &["push", "-q", "fork", BRANCH]);
+
+        assert!(WorktreeFixture::is_published(&origin, &clone));
+    }
+
+    #[test]
+    fn a_pushed_branch_is_published_while_another_remote_branch_holds_its_commits() {
+        let origin = GitTestRepo::new();
+        let clone = WorktreeFixture::clone_with_work(&origin);
+        origin.git(&clone, &["push", "-q", "origin", BRANCH]);
+
+        let stacked = format!("{BRANCH}:refs/heads/stacked");
+        origin.git(&clone, &["push", "-q", "origin", &stacked]);
+
+        assert!(WorktreeFixture::is_published(&origin, &clone));
+    }
+
+    #[test]
+    fn a_merged_remote_branch_of_the_same_name_does_not_publish_it() {
+        let origin = GitTestRepo::new();
+        WorktreeFixture::merge_into_the_default_branch(&origin, BRANCH);
+
+        let clone = WorktreeFixture::clone_with_branch(&origin);
+
+        assert!(!WorktreeFixture::is_published(&origin, &clone));
+    }
+
+    #[test]
+    fn a_branch_pushed_from_a_clone_that_fetches_only_the_default_branch_is_published() {
+        let origin = GitTestRepo::new();
+        let clone = WorktreeFixture::clone_with_branch(&origin);
+        WorktreeFixture::fetch_only_the_default_branch(&origin, &clone);
+
+        origin.git(&clone, &["push", "-q", "-u", "origin", BRANCH]);
+
+        assert!(WorktreeFixture::is_published(&origin, &clone));
+    }
+
+    #[test]
+    fn an_unrelated_remote_branch_of_the_same_name_does_not_publish_it() {
+        let origin = GitTestRepo::new();
+        WorktreeFixture::commit_ahead(&origin, origin.path(), BRANCH);
+
+        let clone = WorktreeFixture::clone_with_branch(&origin);
+
+        assert!(!WorktreeFixture::is_published(&origin, &clone));
+    }
+
+    #[test]
+    fn a_branch_started_from_its_open_remote_copy_is_published() {
+        let origin = GitTestRepo::new();
+        WorktreeFixture::commit_ahead(&origin, origin.path(), BRANCH);
+        let clone = WorktreeFixture::clone_of(&origin, "clone");
+
+        WorktreeFixture::start_from_the_remote_copy(&origin, &clone);
+        origin.commit(&origin.sibling("wt"), "work.txt");
+
+        assert!(WorktreeFixture::is_published(&origin, &clone));
+    }
+
+    #[test]
+    fn an_unborn_branch_is_not_published_despite_a_remote_copy() {
+        let fixture = GitTestRepo::unborn();
+        WorktreeFixture::created(&fixture);
+        let empty_tree = fixture.git(
+            fixture.path(),
+            &["hash-object", "-t", "tree", "-w", "/dev/null"],
+        );
+        let theirs = fixture.git(
+            fixture.path(),
+            &["commit-tree", "-m", "Theirs", &empty_tree],
+        );
+        let origin = fixture.sibling("origin").to_string_lossy().into_owned();
+        fixture.git(fixture.path(), &["remote", "add", "origin", &origin]);
+
+        let remote_ref = format!("refs/remotes/origin/{BRANCH}");
+        fixture.git(fixture.path(), &["update-ref", &remote_ref, &theirs]);
+
+        assert!(!WorktreeFixture::is_published(&fixture, fixture.path()));
+    }
+
+    #[test]
+    fn a_remote_branch_nested_under_the_branch_name_does_not_publish_it() {
+        let origin = GitTestRepo::new();
+        let clone = WorktreeFixture::clone_with_branch(&origin);
+        let head = origin.git(&clone, &["rev-parse", "HEAD"]);
+
+        let nested = format!("refs/remotes/origin/{BRANCH}/draft");
+        origin.git(&clone, &["update-ref", &nested, &head]);
+
+        assert!(!WorktreeFixture::is_published(&origin, &clone));
+    }
+
+    #[test]
+    fn a_rewritten_branch_that_tracks_its_pushed_copy_is_published() {
+        let origin = GitTestRepo::new();
+        let clone = WorktreeFixture::clone_with_work(&origin);
+        let worktree = origin.sibling("wt");
+        origin.git(&worktree, &["push", "-q", "-u", "origin", BRANCH]);
+
+        origin.git(&worktree, &["commit", "-q", "--amend", "-m", "Rewritten"]);
+
+        assert!(WorktreeFixture::is_published(&origin, &clone));
+    }
+
+    #[test]
+    fn an_upstream_whose_remote_branch_was_pruned_does_not_publish_the_branch() {
+        let origin = GitTestRepo::new();
+
+        let clone = WorktreeFixture::clone_with_pruned_upstream(&origin);
+
+        assert!(!WorktreeFixture::is_published(&origin, &clone));
+    }
+
+    #[test]
+    fn tracking_the_base_branch_does_not_publish_the_branch() {
+        let origin = GitTestRepo::new();
+        let clone = WorktreeFixture::clone_with_branch(&origin);
+
+        WorktreeFixture::track_the_base_branch(&origin, &clone);
+
+        assert!(!WorktreeFixture::is_published(&origin, &clone));
+    }
+
+    #[test]
+    fn pushing_the_branch_into_its_own_repo_does_not_publish_it() {
+        let fixture = GitTestRepo::new();
+        WorktreeFixture::created(&fixture);
+
+        fixture.git(fixture.path(), &["push", "-q", "-u", ".", BRANCH]);
+
+        assert!(!WorktreeFixture::is_published(&fixture, fixture.path()));
     }
 
     #[test]
@@ -1095,6 +1457,50 @@ mod tests {
         assert_eq!(
             fixture.git(&worktree, &["branch", "--show-current"]),
             RENAMED
+        );
+    }
+
+    #[test]
+    fn rename_branch_carries_the_upstream_to_the_new_name() {
+        let origin = GitTestRepo::new();
+        let clone = WorktreeFixture::clone_with_pruned_upstream(&origin);
+
+        WorktreeFixture::rename_in_clone(&origin);
+
+        let old = format!("refs/heads/{BRANCH}");
+        assert_eq!(
+            WorktreeFixture::upstream_merge(&origin, &clone, RENAMED),
+            Some(old)
+        );
+    }
+
+    #[test]
+    fn dropping_the_stale_upstream_unsets_one_that_names_the_old_branch() {
+        let origin = GitTestRepo::new();
+        let clone = WorktreeFixture::clone_with_pruned_upstream(&origin);
+        WorktreeFixture::rename_in_clone(&origin);
+
+        WorktreeFixture::drop_stale_upstream_in_clone(&origin);
+
+        assert_eq!(
+            WorktreeFixture::upstream_merge(&origin, &clone, RENAMED),
+            None
+        );
+    }
+
+    #[test]
+    fn dropping_the_stale_upstream_keeps_one_on_the_base_branch() {
+        let origin = GitTestRepo::new();
+        let clone = WorktreeFixture::clone_with_branch(&origin);
+        WorktreeFixture::track_the_base_branch(&origin, &clone);
+        WorktreeFixture::rename_in_clone(&origin);
+
+        WorktreeFixture::drop_stale_upstream_in_clone(&origin);
+
+        let base = format!("refs/heads/{}", GitTestRepo::BRANCH);
+        assert_eq!(
+            WorktreeFixture::upstream_merge(&origin, &clone, RENAMED),
+            Some(base)
         );
     }
 

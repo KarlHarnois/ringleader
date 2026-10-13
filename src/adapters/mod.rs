@@ -2,6 +2,7 @@ pub mod agent_handoff;
 pub mod agent_launcher;
 pub mod app_log;
 pub mod bounded_command;
+pub mod branch_section;
 pub mod command_output;
 pub mod config_file_writer;
 pub mod directory_repo_scanner;

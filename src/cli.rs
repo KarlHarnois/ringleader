@@ -128,8 +128,6 @@ struct NameArgs {
 struct RenameArgs {
     old: String,
     new: String,
-    #[arg(long)]
-    keep_branch: bool,
 }
 
 impl Cli {
