@@ -198,6 +198,24 @@ mod tests {
     }
 
     #[test]
+    fn a_restart_applies_a_drifted_server_config_before_it_recreates_the_session() {
+        let fixture = RestartFixture::stopped()
+            .with_multiplexer(FakeMultiplexer::new().with_drifted_config("M-x"));
+
+        RestartFixture::restart(&fixture).unwrap();
+
+        let calls = fixture.multiplexer().calls();
+        let applied = calls.iter().position(|call| call == "apply_config C-q");
+        let created = calls
+            .iter()
+            .position(|call| call.starts_with("create_session"));
+        assert!(
+            applied.is_some_and(|applied| Some(applied) < created),
+            "{calls:?}"
+        );
+    }
+
+    #[test]
     fn restart_keeps_the_agent_args() {
         let agent = ServiceFixture::agent().with_args(&["--model".to_string(), "opus".to_string()]);
         let fixture =
