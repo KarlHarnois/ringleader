@@ -338,6 +338,8 @@ viewer exits.
     │       ├── chosen_repo.rs           # ChosenRepo, the default repo until the search picks another
     │       ├── repo_finder.rs           # RepoFinder, the fuzzy search over the repos under home
     │       ├── repo_filter.rs           # RepoFilter, ranks repo paths against a fuzzy query
+    │       ├── fuzzy_ranker.rs          # FuzzyRanker, ranks names or paths against a fuzzy query
+    │       ├── match_list.rs            # MatchList, the ranked matches of a fuzzy search and the cursor over them
     │       ├── repo_scan.rs             # RepoScan, one home search and its result
     │       ├── typed_repo_check.rs      # TypedRepoCheck, the git check of a typed repo path
     │       ├── home_path.rs             # HomePath, a path shown from ~ when it is under home
