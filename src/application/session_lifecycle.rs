@@ -51,6 +51,10 @@ impl SessionLifecycle {
         self.hooks.poll_startup_input();
     }
 
+    pub fn startup_wait_note(&self) -> Option<&'static str> {
+        self.hooks.startup_wait_note()
+    }
+
     pub fn wait_startup_input(&self, stop: impl Fn() -> bool) {
         self.hooks.wait_startup_input(stop);
     }

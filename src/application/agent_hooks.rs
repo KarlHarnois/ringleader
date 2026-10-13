@@ -17,6 +17,9 @@ struct StartupJobs {
 }
 
 impl AgentHooks {
+    const STARTUP_WAIT_NOTE: &'static str =
+        "waiting for the agent to reach its prompt to type its startup input";
+
     pub fn new(multiplexer: Arc<dyn Multiplexer>) -> Self {
         Self {
             multiplexer,
@@ -44,6 +47,11 @@ impl AgentHooks {
     pub fn poll_startup_input(&self) {
         let mut jobs = self.jobs();
         jobs.pending.retain(|pending| pending.poll().is_none());
+    }
+
+    pub fn startup_wait_note(&self) -> Option<&'static str> {
+        let queued = !self.jobs().pending.is_empty();
+        queued.then_some(Self::STARTUP_WAIT_NOTE)
     }
 
     pub fn wait_startup_input(&self, stop: impl Fn() -> bool) {

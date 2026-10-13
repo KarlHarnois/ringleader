@@ -233,7 +233,7 @@ impl Cli {
         if self.is_mutating() {
             lock.release();
         }
-        service.wait_startup_input(|| session.is_signaled());
+        Self::wait_for_startup_input(service, session);
         session.finish(result)
     }
 
@@ -243,6 +243,13 @@ impl Cli {
             Ok(None) => {}
             Err(error) => session.output().error(&error.to_string()),
         }
+    }
+
+    fn wait_for_startup_input(service: &SessionService, session: &mut CliSession) {
+        if let Some(note) = service.startup_wait_note() {
+            session.output().note(note);
+        }
+        service.wait_startup_input(|| session.is_signaled());
     }
 
     fn doctor(service: &SessionService, session: &mut CliSession, args: &JsonArgs) -> u8 {
@@ -370,6 +377,30 @@ mod tests {
 
         assert_eq!(exit, CliExit::Code(0));
         assert_eq!(typed.typed_when_ready("ringleader-fix-auth"), ["/color"]);
+    }
+
+    #[test]
+    fn new_notes_that_it_waits_for_the_startup_input() {
+        let fixture = ServiceFixture::new().with_config(ServiceFixture::config_with_input());
+        let harness = CliHarness::new(fixture);
+
+        harness.run(&["new", "--name", "Fix Auth", "--repo", "example-project"]);
+
+        assert!(
+            harness
+                .stderr()
+                .contains("waiting for the agent to reach its prompt to type its startup input")
+        );
+    }
+
+    #[test]
+    fn new_without_startup_input_notes_no_wait() {
+        let harness = CliHarness::new(ServiceFixture::new());
+
+        let exit = harness.run(&["new", "--name", "Fix Auth", "--repo", "example-project"]);
+
+        assert_eq!(exit, CliExit::Code(0));
+        assert!(!harness.stderr().contains("waiting for the agent"));
     }
 
     #[test]
