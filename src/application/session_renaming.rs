@@ -182,7 +182,7 @@ mod tests {
     use std::path::Path;
 
     use super::*;
-    use crate::application::ports::{BranchMarker, MultiplexerError};
+    use crate::application::ports::{BranchMarker, MultiplexerError, WorkspaceError};
     use crate::domain::Agent;
     use crate::test_support::{FakeMultiplexer, FakeSessionRegistry, ServiceFixture};
 
@@ -268,6 +268,18 @@ mod tests {
 
         fn stopped(name: &str) -> ServiceFixture {
             Self::registered(ServiceFixture::session(name))
+        }
+
+        fn stopped_with_failing_git(name: &str, operation: &'static str) -> ServiceFixture {
+            let session = ServiceFixture::session(name);
+            let failure = WorkspaceError::Failed {
+                subcommand: operation.to_string(),
+                status: "exit status: 128".to_string(),
+                stderr: "fatal: unable to read".to_string(),
+            };
+            Self::stopped(name).with_workspace(
+                ServiceFixture::workspace_for(&[&session]).failing(operation, failure),
+            )
         }
 
         fn registered(session: Session) -> ServiceFixture {
@@ -416,6 +428,18 @@ mod tests {
         assert!(error.to_string().ends_with(
             "otherwise the session keeps its name, since rename moves the branch with it"
         ));
+    }
+
+    #[test]
+    fn a_failed_pushed_check_refuses_the_rename() {
+        let fixture = RenameFixture::stopped_with_failing_git("fix-auth", "is_branch_published");
+
+        fixture
+            .service()
+            .rename_session("fix-auth", "fix-login")
+            .unwrap_err();
+
+        assert!(fixture.workspace().state_changing_calls().is_empty());
     }
 
     #[test]
