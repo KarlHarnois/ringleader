@@ -57,13 +57,19 @@ impl PullRequestCatalog {
         match pending.poll() {
             None => self.pending = Some(pending),
             Some(Ok(found)) => {
-                self.next_refresh = Some(now + interval);
                 self.merge(found);
+                self.reschedule(now, interval);
             }
             Some(Err(error)) => {
                 log::warn!("could not look up pull requests: {error}");
-                self.next_refresh = Some(now + interval);
+                self.reschedule(now, interval);
             }
+        }
+    }
+
+    fn reschedule(&mut self, now: Instant, interval: Duration) {
+        if self.next_refresh.is_some() {
+            self.next_refresh = Some(now + interval);
         }
     }
 
@@ -262,6 +268,22 @@ mod tests {
 
         assert_eq!(found.get("fix-auth"), Some(&CatalogFixture::open(142)));
         assert_eq!(found.get("local"), None);
+    }
+
+    #[test]
+    fn a_refresh_requested_during_a_fetch_runs_as_soon_as_it_finishes() {
+        let session = ServiceFixture::session("fix-auth");
+        let fake = CatalogFixture::cached(&session, 142);
+        let mut catalog = PullRequestCatalog::new(Some(fake.clone()));
+        let sessions = std::slice::from_ref(&session);
+        CatalogFixture::settle(&mut catalog, fake.as_ref(), sessions);
+
+        catalog.refresh_soon();
+        catalog.poll(Instant::now(), CatalogFixture::INTERVAL, sessions);
+        catalog.refresh_soon();
+        CatalogFixture::settle(&mut catalog, fake.as_ref(), sessions);
+
+        assert_eq!(fake.calls().len(), 3);
     }
 
     #[test]
