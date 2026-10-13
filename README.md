@@ -46,9 +46,9 @@ Sessions run on Ringleader's own tmux server. It ignores your `~/.tmux.conf`, an
 | `d` | delete the selected session |
 | `R` | rename the selected session |
 | `Enter` | attach to the selected session |
-| `t` | open a shell in the session's worktree |
+| `t` | open a shell in the selected session's worktree |
 | `s` | restart an exited or stopped session |
-| `r` | reload the config and the registry |
+| `r` | reload the config and the registry and refresh diffs |
 | `↑` `↓` `j` `k` `h` `l` | move the selection |
 | `?` | help |
 | `q` | quit, the sessions keep running |
