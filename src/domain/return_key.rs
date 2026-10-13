@@ -20,9 +20,9 @@ impl ReturnKey {
     const REFUSED_CHARACTERS: [char; 3] = ['\'', '"', '\\'];
     const CONTROL_PUNCTUATION: [char; 3] = [']', '^', '_'];
     const LETTERS_READ_AS_TAB_AND_ENTER: [char; 2] = ['i', 'm'];
-    const AGENT_KEYS: [&'static str; 13] = [
+    const AGENT_KEYS: [&'static str; 18] = [
         "C-c", "C-d", "C-z", "C-j", "C-h", "Enter", "Escape", "Tab", "BTab", "BSpace", "Space",
-        "Up", "Down",
+        "Up", "Down", "Left", "Right", "Home", "End", "DC",
     ];
 
     pub fn parse(text: &str) -> Option<Self> {
@@ -265,6 +265,15 @@ mod tests {
     #[test]
     fn keys_agents_need_and_typed_characters_shadow_agent_input() {
         for text in ["C-c", "C-d", "Enter", "Escape", "~", "x"] {
+            let key = ReturnKey::parse(text).unwrap();
+
+            assert!(key.shadows_agent_input(), "{text}");
+        }
+    }
+
+    #[test]
+    fn the_cursor_keys_agents_edit_their_prompt_with_shadow_agent_input() {
+        for text in ["Up", "Down", "Left", "Right", "Home", "End", "DC"] {
             let key = ReturnKey::parse(text).unwrap();
 
             assert!(key.shadows_agent_input(), "{text}");
