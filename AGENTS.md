@@ -168,7 +168,10 @@ mostly the cold worker build.
    strengthen tests until every changed function's row reads 0 under `Survived`
    and `Uncovered`. Leave the rows of functions the change did not touch. Read
    the rows, not the exit code: 3 means a mutant survived anywhere in the file,
-   and uncovered sites still exit 0.
+   and uncovered sites still exit 0. When no test can tell a survivor from the
+   original, remove the code it mutates if the behavior stays the same, and
+   otherwise tell the project owner which mutant survived and why no test can
+   kill it.
 
 Some functions only run with a real terminal or the process's own arguments,
 which the Tests rules keep out of tests, such as `CompositionRoot` in
