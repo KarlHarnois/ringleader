@@ -72,16 +72,27 @@
             tmux
             git
           ];
+          llvm = pkgs.rustc.llvmPackages.llvm;
+          llvmCoverageEnv = {
+            LLVM_COV = "${llvm}/bin/llvm-cov";
+            LLVM_PROFDATA = "${llvm}/bin/llvm-profdata";
+          };
           wrapTool =
             name: tool:
             pkgs.writeShellApplication {
               inherit name;
               inherit runtimeInputs;
+              runtimeEnv = llvmCoverageEnv;
               text = ''exec ${tool}/bin/${name} "$@"'';
             };
         in
         {
-          inherit dryerTool crapperTool mutatorTool;
+          inherit
+            dryerTool
+            crapperTool
+            mutatorTool
+            llvmCoverageEnv
+            ;
           crapperApp = wrapTool "crapper" crapperTool;
           mutatorApp = wrapTool "mutator" mutatorTool;
         };
@@ -158,6 +169,7 @@
               tools.crapperTool
               tools.mutatorTool
             ];
+            env = tools.llvmCoverageEnv;
             UML_VIEWER_DEPS = ''
               {:deps {uml-viewer/uml-viewer {:local/root "${uml-viewer}"} quil/quil {:mvn/version "4.3.1563"}}
                :aliases {:ir {:main-opts ["-m" "uml-viewer.main.ir-generator"]}

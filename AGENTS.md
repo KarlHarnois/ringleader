@@ -58,9 +58,11 @@ nix run .#mutator -- --help
 
 `mutator` runs every covered mutant and many tests start real tmux servers. Never
 run it whole-repo. Name one module or file, cap `--max-workers`, and use
-`--changed` for differential reruns. `crapper` needs `cargo-llvm-cov`, which the
-`metrics` shell provides. This crate is bin-only, so a scoped `mutator` test
-command is `--test-command "cargo test --bin ringleader <module::path>"`.
+`--changed` for differential reruns. `crapper` and `mutator` need `cargo-llvm-cov`
+and the LLVM tools named by `LLVM_COV` and `LLVM_PROFDATA`, which the `metrics`
+shell and the apps set. Without them every function scores 0% coverage and the
+run still exits 0. This crate is bin-only, so a scoped `mutator` test command is
+`--test-command "cargo test --bin ringleader <module::path>"`.
 
 uml-viewer reads `.metrics/crap.edn` and `.metrics/mutate/`. It ignores
 `.metrics/dry.edn`, so `dryer` output stays a text report and never reaches the
