@@ -319,7 +319,7 @@ viewer exits.
     │   ├── repo_group.rs           # RepoGroup, the repo a row is listed under, or other
     │   ├── colored_row.rs          # ColoredRow, a row's text split around its coloured cells
     │   ├── state_indicator.rs      # StateIndicator, the glyph and color of a session state
-    │   ├── table_columns.rs        # TableColumns, column widths and dropping
+    │   ├── table_columns.rs        # TableColumns, column widths and dropping, and RowCells, the cell texts of one row
     │   ├── preview_panel.rs        # PreviewPanel, the Full tier's preview
     │   ├── preview_text.rs         # PreviewText, the captured rows that fit the preview
     │   ├── help_view.rs            # HelpView
