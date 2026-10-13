@@ -19,7 +19,7 @@ pub struct SessionFinder {
 
 impl SessionFinder {
     pub const TITLE: &'static str = " Find session ";
-    const HINTS: &'static str = "Enter attach · Esc cancel · ↑ ↓ ctrl-j ctrl-k choose";
+    const HINTS: &'static str = "Enter attach · Esc cancel · ↑ ↓ Ctrl-J Ctrl-K choose";
 
     pub fn open(names: Vec<String>) -> Self {
         let mut finder = Self {

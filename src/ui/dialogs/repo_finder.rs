@@ -24,7 +24,7 @@ pub struct RepoFinder {
 impl RepoFinder {
     const SEARCHING: &'static str = "Searching ~ for repos…";
     const NO_MATCH: &'static str = "no repo matches, Enter picks the typed path";
-    const HINTS: &'static str = "Type to search · ↑ ↓ ctrl-j ctrl-k choose · Enter pick · Esc back";
+    const HINTS: &'static str = "Type to search · ↑ ↓ Ctrl-J Ctrl-K choose · Enter pick · Esc back";
 
     pub fn open(service: &SessionService) -> Self {
         Self {
