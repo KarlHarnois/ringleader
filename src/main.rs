@@ -208,23 +208,33 @@ impl CompositionRoot {
         .into_iter()
         .flatten()
         .collect();
-        let app = App::new(service, Box::new(io::stdout()), Instant::now())
+        let mut app = App::new(service, Box::new(io::stdout()), Instant::now())
             .with_message((!warnings.is_empty()).then(|| warnings.join("; ")));
-        match Self::run_event_loop(app) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(error) => Self::fail(&error.to_string()),
+        let signals = match SignalFlags::register() {
+            Ok(signals) => signals,
+            Err(error) => return Self::fail(&error.to_string()),
+        };
+        if let Err(error) = Self::run_event_loop(&mut app, signals.clone()) {
+            return Self::fail(&error.to_string());
         }
+        lock.release();
+        Self::wait_for_startup_input(&app, &signals);
+        ExitCode::SUCCESS
     }
 
-    fn run_event_loop(app: App) -> io::Result<()> {
-        let signals = SignalFlags::register()?;
+    fn run_event_loop(app: &mut App, signals: SignalFlags) -> io::Result<()> {
         let screen = TerminalGuard::enter(Box::new(CrosstermScreenMode))?;
         screen.state().install_panic_hook();
-        let mut app_inside_the_screen = app;
         let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
         Self::clear_alternate_screen_leftovers(&mut terminal)?;
-        EventLoop::new(terminal, CrosstermInput, signals, screen.state())
-            .run(&mut app_inside_the_screen)
+        EventLoop::new(terminal, CrosstermInput, signals, screen.state()).run(app)
+    }
+
+    fn wait_for_startup_input(app: &App, signals: &SignalFlags) {
+        if let Some(note) = app.startup_wait_note() {
+            let _ = writeln!(io::stderr(), "{note}");
+        }
+        app.wait_startup_input(|| signals.raised().is_some());
     }
 
     fn clear_alternate_screen_leftovers(
