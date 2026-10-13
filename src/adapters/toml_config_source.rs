@@ -29,6 +29,9 @@ diff_refresh_ms = 3000
 pull_request_refresh_ms = 30000
 activity_idle_seconds = 3
 session_size = "200x50"
+# Ring the terminal bell when an agent finishes working and waits for input.
+# It stays quiet for an agent whose window a client is showing. It rings only
+# while the Ringleader TUI shows, never while you are attached to a session.
 bell_on_waiting = false
 scan_depth = 3
 

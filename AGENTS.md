@@ -233,10 +233,13 @@ The one exception is a driving adapter's own channel to the user: the terminal f
     │   ├── empty_state.rs          # EmptyState, the no-sessions message with the logo above it when it fits
     │   ├── session_table.rs        # SessionTable, the home screen's session list
     │   ├── colored_row.rs          # ColoredRow, a row's text split around its coloured cells
+    │   ├── state_indicator.rs      # StateIndicator, the glyph and color of a session state
     │   ├── table_columns.rs        # TableColumns, column widths and dropping
     │   ├── preview_panel.rs        # PreviewPanel, the Full tier's preview
     │   ├── preview_text.rs         # PreviewText, the captured rows that fit the preview
     │   ├── help_view.rs            # HelpView
+    │   ├── label_column.rs         # LabelColumn, the help's padded label and the indent of its wrapped rows
+    │   ├── legend.rs               # Legend, the help's symbols and their meanings, wrapped under a label
     │   ├── status_bar.rs           # StatusBar
     │   ├── theme.rs                # Theme
     │   └── dialogs/
