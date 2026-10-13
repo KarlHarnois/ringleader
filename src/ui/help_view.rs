@@ -37,7 +37,8 @@ impl HelpView {
     ];
     const RETURN_ACTION: &'static str = "detach from a session and return here";
     const FIRST_SPINNER_TICK: u64 = 0;
-    const LABEL_WIDTH: usize = 13;
+    const LABEL_WIDTH: usize = 11;
+    const LABEL_GAP: &'static str = "  ";
     const CLOSING: &'static str = "↑ ↓ scroll · ? Esc q close";
 
     pub fn new(return_key: &ReturnKey, files: &[(&str, &Path)], home: HomePath) -> Self {
@@ -138,7 +139,11 @@ impl HelpView {
     }
 
     fn label_column(label: &str) -> String {
-        TextFit::new(label).padded(Self::LABEL_WIDTH)
+        format!(
+            "{label:<width$}{}",
+            Self::LABEL_GAP,
+            width = Self::LABEL_WIDTH
+        )
     }
 }
 
@@ -289,6 +294,15 @@ mod tests {
         let text = HelpFixture::text(&HelpFixture::help_for(&ReturnKey::parse("M-x").unwrap()));
 
         assert!(text.contains("Alt-x        detach from a session and return here"));
+    }
+
+    #[test]
+    fn a_long_return_key_shows_in_full_with_a_gap_before_its_action() {
+        let long_key = ReturnKey::parse("C-M-S-F12").unwrap();
+
+        let text = HelpFixture::text(&HelpFixture::help_for(&long_key));
+
+        assert!(text.contains("Ctrl-Alt-Shift-F12  detach from a session and return here"));
     }
 
     #[test]
