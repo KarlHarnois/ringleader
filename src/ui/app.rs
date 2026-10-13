@@ -684,10 +684,11 @@ mod tests {
                 .is_empty()
         );
         fixture.multiplexer().release_typing();
-        fixture
-            .multiplexer()
-            .wait_for_typing("ringleader-new-idea", Duration::from_secs(2));
-        app.on_tick(Instant::now());
+        assert!(
+            fixture
+                .multiplexer()
+                .wait_for_typing("ringleader-new-idea", Duration::from_secs(2))
+        );
         assert_eq!(
             fixture
                 .multiplexer()
