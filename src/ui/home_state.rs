@@ -8,7 +8,7 @@ use super::preview_panel::PreviewPanel;
 use super::pull_request_feed::PullRequestFeed;
 use super::session_list::SessionList;
 use super::session_table::SessionTable;
-use super::status_bar::StatusNote;
+use super::status_bar::{StatusBar, StatusNote};
 use super::theme::Theme;
 use crate::application::{ServiceError, SessionService, Tool};
 
@@ -18,7 +18,7 @@ pub struct HomeState {
     preview: PreviewFeed,
     diffs: DiffQueue,
     pull_requests: PullRequestFeed,
-    table_rows: usize,
+    screen: (u16, u16),
     next_observe: Instant,
     tmux_paused_until: Option<Instant>,
 }
@@ -33,7 +33,7 @@ impl HomeState {
             preview: PreviewFeed::new(now),
             diffs: DiffQueue::default(),
             pull_requests: PullRequestFeed::default(),
-            table_rows: 0,
+            screen: (0, 0),
             next_observe: now,
             tmux_paused_until: None,
         }
@@ -57,9 +57,8 @@ impl HomeState {
     }
 
     pub fn resize(&mut self, width: u16, height: u16, service: &SessionService) {
-        let tier = LayoutTier::for_size(width, height);
-        self.table_rows = tier.table_rows(height);
-        self.preview.resize(tier);
+        self.screen = (width, height);
+        self.preview.resize(LayoutTier::for_size(width, height));
         self.refresh_preview(service);
     }
 
@@ -75,7 +74,12 @@ impl HomeState {
         }
     }
 
-    pub fn tick(&mut self, now: Instant, service: &mut SessionService) -> Result<(), ServiceError> {
+    pub fn tick(
+        &mut self,
+        now: Instant,
+        service: &mut SessionService,
+        status: &StatusBar,
+    ) -> Result<(), ServiceError> {
         let mut observed = Ok(());
         if now >= self.next_observe && !self.is_tmux_paused() {
             self.next_observe = now + service.config().intervals().state_poll();
@@ -87,7 +91,7 @@ impl HomeState {
                 .refresh_if_due(now, service, self.sessions.selected());
             self.pause_on_failure(previewed);
         }
-        let visible = self.sessions.visible_managed(self.table_rows);
+        let visible = self.sessions.visible_managed(self.table_rows(status));
         let measured = self.diffs.tick(now, &visible, service);
         self.sessions.apply_diffs(self.diffs.diffs());
         self.pull_requests.tick(now, &visible, service);
@@ -152,6 +156,11 @@ impl HomeState {
         if let Err(error) = outcome {
             self.pause_after(&error);
         }
+    }
+
+    fn table_rows(&self, status: &StatusBar) -> usize {
+        let (width, height) = self.screen;
+        LayoutTier::for_size(width, height).table_rows(height, status.height(width, height))
     }
 
     fn is_tmux_paused(&self) -> bool {

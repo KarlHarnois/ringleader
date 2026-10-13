@@ -71,7 +71,8 @@ impl App {
     pub fn on_tick(&mut self, now: Instant) {
         self.tick = self.tick.wrapping_add(1);
         self.service.poll_startup_input();
-        let outcome = self.home.tick(now, &mut self.service);
+        let status = Self::status_bar(self.theme, &self.status, &self.home);
+        let outcome = self.home.tick(now, &mut self.service, &status);
         self.status.failure(outcome);
         self.dialogs.poll();
     }
@@ -134,12 +135,16 @@ impl App {
     }
 
     pub fn render(&self, frame: &mut Frame) {
-        let status = StatusBar::new(self.theme)
-            .with_message(self.status.message())
-            .with_note(self.home.note());
+        let status = Self::status_bar(self.theme, &self.status, &self.home);
         let table = self.home.table(self.tick, self.theme);
         HomeView::new(table, self.home.preview_panel(self.theme), status).render(frame);
         self.dialogs.render(frame, &self.theme);
+    }
+
+    fn status_bar<'s>(theme: Theme, status: &'s StatusReport, home: &HomeState) -> StatusBar<'s> {
+        StatusBar::new(theme)
+            .with_message(status.message())
+            .with_note(home.note())
     }
 
     fn handle_key(&mut self, key: &KeyEvent) -> AppRequest {
@@ -222,7 +227,7 @@ mod tests {
     use crate::application::ports::{ConfigError, MultiplexerError, UnmergedCommits};
     use crate::domain::{Config, ConfigDraft, DiffStat, PullRequestState};
     use crate::test_support::{
-        CapturedWriter, FakeMultiplexer, FakePullRequests, ServiceFixture, UiHarness,
+        CapturedWriter, Deadline, FakeMultiplexer, FakePullRequests, ServiceFixture, UiHarness,
     };
 
     struct AppFixture;
@@ -1020,6 +1025,32 @@ mod tests {
 
         assert!(measured.contains("+0 -0 ?3"));
         assert!(AppFixture::screen(&app, 100, 28).contains("+0 -0 ?3"));
+    }
+
+    #[test]
+    fn rows_hidden_under_a_wrapped_status_bar_get_no_pull_request_lookup() {
+        let sessions =
+            ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot"].map(ServiceFixture::session);
+        let multiplexer = sessions
+            .iter()
+            .fold(FakeMultiplexer::new(), |multiplexer, session| {
+                multiplexer.with_live(ServiceFixture::waiting(session))
+            });
+        let fixture = ServiceFixture::new()
+            .with_sessions(&sessions)
+            .with_multiplexer(multiplexer);
+        let mut app = UiHarness::app(&fixture).with_startup_messages(&["word ".repeat(40)], None);
+        app.resize(100, 8);
+
+        app.on_tick(Instant::now());
+
+        let looked_up = Deadline::after(Duration::from_secs(2))
+            .wait_until(|| !fixture.pull_requests().calls().is_empty());
+        assert!(looked_up);
+        assert_eq!(
+            fixture.pull_requests().calls(),
+            [format!("lookup {} 4", ServiceFixture::REPO)]
+        );
     }
 
     #[test]

@@ -16,6 +16,7 @@ pub struct StatusBar<'a> {
 
 impl<'a> StatusBar<'a> {
     const MARGIN: &'static str = " ";
+    const HEIGHT_SHARE: u16 = 4;
 
     pub fn new(theme: Theme) -> Self {
         Self {
@@ -31,6 +32,11 @@ impl<'a> StatusBar<'a> {
 
     pub fn with_note(self, note: Option<String>) -> Self {
         Self { note, ..self }
+    }
+
+    pub fn height(&self, width: u16, screen_height: u16) -> u16 {
+        let room = (screen_height / Self::HEIGHT_SHARE).max(1);
+        self.rows(width).min(room)
     }
 
     pub fn rows(&self, width: u16) -> u16 {
