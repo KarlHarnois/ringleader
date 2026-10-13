@@ -58,6 +58,7 @@ impl SessionRenaming {
         }
         let entries = reconciliation.entries_with(row.session().name().as_str(), renamed.clone());
         self.persist_rename(row, &entries, &renaming)?;
+        renaming.drop_stale_upstream();
         self.tell_agent_its_name(row, &renamed, config);
         Ok(renamed)
     }
@@ -180,6 +181,18 @@ mod tests {
                 .with_workspace(ServiceFixture::workspace_for(&references))
                 .with_host(ServiceFixture::host_for(&references))
                 .with_multiplexer(multiplexer)
+        }
+
+        fn live_with_failing_tmux_rename(name: &str) -> ServiceFixture {
+            let fixture = Self::live(&[name]);
+            fixture.multiplexer().fail(
+                "rename_session",
+                MultiplexerError::Failed {
+                    subcommand: "rename-session".to_string(),
+                    detail: "no ringleader-done line".to_string(),
+                },
+            );
+            fixture
         }
 
         fn unmarked(name: &str) -> ServiceFixture {
@@ -446,14 +459,7 @@ mod tests {
 
     #[test]
     fn a_failed_tmux_rename_rolls_the_branch_back() {
-        let fixture = RenameFixture::live(&["fix-auth"]);
-        fixture.multiplexer().fail(
-            "rename_session",
-            MultiplexerError::Failed {
-                subcommand: "rename-session".to_string(),
-                detail: "no ringleader-done line".to_string(),
-            },
-        );
+        let fixture = RenameFixture::live_with_failing_tmux_rename("fix-auth");
 
         fixture
             .service()
@@ -463,6 +469,39 @@ mod tests {
         let repo = Path::new(ServiceFixture::REPO);
         assert!(fixture.workspace().has_branch(repo, "fix-auth"));
         assert!(!fixture.workspace().has_branch(repo, "fix-login"));
+    }
+
+    #[test]
+    fn a_rolled_back_rename_leaves_the_upstream_alone() {
+        let fixture = RenameFixture::live_with_failing_tmux_rename("fix-auth");
+
+        fixture
+            .service()
+            .rename_session("fix-auth", "fix-login")
+            .unwrap_err();
+
+        assert!(
+            fixture
+                .workspace()
+                .calls()
+                .iter()
+                .all(|call| !call.starts_with("drop_stale_upstream"))
+        );
+    }
+
+    #[test]
+    fn a_recorded_rename_drops_the_upstream_left_on_the_old_name() {
+        let fixture = RenameFixture::stopped("fix-auth");
+
+        fixture
+            .service()
+            .rename_session("fix-auth", "fix-login")
+            .unwrap();
+
+        let calls = fixture.workspace().state_changing_calls();
+        let last = calls.last().unwrap();
+        assert!(last.starts_with("drop_stale_upstream"));
+        assert!(last.ends_with("fix-auth fix-login"));
     }
 
     #[test]

@@ -45,12 +45,13 @@ enum FailedCreateLeftover {
 }
 
 impl FakeWorkspace {
-    pub const STATE_CHANGING: [&'static str; 6] = [
+    pub const STATE_CHANGING: [&'static str; 7] = [
         "create_worktree",
         "remove_worktree",
         "unlock_worktree",
         "delete_branch",
         "rename_branch",
+        "drop_stale_upstream",
         "mark_branch_managed",
     ];
     pub const DEFAULT_START: &'static str = "0123456789abcdef0123456789abcdef01234567";
@@ -403,6 +404,18 @@ impl Workspace for FakeWorkspace {
             }
         });
         Ok(())
+    }
+
+    fn drop_stale_upstream(
+        &self,
+        location: &Path,
+        old: &str,
+        new: &str,
+    ) -> Result<(), WorkspaceError> {
+        self.call(
+            "drop_stale_upstream",
+            format!("{} {old} {new}", location.display()),
+        )
     }
 
     fn branch_exists(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError> {

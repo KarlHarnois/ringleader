@@ -45,6 +45,23 @@ impl<'a> BranchRenaming<'a> {
             .rename_branch(&self.location, self.old, self.new)?)
     }
 
+    pub fn drop_stale_upstream(&self) {
+        if !self.changes_branch() {
+            return;
+        }
+        if let Err(error) = self
+            .workspace
+            .drop_stale_upstream(&self.location, self.old, self.new)
+        {
+            log::warn!(
+                "renamed branch {} to {} but kept its upstream on {}: {error}",
+                self.old,
+                self.new,
+                self.old
+            );
+        }
+    }
+
     pub fn roll_back(&self, error: ServiceError) -> ServiceError {
         if !self.changes_branch() {
             return error;

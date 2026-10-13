@@ -25,6 +25,12 @@ pub trait Workspace: Send + Sync {
         expected_tip: Option<&str>,
     ) -> Result<(), WorkspaceError>;
     fn rename_branch(&self, location: &Path, old: &str, new: &str) -> Result<(), WorkspaceError>;
+    fn drop_stale_upstream(
+        &self,
+        location: &Path,
+        old: &str,
+        new: &str,
+    ) -> Result<(), WorkspaceError>;
     fn branch_exists(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError>;
     fn first_branch_under(
         &self,

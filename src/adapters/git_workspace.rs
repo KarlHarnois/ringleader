@@ -143,6 +143,15 @@ impl Workspace for GitWorkspace {
         GitBranches::new(&self.git).rename(location, old, new)
     }
 
+    fn drop_stale_upstream(
+        &self,
+        location: &Path,
+        old: &str,
+        new: &str,
+    ) -> Result<(), WorkspaceError> {
+        GitBranches::new(&self.git).drop_stale_upstream(location, old, new)
+    }
+
     fn branch_exists(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError> {
         if GitBranches::new(&self.git).has_ref(repo, branch)? {
             return Ok(true);
@@ -365,6 +374,20 @@ mod tests {
         fn track_the_base_branch(origin: &GitTestRepo, clone: &Path) {
             let base = format!("origin/{}", GitTestRepo::BRANCH);
             origin.git(clone, &["branch", "-q", "--set-upstream-to", &base, BRANCH]);
+        }
+
+        fn rename_in_clone(origin: &GitTestRepo) {
+            origin
+                .workspace()
+                .rename_branch(&origin.sibling("wt"), BRANCH, RENAMED)
+                .unwrap();
+        }
+
+        fn drop_stale_upstream_in_clone(origin: &GitTestRepo) {
+            origin
+                .workspace()
+                .drop_stale_upstream(&origin.sibling("wt"), BRANCH, RENAMED)
+                .unwrap();
         }
 
         fn upstream_merge(fixture: &GitTestRepo, repo: &Path, branch: &str) -> Option<String> {
@@ -1314,14 +1337,26 @@ mod tests {
     }
 
     #[test]
-    fn rename_branch_drops_an_upstream_that_names_the_old_branch() {
+    fn rename_branch_carries_the_upstream_to_the_new_name() {
         let origin = GitTestRepo::new();
         let clone = WorktreeFixture::clone_with_pruned_upstream(&origin);
 
-        origin
-            .workspace()
-            .rename_branch(&origin.sibling("wt"), BRANCH, RENAMED)
-            .unwrap();
+        WorktreeFixture::rename_in_clone(&origin);
+
+        let old = format!("refs/heads/{BRANCH}");
+        assert_eq!(
+            WorktreeFixture::upstream_merge(&origin, &clone, RENAMED),
+            Some(old)
+        );
+    }
+
+    #[test]
+    fn dropping_the_stale_upstream_unsets_one_that_names_the_old_branch() {
+        let origin = GitTestRepo::new();
+        let clone = WorktreeFixture::clone_with_pruned_upstream(&origin);
+        WorktreeFixture::rename_in_clone(&origin);
+
+        WorktreeFixture::drop_stale_upstream_in_clone(&origin);
 
         assert_eq!(
             WorktreeFixture::upstream_merge(&origin, &clone, RENAMED),
@@ -1330,15 +1365,13 @@ mod tests {
     }
 
     #[test]
-    fn rename_branch_keeps_an_upstream_on_the_base_branch() {
+    fn dropping_the_stale_upstream_keeps_one_on_the_base_branch() {
         let origin = GitTestRepo::new();
         let clone = WorktreeFixture::clone_with_branch(&origin);
         WorktreeFixture::track_the_base_branch(&origin, &clone);
+        WorktreeFixture::rename_in_clone(&origin);
 
-        origin
-            .workspace()
-            .rename_branch(&origin.sibling("wt"), BRANCH, RENAMED)
-            .unwrap();
+        WorktreeFixture::drop_stale_upstream_in_clone(&origin);
 
         let base = format!("refs/heads/{}", GitTestRepo::BRANCH);
         assert_eq!(
