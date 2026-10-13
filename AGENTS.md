@@ -77,14 +77,19 @@ same namespaces.
 ```sh
 nix develop .#metrics -c dryer --changed       # duplicate candidates; writes .metrics/dry.edn
 nix develop .#metrics -c crapper src           # CC plus coverage plus CRAP; writes .metrics/crap.edn
-nix develop .#metrics -c mutator --max-workers N src/<module>.rs
+nix develop .#metrics -c mutator --max-workers 2 --timeout-factor 60 src/<module>.rs
 nix run .#dryer -- --changed                   # the apps also work outside any dev shell
 nix run .#crapper -- --help
 nix run .#mutator -- --help
 ```
 
 `mutator` runs every covered mutant and many tests start real tmux servers. Never
-run it whole-repo. Name one module or file and cap `--max-workers`. Once a
+run it whole-repo. Name one module or file, and keep `--max-workers 2` and
+`--timeout-factor 60`. Each run builds the crate from scratch in new worker
+directories under `target/mutation-workers/`, and a mutant that times out counts
+as killed. The default factor of 10 times the warm baseline ends those builds
+early, so every mutant reads as killed before a test runs. Parallel cold builds
+slow each other, so raise the factor before the worker count. Once a
 snapshot exists, a rerun only runs survivors and sites in changed functions.
 Never pass `--changed` with a path: it drops the path and mutates every changed
 file in `git status`. `crapper` and `mutator` need `cargo-llvm-cov`
