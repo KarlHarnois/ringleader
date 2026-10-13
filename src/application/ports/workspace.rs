@@ -65,6 +65,7 @@ pub trait Workspace: Send + Sync {
         &self,
         worktree: &Path,
         branch_on_origin: &BaseBranch,
+        started_from: &str,
     ) -> Result<UpstreamMerge, WorkspaceError>;
     fn validate_repo(&self, path: &Path) -> Result<PathBuf, WorkspaceError>;
     fn version(&self) -> Result<String, WorkspaceError>;
@@ -192,6 +193,10 @@ pub enum WorkspaceError {
     NoUpstream { worktree: PathBuf },
     #[error("{worktree} has a merge in progress, finish or abort it before merging again")]
     MergeInProgress { worktree: PathBuf },
+    #[error(
+        "{upstream} does not hold the commit this session started from, so it is not the session's base; merge by hand"
+    )]
+    StartedElsewhere { upstream: String },
     #[error("{worktree} has staged changes, commit them before merging")]
     StagedChanges { worktree: PathBuf },
     #[error("{cause}; undid the unfinished merge, so the worktree is back where it was")]

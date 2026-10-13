@@ -47,7 +47,9 @@ impl SessionMerge {
         let worktree = session.worktree_path();
         let branch_on_origin = self.workspace.fetch_upstream(worktree, base_branch)?;
         self.refuse_unsafe_merge_now(session, reconciliation, config)?;
-        let merge = self.workspace.merge_upstream(worktree, &branch_on_origin)?;
+        let merge =
+            self.workspace
+                .merge_upstream(worktree, &branch_on_origin, session.base_commit())?;
         let handoff = self.hand_off_conflicts(session, &merge);
         Ok(MergeReport::new(session.name(), merge, handoff))
     }
@@ -550,12 +552,10 @@ mod tests {
                 .calls()
                 .contains(&format!("fetch_upstream {worktree} develop"))
         );
-        assert!(
-            fixture
-                .workspace()
-                .calls()
-                .contains(&format!("merge_upstream {worktree} develop"))
-        );
+        assert!(fixture.workspace().calls().contains(&format!(
+            "merge_upstream {worktree} develop {}",
+            FakeWorkspace::DEFAULT_START
+        )));
     }
 
     #[test]

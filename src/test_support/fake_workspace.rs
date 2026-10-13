@@ -542,10 +542,11 @@ impl Workspace for FakeWorkspace {
         &self,
         worktree: &Path,
         branch_on_origin: &BaseBranch,
+        started_from: &str,
     ) -> Result<UpstreamMerge, WorkspaceError> {
         self.call(
             "merge_upstream",
-            format!("{} {branch_on_origin}", worktree.display()),
+            format!("{} {branch_on_origin} {started_from}", worktree.display()),
         )?;
         Ok(self.edit(|state| {
             state

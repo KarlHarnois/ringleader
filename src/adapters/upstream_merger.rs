@@ -34,9 +34,11 @@ impl<'a> UpstreamMerger<'a> {
         &self,
         worktree: &Path,
         branch: &BaseBranch,
+        started_from: &str,
     ) -> Result<UpstreamMerge, WorkspaceError> {
         self.refuse_merge_in_progress(worktree)?;
         self.refuse_staged_changes(worktree)?;
+        self.refuse_another_start(worktree, branch, started_from)?;
         let commit = self.commit_of(worktree, &branch.origin_ref())?;
         let outcome = self.merge_unless_contained(worktree, branch, &commit)?;
         Ok(UpstreamMerge::new(&branch.origin_suggestion(), outcome))
@@ -58,6 +60,22 @@ impl<'a> UpstreamMerger<'a> {
             });
         }
         Ok(())
+    }
+
+    fn refuse_another_start(
+        &self,
+        worktree: &Path,
+        branch: &BaseBranch,
+        started_from: &str,
+    ) -> Result<(), WorkspaceError> {
+        let started_on_upstream = !started_from.is_empty()
+            && self.is_ancestor(worktree, started_from, &branch.origin_ref())?;
+        if started_on_upstream {
+            return Ok(());
+        }
+        Err(WorkspaceError::StartedElsewhere {
+            upstream: branch.origin_suggestion(),
+        })
     }
 
     fn upstream_branch(
@@ -145,10 +163,19 @@ impl<'a> UpstreamMerger<'a> {
     }
 
     fn head_contains(&self, worktree: &Path, commit: &str) -> Result<bool, WorkspaceError> {
+        self.is_ancestor(worktree, commit, Self::HEAD)
+    }
+
+    fn is_ancestor(
+        &self,
+        worktree: &Path,
+        ancestor: &str,
+        descendant: &str,
+    ) -> Result<bool, WorkspaceError> {
         let ancestry = GitInvocation::in_worktree(worktree, "merge-base").args([
             "--is-ancestor",
-            commit,
-            Self::HEAD,
+            ancestor,
+            descendant,
         ]);
         Ok(self.git.lookup(&ancestry)?.is_some())
     }
@@ -219,6 +246,7 @@ mod tests {
         origin: GitTestRepo,
         clone: PathBuf,
         worktree: PathBuf,
+        start: String,
     }
 
     impl MergeFixture {
@@ -254,10 +282,12 @@ mod tests {
                     &Self::text(&worktree),
                 ],
             );
+            let start = origin.git(&worktree, &["rev-parse", "HEAD"]);
             Self {
                 origin,
                 clone,
                 worktree,
+                start,
             }
         }
 
@@ -266,16 +296,21 @@ mod tests {
         }
 
         fn merge_from(&self, base: Option<&BaseBranch>) -> Result<UpstreamMerge, WorkspaceError> {
-            Self::fetch_and_merge(&self.origin.workspace(), &self.worktree, base)
+            self.fetch_and_merge(&self.origin.workspace(), base, &self.start)
+        }
+
+        fn merge_started_from(&self, start: &str) -> Result<UpstreamMerge, WorkspaceError> {
+            self.fetch_and_merge(&self.origin.workspace(), None, start)
         }
 
         fn fetch_and_merge(
+            &self,
             workspace: &GitWorkspace,
-            worktree: &Path,
             base: Option<&BaseBranch>,
+            start: &str,
         ) -> Result<UpstreamMerge, WorkspaceError> {
-            let branch = workspace.fetch_upstream(worktree, base)?;
-            workspace.merge_upstream(worktree, &branch)
+            let branch = workspace.fetch_upstream(&self.worktree, base)?;
+            workspace.merge_upstream(&self.worktree, &branch, start)
         }
 
         fn commit_upstream(&self, file: &str) -> String {
@@ -357,7 +392,7 @@ mod tests {
 
         fn merge_within(&self, deadline: Duration) -> Result<UpstreamMerge, WorkspaceError> {
             let workspace = self.origin.workspace_with_deadline(deadline);
-            Self::fetch_and_merge(&workspace, &self.worktree, None)
+            self.fetch_and_merge(&workspace, None, &self.start)
         }
 
         fn stage_a_change(&self) {
@@ -643,6 +678,23 @@ mod tests {
             }
         );
         assert!(fixture.is_merging());
+    }
+
+    #[test]
+    fn a_session_that_did_not_start_from_the_upstream_is_refused() {
+        let fixture = MergeFixture::new();
+        let start_off_upstream = fixture.commit_on_branch("work.txt");
+        let upstream_tip = fixture.commit_upstream("news.txt");
+
+        let error = fixture.merge_started_from(&start_off_upstream).unwrap_err();
+
+        assert_eq!(
+            error,
+            WorkspaceError::StartedElsewhere {
+                upstream: "origin/main".to_string()
+            }
+        );
+        assert!(!fixture.has_merged(&upstream_tip));
     }
 
     #[test]

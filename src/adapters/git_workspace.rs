@@ -246,8 +246,9 @@ impl Workspace for GitWorkspace {
         &self,
         worktree: &Path,
         branch_on_origin: &BaseBranch,
+        started_from: &str,
     ) -> Result<UpstreamMerge, WorkspaceError> {
-        UpstreamMerger::new(&self.git).merge(worktree, branch_on_origin)
+        UpstreamMerger::new(&self.git).merge(worktree, branch_on_origin, started_from)
     }
 
     fn validate_repo(&self, path: &Path) -> Result<PathBuf, WorkspaceError> {
