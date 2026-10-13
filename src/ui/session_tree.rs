@@ -161,8 +161,7 @@ mod tests {
 
     impl TreeFixture {
         fn row(name: &str, repo: &str) -> SessionSummary {
-            let session = ServiceFixture::session_at(name, repo, ServiceFixture::CREATED_AT);
-            SessionSummary::managed(session, SessionState::Waiting, false)
+            ServiceFixture::summary_in(name, repo, SessionState::Waiting)
         }
 
         fn two_repos() -> Vec<SessionSummary> {

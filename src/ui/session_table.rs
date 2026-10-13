@@ -238,16 +238,11 @@ mod tests {
             SessionSummary::managed(ServiceFixture::session(name), state, false)
         }
 
-        fn in_repo(name: &str, repo: &str, state: SessionState) -> SessionSummary {
-            let session = ServiceFixture::session_at(name, repo, ServiceFixture::CREATED_AT);
-            SessionSummary::managed(session, state, false)
-        }
-
         fn two_repos() -> Vec<SessionSummary> {
             vec![
-                Self::in_repo("fix-auth", "/repos/alpha", SessionState::Working),
-                Self::in_repo("dark-mode", "/repos/alpha", SessionState::Waiting),
-                Self::in_repo("docs", "/repos/beta", SessionState::Exited),
+                ServiceFixture::summary_in("fix-auth", "/repos/alpha", SessionState::Working),
+                ServiceFixture::summary_in("dark-mode", "/repos/alpha", SessionState::Waiting),
+                ServiceFixture::summary_in("docs", "/repos/beta", SessionState::Exited),
             ]
         }
 

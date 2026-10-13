@@ -63,9 +63,7 @@ mod tests {
 
     #[test]
     fn a_row_belongs_to_the_repo_of_its_metadata() {
-        let session =
-            ServiceFixture::session_at("fix-auth", "/repos/alpha", ServiceFixture::CREATED_AT);
-        let row = SessionSummary::managed(session, SessionState::Waiting, false);
+        let row = ServiceFixture::summary_in("fix-auth", "/repos/alpha", SessionState::Waiting);
 
         assert_eq!(RepoGroup::of(&row).to_string(), "alpha");
     }

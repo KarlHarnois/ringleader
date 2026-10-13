@@ -164,16 +164,11 @@ mod tests {
             SessionSummary::managed(ServiceFixture::session(name), state, false)
         }
 
-        fn row_in(name: &str, repo: &str, state: SessionState) -> SessionSummary {
-            let session = ServiceFixture::session_at(name, repo, ServiceFixture::CREATED_AT);
-            SessionSummary::managed(session, state, false)
-        }
-
         fn two_repos() -> Vec<SessionSummary> {
             vec![
-                Self::row_in("a-one", "/repos/alpha", SessionState::Waiting),
-                Self::row_in("b-two", "/repos/alpha", SessionState::Waiting),
-                Self::row_in("c-three", "/repos/beta", SessionState::Waiting),
+                ServiceFixture::summary_in("a-one", "/repos/alpha", SessionState::Waiting),
+                ServiceFixture::summary_in("b-two", "/repos/alpha", SessionState::Waiting),
+                ServiceFixture::summary_in("c-three", "/repos/beta", SessionState::Waiting),
             ]
         }
 
@@ -219,9 +214,9 @@ mod tests {
         let mut list = SessionList::default();
 
         list.show(vec![
-            ListFixture::row_in("zeta", "/repos/beta", SessionState::Working),
-            ListFixture::row_in("alpha-one", "/repos/alpha", SessionState::Stopped),
-            ListFixture::row_in("alpha-two", "/repos/alpha", SessionState::Working),
+            ServiceFixture::summary_in("zeta", "/repos/beta", SessionState::Working),
+            ServiceFixture::summary_in("alpha-one", "/repos/alpha", SessionState::Stopped),
+            ServiceFixture::summary_in("alpha-two", "/repos/alpha", SessionState::Working),
         ]);
 
         assert_eq!(

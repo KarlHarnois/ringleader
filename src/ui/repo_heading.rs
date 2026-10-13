@@ -113,9 +113,7 @@ mod tests {
 
     impl HeadingFixture {
         fn row(name: &str, state: SessionState) -> SessionSummary {
-            let session =
-                ServiceFixture::session_at(name, "/repos/alpha", ServiceFixture::CREATED_AT);
-            SessionSummary::managed(session, state, false)
+            ServiceFixture::summary_in(name, "/repos/alpha", state)
         }
 
         fn text(heading: &RepoHeading) -> String {
