@@ -107,6 +107,18 @@ mod tests {
     }
 
     #[test]
+    fn a_released_lock_frees_the_path() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("lock");
+        let mut first = FileLock::new(&path);
+        first.acquire_for_write().unwrap();
+
+        first.release();
+
+        assert!(LockFixture::acquired_once_forked_children_exec(&path));
+    }
+
+    #[test]
     fn an_unopenable_lock_path_is_an_io_error() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("missing/lock");
