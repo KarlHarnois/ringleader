@@ -69,7 +69,7 @@ ringleader repo list
 ringleader doctor [--json]
 ```
 
-Every command accepts `--config <path>` and `--log-level <level>`. The log is at `~/.local/state/ringleader/app.log`.
+Every command accepts `--config <path>` and `--log-level <level>`.
 
 ## Exit codes
 
