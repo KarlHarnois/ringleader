@@ -167,6 +167,10 @@ impl ServiceFixture {
         &self.multiplexer
     }
 
+    pub fn shared_multiplexer(&self) -> Arc<FakeMultiplexer> {
+        Arc::clone(&self.multiplexer)
+    }
+
     pub fn config_source(&self) -> &FakeConfigSource {
         &self.config_source
     }

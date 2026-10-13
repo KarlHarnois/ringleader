@@ -200,7 +200,12 @@ impl Cli {
         })
     }
 
-    pub fn execute(&self, service: &mut SessionService, session: &mut CliSession) -> CliExit {
+    pub fn execute(
+        &self,
+        service: &mut SessionService,
+        session: &mut CliSession,
+        lock: &mut dyn Lock,
+    ) -> CliExit {
         if let Some(CliCommand::Doctor(args)) = &self.command {
             return CliExit::Code(Self::doctor(service, session, args));
         }
@@ -223,6 +228,7 @@ impl Cli {
             }
         }
         let result = self.dispatch(service, session);
+        session.wait_for_startup_input(service, lock);
         session.finish(result)
     }
 
@@ -282,8 +288,53 @@ impl Cli {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    use signal_hook::consts::SIGINT;
+
     use super::*;
-    use crate::test_support::{CliHarness, FakeLock, ServiceFixture};
+    use crate::test_support::{
+        CapturedWriter, CliHarness, Deadline, FakeLock, FakeMultiplexer, Gate, ServiceFixture,
+    };
+
+    struct LockFlowFixture;
+
+    impl LockFlowFixture {
+        const TYPING_DELAY: Duration = Duration::from_millis(200);
+
+        fn release_typing_later(multiplexer: &Arc<FakeMultiplexer>) {
+            let delayed = Arc::clone(multiplexer);
+            thread::spawn(move || {
+                thread::sleep(Self::TYPING_DELAY);
+                delayed.release_typing();
+            });
+        }
+
+        fn wait_for(log: &Arc<Mutex<Vec<String>>>, event: &str, limit: Duration) -> bool {
+            Deadline::after(limit)
+                .wait_until(|| log.lock().unwrap().iter().any(|item| item == event))
+        }
+
+        fn recorded_before(log: &Arc<Mutex<Vec<String>>>, earlier: &str, later: &str) -> bool {
+            let events = log.lock().unwrap();
+            let position = |event: &str| events.iter().position(|item| item == event);
+            matches!(
+                (position(earlier), position(later)),
+                (Some(first), Some(second)) if first < second
+            )
+        }
+
+        fn wait_for_typing_call(multiplexer: &FakeMultiplexer, limit: Duration) -> bool {
+            Deadline::after(limit).wait_until(|| {
+                multiplexer
+                    .calls()
+                    .iter()
+                    .any(|call| call.starts_with("type_when_ready"))
+            })
+        }
+    }
 
     #[test]
     fn a_mutating_command_against_a_held_lock_exits_three_and_names_the_lock() {
@@ -315,6 +366,144 @@ mod tests {
         harness.run(&["delete", "fix-auth"]);
 
         assert_eq!(harness.lock_acquisitions(), ["write"]);
+    }
+
+    #[test]
+    fn new_types_the_startup_input_before_the_command_exits() {
+        let fixture = ServiceFixture::new()
+            .with_config(ServiceFixture::config_with_input())
+            .with_multiplexer(FakeMultiplexer::new().blocking_typing());
+        let typed = fixture.shared_multiplexer();
+        let harness = CliHarness::new(fixture);
+        LockFlowFixture::release_typing_later(&typed);
+
+        let exit = harness.run(&["new", "--name", "Fix Auth", "--repo", "example-project"]);
+
+        assert_eq!(exit, CliExit::Code(0));
+        assert_eq!(typed.typed_when_ready("ringleader-fix-auth"), ["/color"]);
+    }
+
+    #[test]
+    fn new_notes_that_it_waits_for_the_startup_input() {
+        let fixture = ServiceFixture::new()
+            .with_config(ServiceFixture::config_with_input())
+            .with_multiplexer(FakeMultiplexer::new().blocking_typing());
+        let typing = fixture.shared_multiplexer();
+        let stderr = CapturedWriter::default();
+        let harness = CliHarness::new(fixture).with_stderr(stderr.clone());
+        let handle = thread::spawn(move || {
+            harness.run(&["new", "--name", "Fix Auth", "--repo", "example-project"])
+        });
+
+        let noted = Deadline::after(Duration::from_secs(2)).wait_until(|| {
+            stderr
+                .text()
+                .contains("waiting for the agent to reach its prompt to type its startup input")
+        });
+        typing.release_typing();
+        handle.join().unwrap();
+
+        assert!(noted);
+    }
+
+    #[test]
+    fn new_without_startup_input_notes_no_wait() {
+        let harness = CliHarness::new(ServiceFixture::new());
+
+        let exit = harness.run(&["new", "--name", "Fix Auth", "--repo", "example-project"]);
+
+        assert_eq!(exit, CliExit::Code(0));
+        assert!(!harness.stderr().contains("waiting for the agent"));
+    }
+
+    #[test]
+    fn a_signal_ends_the_startup_input_wait() {
+        let fixture = ServiceFixture::new()
+            .with_config(ServiceFixture::config_with_input())
+            .with_multiplexer(FakeMultiplexer::new().blocking_typing());
+        let typing = fixture.shared_multiplexer();
+        let harness = CliHarness::new(fixture);
+        let signals = harness.signals().clone();
+        let started = Instant::now();
+        let handle = thread::spawn(move || {
+            harness.run(&["new", "--name", "Fix Auth", "--repo", "example-project"])
+        });
+        assert!(LockFlowFixture::wait_for_typing_call(
+            &typing,
+            Duration::from_secs(2)
+        ));
+
+        signals.raise(SIGINT);
+        let exit = handle.join().unwrap();
+
+        assert_eq!(
+            exit,
+            CliExit::Interrupted {
+                signal: SIGINT,
+                code: 0
+            }
+        );
+        assert!(started.elapsed() < Duration::from_secs(2));
+        typing.release_typing();
+    }
+
+    #[test]
+    fn a_signal_during_the_command_skips_the_wait_note() {
+        let fixture = ServiceFixture::new()
+            .with_config(ServiceFixture::config_with_input())
+            .with_multiplexer(FakeMultiplexer::new().blocking_typing());
+        let typing = fixture.shared_multiplexer();
+        let harness = CliHarness::new(fixture);
+        let signals = harness.signals().clone();
+        typing.add_call_hook("create_session", move || signals.raise(SIGINT));
+
+        harness.run(&["new", "--name", "Fix Auth", "--repo", "example-project"]);
+
+        assert!(!harness.stderr().contains("waiting for the agent"));
+        typing.release_typing();
+    }
+
+    #[test]
+    fn the_write_lock_is_released_before_the_startup_input_is_waited_on() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let create_log = Arc::clone(&log);
+        let typing_log = Arc::clone(&log);
+        let gate = Arc::new(Gate::closed());
+        let multiplexer = FakeMultiplexer::new()
+            .with_typing_gate(Arc::clone(&gate))
+            .on_call("create_session", move || {
+                create_log.lock().unwrap().push("create".to_string());
+            })
+            .on_call("type_when_ready", move || {
+                typing_log.lock().unwrap().push("typing".to_string());
+            });
+        let lock = FakeLock::free().recording(Arc::clone(&log));
+        let fixture = ServiceFixture::new()
+            .with_config(ServiceFixture::config_with_input())
+            .with_multiplexer(multiplexer);
+        let typed = fixture.shared_multiplexer();
+        let harness = CliHarness::new(fixture).with_lock(lock);
+
+        let handle = thread::spawn(move || {
+            harness.run(&["new", "--name", "Fix Auth", "--repo", "example-project"])
+        });
+
+        assert!(LockFlowFixture::wait_for(
+            &log,
+            "typing",
+            Duration::from_secs(2)
+        ));
+        assert!(
+            LockFlowFixture::wait_for(&log, "release", Duration::from_secs(1)),
+            "the write lock was still held when the typing wait began"
+        );
+        assert!(
+            LockFlowFixture::recorded_before(&log, "create", "release"),
+            "the write lock was released before the use case ran"
+        );
+        gate.open_now();
+        assert_eq!(handle.join().unwrap(), CliExit::Code(0));
+        assert_eq!(typed.typed_when_ready("ringleader-fix-auth"), ["/color"]);
     }
 
     struct ParseFixture;

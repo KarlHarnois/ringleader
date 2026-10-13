@@ -49,9 +49,10 @@ command = "claude"
 # command is never split. Put flags in args. {name} is the session name.
 args = ["--name", "{name}"]
 env = ["ANTHROPIC_API_KEY"]
-# env copies these variables from Ringleader's environment. set_env sets fixed
-# values, for example the config directory of a second Claude account. Values
-# are used as written: only a leading ~/ expands. Keep secrets in env.
+# Agents start with a fixed baseline such as PATH and HOME. env copies more
+# variables from Ringleader's environment. set_env sets fixed values, for
+# example the config directory of a second Claude account. Values are used as
+# written: only a leading ~/ expands. Keep secrets in env.
 # set_env = { CLAUDE_CONFIG_DIR = "~/.claude-work" }
 prompt_args = ["{prompt}"]
 # Lines typed into the agent once its prompt is ready, each followed by Enter.

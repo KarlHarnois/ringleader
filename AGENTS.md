@@ -62,6 +62,83 @@ A new capability that `application`, `ui`, or `cli` needs from outside the proce
 
 The one exception is a driving adapter's own channel to the user: the terminal for the TUI, including the shell it runs there, and the standard streams for the CLI. That I/O stays in `ui` or `cli`, behind a trait beside its real implementation or a std `Read` or `Write`, with its fake in `src/test_support/`. The TUI owns `InputSource`, `ScreenMode`, and `ShellRunner` this way, and the CLI writes through the `Write` streams `CliOutput` holds. A test seam inside `adapters`, like `AgentLauncher`'s `ExecSeam`, has the same shape with its fake in the adapter's own tests.
 
+## Metrics
+
+Local, on-demand code-health tools. CI never builds or runs them. Do not add them
+to `checks`, to the default dev shell, or to `.github/workflows/ci.yml`. The flake
+builds them as `apps` so `nix flake check` only evaluates them, and puts them in
+the `metrics` dev shell, which extends the default one. That evaluation still
+downloads the four upstream inputs, so if one can no longer be fetched, CI's
+flake check fails until its input is repinned or removed. `dryer`, `crapper`, and
+`mutator` write snapshots under `.metrics/`, which is gitignored.
+Run them from the repository root, and pass `dryer` and `crapper` the `src` path.
+A pathless run also walks nested checkouts such as `.claude/worktrees` and scores
+every copy under the same namespaces, and `crapper` reruns coverage for each.
+`dryer --changed` compares the changed files only with each other, so it misses
+code copied from an unchanged file.
+
+```sh
+nix develop .#metrics -c dryer src             # duplicate candidates; writes .metrics/dry.edn
+nix develop .#metrics -c crapper src           # CC plus coverage plus CRAP; writes .metrics/crap.edn
+nix develop .#metrics -c mutator --max-workers 2 --timeout-factor 60 src/<module>.rs
+nix run .#dryer -- src                         # the apps also work outside any dev shell
+nix run .#crapper -- --help
+nix run .#mutator -- --help
+```
+
+`mutator` runs every covered mutant and many tests start real tmux servers. Never
+run it whole-repo. Name one module or file, and keep `--max-workers 2` and
+`--timeout-factor 60`. Each run builds the crate from scratch in new worker
+directories under `target/mutation-workers/`, and a mutant that times out counts
+as killed. The default factor of 10 times the warm baseline ends those builds
+early, so every mutant reads as killed before a test runs. Parallel cold builds
+slow each other, so raise the factor before the worker count. Once a
+snapshot exists, a rerun only runs survivors and sites in changed functions, so a
+kill recorded by a timeout stays. After a run with a smaller factor, rerun that
+file once with `--mutate-all`.
+Never pass `--changed` with a path: it drops the path and mutates every changed
+file in `git status`. `crapper` and `mutator` need `cargo-llvm-cov`
+and the LLVM tools named by `LLVM_COV` and `LLVM_PROFDATA`, which the `metrics`
+shell and the apps set. When `cargo llvm-cov` fails, whether from a missing tool
+or one failing test, every function scores 0% coverage and the run still exits 0.
+Check the output for `Rust coverage will score 0%` before trusting the snapshot.
+Do not pass `mutator` a filtered `--test-command`. Many modules are tested only
+through their callers, so a module-path filter runs zero tests, exits 0, and lets
+every mutant survive.
+
+uml-viewer reads `.metrics/crap.edn` and `.metrics/mutate/`. It ignores
+`.metrics/dry.edn`, so `dryer` output stays a text report and never reaches the
+diagram. It needs a display and downloads Maven dependencies on first run. Write
+the policy to the gitignored `.uml-viewer/ringleader.policy.edn`:
+
+```edn
+{:title "Ringleader"
+ :sources [{:lang :rust :root "src" :prefix "ringleader"}]
+ :hierarchical true
+ :out ".uml-viewer/ringleader.edn"}
+```
+
+Leave the policy-level `:prefix` unset. The overlay joins a `crate::module::Type`
+snapshot to the module class through the class id's crate path, and stripping the
+crate name from the id breaks that join. `$UML_VIEWER_DEPS`, set by the `metrics`
+shell, points the Clojure CLI at the `uml-viewer` flake input. Inside
+`nix develop .#metrics`, generate the IR, then open the viewer:
+
+```sh
+clojure -Sdeps "$UML_VIEWER_DEPS" -M:ir .uml-viewer/ringleader.policy.edn
+viewer_tmux_dir=$(mktemp -d /tmp/uml.XXXXXX)
+env -u TMUX -u TMUX_PANE TMUX_TMPDIR="$viewer_tmux_dir" \
+  clojure -Sdeps "$UML_VIEWER_DEPS" -M:run --restart .uml-viewer/ringleader.edn
+rm -rf "$viewer_tmux_dir"
+```
+
+Always pass `--restart`. Without it the viewer starts `grok --yolo --trust` as its
+companion in a new session on the user's tmux server, and opens on a blank canvas
+until that companion answers. `--restart` skips the companion and loads the EDN
+at once. It still looks for a companion with `tmux has-session`, so the `env`
+prefix sends those lookups to an empty private directory, removed after the
+viewer exits.
+
 ## Layout
 
 ```
@@ -70,7 +147,7 @@ The one exception is a driving adapter's own channel to the user: the terminal f
 ├── Cargo.lock
 ├── rustfmt.toml            # max_width = 100
 ├── LICENSE                 # MIT
-├── .gitignore              # /target, /result, /result-*, /.direnv
+├── .gitignore              # /target, /result, /result-*, /.direnv, /.claude/worktrees, /.metrics, /.uml-viewer, /uml-viewer-log.txt
 ├── flake.nix
 ├── flake.lock
 ├── .envrc                  # direnv: use flake, loads the dev shell
@@ -83,7 +160,7 @@ The one exception is a driving adapter's own channel to the user: the terminal f
     ├── cli.rs              # Cli struct, clap definitions, dispatch
     ├── cli/
     │   ├── cli_output.rs         # CliOutput, writeln! output that stops at a broken pipe
-    │   ├── cli_session.rs        # CliSession, signal checks, worker waits, and the exit of one command
+    │   ├── cli_session.rs        # CliSession, signal checks, worker waits, the startup input wait the CLI and TUI end with, and the exit of one command
     │   ├── session_commands.rs   # SessionCommands: list, new, delete, attach, rename, restart
     │   ├── list_report.rs        # ListReport, the list text and JSON
     │   ├── repo_argument.rs      # RepoArgument, the --repo name or path resolution
@@ -126,7 +203,7 @@ The one exception is a driving adapter's own channel to the user: the terminal f
     │   ├── rename_request.rs     # RenameRequest, the old and new names
     │   ├── branch_availability.rs # BranchAvailability, refuses a branch name that exists or holds other branches, for create and rename
     │   ├── session_restart.rs    # SessionRestart: restart of an Exited or Stopped session
-    │   ├── agent_hooks.rs        # AgentHooks, types an agent's startup and rename input after a start or a rename
+    │   ├── agent_hooks.rs        # AgentHooks, schedules an agent's startup input in the background and types its rename input
     │   ├── worktree_inspection.rs # WorktreeInspection, the worktree checks restart, delete, and doctor share
     │   ├── session_deletion.rs   # SessionDeletion: delete_session steps 5 to 8 and forget
     │   ├── deletion_guards.rs    # DeletionGuards: delete_session steps 2 to 4
@@ -270,6 +347,8 @@ The one exception is a driving adapter's own channel to the user: the terminal f
         ├── fake_repo_scanner.rs     # FakeRepoScanner
         ├── fake_host_probe.rs       # FakeHostProbe
         ├── fake_clock.rs            # FakeClock
+        ├── gate.rs                  # Gate: a test gate that blocks a call until it is opened or a deadline passes
+        ├── deadline.rs              # Deadline: polls a condition until it holds or a time limit passes
         ├── recording_screen_mode.rs # RecordingScreenMode, the screen mode that records each switch
         ├── ui_harness.rs            # UiHarness: scripted input and a TestBackend wrapper for EventLoop tests
         ├── cli_harness.rs           # CliHarness: a Cli run against the fakes with captured output
@@ -297,7 +376,7 @@ The one exception is a driving adapter's own channel to the user: the terminal f
 - Blocking TUI operations (create, delete, rename, restart, and the delete measurement) run behind a busy message, and the event loop drops the key and paste events queued while they ran.
 - A dialog's hint line lists only keys whose meaning is Ringleader's own, such as `Enter create`, `Ctrl-S create`, and `Esc cancel`, and the keys that choose from a list, such as `↑ ↓ j k choose`. It never lists text-editing keys like cursor movement, Ctrl-U, or Ctrl-W, because every terminal user already expects them. A new editing key goes into `TextField` with its usual terminal meaning, not into a hint.
 - Logs go to `$XDG_STATE_HOME/ringleader/app.log` through `env_logger`, never to the terminal.
-- `AgentHooks` types an agent's `startup_input` after create and restart, waiting up to 10 seconds for its prompt, and its `rename_input` after a rename only when the agent is at its prompt at that moment. Each later line waits up to 2 seconds for the prompt to come back, after a short pause that lets the agent take the line before it. An agent is at its prompt when its pane is out of copy mode, shows the cursor, and the text before the cursor on its row is a bare prompt marker and a blank, with no letters or digits. Copy mode would take the keys instead of the agent. Claude hides the cursor in its trust and permission dialogs, an agent still starting has drawn no marker, and an unsent draft puts its text before the cursor. A skipped or failed typing is logged and never fails the use case.
+- `AgentHooks` schedules an agent's `startup_input` in the background after create and restart, so the use case returns once the tmux session exists. One typing job runs per session at a time, and a second start for the same session is skipped. The job finds the agent pane once when it starts, then checks only the prompt conditions below before each line. It never rechecks the session's name or registry entry, so a rename during its wait does not reach it. The job waits up to 60 seconds for the first prompt, and each later line waits up to 2 seconds for the prompt to come back, after a short pause that lets the agent take the line before it. The TUI polls the job while it runs. On exit, the CLI after its command and the TUI after restoring the screen release the lock, note the wait on stderr, and wait for the job unless a signal arrives. Its `rename_input` is typed after a rename only when the agent is at its prompt at that moment. An agent is at its prompt when its pane is out of copy mode, shows the cursor, and the text before the cursor on its row is a bare prompt marker and a blank, with no letters or digits. Copy mode would take the keys instead of the agent. Claude hides the cursor in its trust and permission dialogs, an agent still starting has drawn no marker, and an unsent draft puts its text before the cursor. A skipped or failed typing is logged and never fails the use case.
 
 ## CLI exit codes
 
@@ -306,7 +385,7 @@ The one exception is a driving adapter's own channel to the user: the terminal f
 - 2: a session name that was not found.
 - 3: a conflict, including a refused guard, an `Unmanaged` target, a session that is live and healthy, or the lock being held.
 
-A command interrupted by a signal before its use case starts never runs it, and one interrupted during its use case finishes it and then ends by that signal.
+A command interrupted by a signal before its use case starts never runs it, and one interrupted during its use case finishes it and then ends by that signal. One interrupted while it waits for queued startup input stops waiting, logs the abandoned input, and ends by that signal, though its use case succeeded.
 
 ## Tests
 
@@ -326,5 +405,5 @@ A command interrupted by a signal before its use case starts never runs it, and 
 
 ## Documentation
 
-- `README.md` stays terse and human-facing: what Ringleader is, install, first run, keys, the CLI synopsis, and the exit codes. No architecture and no agent instructions.
+- `README.md` stays terse and human-facing: what Ringleader is, install, first run, the CLI synopsis, and the exit codes. No architecture and no agent instructions.
 - The repository holds no `CLAUDE.md` or `CLAUDE.local.md`, because either would hide this file from Claude Code. If one is ever needed, its first line is `@AGENTS.md`.

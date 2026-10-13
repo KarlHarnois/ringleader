@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
-use std::sync::{Condvar, Mutex};
+use std::sync::Mutex;
 
+use super::gate::Gate;
 use crate::application::ports::{RepoScanner, ScanError, ScanOutcome};
 use crate::domain::{Repo, RepoScope};
 
@@ -79,36 +80,5 @@ impl RepoScanner for FakeRepoScanner {
             Some(error) => Err(error.clone()),
             None => Ok(ScanOutcome::new(self.repos.clone(), self.cut_short)),
         }
-    }
-}
-
-struct Gate {
-    open: Mutex<bool>,
-    changed: Condvar,
-}
-
-impl Gate {
-    fn open() -> Self {
-        Self {
-            open: Mutex::new(true),
-            changed: Condvar::new(),
-        }
-    }
-
-    fn closed() -> Self {
-        Self {
-            open: Mutex::new(false),
-            changed: Condvar::new(),
-        }
-    }
-
-    fn open_now(&self) {
-        *self.open.lock().unwrap() = true;
-        self.changed.notify_all();
-    }
-
-    fn wait(&self) {
-        let open = self.open.lock().unwrap();
-        drop(self.changed.wait_while(open, |open| !*open).unwrap());
     }
 }

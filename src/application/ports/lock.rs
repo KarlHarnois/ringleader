@@ -5,6 +5,7 @@ use thiserror::Error;
 pub trait Lock {
     fn acquire_lifetime(&mut self) -> Result<(), LockError>;
     fn acquire_for_write(&mut self) -> Result<(), LockError>;
+    fn release(&mut self);
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
