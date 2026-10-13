@@ -65,26 +65,33 @@
           dryerTool = buildTool "dryer" dryer [ ];
           crapperTool = buildTool "crapper" crapper [ ];
           mutatorTool = buildTool "mutator" mutator [ crapperTool ];
-          runtimeInputs = with pkgs; [
-            cargo
-            rustc
-            cargo-llvm-cov
-            tmux
-            git
-          ];
           llvm = pkgs.rustc.llvmPackages.llvm;
           llvmCoverageEnv = {
             LLVM_COV = "${llvm}/bin/llvm-cov";
             LLVM_PROFDATA = "${llvm}/bin/llvm-profdata";
           };
+          gitRuntime = {
+            runtimeInputs = [ pkgs.git ];
+          };
+          coverageRuntime = {
+            runtimeInputs = with pkgs; [
+              cargo
+              rustc
+              cargo-llvm-cov
+              tmux
+              git
+            ];
+            runtimeEnv = llvmCoverageEnv;
+          };
           wrapTool =
-            name: tool:
-            pkgs.writeShellApplication {
-              inherit name;
-              inherit runtimeInputs;
-              runtimeEnv = llvmCoverageEnv;
-              text = ''exec ${tool}/bin/${name} "$@"'';
-            };
+            name: tool: runtime:
+            pkgs.writeShellApplication (
+              runtime
+              // {
+                inherit name;
+                text = ''exec ${tool}/bin/${name} "$@"'';
+              }
+            );
         in
         {
           inherit
@@ -93,9 +100,9 @@
             mutatorTool
             llvmCoverageEnv
             ;
-          dryerApp = wrapTool "dryer" dryerTool;
-          crapperApp = wrapTool "crapper" crapperTool;
-          mutatorApp = wrapTool "mutator" mutatorTool;
+          dryerApp = wrapTool "dryer" dryerTool gitRuntime;
+          crapperApp = wrapTool "crapper" crapperTool coverageRuntime;
+          mutatorApp = wrapTool "mutator" mutatorTool coverageRuntime;
         };
 
       forEachSystemWithMetricsTools = build: forEachSystem (pkgs: build pkgs (metricsTools pkgs));
