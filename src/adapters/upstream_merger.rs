@@ -513,7 +513,7 @@ mod tests {
         let error = fixture.merge().unwrap_err();
 
         assert!(
-            matches!(&error, WorkspaceError::Failed { subcommand, .. } if subcommand == "merge"),
+            matches!(&error, WorkspaceError::Failed { stderr, .. } if stderr.contains("would be overwritten by merge")),
             "{error:?}"
         );
         assert!(!fixture.is_merging());
