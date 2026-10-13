@@ -283,7 +283,7 @@ viewer exits.
     │   ├── signal_flags.rs       # SignalFlags, the SIGHUP, SIGINT, SIGTERM, and SIGQUIT flags
     │   ├── durable_file.rs       # DurableFile, synced temp file renamed over the target
     │   ├── tmux_command.rs       # TmuxCommand, the private server's `-S` and `-f`, `-u` and `-N`, a child environment without `TMUX` and `TMUX_PANE`, the caller's identity
-    │   ├── server_files.rs       # ServerFiles, the private server's socket and generated config, and the 0700 socket directory
+    │   ├── server_files.rs       # ServerFiles, the private server's socket and generated config, the 0700 socket directory, and whether a server still starts under the socket's lock
     │   ├── tmux_error.rs         # TmuxError
     │   ├── tmux_sequence.rs      # TmuxSequence, `;`-separated commands with `#` and `;` escaping
     │   ├── tmux_output.rs        # TmuxOutput, labeled lines and the zero-session errors

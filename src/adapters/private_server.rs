@@ -83,9 +83,9 @@ impl<'a> PrivateServer<'a> {
     }
 
     fn servers_without_socket(&self) -> Vec<LiveProcess> {
-        let socket = self.tmux.server().socket();
-        match Self::is_missing(socket) {
-            true => LiveProcess::tmux_servers_on(socket),
+        let files = self.tmux.server();
+        match Self::is_missing(files.socket()) && !files.server_is_starting() {
+            true => LiveProcess::tmux_servers_on(files.socket()),
             false => Vec::new(),
         }
     }
@@ -195,6 +195,12 @@ mod tests {
             ReturnKey::parse("M-x").unwrap()
         }
 
+        fn start_lock(server: &TmuxTestServer) -> fs::File {
+            let mut path = server.socket().as_os_str().to_os_string();
+            path.push(".lock");
+            fs::File::create(path).unwrap()
+        }
+
         fn detach_keys(server: &TmuxTestServer) -> Vec<String> {
             Self::detach_keys_in(server, "root")
         }
@@ -286,6 +292,34 @@ mod tests {
             .mode();
         assert!(restored);
         assert_eq!(mode & 0o777, 0o700);
+    }
+
+    #[test]
+    fn a_server_starting_under_the_start_lock_is_left_to_bind_its_socket() {
+        let server = TmuxTestServer::with_session("holder");
+        let tmux = server.command();
+        let private = PrivateServer::new(&tmux);
+        fs::remove_file(server.socket()).unwrap();
+        let lock = ServerFixture::start_lock(&server);
+        lock.lock().unwrap();
+
+        let lost = private.socket_lost();
+        let restored = private.restore_socket().unwrap();
+
+        drop(lock);
+        private.restore_socket().unwrap();
+        assert!(!lost);
+        assert!(!restored);
+    }
+
+    #[test]
+    fn a_start_lock_left_behind_does_not_stop_the_recovery() {
+        let server = TmuxTestServer::with_session("holder");
+        let tmux = server.command();
+        fs::remove_file(server.socket()).unwrap();
+        drop(ServerFixture::start_lock(&server));
+
+        assert!(PrivateServer::new(&tmux).restore_socket().unwrap());
     }
 
     #[test]
