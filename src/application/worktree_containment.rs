@@ -24,6 +24,11 @@ impl<'a> WorktreeContainment<'a> {
         worktree != root && worktree.starts_with(&root)
     }
 
+    pub fn holds(&self, directory: &Path, path: &Path) -> bool {
+        let same = self.host.canonical_or_given(directory) == self.host.canonical_or_given(path);
+        same || self.contains(directory, path)
+    }
+
     fn has_parent_component(path: &Path) -> bool {
         path.components()
             .any(|component| component == Component::ParentDir)

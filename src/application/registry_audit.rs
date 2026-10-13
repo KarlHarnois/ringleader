@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
 use super::branch_ownership::BranchOwnership;
+use super::busy_worktree::BusyWorktree;
 use super::doctor_report::DoctorReport;
 use super::orphan_audit::OrphanAudit;
-use super::ports::{Multiplexer, Workspace};
+use super::ports::{HostProbe, Multiplexer, Workspace};
 use super::reconciliation::Reconciliation;
 use super::service_ports::ServicePorts;
 use super::worktree_inspection::WorktreeInspection;
@@ -14,6 +15,7 @@ pub struct RegistryAudit {
     orphans: OrphanAudit,
     workspace: Arc<dyn Workspace>,
     multiplexer: Arc<dyn Multiplexer>,
+    host: Arc<dyn HostProbe>,
 }
 
 impl RegistryAudit {
@@ -23,6 +25,7 @@ impl RegistryAudit {
             orphans: OrphanAudit::new(ports),
             workspace: ports.repos().workspace(),
             multiplexer: ports.tmux().multiplexer(),
+            host: ports.repos().host(),
         }
     }
 
@@ -89,6 +92,26 @@ impl RegistryAudit {
         }
     }
 
+    fn audit_stopped(
+        &self,
+        session: &Session,
+        reconciliation: &Reconciliation,
+        report: &mut DoctorReport,
+    ) {
+        let socket = self.multiplexer.socket();
+        if let Some(finding) = BusyWorktree::new(self.host.as_ref(), &socket).finding(session) {
+            report.warning(finding);
+        }
+        if let Some(claimant) = reconciliation.claimant_of(session) {
+            report.problem(format!(
+                "session {}: tmux session {} claims its worktree {}",
+                session.name(),
+                claimant.tmux_name(),
+                session.worktree_path().display()
+            ));
+        }
+    }
+
     fn audit_marker(&self, session: &Session, report: &mut DoctorReport) {
         if let Ok(false) = self
             .workspace
@@ -103,37 +126,6 @@ impl RegistryAudit {
         }
     }
 
-    fn audit_stopped(
-        &self,
-        session: &Session,
-        reconciliation: &Reconciliation,
-        report: &mut DoctorReport,
-    ) {
-        let name = session.name();
-        let socket = session.socket_path();
-        match self
-            .multiplexer
-            .has_session_on(socket, session.tmux_name(), session.worktree_path())
-        {
-            Ok(true) => report.problem(format!(
-                "session {name} is live on the tmux server at {}",
-                socket.display()
-            )),
-            Ok(false) => {}
-            Err(error) => report.problem(format!(
-                "session {name}: cannot check {}: {error}",
-                socket.display()
-            )),
-        }
-        if let Some(claimant) = reconciliation.claimant_of(session) {
-            report.problem(format!(
-                "session {name}: tmux session {} claims its worktree {}",
-                claimant.tmux_name(),
-                session.worktree_path().display()
-            ));
-        }
-    }
-
     fn audit_against_config(session: &Session, config: &Config, report: &mut DoctorReport) {
         let name = session.name();
         if config.agent(session.agent()).is_none() {
@@ -144,11 +136,10 @@ impl RegistryAudit {
         }
         let recorded = session.naming();
         let current = config.naming();
-        if recorded != current {
+        if recorded.worktree_root() != current.worktree_root() {
             report.warning(format!(
-                "session {name} was created under worktree_root {} and tmux_prefix {}, which differ from the config; Ctrl-Q does not return from a session whose name lacks the current tmux_prefix",
-                recorded.worktree_root().display(),
-                recorded.tmux_prefix()
+                "session {name} was created under worktree_root {}, which differs from the config",
+                recorded.worktree_root().display()
             ));
         }
     }

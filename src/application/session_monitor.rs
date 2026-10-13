@@ -5,7 +5,7 @@ use super::reconciliation::Reconciliation;
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
 use super::session_reconciler::SessionReconciler;
-use crate::domain::{Config, DiffStat, Session};
+use crate::domain::{Config, DiffStat, ReturnKey, Session};
 
 pub struct SessionMonitor {
     multiplexer: Arc<dyn Multiplexer>,
@@ -45,7 +45,11 @@ impl SessionMonitor {
         Ok(self.multiplexer.capture_pane(tmux_name)?)
     }
 
-    pub fn ring_bell(&self) -> Result<(), ServiceError> {
-        Ok(self.multiplexer.ring_bell()?)
+    pub fn server_return_key(&self) -> Option<ReturnKey> {
+        let running = self
+            .multiplexer
+            .server_config(&ReturnKey::default())
+            .ok()??;
+        running.return_key().cloned()
     }
 }
