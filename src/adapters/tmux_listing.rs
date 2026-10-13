@@ -18,6 +18,8 @@ impl<'a> TmuxListing<'a> {
     pub const TTY_FORMAT: &'static str = "ringleader-tty #{pane_dead} #{pane_tty}";
     pub const SERVER_FORMAT: &'static str = "ringleader-server #{version}";
     pub const SESSION_FORMAT: &'static str = "ringleader-session";
+    pub const SESSION_ID_FORMAT: &'static str =
+        "ringleader-session-id #{session_id} #{session_name}";
     const TAGGED: &'static str = "1";
     const DEAD: &'static str = "1";
     const KEY_BINDING: &'static str = "bind-key";
@@ -78,6 +80,15 @@ impl<'a> TmuxListing<'a> {
             let (pane, tag) = row.split_once(' ')?;
             (tag == Self::TAGGED).then(|| pane.to_string())
         })
+    }
+
+    pub fn session_id_named(&self, tmux_name: &str) -> Option<String> {
+        self.output
+            .labeled("ringleader-session-id")
+            .find_map(|row| {
+                let (id, name) = row.split_once(' ')?;
+                (name == tmux_name).then(|| id.to_string())
+            })
     }
 
     pub fn live_pane_pids(&self) -> Vec<u32> {

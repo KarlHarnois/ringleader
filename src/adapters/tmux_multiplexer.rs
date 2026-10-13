@@ -127,7 +127,11 @@ impl TmuxMultiplexer {
     }
 
     fn agent_pane(&self, tmux_name: &str) -> Result<Option<String>, MultiplexerError> {
-        let lookup = TmuxScripts::session_panes(tmux_name, TmuxListing::AGENT_FORMAT);
+        self.agent_pane_in(&self.session_target(tmux_name)?)
+    }
+
+    fn agent_pane_in(&self, session: &str) -> Result<Option<String>, MultiplexerError> {
+        let lookup = TmuxScripts::session_panes(session, TmuxListing::AGENT_FORMAT);
         let output = self.tmux.query(&lookup)?;
         if !output.succeeded() && !output.has("ringleader-agent") {
             return Err(TmuxError::failed("list-panes", &output).into());
@@ -146,9 +150,22 @@ impl TmuxMultiplexer {
     }
 
     fn shown_pane(&self, tmux_name: &str) -> Result<String, MultiplexerError> {
-        Ok(self
-            .agent_pane(tmux_name)?
-            .unwrap_or_else(|| TmuxScripts::exact(tmux_name)))
+        let session = self.session_target(tmux_name)?;
+        Ok(self.agent_pane_in(&session)?.unwrap_or(session))
+    }
+
+    fn session_target(&self, tmux_name: &str) -> Result<String, MultiplexerError> {
+        if !TmuxScripts::reads_as_session_id(tmux_name) {
+            return Ok(TmuxScripts::exact(tmux_name));
+        }
+        let output = self.tmux.query(&TmuxScripts::session_ids())?;
+        TmuxListing::new(&output)
+            .session_id_named(tmux_name)
+            .map(|session_id| TmuxScripts::by_session_id(&session_id))
+            .ok_or_else(|| MultiplexerError::Failed {
+                subcommand: "list-sessions".to_string(),
+                detail: format!("no tmux session is named {tmux_name}"),
+            })
     }
 
     fn attach_in_foreground(&self, mut attach: Command) -> Result<(), MultiplexerError> {
@@ -215,7 +232,8 @@ impl Multiplexer for TmuxMultiplexer {
     }
 
     fn pane_pids(&self, tmux_name: &str) -> Result<Vec<u32>, MultiplexerError> {
-        let list = TmuxScripts::session_panes(tmux_name, TmuxListing::PANE_PID_FORMAT);
+        let session = self.session_target(tmux_name)?;
+        let list = TmuxScripts::session_panes(&session, TmuxListing::PANE_PID_FORMAT);
         let output = self.tmux.query(&list)?;
         if !output.succeeded() && !output.has("ringleader-pane-pid") {
             return Err(TmuxError::failed("list-panes", &output).into());
@@ -489,6 +507,11 @@ mod tests {
                 .position(|argument| argument == "attach-session")
                 .unwrap();
             arguments[subcommand..].to_vec()
+        }
+
+        fn session_named_by(&self, target: &str) -> String {
+            self.server
+                .text(&["display-message", "-p", "-t", target, "#{session_name}"])
         }
 
         fn signal(pid: &str, signal: &str) {
@@ -1245,6 +1268,41 @@ mod tests {
         });
 
         assert!(captured, "{:?}", multiplexer.capture_pane("handmade"));
+    }
+
+    #[test]
+    fn a_session_named_like_another_sessions_id_is_attached_by_its_own_id() {
+        let fixture = MultiplexerFixture::new();
+        fixture.create("fix-auth").unwrap();
+        fixture.server.start_session("$0");
+
+        let attach = fixture.attached_to(&AttachTarget::Agent("$0".to_string()));
+
+        let target = attach.last().unwrap();
+        assert_eq!(fixture.session_named_by(target), "$0");
+    }
+
+    #[test]
+    fn a_session_named_like_another_sessions_id_is_captured_from_its_own_pane() {
+        let fixture = MultiplexerFixture::with_holder();
+        fixture.server.text(&[
+            "new-session",
+            "-d",
+            "-s",
+            "$0",
+            "sh",
+            "-c",
+            "printf 'named like an id\\n'; sleep 30",
+        ]);
+        let multiplexer = fixture.server.multiplexer();
+
+        let captured = fixture.server.wait_for(|| {
+            multiplexer
+                .capture_pane("$0")
+                .is_ok_and(|text| text.contains("named like an id"))
+        });
+
+        assert!(captured, "{:?}", multiplexer.capture_pane("$0"));
     }
 
     #[test]
