@@ -7,6 +7,7 @@ use serde::Deserialize;
 
 use super::bounded_command::{BoundedCommand, Call, CallKind, CommandError};
 use super::command_output::CommandOutput;
+use super::gh_query::GhQuery;
 use crate::application::ports::{PullRequestError, PullRequests};
 use crate::domain::{PullRequest, PullRequestState};
 
@@ -48,7 +49,7 @@ impl GhPullRequests {
             });
         }
         GhListing::parse(&output.stdout_text())
-            .map(|listing| query.pull_requests(&listing))
+            .map(|listing| listing.pull_requests(query))
             .map_err(|error| PullRequestError::Failed {
                 subcommand: Self::SUBCOMMAND.to_string(),
                 status: "unreadable json".to_string(),
@@ -90,75 +91,6 @@ impl PullRequests for GhPullRequests {
     }
 }
 
-struct GhQuery {
-    branches: Vec<String>,
-}
-
-impl GhQuery {
-    const CANDIDATES: &'static str = "first: 10, orderBy: {field: CREATED_AT, direction: DESC}";
-    const FIELDS: &'static str = "number state isDraft createdAt headRepositoryOwner { login }";
-    const RESHAPE: &'static str = ".data | {viewer: .viewer.login, \
-        owner: .repository.owner.login, \
-        branches: (.repository | del(.owner) | map_values([.nodes[] | {number, state, isDraft, \
-        createdAt: (.createdAt | fromdateiso8601), headOwner: .headRepositoryOwner.login}]))}";
-
-    fn new(branches: &[String]) -> Self {
-        Self {
-            branches: branches.to_vec(),
-        }
-    }
-
-    fn arguments(&self) -> Vec<String> {
-        let mut arguments = vec![
-            "-f".to_string(),
-            format!("query={}", self.text()),
-            "--jq".to_string(),
-            Self::RESHAPE.to_string(),
-        ];
-        for (alias, branch) in self.aliased() {
-            arguments.extend(["-f".to_string(), format!("{alias}={branch}")]);
-        }
-        arguments
-    }
-
-    fn text(&self) -> String {
-        let variables: String = self
-            .aliased()
-            .map(|(alias, _)| format!(", ${alias}: String!"))
-            .collect();
-        let fields: String = self
-            .aliased()
-            .map(|(alias, _)| Self::field(&alias))
-            .collect();
-        format!(
-            "query($owner: String!, $name: String!{variables}) \
-             {{ viewer {{ login }} \
-             repository(owner: $owner, name: $name) {{ owner {{ login }}{fields} }} }}"
-        )
-    }
-
-    fn field(alias: &str) -> String {
-        format!(
-            " {alias}: pullRequests(headRefName: ${alias}, {}) {{ nodes {{ {} }} }}",
-            Self::CANDIDATES,
-            Self::FIELDS
-        )
-    }
-
-    fn pull_requests(&self, listing: &GhListing) -> HashMap<String, Option<PullRequest>> {
-        self.aliased()
-            .map(|(alias, branch)| (branch.clone(), listing.pull_request(&alias)))
-            .collect()
-    }
-
-    fn aliased(&self) -> impl Iterator<Item = (String, &String)> {
-        self.branches
-            .iter()
-            .enumerate()
-            .map(|(index, branch)| (format!("branch{index}"), branch))
-    }
-}
-
 #[derive(Deserialize)]
 struct GhListing {
     viewer: String,
@@ -169,6 +101,13 @@ struct GhListing {
 impl GhListing {
     fn parse(text: &str) -> Result<Self, serde_json::Error> {
         serde_json::from_str(text)
+    }
+
+    fn pull_requests(&self, query: &GhQuery) -> HashMap<String, Option<PullRequest>> {
+        query
+            .aliased()
+            .map(|(alias, branch)| (branch.clone(), self.pull_request(&alias)))
+            .collect()
     }
 
     fn pull_request(&self, alias: &str) -> Option<PullRequest> {
@@ -492,16 +431,6 @@ printf '{"viewer":"octocat","owner":"example-org","branches":{%s}}' "$listing"
         );
         assert_eq!(command.get_current_dir(), Some(Path::new("/repos/example")));
         assert_eq!(prompt, Some(OsStr::new("1")));
-    }
-
-    #[test]
-    fn the_query_holds_one_aliased_field_per_branch() {
-        let text = GhQuery::new(&ParseFixture::branches()).text();
-
-        assert!(text.contains("$branch0: String!, $branch1: String!"));
-        assert!(text.contains("branch1: pullRequests(headRefName: $branch1,"));
-        assert!(text.contains("viewer { login }"));
-        assert!(text.contains("headRepositoryOwner { login }"));
     }
 
     #[test]

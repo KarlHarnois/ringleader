@@ -1,0 +1,77 @@
+pub struct GhQuery {
+    branches: Vec<String>,
+}
+
+impl GhQuery {
+    const CANDIDATES: &'static str = "first: 10, orderBy: {field: CREATED_AT, direction: DESC}";
+    const FIELDS: &'static str = "number state isDraft createdAt headRepositoryOwner { login }";
+    const RESHAPE: &'static str = ".data | {viewer: .viewer.login, \
+        owner: .repository.owner.login, \
+        branches: (.repository | del(.owner) | map_values([.nodes[] | {number, state, isDraft, \
+        createdAt: (.createdAt | fromdateiso8601), headOwner: .headRepositoryOwner.login}]))}";
+
+    pub fn new(branches: &[String]) -> Self {
+        Self {
+            branches: branches.to_vec(),
+        }
+    }
+
+    pub fn arguments(&self) -> Vec<String> {
+        let mut arguments = vec![
+            "-f".to_string(),
+            format!("query={}", self.text()),
+            "--jq".to_string(),
+            Self::RESHAPE.to_string(),
+        ];
+        for (alias, branch) in self.aliased() {
+            arguments.extend(["-f".to_string(), format!("{alias}={branch}")]);
+        }
+        arguments
+    }
+
+    pub fn aliased(&self) -> impl Iterator<Item = (String, &String)> {
+        self.branches
+            .iter()
+            .enumerate()
+            .map(|(index, branch)| (format!("branch{index}"), branch))
+    }
+
+    fn text(&self) -> String {
+        let variables: String = self
+            .aliased()
+            .map(|(alias, _)| format!(", ${alias}: String!"))
+            .collect();
+        let fields: String = self
+            .aliased()
+            .map(|(alias, _)| Self::field(&alias))
+            .collect();
+        format!(
+            "query($owner: String!, $name: String!{variables}) \
+             {{ viewer {{ login }} \
+             repository(owner: $owner, name: $name) {{ owner {{ login }}{fields} }} }}"
+        )
+    }
+
+    fn field(alias: &str) -> String {
+        format!(
+            " {alias}: pullRequests(headRefName: ${alias}, {}) {{ nodes {{ {} }} }}",
+            Self::CANDIDATES,
+            Self::FIELDS
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_query_holds_one_aliased_field_per_branch() {
+        let text = GhQuery::new(&["fix-auth".to_string(), "dark-mode".to_string()]).text();
+
+        assert!(text.contains("$branch0: String!, $branch1: String!"));
+        assert!(text.contains("branch1: pullRequests(headRefName: $branch1,"));
+        assert!(text.contains("viewer { login }"));
+        assert!(text.contains("headRepositoryOwner { login }"));
+    }
+}

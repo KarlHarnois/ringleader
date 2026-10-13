@@ -183,6 +183,7 @@ The one exception is a driving adapter's own channel to the user: the terminal f
     │   ├── json_session_registry.rs # JsonSessionRegistry
     │   ├── file_lock.rs          # FileLock
     │   ├── gh_pull_requests.rs   # GhPullRequests, looks up the pull requests of a repo's branches in one gh GraphQL call
+    │   ├── gh_query.rs           # GhQuery, the aliased GraphQL query and jq reshape for a repo's branches
     │   ├── null_pull_requests.rs # NullPullRequests, finds no pull request on a host without gh
     │   ├── bounded_command.rs    # BoundedCommand, runs git and tmux children in a new session with a deadline
     │   ├── command_output.rs     # CommandOutput, a finished child's status and output
