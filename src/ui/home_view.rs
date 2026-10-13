@@ -143,13 +143,17 @@ impl<'a> CenteredText<'a> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
     use super::*;
-    use crate::domain::{SessionState, SessionSummary};
+    use crate::domain::{DiffStat, SessionState, SessionSummary};
     use crate::test_support::ServiceFixture;
     use crate::ui::empty_state::EmptyState;
+    use crate::ui::list_selection::ListSelection;
+    use crate::ui::session_tree::SessionTree;
     use crate::ui::theme::Theme;
 
     struct ViewFixture;
@@ -163,13 +167,22 @@ mod tests {
             )]
         }
 
+        fn rows_with_a_diff() -> Vec<SessionSummary> {
+            Self::rows()
+                .into_iter()
+                .map(|row| row.with_diff(DiffStat::from_changes([], 2)))
+                .collect()
+        }
+
         fn render(rows: &[SessionSummary], width: u16, height: u16) -> String {
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
             let selected = rows.first();
+            let selection = selected.map(|row| ListSelection::Session(row.name().to_string()));
+            let tree = || SessionTree::new(rows, &HashSet::new());
             terminal
                 .draw(|frame| {
                     HomeView::new(
-                        SessionTable::new(rows, selected.map(SessionSummary::name), 0, Theme),
+                        SessionTable::new(tree(), selection.as_ref(), 0, Theme),
                         PreviewPanel::new(selected, None, Theme),
                         StatusBar::new(Theme),
                     )
@@ -222,15 +235,15 @@ mod tests {
         let screen = ViewFixture::render(&ViewFixture::rows(), 60, 12);
 
         assert!(!screen.contains("Preview"));
-        assert!(screen.contains("Branch"));
+        assert!(screen.contains("Diff"));
     }
 
     #[test]
     fn the_minimal_tier_keeps_only_state_and_name() {
-        let screen = ViewFixture::render(&ViewFixture::rows(), 36, 8);
+        let screen = ViewFixture::render(&ViewFixture::rows_with_a_diff(), 36, 8);
 
         assert!(screen.contains("● fix-auth"));
-        assert!(!screen.contains("Branch"));
+        assert!(!screen.contains("?2"));
         assert!(!screen.contains("Name"));
     }
 
