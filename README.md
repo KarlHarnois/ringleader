@@ -27,7 +27,7 @@ Nix older than 2.30 spells `nix profile add` as `nix profile install`.
 
 ## First run
 
-Run `ringleader` in a directory that holds your repos. It opens the TUI and writes a commented config to `~/.config/ringleader/config.toml`, with Claude Code and opencode as agents. Its comments show how to pass variables to an agent, for example to run Claude Code under a second account.
+Run `ringleader` in a directory that holds your repos. It opens the TUI and writes a commented config, with Claude Code and opencode as agents. Its comments show how to pass variables to an agent, for example to run Claude Code under a second account.
 
 Sessions run on Ringleader's own tmux server. It ignores your tmux config, and its sessions do not show in your `tmux ls`.
 
