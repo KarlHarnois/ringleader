@@ -80,17 +80,17 @@ impl SessionMerge {
         Ok(())
     }
 
-    fn hand_off_conflicts(&self, session: &Session, merge: &UpstreamMerge) -> AgentHandoff {
+    fn hand_off_conflicts(&self, session: &Session, merge: &UpstreamMerge) -> ConflictHandoff {
         let MergeOutcome::Conflicted(paths) = merge.outcome() else {
-            return AgentHandoff::Unneeded;
+            return ConflictHandoff::Unneeded;
         };
         let prompt = Self::conflict_prompt(merge.upstream(), paths);
         match self
             .multiplexer
             .type_if_ready(session.tmux_name(), &[prompt])
         {
-            Ok(()) => AgentHandoff::Asked,
-            Err(error) => AgentHandoff::Refused(error),
+            Ok(()) => ConflictHandoff::Asked,
+            Err(error) => ConflictHandoff::Refused(error),
         }
     }
 
@@ -122,18 +122,18 @@ impl SessionMerge {
 pub struct MergeReport {
     name: SessionName,
     merge: UpstreamMerge,
-    handoff: AgentHandoff,
+    handoff: ConflictHandoff,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum AgentHandoff {
+enum ConflictHandoff {
     Unneeded,
     Asked,
     Refused(MultiplexerError),
 }
 
 impl MergeReport {
-    fn new(name: &SessionName, merge: UpstreamMerge, handoff: AgentHandoff) -> Self {
+    fn new(name: &SessionName, merge: UpstreamMerge, handoff: ConflictHandoff) -> Self {
         Self {
             name: name.clone(),
             merge,
@@ -142,7 +142,7 @@ impl MergeReport {
     }
 
     pub fn needs_attention(&self) -> bool {
-        matches!(self.handoff, AgentHandoff::Refused(_))
+        matches!(self.handoff, ConflictHandoff::Refused(_))
     }
 
     pub fn summary(&self) -> String {
@@ -151,7 +151,7 @@ impl MergeReport {
         match (self.merge.outcome(), &self.handoff) {
             (MergeOutcome::UpToDate, _) => format!("{name} already has {upstream}"),
             (MergeOutcome::Merged, _) => format!("merged {upstream} into {name}"),
-            (MergeOutcome::Conflicted(paths), AgentHandoff::Refused(error)) => format!(
+            (MergeOutcome::Conflicted(paths), ConflictHandoff::Refused(error)) => format!(
                 "merging {upstream} into {name} stopped on {}, and its agent was not asked to resolve them: {error}",
                 Self::conflicts(paths)
             ),
