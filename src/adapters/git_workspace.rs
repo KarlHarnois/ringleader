@@ -2,6 +2,7 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use super::bounded_command::BoundedCommand;
+use super::diff_base_resolver::DiffBaseResolver;
 use super::git_branches::GitBranches;
 use super::git_invocation::GitInvocation;
 use super::git_porcelain::GitPorcelain;
@@ -10,7 +11,7 @@ use super::host_path::HostPath;
 use super::start_point_resolver::StartPointResolver;
 use super::submodule_commits::SubmoduleCommits;
 use crate::application::ports::{
-    DirtyState, StartPoint, UnmergedCommits, Workspace, WorkspaceError, WorktreeEntry,
+    DiffBase, DirtyState, StartPoint, UnmergedCommits, Workspace, WorkspaceError, WorktreeEntry,
 };
 use crate::domain::{BaseBranch, DiffStat};
 
@@ -71,12 +72,6 @@ impl GitWorkspace {
             .first_line()
             .parse()
             .unwrap_or(0))
-    }
-
-    fn empty_tree(&self, worktree: &Path) -> Result<String, WorkspaceError> {
-        let invocation =
-            GitInvocation::in_worktree(worktree, "hash-object").args(["-t", "tree", "/dev/null"]);
-        Ok(self.git.run_checked(&invocation)?.first_line().to_string())
     }
 }
 
@@ -224,14 +219,11 @@ impl Workspace for GitWorkspace {
         ))
     }
 
-    fn diff_stat(&self, worktree: &Path, base_commit: &str) -> Result<DiffStat, WorkspaceError> {
-        let base = match base_commit {
-            "" => self.empty_tree(worktree)?,
-            commit => commit.to_string(),
-        };
+    fn diff_stat(&self, worktree: &Path, base: &DiffBase) -> Result<DiffStat, WorkspaceError> {
+        let base_commit = DiffBaseResolver::new(&self.git).resolve(worktree, base)?;
         let numstat = GitInvocation::in_worktree(worktree, "diff-index")
             .diffing()
-            .args(["--numstat", "--no-renames", &base]);
+            .args(["--numstat", "--no-renames", &base_commit]);
         let untracked = GitInvocation::in_worktree(worktree, "ls-files")
             .diffing()
             .args(["--others", "--exclude-standard", "-z"]);
@@ -1101,7 +1093,7 @@ mod tests {
 
         fixture
             .workspace()
-            .diff_stat(&worktree, FakeBase::head(&fixture, &worktree).as_str())
+            .diff_stat(&worktree, &FakeBase::head(&fixture, &worktree))
             .unwrap();
 
         assert_eq!(fs::metadata(&index).unwrap().modified().unwrap(), before);
@@ -1135,7 +1127,10 @@ mod tests {
         let worktree = WorktreeFixture::created(&fixture);
         fixture.commit(&worktree, "first.txt");
 
-        let diff = fixture.workspace().diff_stat(&worktree, "").unwrap();
+        let diff = fixture
+            .workspace()
+            .diff_stat(&worktree, &DiffBase::new("", None))
+            .unwrap();
 
         assert_eq!((diff.files(), diff.insertions()), (1, 1));
     }
@@ -1745,8 +1740,8 @@ mod tests {
     struct FakeBase;
 
     impl FakeBase {
-        fn head(fixture: &GitTestRepo, worktree: &Path) -> String {
-            fixture.git(worktree, &["rev-parse", "HEAD"])
+        fn head(fixture: &GitTestRepo, worktree: &Path) -> DiffBase {
+            DiffBase::new(&fixture.git(worktree, &["rev-parse", "HEAD"]), None)
         }
     }
 }

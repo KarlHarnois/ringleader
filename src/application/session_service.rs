@@ -186,13 +186,16 @@ impl SessionService {
         names
             .iter()
             .filter_map(|name| self.entry(name))
-            .map(|session| (session.name().to_string(), self.monitor.diff_stat(session)))
+            .map(|session| {
+                let diff = self.monitor.diff_stat(session, self.config());
+                (session.name().to_string(), diff)
+            })
             .collect()
     }
 
     pub fn start_diff(&self, name: &str) -> Option<Pending<DiffStat>> {
         let session = self.entry(name)?;
-        Some(self.monitor.start_diff(session))
+        Some(self.monitor.start_diff(session, self.config()))
     }
 
     pub fn start_preview(&self, tmux_name: &str) -> Pending<String> {
