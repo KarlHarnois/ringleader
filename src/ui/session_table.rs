@@ -418,6 +418,34 @@ mod tests {
     }
 
     #[test]
+    fn a_draft_pull_request_shows_in_yellow() {
+        let row = TableFixture::managed("fix-auth", SessionState::Waiting)
+            .with_pull_request(PullRequest::new(5, PullRequestState::Draft));
+
+        let terminal = TableFixture::render(&[row], None, 0, 6);
+        let line = TableFixture::line(&terminal, 2);
+        let byte = line.find("#5").unwrap();
+        let column = u16::try_from(line[..byte].chars().count()).unwrap();
+        let buffer = terminal.backend().buffer();
+
+        assert_eq!(buffer[(column, 2)].fg, Color::Yellow);
+    }
+
+    #[test]
+    fn a_closed_pull_request_shows_in_red() {
+        let row = TableFixture::managed("fix-auth", SessionState::Waiting)
+            .with_pull_request(PullRequest::new(3, PullRequestState::Closed));
+
+        let terminal = TableFixture::render(&[row], None, 0, 6);
+        let line = TableFixture::line(&terminal, 2);
+        let byte = line.find("#3").unwrap();
+        let column = u16::try_from(line[..byte].chars().count()).unwrap();
+        let buffer = terminal.backend().buffer();
+
+        assert_eq!(buffer[(column, 2)].fg, Color::Red);
+    }
+
+    #[test]
     fn only_the_selected_row_is_reversed_across_the_whole_width() {
         let rows = [
             TableFixture::managed("dark-mode", SessionState::Waiting),
