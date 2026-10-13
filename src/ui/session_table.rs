@@ -174,9 +174,6 @@ impl<'a> SessionTable<'a> {
     }
 
     fn pull_request_text(row: &SessionSummary) -> String {
-        if row.session().is_none() {
-            return String::new();
-        }
         row.pull_request()
             .map_or(String::new(), |pull_request| pull_request.to_string())
     }
