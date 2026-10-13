@@ -34,8 +34,9 @@ impl ObservationFeed {
         Some(finished)
     }
 
-    pub fn drop_in_flight(&mut self) {
+    pub fn supersede(&mut self, now: Instant, service: &SessionService) {
         self.pending = None;
+        self.next_observe = now + service.config().intervals().state_poll();
     }
 }
 
@@ -80,7 +81,22 @@ mod tests {
     }
 
     #[test]
-    fn a_dropped_observation_is_never_collected() {
+    fn a_superseded_feed_waits_a_full_interval_before_observing_again() {
+        let service = ServiceFixture::new().service();
+        let start = Instant::now();
+        let mut feed = ObservationFeed::new(start);
+
+        feed.supersede(start, &service);
+        feed.start_if_due(start, &service);
+        let started_at_once = feed.awaits_result();
+        feed.start_if_due(start + Duration::from_secs(1), &service);
+
+        assert!(!started_at_once);
+        assert!(feed.awaits_result());
+    }
+
+    #[test]
+    fn a_superseded_observation_is_never_collected() {
         let held = HeldCalls::all();
         let fixture = FeedFixture::holding(&held);
         let service = fixture.service();
@@ -89,7 +105,7 @@ mod tests {
         feed.start_if_due(start, &service);
         held.wait_for(1);
 
-        feed.drop_in_flight();
+        feed.supersede(start, &service);
         held.release();
         FeedFixture::wait_for_the_listing(&fixture);
 

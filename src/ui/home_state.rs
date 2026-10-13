@@ -101,7 +101,7 @@ impl HomeState {
     }
 
     pub fn observe(&mut self, service: &mut SessionService) -> Result<(), ServiceError> {
-        self.observations.drop_in_flight();
+        self.observations.supersede(Instant::now(), service);
         if self.is_tmux_paused() {
             return Ok(());
         }
