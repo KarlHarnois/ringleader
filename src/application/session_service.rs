@@ -136,6 +136,14 @@ impl SessionService {
             .sync_server_config(self.config().return_key())
     }
 
+    pub fn reload_server_config(&self) -> Result<(), ServiceError> {
+        if self.read_only_reason().is_some() {
+            return Ok(());
+        }
+        self.lifecycle
+            .reload_server_config(self.config().return_key())
+    }
+
     pub fn shown_return_key(&self) -> ReturnKey {
         self.monitor
             .server_return_key()
@@ -389,6 +397,36 @@ mod tests {
                 .multiplexer()
                 .calls()
                 .contains(&"apply_config C-q".to_string())
+        );
+    }
+
+    #[test]
+    fn a_reload_resources_a_server_config_whose_hash_matches() {
+        let fixture = ServiceFixture::new();
+
+        fixture.service().reload_server_config().unwrap();
+
+        assert!(
+            fixture
+                .multiplexer()
+                .calls()
+                .contains(&"apply_config C-q".to_string())
+        );
+    }
+
+    #[test]
+    fn a_reload_without_a_running_server_sends_no_change() {
+        let fixture = ServiceFixture::new()
+            .with_multiplexer(FakeMultiplexer::new().with_versions("3.6a", None));
+
+        fixture.service().reload_server_config().unwrap();
+
+        assert!(
+            fixture
+                .multiplexer()
+                .calls()
+                .iter()
+                .all(|call| !call.starts_with("apply_config"))
         );
     }
 

@@ -184,7 +184,7 @@ impl App {
             .and_then(|()| restored.map(|_| ()).map_err(|error| error.to_string()))
             .and_then(|()| {
                 self.service
-                    .reapply_server_config()
+                    .reload_server_config()
                     .map_err(|error| error.to_string())
             });
         self.status.outcome(outcome, reloaded);
@@ -659,6 +659,21 @@ mod tests {
         assert!(
             AppFixture::flattened_screen(&app, 100, 28)
                 .contains("Reloaded the config and the registry. Also recreated the socket")
+        );
+    }
+
+    #[test]
+    fn r_resources_the_server_config_even_when_its_hash_matches() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press(&mut app, 'r');
+
+        assert!(
+            fixture
+                .multiplexer()
+                .calls()
+                .contains(&"apply_config C-q".to_string())
         );
     }
 

@@ -85,6 +85,13 @@ impl SessionLifecycle {
         }
     }
 
+    pub fn reload_server_config(&self, return_key: &ReturnKey) -> Result<(), ServiceError> {
+        match self.multiplexer.server_config(return_key)? {
+            Some(_) => Ok(self.multiplexer.apply_config(return_key)?),
+            None => Ok(()),
+        }
+    }
+
     pub fn delete_impact(
         &self,
         reconciliation: &Reconciliation,
