@@ -69,7 +69,7 @@ impl SessionCreation {
         config_path: &Path,
     ) -> Result<CreationPlan, ServiceError> {
         let checks = UseChecks::new(self.host.as_ref(), config, config_path);
-        let agent = checks.agent_for_creation(request.agent(), request.prompt())?;
+        let agent = checks.agent_for_creation(request)?;
         let root = self
             .host
             .canonicalize_lenient(config.naming().worktree_root())?;
@@ -175,8 +175,7 @@ mod tests {
 
     use super::*;
     use crate::application::ports::{MultiplexerError, WorkspaceError, WorktreeEntry};
-    use crate::domain::Agent;
-    use crate::domain::AgentPane;
+    use crate::domain::{Agent, AgentMode, AgentPane};
     use crate::test_support::{FakeHostProbe, FakeMultiplexer, FakeWorkspace, ServiceFixture};
 
     struct CreateFixture;
@@ -323,6 +322,25 @@ mod tests {
 
         let launch = fixture.multiplexer().launches().pop().unwrap();
         assert_eq!(launch.argv(), ["claude", "fix the tests; then stop"]);
+    }
+
+    #[test]
+    fn create_in_plan_mode_launches_the_agent_with_its_plan_args() {
+        let fixture = ServiceFixture::new();
+
+        CreateFixture::create(
+            &fixture,
+            CreateFixture::request("fix-auth")
+                .with_mode(AgentMode::Plan)
+                .with_prompt("fix the tests"),
+        )
+        .unwrap();
+
+        let launch = fixture.multiplexer().launches().pop().unwrap();
+        assert_eq!(
+            launch.argv(),
+            ["claude", "--permission-mode", "plan", "fix the tests"]
+        );
     }
 
     #[test]
@@ -704,6 +722,22 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(error.exit_code(), 1);
+        CreateFixture::assert_nothing_touched(&fixture);
+    }
+
+    #[test]
+    fn create_refuses_plan_mode_for_an_agent_without_plan_args() {
+        let agent = Agent::new("claude", "claude");
+        let fixture =
+            ServiceFixture::new().with_config(ServiceFixture::config().with_agents(vec![agent]));
+
+        let error = CreateFixture::create(
+            &fixture,
+            CreateFixture::request("fix-auth").with_mode(AgentMode::Plan),
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("cannot start in plan mode"));
         CreateFixture::assert_nothing_touched(&fixture);
     }
 }

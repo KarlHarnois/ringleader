@@ -1,3 +1,4 @@
+use super::agent_mode::AgentMode;
 use super::session_name::SessionName;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -8,6 +9,7 @@ pub struct Agent {
     env_names: Vec<String>,
     env_assignments: Vec<(String, String)>,
     prompt_args: Vec<String>,
+    plan_args: Vec<String>,
     startup_input: Vec<String>,
     rename_input: Vec<String>,
 }
@@ -67,6 +69,7 @@ impl Agent {
             env_names: Vec::new(),
             env_assignments: Vec::new(),
             prompt_args: Vec::new(),
+            plan_args: Vec::new(),
             startup_input: Vec::new(),
             rename_input: Vec::new(),
         }
@@ -99,6 +102,13 @@ impl Agent {
     pub fn with_prompt_args(self, template: &[String]) -> Self {
         Self {
             prompt_args: template.to_vec(),
+            ..self
+        }
+    }
+
+    pub fn with_plan_args(self, args: &[String]) -> Self {
+        Self {
+            plan_args: args.to_vec(),
             ..self
         }
     }
@@ -143,7 +153,12 @@ impl Agent {
             .any(|element| element.contains(Self::PROMPT_PLACEHOLDER))
     }
 
-    pub fn prompt_refusal(&self, prompt: &str) -> Option<String> {
+    pub fn launch_refusal(&self, mode: AgentMode, prompt: &str) -> Option<String> {
+        self.prompt_refusal(prompt)
+            .or_else(|| self.mode_refusal(mode))
+    }
+
+    fn prompt_refusal(&self, prompt: &str) -> Option<String> {
         if prompt.is_empty() || self.accepts_prompt() {
             return None;
         }
@@ -154,8 +169,20 @@ impl Agent {
         ))
     }
 
-    pub fn launch_argv(&self, session: &SessionName, prompt: &str) -> Vec<String> {
+    fn mode_refusal(&self, mode: AgentMode) -> Option<String> {
+        if self.supports(mode) {
+            return None;
+        }
+        Some(format!(
+            "agent {} cannot start in {} mode, it has no plan_args",
+            self.name,
+            mode.name()
+        ))
+    }
+
+    pub fn launch_argv(&self, session: &SessionName, mode: AgentMode, prompt: &str) -> Vec<String> {
         let mut argv = self.restart_argv(session);
+        argv.extend_from_slice(self.mode_args(mode));
         if !prompt.is_empty() {
             argv.extend(self.expanded_prompt_args(prompt));
         }
@@ -181,6 +208,20 @@ impl Agent {
             .iter()
             .map(|element| element.replace(Self::NAME_PLACEHOLDER, session.as_str()))
             .collect()
+    }
+
+    fn supports(&self, mode: AgentMode) -> bool {
+        match mode {
+            AgentMode::Build => true,
+            AgentMode::Plan => !self.plan_args.is_empty(),
+        }
+    }
+
+    fn mode_args(&self, mode: AgentMode) -> &[String] {
+        match mode {
+            AgentMode::Build => &[],
+            AgentMode::Plan => &self.plan_args,
+        }
     }
 
     fn expanded_prompt_args(&self, prompt: &str) -> impl Iterator<Item = String> {
@@ -212,6 +253,10 @@ mod tests {
                 .with_rename_input(&Self::words(&["/rename {name}"]))
         }
 
+        fn planning() -> Agent {
+            Self::with_template(&["{prompt}"]).with_plan_args(&Self::words(&["--mode", "plan"]))
+        }
+
         fn session() -> SessionName {
             SessionName::new("fix-auth").unwrap()
         }
@@ -225,16 +270,69 @@ mod tests {
     fn the_argv_is_command_then_args_then_prompt_args() {
         let agent = AgentFixture::with_template(&["{prompt}"]);
 
-        let argv = agent.launch_argv(&AgentFixture::session(), "fix the tests");
+        let argv = agent.launch_argv(&AgentFixture::session(), AgentMode::Build, "fix the tests");
 
         assert_eq!(argv, ["example-agent", "--model", "opus", "fix the tests"]);
+    }
+
+    #[test]
+    fn plan_mode_puts_the_plan_args_between_the_args_and_the_prompt_args() {
+        let agent = AgentFixture::planning();
+
+        let argv = agent.launch_argv(&AgentFixture::session(), AgentMode::Plan, "fix the tests");
+
+        assert_eq!(
+            argv,
+            [
+                "example-agent",
+                "--model",
+                "opus",
+                "--mode",
+                "plan",
+                "fix the tests"
+            ]
+        );
+    }
+
+    #[test]
+    fn build_mode_leaves_out_the_plan_args() {
+        let agent = AgentFixture::planning();
+
+        let argv = agent.launch_argv(&AgentFixture::session(), AgentMode::Build, "fix the tests");
+
+        assert_eq!(argv, ["example-agent", "--model", "opus", "fix the tests"]);
+    }
+
+    #[test]
+    fn plan_mode_for_an_agent_without_plan_args_is_refused() {
+        let agent = AgentFixture::with_template(&["{prompt}"]);
+
+        assert_eq!(
+            agent.launch_refusal(AgentMode::Plan, "").as_deref(),
+            Some("agent example-agent cannot start in plan mode, it has no plan_args")
+        );
+    }
+
+    #[test]
+    fn plan_mode_for_an_agent_with_plan_args_is_never_refused() {
+        assert_eq!(
+            AgentFixture::planning().launch_refusal(AgentMode::Plan, ""),
+            None
+        );
+    }
+
+    #[test]
+    fn build_mode_is_never_refused() {
+        let agent = AgentFixture::with_template(&[]);
+
+        assert_eq!(agent.launch_refusal(AgentMode::Build, ""), None);
     }
 
     #[test]
     fn an_empty_prompt_appends_no_prompt_args() {
         let agent = AgentFixture::with_template(&["--prompt", "{prompt}"]);
 
-        let argv = agent.launch_argv(&AgentFixture::session(), "");
+        let argv = agent.launch_argv(&AgentFixture::session(), AgentMode::Build, "");
 
         assert_eq!(argv, ["example-agent", "--model", "opus"]);
     }
@@ -243,7 +341,11 @@ mod tests {
     fn a_multi_word_prompt_stays_one_argv_element() {
         let agent = AgentFixture::with_template(&["{prompt}"]);
 
-        let argv = agent.launch_argv(&AgentFixture::session(), "fix \"the\" tests;");
+        let argv = agent.launch_argv(
+            &AgentFixture::session(),
+            AgentMode::Build,
+            "fix \"the\" tests;",
+        );
 
         assert_eq!(argv.last().unwrap(), "fix \"the\" tests;");
     }
@@ -252,7 +354,11 @@ mod tests {
     fn the_placeholder_expands_inside_a_larger_element() {
         let agent = AgentFixture::with_template(&["--prompt={prompt}"]);
 
-        let argv = agent.launch_argv(&AgentFixture::session(), "- fix the tests");
+        let argv = agent.launch_argv(
+            &AgentFixture::session(),
+            AgentMode::Build,
+            "- fix the tests",
+        );
 
         assert_eq!(argv.last().unwrap(), "--prompt=- fix the tests");
     }
@@ -261,7 +367,7 @@ mod tests {
     fn the_placeholder_expands_twice_in_one_element() {
         let agent = AgentFixture::with_template(&["{prompt}|{prompt}"]);
 
-        let argv = agent.launch_argv(&AgentFixture::session(), "go");
+        let argv = agent.launch_argv(&AgentFixture::session(), AgentMode::Build, "go");
 
         assert_eq!(argv.last().unwrap(), "go|go");
     }
@@ -270,7 +376,7 @@ mod tests {
     fn a_prompt_containing_the_placeholder_is_not_expanded_again() {
         let agent = AgentFixture::with_template(&["--prompt={prompt}"]);
 
-        let argv = agent.launch_argv(&AgentFixture::session(), "say {prompt}");
+        let argv = agent.launch_argv(&AgentFixture::session(), AgentMode::Build, "say {prompt}");
 
         assert_eq!(argv.last().unwrap(), "--prompt=say {prompt}");
     }
@@ -287,7 +393,11 @@ mod tests {
 
     #[test]
     fn the_name_placeholder_expands_in_args_on_launch() {
-        let argv = AgentFixture::named().launch_argv(&AgentFixture::session(), "fix the tests");
+        let argv = AgentFixture::named().launch_argv(
+            &AgentFixture::session(),
+            AgentMode::Build,
+            "fix the tests",
+        );
 
         assert_eq!(
             argv,
@@ -304,7 +414,11 @@ mod tests {
 
     #[test]
     fn a_prompt_containing_the_name_placeholder_is_not_expanded() {
-        let argv = AgentFixture::named().launch_argv(&AgentFixture::session(), "say {name}");
+        let argv = AgentFixture::named().launch_argv(
+            &AgentFixture::session(),
+            AgentMode::Build,
+            "say {name}",
+        );
 
         assert_eq!(argv.last().unwrap(), "say {name}");
     }
@@ -350,7 +464,9 @@ mod tests {
         let agent = AgentFixture::with_template(&["--yes"]);
 
         assert_eq!(
-            agent.prompt_refusal("fix the tests").as_deref(),
+            agent
+                .launch_refusal(AgentMode::Build, "fix the tests")
+                .as_deref(),
             Some("agent example-agent cannot take a prompt, its prompt_args has no {prompt}")
         );
     }
@@ -359,7 +475,7 @@ mod tests {
     fn an_empty_prompt_is_never_refused() {
         let agent = AgentFixture::with_template(&[]);
 
-        assert_eq!(agent.prompt_refusal(""), None);
+        assert_eq!(agent.launch_refusal(AgentMode::Build, ""), None);
     }
 
     #[test]

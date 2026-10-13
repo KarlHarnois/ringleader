@@ -56,6 +56,9 @@ env = ["ANTHROPIC_API_KEY"]
 # written: only a leading ~/ expands. Keep secrets in env.
 # set_env = { CLAUDE_CONFIG_DIR = "~/.claude-work" }
 prompt_args = ["{prompt}"]
+# Added after args when a new session starts in plan mode, which Shift-Tab
+# picks in the new session dialog. An agent without plan_args has no plan mode.
+plan_args = ["--permission-mode", "plan"]
 # Lines typed into the agent once its prompt is ready, each followed by Enter.
 # startup_input is typed at every start, rename_input after a rename.
 startup_input = ["/color"]
@@ -205,7 +208,7 @@ impl ConfigSource for TomlConfigSource {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{Agent, SessionName};
+    use crate::domain::{Agent, AgentMode, SessionName};
 
     const FIXTURE: &str = include_str!("../../tests/fixtures/config.toml");
 
@@ -385,6 +388,35 @@ mod tests {
     }
 
     #[test]
+    fn agent_plan_args_load_for_plan_mode() {
+        let fixture = SourceFixture::with_text(concat!(
+            "[[agents]]\nname = \"a\"\ncommand = \"a\"\n",
+            "plan_args = [\"--mode\", \"plan\"]\n",
+        ));
+
+        let config = fixture.source().load().unwrap();
+
+        let session = SessionName::new("fix-auth").unwrap();
+        assert_eq!(
+            config.agents()[0].launch_argv(&session, AgentMode::Plan, ""),
+            ["a", "--mode", "plan"]
+        );
+    }
+
+    #[test]
+    fn an_agent_without_plan_args_loads_with_no_plan_mode() {
+        let fixture = SourceFixture::with_text("[[agents]]\nname = \"a\"\ncommand = \"a\"\n");
+
+        let config = fixture.source().load().unwrap();
+
+        assert!(
+            config.agents()[0]
+                .launch_refusal(AgentMode::Plan, "")
+                .is_some()
+        );
+    }
+
+    #[test]
     fn an_agent_without_input_loads_with_none() {
         let fixture = SourceFixture::with_text("[[agents]]\nname = \"a\"\ncommand = \"a\"\n");
 
@@ -435,6 +467,23 @@ mod tests {
             TomlConfigSource::TEMPLATE
         );
         assert_eq!(fixture.source().load().unwrap().agents().len(), 2);
+    }
+
+    #[test]
+    fn the_first_run_template_starts_claude_in_its_permission_plan_mode() {
+        let fixture = SourceFixture::new();
+        fixture.source().write_first_run_template().unwrap();
+
+        let config = fixture.source().load().unwrap();
+
+        let session = SessionName::new("fix-auth").unwrap();
+        assert_eq!(
+            config
+                .agent("claude")
+                .unwrap()
+                .launch_argv(&session, AgentMode::Plan, ""),
+            ["claude", "--name", "fix-auth", "--permission-mode", "plan"]
+        );
     }
 
     #[test]

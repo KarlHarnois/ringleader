@@ -111,6 +111,8 @@ struct RawAgent {
     #[serde(default)]
     prompt_args: Vec<String>,
     #[serde(default)]
+    plan_args: Vec<String>,
+    #[serde(default)]
     startup_input: Vec<String>,
     #[serde(default)]
     rename_input: Vec<String>,
@@ -123,6 +125,7 @@ impl RawAgent {
             .with_env_names(&self.env)
             .with_env_assignments(&self.expanded_assignments(home))
             .with_prompt_args(&self.prompt_args)
+            .with_plan_args(&self.plan_args)
             .with_startup_input(&self.startup_input)
             .with_rename_input(&self.rename_input)
     }
