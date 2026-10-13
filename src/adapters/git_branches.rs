@@ -199,35 +199,52 @@ impl<'a> GitBranches<'a> {
         branch: &str,
         remote_ref: &str,
     ) -> Result<bool, WorkspaceError> {
-        Ok(self.branch_contains(repo, branch, remote_ref)?
-            && self.is_ahead_of_the_default_branches(repo, remote_ref)?)
+        match self.shared_tip(repo, &Self::branch_ref(branch), remote_ref)? {
+            Some(shared) => self.is_ahead_of_the_default_branches(repo, &shared),
+            None => Ok(false),
+        }
+    }
+
+    fn shared_tip(
+        &self,
+        repo: &Path,
+        local_ref: &str,
+        remote_ref: &str,
+    ) -> Result<Option<String>, WorkspaceError> {
+        if self.is_ancestor(repo, remote_ref, local_ref)? {
+            return Ok(Some(remote_ref.to_string()));
+        }
+        if self.is_ancestor(repo, local_ref, remote_ref)? {
+            return Ok(Some(local_ref.to_string()));
+        }
+        Ok(None)
     }
 
     fn is_ahead_of_the_default_branches(
         &self,
         repo: &Path,
-        remote_ref: &str,
+        commit: &str,
     ) -> Result<bool, WorkspaceError> {
         let default_branches = format!("--glob={}/*/HEAD", Self::REMOTE_REFS);
         let list = GitInvocation::in_repo(repo, "rev-list").args([
             "-n1",
-            remote_ref,
+            commit,
             "--not",
             &default_branches,
         ]);
         Ok(!self.git.run_checked(&list)?.first_line().is_empty())
     }
 
-    fn branch_contains(
+    fn is_ancestor(
         &self,
         repo: &Path,
-        branch: &str,
-        commit: &str,
+        ancestor: &str,
+        descendant: &str,
     ) -> Result<bool, WorkspaceError> {
         let check = GitInvocation::in_repo(repo, "merge-base").args([
             "--is-ancestor",
-            commit,
-            &Self::branch_ref(branch),
+            ancestor,
+            descendant,
         ]);
         Ok(self.git.lookup(&check)?.is_some())
     }

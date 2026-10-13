@@ -414,6 +414,16 @@ mod tests {
             );
         }
 
+        fn commit_on_top_of(fixture: &GitTestRepo, repo: &Path, branch: &str) {
+            let tip = format!("refs/heads/{branch}");
+            let tree = fixture.git(repo, &["rev-parse", &format!("{tip}^{{tree}}")]);
+            let suggestion = fixture.git(
+                repo,
+                &["commit-tree", "-p", &tip, "-m", "Suggestion", &tree],
+            );
+            fixture.git(repo, &["update-ref", &tip, &suggestion]);
+        }
+
         fn start_from_the_remote_copy(fixture: &GitTestRepo, clone: &Path) {
             let copy = fixture.git(clone, &["rev-parse", &format!("origin/{BRANCH}")]);
             fixture
@@ -494,6 +504,18 @@ mod tests {
         let clone = WorktreeFixture::clone_with_work(&origin);
 
         origin.git(&clone, &["push", "-q", "origin", BRANCH]);
+
+        assert!(WorktreeFixture::is_published(&origin, &clone));
+    }
+
+    #[test]
+    fn a_pushed_branch_whose_remote_copy_moved_ahead_is_published() {
+        let origin = GitTestRepo::new();
+        let clone = WorktreeFixture::clone_with_work(&origin);
+        origin.git(&clone, &["push", "-q", "origin", BRANCH]);
+
+        WorktreeFixture::commit_on_top_of(&origin, origin.path(), BRANCH);
+        origin.git(&clone, &["fetch", "-q", "origin"]);
 
         assert!(WorktreeFixture::is_published(&origin, &clone));
     }
