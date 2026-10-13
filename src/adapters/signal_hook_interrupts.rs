@@ -32,7 +32,7 @@ impl SignalHookInterrupts {
     }
 
     #[cfg(test)]
-    pub fn raise(&self, signal: i32) {
+    fn raise(&self, signal: i32) {
         if let Some((_, flag)) = self.flags.iter().find(|(handled, _)| *handled == signal) {
             flag.store(true, Ordering::SeqCst);
         }
