@@ -179,6 +179,14 @@ mod tests {
             hooks.wait_startup_input(|| started.elapsed() > Self::WAIT_LIMIT);
         }
 
+        fn typing_attempts(multiplexer: &FakeMultiplexer) -> usize {
+            multiplexer
+                .calls()
+                .iter()
+                .filter(|call| call.starts_with("type_when_ready"))
+                .count()
+        }
+
         fn wait_for_note_to_clear(hooks: &AgentHooks) -> bool {
             Deadline::after(Self::WAIT_LIMIT).wait_until(|| hooks.startup_wait_note().is_none())
         }
@@ -211,6 +219,20 @@ mod tests {
             multiplexer.typed_when_ready(HooksFixture::TMUX_NAME),
             ["/color", "/color"]
         );
+    }
+
+    #[test]
+    fn a_start_after_a_failed_job_tries_again() {
+        let not_ready = MultiplexerError::AgentNotReady {
+            tmux_name: HooksFixture::TMUX_NAME.to_string(),
+        };
+        let multiplexer = Arc::new(FakeMultiplexer::new().failing("type_when_ready", not_ready));
+        let hooks = HooksFixture::hooks(&multiplexer);
+
+        HooksFixture::start_and_settle(&hooks);
+        HooksFixture::start_and_settle(&hooks);
+
+        assert_eq!(HooksFixture::typing_attempts(&multiplexer), 2);
     }
 
     #[test]
