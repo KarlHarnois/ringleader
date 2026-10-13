@@ -137,11 +137,9 @@ impl SessionService {
     }
 
     pub fn shown_return_key(&self) -> ReturnKey {
-        let configured = self.config().return_key().clone();
-        if self.read_only_reason().is_none() {
-            return configured;
-        }
-        self.monitor.server_return_key().unwrap_or(configured)
+        self.monitor
+            .server_return_key()
+            .unwrap_or_else(|| self.config().return_key().clone())
     }
 
     pub fn refuse_own_pane(&self) -> Result<(), ServiceError> {
@@ -433,6 +431,22 @@ mod tests {
             .with_multiplexer(FakeMultiplexer::new().with_drifted_config("M-x"));
 
         assert_eq!(fixture.service().shown_return_key().to_string(), "M-x");
+    }
+
+    #[test]
+    fn a_server_still_binding_another_key_shows_the_key_it_binds() {
+        let fixture = ServiceFixture::new()
+            .with_multiplexer(FakeMultiplexer::new().with_drifted_config("M-x"));
+
+        assert_eq!(fixture.service().shown_return_key().to_string(), "M-x");
+    }
+
+    #[test]
+    fn without_a_running_server_the_configured_key_is_shown() {
+        let fixture = ServiceFixture::new()
+            .with_multiplexer(FakeMultiplexer::new().with_versions("3.6a", None));
+
+        assert_eq!(fixture.service().shown_return_key(), ReturnKey::default());
     }
 
     #[test]
