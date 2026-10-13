@@ -82,9 +82,9 @@ impl SessionRenaming {
         session: &Session,
         renamed: &Session,
     ) -> Result<(), ServiceError> {
+        self.refuse_published(session)?;
         self.branches
             .refuse_taken(session.repo_path(), renamed.branch())?;
-        self.refuse_published(session)?;
         self.ownership
             .refuse_unmarked(session, BranchMutation::Rename)
     }
@@ -403,6 +403,28 @@ mod tests {
         assert!(error.to_string().ends_with(
             "otherwise the session keeps its name, since rename moves the branch with it"
         ));
+    }
+
+    #[test]
+    fn a_pushed_branch_onto_a_taken_name_is_refused_as_pushed() {
+        let session = ServiceFixture::session("fix-auth");
+        let repo = Path::new(ServiceFixture::REPO);
+        let fixture = RenameFixture::stopped("fix-auth").with_workspace(
+            ServiceFixture::workspace_for(&[&session])
+                .with_published_branch(repo, session.branch())
+                .with_branch(repo, "fix-login", ServiceFixture::TIP),
+        );
+
+        let error = fixture
+            .service()
+            .rename_session("fix-auth", "fix-login")
+            .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("branch fix-auth has been pushed")
+        );
     }
 
     #[test]
