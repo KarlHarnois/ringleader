@@ -42,6 +42,10 @@ impl CliHarness {
         Self { stdout, ..self }
     }
 
+    pub fn with_stderr(self, stderr: CapturedWriter) -> Self {
+        Self { stderr, ..self }
+    }
+
     pub fn with_signals(self, signals: SignalFlags) -> Self {
         Self { signals, ..self }
     }

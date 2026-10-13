@@ -298,7 +298,7 @@ mod tests {
 
     use super::*;
     use crate::test_support::{
-        CliHarness, Deadline, FakeLock, FakeMultiplexer, Gate, ServiceFixture,
+        CapturedWriter, CliHarness, Deadline, FakeLock, FakeMultiplexer, Gate, ServiceFixture,
     };
 
     struct LockFlowFixture;
@@ -390,16 +390,22 @@ mod tests {
         let fixture = ServiceFixture::new()
             .with_config(ServiceFixture::config_with_input())
             .with_multiplexer(FakeMultiplexer::new().blocking_typing());
-        LockFlowFixture::release_typing_later(&fixture.shared_multiplexer());
-        let harness = CliHarness::new(fixture);
+        let typing = fixture.shared_multiplexer();
+        let stderr = CapturedWriter::default();
+        let harness = CliHarness::new(fixture).with_stderr(stderr.clone());
+        let handle = thread::spawn(move || {
+            harness.run(&["new", "--name", "Fix Auth", "--repo", "example-project"])
+        });
 
-        harness.run(&["new", "--name", "Fix Auth", "--repo", "example-project"]);
-
-        assert!(
-            harness
-                .stderr()
+        let noted = Deadline::after(Duration::from_secs(2)).wait_until(|| {
+            stderr
+                .text()
                 .contains("waiting for the agent to reach its prompt to type its startup input")
-        );
+        });
+        typing.release_typing();
+        handle.join().unwrap();
+
+        assert!(noted);
     }
 
     #[test]
