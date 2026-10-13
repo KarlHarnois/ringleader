@@ -260,7 +260,8 @@ viewer exits.
     │   ├── json_session_registry.rs # JsonSessionRegistry
     │   ├── file_lock.rs          # FileLock
     │   ├── gh_pull_requests.rs   # GhPullRequests, looks up the pull requests of a repo's branches in one gh GraphQL call
-    │   ├── gh_query.rs           # GhQuery, the aliased GraphQL query and jq reshape for a repo's branches
+    │   ├── gh_query.rs           # GhQuery, the aliased GraphQL query for a repo's branches
+    │   ├── gh_listing.rs         # GhListing, the viewer's or repo owner's newest pull request per branch in a gh response
     │   ├── null_pull_requests.rs # NullPullRequests, finds no pull request on a host without gh
     │   ├── bounded_command.rs    # BoundedCommand, runs git, tmux, and gh children in a new session with a deadline
     │   ├── command_output.rs     # CommandOutput, a finished child's status and output

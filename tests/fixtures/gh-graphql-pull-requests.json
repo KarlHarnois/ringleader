@@ -1,0 +1,37 @@
+{
+  "data": {
+    "viewer": {
+      "login": "octocat"
+    },
+    "repository": {
+      "owner": {
+        "login": "example-org"
+      },
+      "branch0": {
+        "nodes": [
+          {
+            "number": 300,
+            "state": "OPEN",
+            "isDraft": false,
+            "createdAt": "2023-11-14T22:28:20Z",
+            "headRepositoryOwner": {
+              "login": "stranger"
+            }
+          },
+          {
+            "number": 42,
+            "state": "OPEN",
+            "isDraft": false,
+            "createdAt": "2023-11-14T22:13:20Z",
+            "headRepositoryOwner": {
+              "login": "octocat"
+            }
+          }
+        ]
+      },
+      "branch1": {
+        "nodes": []
+      }
+    }
+  }
+}

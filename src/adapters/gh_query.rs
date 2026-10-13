@@ -5,10 +5,6 @@ pub struct GhQuery {
 impl GhQuery {
     const CANDIDATES: &'static str = "first: 10, orderBy: {field: CREATED_AT, direction: DESC}";
     const FIELDS: &'static str = "number state isDraft createdAt headRepositoryOwner { login }";
-    const RESHAPE: &'static str = ".data | {viewer: .viewer.login, \
-        owner: .repository.owner.login, \
-        branches: (.repository | del(.owner) | map_values([.nodes[] | {number, state, isDraft, \
-        createdAt: (.createdAt | fromdateiso8601), headOwner: .headRepositoryOwner.login}]))}";
 
     pub fn new(branches: &[String]) -> Self {
         Self {
@@ -17,12 +13,7 @@ impl GhQuery {
     }
 
     pub fn arguments(&self) -> Vec<String> {
-        let mut arguments = vec![
-            "-f".to_string(),
-            format!("query={}", self.text()),
-            "--jq".to_string(),
-            Self::RESHAPE.to_string(),
-        ];
+        let mut arguments = vec!["-f".to_string(), format!("query={}", self.text())];
         for (alias, branch) in self.aliased() {
             arguments.extend(["-f".to_string(), format!("{alias}={branch}")]);
         }

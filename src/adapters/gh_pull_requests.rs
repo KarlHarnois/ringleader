@@ -3,14 +3,13 @@ use std::ffi::{OsStr, OsString};
 use std::path::Path;
 use std::process::Command;
 
-use serde::Deserialize;
-
 use super::bounded_command::{BoundedCommand, Call, CallKind, CommandError};
 use super::command_output::CommandOutput;
+use super::gh_listing::GhListing;
 use super::gh_query::GhQuery;
 use super::git_invocation::GitInvocation;
 use crate::application::ports::{PullRequestError, PullRequests};
-use crate::domain::{PullRequest, PullRequestState};
+use crate::domain::PullRequest;
 
 pub struct GhPullRequests {
     program: OsString,
@@ -97,67 +96,6 @@ impl PullRequests for GhPullRequests {
     }
 }
 
-#[derive(Deserialize)]
-struct GhListing {
-    viewer: String,
-    owner: String,
-    branches: HashMap<String, Vec<GhEntry>>,
-}
-
-impl GhListing {
-    fn parse(text: &str) -> Result<Self, serde_json::Error> {
-        serde_json::from_str(text)
-    }
-
-    fn pull_requests(&self, query: &GhQuery) -> HashMap<String, Option<PullRequest>> {
-        query
-            .aliased()
-            .map(|(alias, branch)| (branch.clone(), self.pull_request(&alias)))
-            .collect()
-    }
-
-    fn pull_request(&self, alias: &str) -> Option<PullRequest> {
-        self.branches
-            .get(alias)?
-            .iter()
-            .find(|entry| self.owns(entry))
-            .and_then(GhEntry::pull_request)
-    }
-
-    fn owns(&self, entry: &GhEntry) -> bool {
-        entry.has_head_owner(&self.viewer) || entry.has_head_owner(&self.owner)
-    }
-}
-
-#[derive(Deserialize)]
-struct GhEntry {
-    number: u64,
-    state: String,
-    #[serde(default, rename = "isDraft")]
-    is_draft: bool,
-    #[serde(rename = "createdAt")]
-    created_at: u64,
-    #[serde(rename = "headOwner")]
-    head_owner: Option<String>,
-}
-
-impl GhEntry {
-    fn pull_request(&self) -> Option<PullRequest> {
-        let state = match self.state.as_str() {
-            "OPEN" if self.is_draft => PullRequestState::Draft,
-            "OPEN" => PullRequestState::Open,
-            "MERGED" => PullRequestState::Merged,
-            "CLOSED" => PullRequestState::Closed,
-            _ => return None,
-        };
-        Some(PullRequest::new(self.number, state, self.created_at))
-    }
-
-    fn has_head_owner(&self, login: &str) -> bool {
-        self.head_owner.as_deref() == Some(login)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -168,19 +106,22 @@ mod tests {
 
     use super::*;
     use crate::adapters::bounded_command::Deadlines;
+    use crate::domain::PullRequestState;
 
     struct ParseFixture;
 
     impl ParseFixture {
         const OPENED_AT: u64 = 1_700_000_000;
+        const RECORDED: &'static str =
+            include_str!("../../tests/fixtures/gh-graphql-pull-requests.json");
         const STAND_IN: &'static str = r#"#!/bin/sh
 echo call >> "$0.calls"
 listing=''
 while [ $# -gt 0 ]; do
   if [ "$1" = "-f" ]; then
     case "$2" in
-      branch*=fix-auth) entry='[{"number":42,"state":"OPEN","isDraft":false,"createdAt":1700000000,"headOwner":"octocat"}]' ;;
-      branch*=*) entry='[]' ;;
+      branch*=fix-auth) entry='{"nodes":[{"number":42,"state":"OPEN","isDraft":false,"createdAt":"2023-11-14T22:13:20Z","headRepositoryOwner":{"login":"octocat"}}]}' ;;
+      branch*=*) entry='{"nodes":[]}' ;;
       *) entry='' ;;
     esac
     if [ -n "$entry" ]; then listing="$listing${listing:+,}\"${2%%=*}\":$entry"; fi
@@ -188,17 +129,8 @@ while [ $# -gt 0 ]; do
   fi
   shift
 done
-printf '{"viewer":"octocat","owner":"example-org","branches":{%s}}' "$listing"
+printf '{"data":{"viewer":{"login":"octocat"},"repository":{"owner":{"login":"example-org"},%s}}}' "$listing"
 "#;
-
-        fn pull_request(entries: &str) -> Option<PullRequest> {
-            let listing = GhListing::parse(&Self::listing(&format!(r#""branch0":[{entries}]"#)));
-            listing.unwrap().pull_request("branch0")
-        }
-
-        fn listing(branches: &str) -> String {
-            format!(r#"{{"viewer":"octocat","owner":"example-org","branches":{{{branches}}}}}"#)
-        }
 
         fn branches() -> Vec<String> {
             vec!["fix-auth".to_string(), "dark-mode".to_string()]
@@ -231,147 +163,16 @@ printf '{"viewer":"octocat","owner":"example-org","branches":{%s}}' "$listing"
     }
 
     #[test]
-    fn an_open_pull_request_is_read_with_its_number() {
-        let found = ParseFixture::pull_request(
-            r#"{"number":142,"state":"OPEN","isDraft":false,"createdAt":1700000000,"headOwner":"octocat"}"#,
-        );
-
-        assert_eq!(
-            found,
-            Some(PullRequest::new(
-                142,
-                PullRequestState::Open,
-                ParseFixture::OPENED_AT
-            ))
-        );
-    }
-
-    #[test]
-    fn a_draft_reads_as_a_draft() {
-        let found = ParseFixture::pull_request(
-            r#"{"number":5,"state":"OPEN","isDraft":true,"createdAt":1700000000,"headOwner":"octocat"}"#,
-        );
-
-        assert_eq!(
-            found,
-            Some(PullRequest::new(
-                5,
-                PullRequestState::Draft,
-                ParseFixture::OPENED_AT
-            ))
-        );
-    }
-
-    #[test]
-    fn a_merged_pull_request_reads_as_merged() {
-        let found = ParseFixture::pull_request(
-            r#"{"number":9,"state":"MERGED","isDraft":false,"createdAt":1700000000,"headOwner":"octocat"}"#,
-        );
-
-        assert_eq!(
-            found,
-            Some(PullRequest::new(
-                9,
-                PullRequestState::Merged,
-                ParseFixture::OPENED_AT
-            ))
-        );
-    }
-
-    #[test]
-    fn a_closed_pull_request_reads_as_closed() {
-        let found = ParseFixture::pull_request(
-            r#"{"number":3,"state":"CLOSED","isDraft":false,"createdAt":1700000000,"headOwner":"octocat"}"#,
-        );
-
-        assert_eq!(
-            found,
-            Some(PullRequest::new(
-                3,
-                PullRequestState::Closed,
-                ParseFixture::OPENED_AT
-            ))
-        );
-    }
-
-    #[test]
-    fn no_pull_request_reads_as_none() {
-        assert_eq!(ParseFixture::pull_request(""), None);
-    }
-
-    #[test]
-    fn a_strangers_newer_fork_pull_request_is_skipped() {
-        let found = ParseFixture::pull_request(
-            r#"{"number":300,"state":"OPEN","isDraft":false,"createdAt":1700000900,"headOwner":"stranger"},
-               {"number":42,"state":"OPEN","isDraft":false,"createdAt":1700000000,"headOwner":"octocat"}"#,
-        );
-
-        assert_eq!(
-            found,
-            Some(PullRequest::new(
-                42,
-                PullRequestState::Open,
-                ParseFixture::OPENED_AT
-            ))
-        );
-    }
-
-    #[test]
-    fn a_pull_request_headed_in_the_repository_owner_counts_as_own() {
-        let found = ParseFixture::pull_request(
-            r#"{"number":8,"state":"OPEN","isDraft":false,"createdAt":1700000000,"headOwner":"example-org"}"#,
-        );
-
-        assert_eq!(
-            found,
-            Some(PullRequest::new(
-                8,
-                PullRequestState::Open,
-                ParseFixture::OPENED_AT
-            ))
-        );
-    }
-
-    #[test]
-    fn only_strangers_pull_requests_read_as_none() {
-        let found = ParseFixture::pull_request(
-            r#"{"number":300,"state":"OPEN","isDraft":false,"createdAt":1700000900,"headOwner":"stranger"}"#,
-        );
-
-        assert_eq!(found, None);
-    }
-
-    #[test]
-    fn an_unknown_state_reads_as_none() {
-        assert_eq!(
-            ParseFixture::pull_request(
-                r#"{"number":1,"state":"QUEUED","isDraft":false,"createdAt":1700000000,"headOwner":"octocat"}"#
-            ),
-            None
-        );
-    }
-
-    #[test]
-    fn unreadable_json_is_a_parse_error() {
-        assert!(GhListing::parse("not json").is_err());
-    }
-
-    #[test]
-    fn a_successful_listing_maps_each_alias_back_to_its_branch() {
+    fn a_recorded_response_maps_each_alias_back_to_its_branch() {
         let query = GhQuery::new(&ParseFixture::branches());
-        let output = ParseFixture::output(
-            0,
-            &ParseFixture::listing(
-                r#""branch0":[{"number":7,"state":"OPEN","isDraft":false,"createdAt":1700000000,"headOwner":"octocat"}],"branch1":[]"#,
-            ),
-        );
+        let output = ParseFixture::output(0, ParseFixture::RECORDED);
 
         let found = GhPullRequests::pull_requests(&output, &query).unwrap();
 
         assert_eq!(
             found.get("fix-auth"),
             Some(&Some(PullRequest::new(
-                7,
+                42,
                 PullRequestState::Open,
                 ParseFixture::OPENED_AT
             )))

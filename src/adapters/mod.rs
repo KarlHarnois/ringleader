@@ -7,6 +7,7 @@ pub mod config_file_writer;
 pub mod directory_repo_scanner;
 pub mod durable_file;
 pub mod file_lock;
+pub mod gh_listing;
 pub mod gh_pull_requests;
 pub mod gh_query;
 pub mod git_branches;
