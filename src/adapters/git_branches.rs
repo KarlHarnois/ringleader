@@ -67,7 +67,11 @@ impl<'a> GitBranches<'a> {
         let rename = GitInvocation::in_worktree(location, "branch")
             .writing()
             .args(["-m", old, new]);
-        self.git.run_checked(&rename).map(drop)
+        self.git.run_checked(&rename)?;
+        if let Err(error) = self.drop_stale_upstream(location, old, new) {
+            log::warn!("renamed branch {old} to {new} but kept its upstream on {old}: {error}");
+        }
+        Ok(())
     }
 
     pub fn mark_managed(&self, repo: &Path, branch: &str) -> Result<(), WorkspaceError> {
@@ -110,6 +114,22 @@ impl<'a> GitBranches<'a> {
             }
         }
         Ok(false)
+    }
+
+    fn drop_stale_upstream(
+        &self,
+        location: &Path,
+        old: &str,
+        new: &str,
+    ) -> Result<(), WorkspaceError> {
+        let merge_key = BranchSection::new(new).upstream_merge_key();
+        if self.read_local_config(location, &merge_key)? != Some(Self::branch_ref(old)) {
+            return Ok(());
+        }
+        let unset = GitInvocation::in_worktree(location, "branch")
+            .writing()
+            .args(["--unset-upstream", new]);
+        self.git.run_checked(&unset).map(drop)
     }
 
     fn list_marked(&self, repo: &Path) -> Result<Vec<String>, WorkspaceError> {
