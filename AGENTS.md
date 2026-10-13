@@ -298,6 +298,7 @@ viewer exits.
     │   ├── mod.rs
     │   ├── app.rs                  # App
     │   ├── action_gate.rs          # ActionGate, which actions the selected row allows
+    │   ├── key_sequence.rs         # KeySequence, the g that waits for a second g to make gg
     │   ├── home_state.rs           # HomeState, the polled rows, selection, and preview
     │   ├── session_list.rs         # SessionList, sorted rows and name-based selection
     │   ├── preview_feed.rs         # PreviewFeed, the preview capture and its timer

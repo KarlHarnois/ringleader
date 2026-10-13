@@ -27,6 +27,7 @@ pub enum Dialog {
 impl Dialog {
     const WIDTH: u16 = 76;
     const HEIGHT: u16 = 22;
+    const HELP_HEIGHT: u16 = 23;
 
     pub fn open(opening: DialogOpening, service: &SessionService) -> Self {
         match opening {
@@ -117,7 +118,7 @@ impl Dialog {
     }
 
     pub fn render(&self, frame: &mut Frame, theme: &Theme) {
-        let (area, labels) = Self::placement(frame.area());
+        let (area, labels) = Self::placement(frame.area(), self.height());
         let block = Block::default().borders(Borders::ALL).title(self.title());
         let inner = block.inner(area);
         frame.render_widget(Clear, area);
@@ -148,13 +149,20 @@ impl Dialog {
         }
     }
 
-    fn placement(frame: Rect) -> (Rect, DialogLabels) {
+    fn height(&self) -> u16 {
+        match self {
+            Self::Help(_) => Self::HELP_HEIGHT,
+            Self::NewSession(_) | Self::Delete(_) | Self::Rename(_) => Self::HEIGHT,
+        }
+    }
+
+    fn placement(frame: Rect, preferred_height: u16) -> (Rect, DialogLabels) {
         if LayoutTier::for_size(frame.width, frame.height) != LayoutTier::Full {
             let margin = Margin::new(1, 1);
             return (frame.inner(margin), DialogLabels::abbreviated());
         }
         let width = Self::WIDTH.min(frame.width);
-        let height = Self::HEIGHT.min(frame.height.saturating_sub(2));
+        let height = preferred_height.min(frame.height.saturating_sub(2));
         let x = frame.x + (frame.width - width) / 2;
         let y = frame.y + (frame.height - height) / 2;
         (Rect::new(x, y, width, height), DialogLabels::full())
@@ -186,9 +194,9 @@ mod tests {
     struct PlacementFixture;
 
     impl PlacementFixture {
-        fn render(width: u16, height: u16) -> Terminal<TestBackend> {
+        fn render(opening: DialogOpening, width: u16, height: u16) -> Terminal<TestBackend> {
             let service = ServiceFixture::new().service();
-            let dialog = Dialog::open(DialogOpening::NewSession, &service);
+            let dialog = Dialog::open(opening, &service);
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
             terminal.draw(|frame| dialog.render(frame, &Theme)).unwrap();
             terminal
@@ -203,7 +211,7 @@ mod tests {
 
     #[test]
     fn the_full_tier_centers_the_dialog() {
-        let terminal = PlacementFixture::render(100, 28);
+        let terminal = PlacementFixture::render(DialogOpening::NewSession, 100, 28);
 
         assert_eq!(PlacementFixture::symbol(&terminal, 12, 3), "┌");
         assert_eq!(PlacementFixture::symbol(&terminal, 13, 3), " ");
@@ -212,8 +220,17 @@ mod tests {
     }
 
     #[test]
+    fn the_help_stands_one_row_taller_than_the_other_dialogs() {
+        let help = PlacementFixture::render(DialogOpening::Help, 100, 28);
+        let new_session = PlacementFixture::render(DialogOpening::NewSession, 100, 28);
+
+        assert_eq!(PlacementFixture::symbol(&help, 12, 2), "┌");
+        assert_eq!(PlacementFixture::symbol(&new_session, 12, 3), "┌");
+    }
+
+    #[test]
     fn a_compact_tier_uses_the_frame_with_a_margin_and_abbreviated_labels() {
-        let terminal = PlacementFixture::render(60, 12);
+        let terminal = PlacementFixture::render(DialogOpening::NewSession, 60, 12);
 
         assert_eq!(PlacementFixture::symbol(&terminal, 1, 1), "┌");
         assert_eq!(PlacementFixture::symbol(&terminal, 2, 2), "N");

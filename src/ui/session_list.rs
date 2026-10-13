@@ -85,16 +85,30 @@ impl SessionList {
 
     pub fn move_selection(&mut self, offset: isize) {
         let current = self.selected_index().unwrap_or(0);
-        let last = self.rows.len().saturating_sub(1);
-        let target = current.saturating_add_signed(offset).min(last);
-        if let Some(row) = self.rows.get(target) {
-            self.selection = Some(row.name().to_string());
-        }
+        self.select_index(current.saturating_add_signed(offset));
+    }
+
+    pub fn select_first(&mut self) {
+        self.select_index(0);
+    }
+
+    pub fn select_last(&mut self) {
+        self.select_index(self.last_index());
     }
 
     fn selected_index(&self) -> Option<usize> {
         let selected = self.selection.as_deref()?;
         self.rows.iter().position(|row| row.name() == selected)
+    }
+
+    fn select_index(&mut self, index: usize) {
+        if let Some(row) = self.rows.get(index.min(self.last_index())) {
+            self.selection = Some(row.name().to_string());
+        }
+    }
+
+    fn last_index(&self) -> usize {
+        self.rows.len().saturating_sub(1)
     }
 }
 
@@ -113,6 +127,16 @@ mod tests {
 
         fn names(list: &SessionList) -> Vec<&str> {
             list.rows().iter().map(SessionSummary::name).collect()
+        }
+
+        fn three_waiting_rows() -> SessionList {
+            let mut list = SessionList::default();
+            list.show(vec![
+                Self::row("dark-mode", SessionState::Waiting),
+                Self::row("fix-auth", SessionState::Waiting),
+                Self::row("spike-tui", SessionState::Waiting),
+            ]);
+            list
         }
     }
 
@@ -216,5 +240,34 @@ mod tests {
 
         assert_eq!(at_top.as_deref(), Some("dark-mode"));
         assert_eq!(list.selected_name(), Some("fix-auth"));
+    }
+
+    #[test]
+    fn select_last_picks_the_bottom_row() {
+        let mut list = ListFixture::three_waiting_rows();
+
+        list.select_last();
+
+        assert_eq!(list.selected_name(), Some("spike-tui"));
+    }
+
+    #[test]
+    fn select_first_picks_the_top_row_after_a_move() {
+        let mut list = ListFixture::three_waiting_rows();
+        list.move_selection(2);
+
+        list.select_first();
+
+        assert_eq!(list.selected_name(), Some("dark-mode"));
+    }
+
+    #[test]
+    fn jumping_on_an_empty_list_selects_nothing() {
+        let mut list = SessionList::default();
+
+        list.select_last();
+        list.select_first();
+
+        assert_eq!(list.selected_name(), None);
     }
 }

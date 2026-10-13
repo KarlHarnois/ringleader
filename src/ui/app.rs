@@ -10,6 +10,7 @@ use super::blocking_operation::{BlockingOperation, OperationOutcome};
 use super::dialogs::{Dialog, DialogSlot, DialogStep};
 use super::home_state::HomeState;
 use super::home_view::HomeView;
+use super::key_sequence::KeySequence;
 use super::status_bar::{StatusBar, StatusMessage};
 use super::status_report::StatusReport;
 use super::theme::Theme;
@@ -18,6 +19,7 @@ use crate::application::{EphemeralShell, ServiceError, SessionService, ShellOutc
 pub struct App {
     service: SessionService,
     home: HomeState,
+    key_sequence: KeySequence,
     dialogs: DialogSlot,
     status: StatusReport,
     tick: u64,
@@ -32,6 +34,7 @@ impl App {
         Self {
             service,
             home: HomeState::new(now, Bell::new(bell_sink)),
+            key_sequence: KeySequence::default(),
             dialogs: DialogSlot::default(),
             status: StatusReport::default(),
             tick: 0,
@@ -138,9 +141,12 @@ impl App {
     fn handle_key(&mut self, key: &KeyEvent) -> AppRequest {
         self.status.show(None);
         let selected = self.home.sessions().selected();
-        match ActionGate::new(selected, self.service.read_only_reason()).action_for(key) {
+        let gate = ActionGate::new(selected, self.service.read_only_reason());
+        match self.key_sequence.action_for(key, &gate) {
             KeyAction::Request(request) => return self.request(request),
             KeyAction::Move(offset) => self.home.move_selection(offset, &self.service),
+            KeyAction::SelectFirst => self.home.select_first(&self.service),
+            KeyAction::SelectLast => self.home.select_last(&self.service),
             KeyAction::Open(opening) => {
                 self.dialogs.open(Dialog::open(opening, &self.service));
             }
@@ -430,6 +436,28 @@ mod tests {
         assert_eq!(after_l.as_deref(), Some("fix-auth"));
         assert_eq!(after_h.as_deref(), Some("dark-mode"));
         assert_eq!(after_right.as_deref(), Some("fix-auth"));
+        assert_eq!(AppFixture::selected(&app).as_deref(), Some("dark-mode"));
+    }
+
+    #[test]
+    fn capital_g_selects_the_last_session() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press(&mut app, 'G');
+
+        assert_eq!(AppFixture::selected(&app).as_deref(), Some("fix-auth"));
+    }
+
+    #[test]
+    fn gg_selects_the_first_session() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, 'G');
+
+        AppFixture::press(&mut app, 'g');
+        AppFixture::press(&mut app, 'g');
+
         assert_eq!(AppFixture::selected(&app).as_deref(), Some("dark-mode"));
     }
 

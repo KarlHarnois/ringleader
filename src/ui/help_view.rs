@@ -24,7 +24,7 @@ pub struct HelpView {
 impl HelpView {
     pub const TITLE: &'static str = concat!(" Help · ringleader ", env!("CARGO_PKG_VERSION"), " ");
     const KEYS_HEADING: &'static str = "Keys";
-    const KEYS: [(&'static str, &'static str); 9] = [
+    const KEYS: [(&'static str, &'static str); 10] = [
         ("n", "create a session"),
         ("d", "delete the selected session"),
         ("R", "rename the selected session and its branch"),
@@ -36,6 +36,7 @@ impl HelpView {
             "reload the config and the registry and refresh diffs and PRs",
         ),
         ("↑ ↓ j k h l", "move the selection"),
+        ("gg G", "select the first or the last session"),
         ("q", "quit, the sessions keep running"),
     ];
     const RETURN_ACTION: &'static str = "detach from a session and return here";
@@ -191,6 +192,7 @@ mod tests {
         const SHORT_WIDTH: usize = 56;
         const SHORT_HEIGHT: usize = 8;
         const PAST_THE_END: usize = 50;
+        const ROWS_ABOVE_THE_SMALLEST_FULL_SIZE: u16 = 1;
 
         fn help() -> HelpView {
             Self::help_for(&ReturnKey::default())
@@ -219,6 +221,11 @@ mod tests {
                 ],
                 &HomePath::new(Some(Path::new(Self::HOME))),
             )
+        }
+
+        fn smallest_size_that_fits() -> (u16, u16) {
+            let (width, height) = LayoutTier::smallest_full_size();
+            (width, height + Self::ROWS_ABOVE_THE_SMALLEST_FULL_SIZE)
         }
 
         fn screen(help: HelpView, width: u16, height: u16) -> String {
@@ -300,7 +307,7 @@ mod tests {
     fn the_help_overlay_is_centered_and_lists_the_keys() {
         let screen = HelpFixture::screen(HelpFixture::help(), 100, 28);
 
-        assert!(screen.lines().nth(3).unwrap().contains("┌ Help "));
+        assert!(screen.lines().nth(2).unwrap().contains("┌ Help "));
         assert!(screen.contains("n            create a session"));
         assert!(screen.contains("q            quit, the sessions keep running"));
     }
@@ -314,8 +321,8 @@ mod tests {
     }
 
     #[test]
-    fn the_whole_help_fits_the_smallest_full_size_dialog() {
-        let (width, height) = LayoutTier::smallest_full_size();
+    fn the_whole_help_fits_one_row_above_the_smallest_full_size() {
+        let (width, height) = HelpFixture::smallest_size_that_fits();
 
         let screen = HelpFixture::screen(HelpFixture::help(), width, height);
 
@@ -325,12 +332,21 @@ mod tests {
 
     #[test]
     fn a_help_that_fits_offers_no_scroll_keys() {
-        let (width, height) = LayoutTier::smallest_full_size();
+        let (width, height) = HelpFixture::smallest_size_that_fits();
 
         let screen = HelpFixture::screen(HelpFixture::help(), width, height);
 
         assert!(screen.contains("? Esc q close"));
         assert!(!screen.contains("scroll"));
+    }
+
+    #[test]
+    fn the_smallest_full_size_offers_the_scroll_keys() {
+        let (width, height) = LayoutTier::smallest_full_size();
+
+        let screen = HelpFixture::screen(HelpFixture::help(), width, height);
+
+        assert!(screen.contains("↑ ↓ scroll · ? Esc q close"));
     }
 
     #[test]
