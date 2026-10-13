@@ -226,32 +226,41 @@ mod tests {
 
     impl AppFixture {
         fn two_waiting_sessions() -> ServiceFixture {
-            Self::waiting_sessions(&["dark-mode", "fix-auth"])
+            Self::waiting_sessions(&[
+                ("dark-mode", "dark mode output"),
+                ("fix-auth", "fix auth output"),
+            ])
         }
 
         fn three_waiting_sessions() -> ServiceFixture {
-            Self::waiting_sessions(&["dark-mode", "fix-auth", "spike-tui"])
+            Self::waiting_sessions(&[
+                ("dark-mode", "dark mode output"),
+                ("fix-auth", "fix auth output"),
+                ("spike-tui", "spike tui output"),
+            ])
         }
 
-        fn waiting_sessions(names: &[&str]) -> ServiceFixture {
-            let sessions: Vec<Session> =
-                names.iter().copied().map(ServiceFixture::session).collect();
+        fn waiting_sessions(previews: &[(&str, &str)]) -> ServiceFixture {
+            let sessions: Vec<Session> = previews
+                .iter()
+                .map(|(name, _)| ServiceFixture::session(name))
+                .collect();
             let multiplexer = sessions
                 .iter()
+                .zip(previews)
                 .fold(FakeMultiplexer::new(), Self::with_waiting);
             ServiceFixture::new()
                 .with_sessions(&sessions)
                 .with_multiplexer(multiplexer)
         }
 
-        fn with_waiting(multiplexer: FakeMultiplexer, session: &Session) -> FakeMultiplexer {
+        fn with_waiting(
+            multiplexer: FakeMultiplexer,
+            (session, (_, preview)): (&Session, &(&str, &str)),
+        ) -> FakeMultiplexer {
             multiplexer
                 .with_live(ServiceFixture::waiting(session))
-                .with_capture(session.tmux_name(), &Self::preview_of(session))
-        }
-
-        fn preview_of(session: &Session) -> String {
-            format!("{} output", session.name().as_str().replace('-', " "))
+                .with_capture(session.tmux_name(), preview)
         }
 
         fn blocked_startup_input() -> ServiceFixture {
