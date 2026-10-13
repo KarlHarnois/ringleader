@@ -1,10 +1,11 @@
 use std::fmt;
+use std::path::PathBuf;
 
 use crate::domain::{RepoName, SessionSummary};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum RepoGroup {
-    Named(RepoName),
+    Named(RepoName, PathBuf),
     Other,
 }
 
@@ -13,7 +14,10 @@ impl RepoGroup {
 
     pub fn of(row: &SessionSummary) -> Self {
         row.metadata().map_or(Self::Other, |metadata| {
-            Self::Named(metadata.repo_name().clone())
+            Self::Named(
+                metadata.repo_name().clone(),
+                metadata.repo_path().to_path_buf(),
+            )
         })
     }
 }
@@ -21,7 +25,7 @@ impl RepoGroup {
 impl fmt::Display for RepoGroup {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Named(name) => write!(formatter, "{name}"),
+            Self::Named(name, _) => write!(formatter, "{name}"),
             Self::Other => formatter.write_str(Self::OTHER),
         }
     }
@@ -37,7 +41,8 @@ mod tests {
 
     impl GroupFixture {
         fn named(name: &str) -> RepoGroup {
-            RepoGroup::Named(RepoName::parse(name).unwrap())
+            let path = PathBuf::from(format!("/repos/{name}"));
+            RepoGroup::Named(RepoName::parse(name).unwrap(), path)
         }
     }
 
@@ -66,6 +71,15 @@ mod tests {
         let row = ServiceFixture::summary_in("fix-auth", "/repos/alpha", SessionState::Waiting);
 
         assert_eq!(RepoGroup::of(&row).to_string(), "alpha");
+    }
+
+    #[test]
+    fn repos_sharing_a_name_are_separate_groups_with_the_same_label() {
+        let work = ServiceFixture::summary_in("a-one", "/work/api", SessionState::Waiting);
+        let fork = ServiceFixture::summary_in("b-two", "/forks/api", SessionState::Waiting);
+
+        assert_ne!(RepoGroup::of(&work), RepoGroup::of(&fork));
+        assert_eq!(RepoGroup::of(&fork).to_string(), "api");
     }
 
     #[test]
