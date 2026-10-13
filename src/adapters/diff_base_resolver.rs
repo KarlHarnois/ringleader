@@ -91,16 +91,20 @@ impl<'a> DiffBaseResolver<'a> {
         checked_out: &str,
     ) -> Result<Vec<String>, WorkspaceError> {
         let listed = self.listed_rung_refs(worktree)?;
-        let origin_default = listed
-            .iter()
-            .find(|(name, _)| name == BaseBranchLadder::ORIGIN_HEAD)
-            .map(|(_, target)| target.clone());
+        let origin_default = Self::symbolic_origin_head_target(&listed);
         let existing_branches: Vec<&str> = listed
             .iter()
             .map(|(name, _)| name.as_str())
             .filter(|name| *name != checked_out)
             .collect();
         Ok(BaseBranchLadder::new(origin_default).first_rung(&existing_branches))
+    }
+
+    fn symbolic_origin_head_target(listed: &[(String, String)]) -> Option<String> {
+        listed
+            .iter()
+            .find(|(name, target)| name == BaseBranchLadder::ORIGIN_HEAD && !target.is_empty())
+            .map(|(_, target)| target.clone())
     }
 
     fn listed_rung_refs(&self, worktree: &Path) -> Result<Vec<(String, String)>, WorkspaceError> {
@@ -255,6 +259,20 @@ mod tests {
 
         fn edit_in_session(&self, file: &str) {
             fs::write(self.worktree.join(file), "edited\n").unwrap();
+        }
+
+        fn make_origin_head_a_plain_ref(&self) {
+            let repo = self.repo.path();
+            let tip = self.repo.git(repo, &["rev-parse", "HEAD"]);
+            self.repo.git(
+                repo,
+                &[
+                    "update-ref",
+                    "--no-deref",
+                    BaseBranchLadder::ORIGIN_HEAD,
+                    &tip,
+                ],
+            );
         }
 
         fn commit_on(&self, branch: &str, file: &str) {
@@ -417,6 +435,17 @@ mod tests {
         fixture.merge_into_session(GitTestRepo::BRANCH);
 
         assert_eq!(fixture.diff().files(), 2);
+    }
+
+    #[test]
+    fn a_plain_origin_head_leaves_main_as_the_base_branch() {
+        let fixture = DiffBaseFixture::started();
+        fixture.make_origin_head_a_plain_ref();
+        fixture.commit_in_session("session.md");
+        fixture.advance_the_checked_out_branch("news.md");
+        fixture.merge_into_session(GitTestRepo::BRANCH);
+
+        assert_eq!(fixture.diff().files(), 1);
     }
 
     #[test]
