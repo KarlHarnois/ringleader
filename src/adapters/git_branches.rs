@@ -199,34 +199,37 @@ impl<'a> GitBranches<'a> {
         branch: &str,
         remote_ref: &str,
     ) -> Result<bool, WorkspaceError> {
-        match self.merge_base(repo, &Self::branch_ref(branch), remote_ref)? {
-            Some(shared) => self.is_ahead_of_the_default_branches(repo, &shared),
-            None => Ok(false),
+        let shared = self.merge_bases(repo, &Self::branch_ref(branch), remote_ref)?;
+        if shared.is_empty() {
+            return Ok(false);
         }
+        self.is_ahead_of_the_default_branches(repo, &shared)
     }
 
-    fn merge_base(
+    fn merge_bases(
         &self,
         repo: &Path,
         local_ref: &str,
         remote_ref: &str,
-    ) -> Result<Option<String>, WorkspaceError> {
-        let find = GitInvocation::in_repo(repo, "merge-base").args([local_ref, remote_ref]);
-        self.git.resolved_from(&find)
+    ) -> Result<Vec<String>, WorkspaceError> {
+        let find =
+            GitInvocation::in_repo(repo, "merge-base").args(["--all", local_ref, remote_ref]);
+        let found = self.git.lookup(&find)?;
+        Ok(found
+            .map(|bases| bases.lines().into_iter().map(str::to_string).collect())
+            .unwrap_or_default())
     }
 
     fn is_ahead_of_the_default_branches(
         &self,
         repo: &Path,
-        commit: &str,
+        commits: &[String],
     ) -> Result<bool, WorkspaceError> {
         let default_branches = format!("--glob={}/*/HEAD", Self::REMOTE_REFS);
-        let list = GitInvocation::in_repo(repo, "rev-list").args([
-            "-n1",
-            commit,
-            "--not",
-            &default_branches,
-        ]);
+        let list = GitInvocation::in_repo(repo, "rev-list")
+            .arg("-n1")
+            .args(commits)
+            .args(["--not", &default_branches]);
         Ok(!self.git.run_checked(&list)?.first_line().is_empty())
     }
 
