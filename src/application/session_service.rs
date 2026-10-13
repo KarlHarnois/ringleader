@@ -125,9 +125,6 @@ impl SessionService {
     }
 
     pub fn restore_server_socket(&self) -> Result<Option<String>, ServiceError> {
-        if self.read_only_reason().is_some() {
-            return Ok(None);
-        }
         self.lifecycle.restore_server_socket()
     }
 
@@ -315,6 +312,20 @@ mod tests {
 
         assert!(first.unwrap().contains("recreated the socket"));
         assert_eq!(second, None);
+    }
+
+    #[test]
+    fn a_read_only_service_still_recreates_a_lost_socket() {
+        let fixture = ServiceFixture::new()
+            .with_broken_config(ConfigError::Parse {
+                path: PathBuf::from("/config/ringleader/config.toml"),
+                detail: "expected `=`".to_string(),
+            })
+            .with_multiplexer(FakeMultiplexer::new().with_lost_socket());
+
+        let note = fixture.service().restore_server_socket().unwrap();
+
+        assert!(note.unwrap().contains("recreated the socket"));
     }
 
     #[test]
