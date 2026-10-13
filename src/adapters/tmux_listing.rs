@@ -1,12 +1,10 @@
-use std::path::{Path, PathBuf};
+use std::ffi::OsStr;
+use std::path::Path;
 
-use serde::{Deserialize, Serialize};
-
+use super::metadata_json::MetadataJson;
 use super::tmux_output::TmuxOutput;
-use crate::domain::{
-    AgentPane, RepoName, SessionMetadata, SessionObservation, SessionRepo, SessionWorktree,
-    TmuxAddress,
-};
+use crate::application::ports::ServerState;
+use crate::domain::{AgentPane, SessionObservation, TmuxAddress};
 
 pub struct TmuxListing<'a> {
     output: &'a TmuxOutput,
@@ -15,12 +13,15 @@ pub struct TmuxListing<'a> {
 impl<'a> TmuxListing<'a> {
     pub const PANE_FORMAT: &'static str = "ringleader-pane\t#{session_name}\t#{socket_path}\t#{session_created}\t#{window_active_clients}\t#{pane_id}\t#{@ringleader_agent}\t#{pane_dead}\t#{window_activity}\t#{@ringleader_meta}";
     pub const WINDOW_FORMAT: &'static str = "ringleader-window #{window_id} #{@ringleader_shell}";
-    pub const CLIENT_FORMAT: &'static str =
-        "ringleader-client\t#{client_control_mode}\t#{client_tty}";
     pub const AGENT_FORMAT: &'static str = "ringleader-agent #{pane_id} #{@ringleader_agent}";
     pub const PANE_PID_FORMAT: &'static str = "ringleader-pane-pid #{pane_dead} #{pane_pid}";
-    pub const CLAIM_FORMAT: &'static str = "ringleader-claim\t#{session_name}\t#{@ringleader_meta}";
+    pub const TTY_FORMAT: &'static str = "ringleader-tty #{pane_dead} #{pane_tty}";
+    pub const SERVER_FORMAT: &'static str = "ringleader-server #{version}";
+    pub const SESSION_FORMAT: &'static str = "ringleader-session";
     const TAGGED: &'static str = "1";
+    const DEAD: &'static str = "1";
+    const KEY_BINDING: &'static str = "bind-key";
+    const DETACH: &'static str = "detach-client";
 
     pub fn new(output: &'a TmuxOutput) -> Self {
         Self { output }
@@ -51,13 +52,25 @@ impl<'a> TmuxListing<'a> {
         })
     }
 
-    pub fn bell_ttys(&self) -> Vec<PathBuf> {
+    pub fn server_state(&self) -> Option<ServerState> {
+        let version = self.output.first("ringleader-server")?;
+        let sessions = self.output.labeled(Self::SESSION_FORMAT).count();
+        Some(ServerState::new(version, sessions))
+    }
+
+    pub fn shows_terminal(&self, terminal: &OsStr) -> bool {
         self.output
-            .labeled("ringleader-client")
-            .filter_map(|row| row.split_once('\t'))
-            .filter(|(control_mode, tty)| *control_mode != Self::TAGGED && !tty.is_empty())
-            .map(|(_, tty)| PathBuf::from(tty))
-            .collect()
+            .labeled("ringleader-tty")
+            .filter_map(|row| row.split_once(' '))
+            .filter(|(dead, _)| *dead != Self::DEAD)
+            .any(|(_, tty)| Path::new(tty) == Path::new(terminal))
+    }
+
+    pub fn binds_detach(&self) -> bool {
+        self.output.stdout().lines().any(|line| {
+            let words: Vec<&str> = line.split_whitespace().collect();
+            words.first() == Some(&Self::KEY_BINDING) && words.last() == Some(&Self::DETACH)
+        })
     }
 
     pub fn agent_pane(&self) -> Option<String> {
@@ -74,15 +87,6 @@ impl<'a> TmuxListing<'a> {
             .filter(|(dead, _)| *dead == "0")
             .filter_map(|(_, pid)| pid.parse().ok())
             .collect()
-    }
-
-    pub fn holds_claim(&self, tmux_name: &str, worktree: &Path) -> bool {
-        self.output.labeled("ringleader-claim").any(|row| {
-            let (session, metadata) = row.split_once('\t').unwrap_or((row, ""));
-            let claims_worktree = MetadataJson::decode(metadata)
-                .is_some_and(|metadata| metadata.worktree_path() == worktree);
-            session == tmux_name || claims_worktree
-        })
     }
 
     fn observe_session(rows: &[PaneRow], session: &str) -> SessionObservation {
@@ -161,45 +165,12 @@ impl<'a> PaneRow<'a> {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct MetadataJson {
-    repo_name: String,
-    repo_path: PathBuf,
-    branch: String,
-    base_commit: String,
-    worktree_path: PathBuf,
-    agent: String,
-}
-
-impl MetadataJson {
-    pub fn encode(metadata: &SessionMetadata) -> String {
-        let record = Self {
-            repo_name: metadata.repo_name().to_string(),
-            repo_path: metadata.repo_path().to_path_buf(),
-            branch: metadata.branch().to_string(),
-            base_commit: metadata.base_commit().to_string(),
-            worktree_path: metadata.worktree_path().to_path_buf(),
-            agent: metadata.agent().to_string(),
-        };
-        serde_json::to_string(&record).unwrap_or_default()
-    }
-
-    pub fn decode(text: &str) -> Option<SessionMetadata> {
-        let record: Self = serde_json::from_str(text).ok()?;
-        let repo = SessionRepo::new(RepoName::parse(&record.repo_name).ok()?, &record.repo_path);
-        let worktree =
-            SessionWorktree::new(&record.worktree_path, &record.branch, &record.base_commit);
-        Some(SessionMetadata::new(repo, worktree, &record.agent))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const PANES: &str = include_str!("../../tests/fixtures/tmux-list-panes.txt");
     const WINDOWS: &str = include_str!("../../tests/fixtures/tmux-list-windows-shell.txt");
-    const CLIENTS: &str = include_str!("../../tests/fixtures/tmux-list-clients.txt");
 
     struct ListingFixture;
 
@@ -301,25 +272,5 @@ mod tests {
             TmuxListing::new(&output).shell_window(),
             Some("@7".to_string())
         );
-    }
-
-    #[test]
-    fn the_bell_skips_both_control_mode_clients_and_hook_lines() {
-        let output = TmuxOutput::new(true, CLIENTS, "");
-
-        assert_eq!(
-            TmuxListing::new(&output).bell_ttys(),
-            [PathBuf::from("/dev/pts/3"), PathBuf::from("/dev/pts/9")]
-        );
-    }
-
-    #[test]
-    fn metadata_survives_an_encode_decode_round_trip() {
-        let observation = ListingFixture::observation("ringleader-fix-auth");
-        let metadata = observation.metadata().unwrap();
-
-        let decoded = MetadataJson::decode(&MetadataJson::encode(metadata)).unwrap();
-
-        assert_eq!(&decoded, metadata);
     }
 }

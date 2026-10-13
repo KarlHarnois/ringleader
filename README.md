@@ -36,9 +36,13 @@ While the repository is private, `git+https` authenticates through your git cred
 
 Run `ringleader` with no arguments in a directory that holds your repos. It opens the TUI and writes a commented config to `~/.config/ringleader/config.toml`, with Claude Code and opencode as agents. Press `n` to create a session, pick a repo and an agent, and optionally give an initial prompt.
 
-Ctrl-Q returns from a session to the TUI. Outside tmux it detaches the client, and inside tmux it switches back to the TUI's pane. It works only in sessions whose name starts with `tmux_prefix`. A terminal emulator started in the foreground of a tmux pane counts as inside tmux, so run `env -u TMUX -u TMUX_PANE ringleader` to force outside mode. Open extra shells with `t` instead of splitting the agent window, because output in a split pane counts as agent activity.
+Sessions run on Ringleader's own tmux server, so they do not show in your own `tmux ls`. The return key, Ctrl-Q unless `return_key` in the config names another, detaches from any session back to the TUI. A changed `return_key` takes effect after `r` in the TUI, or at the next `ringleader new` or `restart`. Sessions have no prefix key, the mouse is on, and each keeps 25,000 lines of scrollback. Inside your own tmux a session opens nested, so your tmux must not use the return key as its prefix or bind it in its root table. Open extra shells with `t` instead of splitting the agent window, because output in a split pane counts as agent activity.
 
-Set `bell_on_waiting = true` to ring the terminal bell when an agent finishes working and waits for input. It stays quiet for an agent whose window a client is showing, and for an agent that exits. An attach from outside tmux suspends the TUI, so the bell rings only when Ringleader runs inside tmux or while the TUI shows.
+To inspect the sessions with tmux itself, run `tmux -S "$XDG_RUNTIME_DIR/ringleader/tmux/tmux.sock" ls`. Without `XDG_RUNTIME_DIR`, the socket is under `~/.local/state/ringleader/tmux/`. The help screen (`?`) shows the path. Logging out of your last session can remove that socket while the server keeps running. Ringleader recreates it when it starts, when you press `r` in the TUI, and before it starts a session.
+
+Ringleader owns the configuration of its tmux server, as it owns the rest of its interface. Your own `~/.tmux.conf` never loads there, and Ringleader reads no other tmux file.
+
+Set `bell_on_waiting = true` to ring the terminal bell when an agent finishes working and waits for input. It stays quiet for an agent whose window a client is showing, and for an agent that exits. The TUI is suspended while you are attached to a session, so the bell rings only while the TUI shows.
 
 ## Agent environment
 

@@ -1,5 +1,4 @@
 use std::io::{self, Write};
-use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
 use crossterm::event::{Event, KeyEvent, KeyEventKind};
@@ -14,15 +13,13 @@ use super::home_view::HomeView;
 use super::status_bar::{StatusBar, StatusMessage};
 use super::status_report::StatusReport;
 use super::theme::Theme;
-use crate::application::ports::{BindingError, ReturnBinding};
-use crate::application::{EphemeralShell, ReturnMode, ServiceError, SessionService, ShellOutcome};
+use crate::application::{EphemeralShell, ServiceError, SessionService, ShellOutcome};
 
 pub struct App {
     service: SessionService,
     home: HomeState,
     dialogs: DialogSlot,
     status: StatusReport,
-    binding: Option<BindingGuard>,
     tick: u64,
     theme: Theme,
 }
@@ -37,7 +34,6 @@ impl App {
             home: HomeState::new(now, Bell::new(bell_sink)),
             dialogs: DialogSlot::default(),
             status: StatusReport::default(),
-            binding: None,
             tick: 0,
             theme: Theme,
         }
@@ -46,15 +42,6 @@ impl App {
     pub fn with_message(mut self, message: Option<String>) -> Self {
         self.status.show(message.map(StatusMessage::Error));
         self
-    }
-
-    pub fn with_binding_guard(mut self, binding: BindingGuard) -> Self {
-        self.binding = Some(binding);
-        self
-    }
-
-    pub fn is_inside_tmux(&self) -> bool {
-        self.service.is_inside_tmux()
     }
 
     pub fn handle_event(&mut self, event: &Event) -> AppRequest {
@@ -84,22 +71,19 @@ impl App {
     }
 
     pub fn attach(&mut self, name: &str) {
-        let outcome = self.service.attach(name, ReturnMode::InstallReturnBinding);
+        let outcome = self.service.attach(name);
         self.observe();
-        match outcome {
-            Ok(attached) => self.status.attached(&attached),
-            Err(error) => self.report_failure(error),
+        if let Err(error) = outcome {
+            self.report_failure(error);
         }
     }
 
     pub fn open_shell(&mut self, name: &str) -> Option<EphemeralShell> {
-        let outcome = self
-            .service
-            .open_shell(name, ReturnMode::InstallReturnBinding);
+        let outcome = self.service.open_shell(name);
         self.observe();
         match outcome {
             Ok(ShellOutcome::Ephemeral(shell)) => return Some(shell),
-            Ok(ShellOutcome::Attached(attached)) => self.status.attached(&attached),
+            Ok(ShellOutcome::Attached) => {}
             Err(error) => self.report_failure(error),
         }
         None
@@ -138,10 +122,9 @@ impl App {
     }
 
     pub fn render(&self, frame: &mut Frame) {
-        let prefix = self.service.config().naming().tmux_prefix();
         let status = StatusBar::new(self.theme)
             .with_message(self.status.message())
-            .with_note(self.home.note(prefix));
+            .with_note(self.home.note());
         let table = self.home.table(self.tick, self.theme);
         HomeView::new(table, self.home.preview_panel(self.theme), status).render(frame);
         self.dialogs.render(frame, &self.theme);
@@ -172,10 +155,22 @@ impl App {
 
     fn reload(&mut self) {
         let outcome = self.service.reload();
+        let restored = self.service.restore_server_socket();
         self.home.refresh_now();
         self.observe();
-        let outcome = outcome.map_err(|error| format!("{}: {error}", Self::RELOAD_FAILED));
-        self.status.outcome(outcome, Self::RELOADED.to_string());
+        let reloaded = match &restored {
+            Ok(Some(note)) => format!("{} Also {note}.", Self::RELOADED),
+            _ => Self::RELOADED.to_string(),
+        };
+        let outcome = outcome
+            .map_err(|error| format!("{}: {error}", Self::RELOAD_FAILED))
+            .and_then(|()| restored.map(|_| ()).map_err(|error| error.to_string()))
+            .and_then(|()| {
+                self.service
+                    .reapply_server_config()
+                    .map_err(|error| error.to_string())
+            });
+        self.status.outcome(outcome, reloaded);
     }
 
     fn report_failure(&mut self, error: ServiceError) {
@@ -202,80 +197,6 @@ pub enum AppRequest {
     Block(BlockingOperation),
 }
 
-pub struct BindingGuard {
-    binding: Arc<dyn ReturnBinding>,
-    notice: NoticeHandle,
-}
-
-impl BindingGuard {
-    pub fn new(binding: Arc<dyn ReturnBinding>, notice: NoticeHandle) -> Self {
-        Self { binding, notice }
-    }
-
-    pub fn repair_stale(&self) -> Option<String> {
-        self.report(self.binding.repair_stale())
-    }
-
-    fn report(&self, outcome: Result<(), BindingError>) -> Option<String> {
-        let error = outcome.err()?;
-        log::warn!("{error}");
-        if let BindingError::NotRestored { saved_line } = &error {
-            self.notice.add(saved_line);
-        }
-        Some(error.to_string())
-    }
-}
-
-impl Drop for BindingGuard {
-    fn drop(&mut self) {
-        self.report(self.binding.restore());
-    }
-}
-
-pub struct ExitNotice {
-    lines: Arc<Mutex<Vec<String>>>,
-    sink: Box<dyn Write>,
-}
-
-impl ExitNotice {
-    pub fn new(sink: Box<dyn Write>) -> Self {
-        Self {
-            lines: Arc::default(),
-            sink,
-        }
-    }
-
-    pub fn handle(&self) -> NoticeHandle {
-        NoticeHandle {
-            lines: Arc::clone(&self.lines),
-        }
-    }
-}
-
-impl Drop for ExitNotice {
-    fn drop(&mut self) {
-        let lines = self.lines.lock().unwrap_or_else(PoisonError::into_inner);
-        for line in lines.iter() {
-            let _ = writeln!(
-                self.sink,
-                "ringleader: could not restore your Ctrl-Q binding, rebind it by hand: {line}"
-            );
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct NoticeHandle {
-    lines: Arc<Mutex<Vec<String>>>,
-}
-
-impl NoticeHandle {
-    fn add(&self, line: &str) {
-        let mut lines = self.lines.lock().unwrap_or_else(PoisonError::into_inner);
-        lines.push(line.to_string());
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};
@@ -288,9 +209,7 @@ mod tests {
     use super::*;
     use crate::application::ports::{ConfigError, MultiplexerError, UnmergedCommits};
     use crate::domain::{Config, ConfigDraft, DiffStat};
-    use crate::test_support::{
-        CapturedWriter, FakeMultiplexer, FakeReturnBinding, ServiceFixture, UiHarness,
-    };
+    use crate::test_support::{FakeMultiplexer, ServiceFixture, UiHarness};
 
     struct AppFixture;
 
@@ -331,6 +250,11 @@ mod tests {
         fn status_line(app: &App, width: u16) -> String {
             let screen = Self::screen(app, width, 28);
             screen.lines().last().unwrap().trim_end().to_string()
+        }
+
+        fn flattened_screen(app: &App, width: u16, height: u16) -> String {
+            let screen = Self::screen(app, width, height);
+            screen.split_whitespace().collect::<Vec<_>>().join(" ")
         }
 
         fn captures(fixture: &ServiceFixture) -> Vec<String> {
@@ -400,10 +324,8 @@ mod tests {
             }
         }
 
-        fn config_with_prefix(tmux_prefix: &str) -> Config {
-            let draft = ConfigDraft::new(Path::new(ServiceFixture::WORKTREE_ROOT))
-                .tmux_prefix(tmux_prefix)
-                .agent(ServiceFixture::agent());
+        fn config_with_worktree_root(worktree_root: &str) -> Config {
+            let draft = ConfigDraft::new(Path::new(worktree_root)).agent(ServiceFixture::agent());
             Config::new(&draft).unwrap()
         }
     }
@@ -498,22 +420,6 @@ mod tests {
     }
 
     #[test]
-    fn the_status_bar_explains_ctrl_q_for_a_session_under_an_earlier_prefix() {
-        let session = ServiceFixture::session("fix-auth");
-        let fixture = ServiceFixture::new()
-            .with_config(AppFixture::config_with_prefix("agents-"))
-            .with_sessions(std::slice::from_ref(&session))
-            .with_multiplexer(FakeMultiplexer::new().with_live(ServiceFixture::waiting(&session)));
-
-        let app = AppFixture::started(&fixture, 100, 28);
-
-        assert_eq!(
-            AppFixture::status_line(&app, 100),
-            " Ctrl-Q does not return from ringleader-fix-auth, whose name lacks the current tmux_prefix agents-."
-        );
-    }
-
-    #[test]
     fn the_status_bar_gives_the_kill_session_advice_for_a_shadowed_pair() {
         let session = ServiceFixture::session("fix-auth");
         let fixture = ServiceFixture::new()
@@ -526,7 +432,8 @@ mod tests {
         let app = AppFixture::started(&fixture, 100, 28);
 
         assert!(
-            AppFixture::status_line(&app, 250).contains("Inspect it, then end it with tmux -S")
+            AppFixture::flattened_screen(&app, 100, 28)
+                .contains("Inspect it, then end it with tmux -S")
         );
     }
 
@@ -542,6 +449,38 @@ mod tests {
             AppRequest::Block(BlockingOperation::Restart("fix-auth".to_string()))
         );
         assert_eq!(AppFixture::status_line(&app, 100), " Restarting fix-auth…");
+    }
+
+    #[test]
+    fn a_restart_refused_for_a_lost_socket_keeps_its_advice_on_an_80_column_screen() {
+        let session = ServiceFixture::session("fix-auth");
+        let fixture = ServiceFixture::new()
+            .with_sessions(std::slice::from_ref(&session))
+            .with_host(ServiceFixture::with_worktree_agent(&session));
+        let mut app = AppFixture::started(&fixture, 80, 24);
+
+        app.perform(BlockingOperation::Restart("fix-auth".to_string()));
+
+        assert!(AppFixture::flattened_screen(&app, 80, 24).contains("Do not end them"));
+    }
+
+    #[test]
+    fn a_restart_refused_for_another_server_keeps_its_kill_command_on_an_80_column_screen() {
+        let recorded = Path::new("/home/example/.local/state/ringleader/tmux/tmux.sock");
+        let session = ServiceFixture::session("fix-auth").on_socket(recorded);
+        let host = ServiceFixture::with_worktree_process(&session)
+            .serving(ServiceFixture::WORKTREE_PROCESS, recorded);
+        let fixture = ServiceFixture::new()
+            .with_sessions(std::slice::from_ref(&session))
+            .with_host(host);
+        let mut app = AppFixture::started(&fixture, 80, 24);
+
+        app.perform(BlockingOperation::Restart("fix-auth".to_string()));
+
+        assert!(
+            AppFixture::flattened_screen(&app, 80, 24)
+                .contains("kill-session -t '=ringleader-fix-auth:'")
+        );
     }
 
     #[test]
@@ -584,19 +523,57 @@ mod tests {
     }
 
     #[test]
+    fn r_recreates_a_lost_server_socket_and_says_so() {
+        let fixture =
+            ServiceFixture::new().with_multiplexer(FakeMultiplexer::new().with_lost_socket());
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press(&mut app, 'r');
+
+        assert!(
+            AppFixture::flattened_screen(&app, 100, 28)
+                .contains("Reloaded the config and the registry. Also recreated the socket")
+        );
+    }
+
+    #[test]
     fn r_reloads_the_config() {
         let fixture = AppFixture::two_waiting_sessions();
         let mut app = AppFixture::started(&fixture, 100, 28);
         fixture
             .config_source()
-            .replace(AppFixture::config_with_prefix("agents-"));
+            .replace(AppFixture::config_with_worktree_root("/reloaded/worktrees"));
 
         AppFixture::press(&mut app, 'r');
 
-        assert_eq!(app.service.config().naming().tmux_prefix(), "agents-");
+        assert_eq!(
+            app.service.config().naming().worktree_root(),
+            Path::new("/reloaded/worktrees")
+        );
         assert_eq!(
             AppFixture::status_line(&app, 100),
             " Reloaded the config and the registry."
+        );
+    }
+
+    #[test]
+    fn r_shows_a_failed_reapply_of_the_server_config() {
+        let fixture = AppFixture::two_waiting_sessions();
+        fixture.multiplexer().fail(
+            "apply_config",
+            MultiplexerError::Failed {
+                subcommand: "source-file".to_string(),
+                detail: "invalid option: no-such-option".to_string(),
+            },
+        );
+        fixture.multiplexer().drift_config("M-x");
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press(&mut app, 'r');
+
+        assert_eq!(
+            AppFixture::status_line(&app, 200),
+            " tmux source-file failed: invalid option: no-such-option"
         );
     }
 
@@ -816,116 +793,17 @@ mod tests {
     }
 
     #[test]
-    fn attach_from_the_tui_installs_the_return_binding_first() {
+    fn attach_from_the_tui_attaches_to_the_agent() {
         let fixture = AppFixture::two_waiting_sessions();
         let mut app = AppFixture::started(&fixture, 100, 28);
 
         app.attach("dark-mode");
 
-        assert_eq!(fixture.binding().calls(), ["install"]);
         assert_eq!(fixture.multiplexer().attached().len(), 1);
-    }
-
-    #[test]
-    fn a_shell_from_the_tui_installs_the_return_binding_first() {
-        let fixture = AppFixture::deletable();
-        let mut app = AppFixture::started(&fixture, 100, 28);
-
-        app.open_shell("fix-auth");
-
-        assert_eq!(fixture.binding().calls(), ["install"]);
-    }
-
-    #[test]
-    fn a_binding_that_cannot_be_installed_is_explained_in_the_status_bar() {
-        let fixture = AppFixture::two_waiting_sessions().with_binding(
-            FakeReturnBinding::default().failing_install(BindingError::Unavailable {
-                reason: "TMUX_PANE is not set, as in a display-popup".to_string(),
-            }),
-        );
-        let mut app = AppFixture::started(&fixture, 100, 28);
-
-        app.attach("dark-mode");
-
         assert_eq!(
-            AppFixture::status_line(&app, 200),
-            " Ctrl-Q return binding not installed: TMUX_PANE is not set, as in a display-popup"
+            AppFixture::status_line(&app, 100),
+            " n new   d delete   R rename   Enter attach   t shell   s restart   r refresh   ? help   q quit"
         );
-    }
-
-    #[test]
-    fn dropping_the_app_restores_the_binding() {
-        let fixture = AppFixture::two_waiting_sessions();
-        let notice = ExitNotice::new(Box::new(CapturedWriter::default()));
-        let app = UiHarness::app(&fixture)
-            .with_binding_guard(BindingGuard::new(fixture.shared_binding(), notice.handle()));
-
-        drop(app);
-
-        assert_eq!(fixture.binding().calls(), ["restore"]);
-    }
-
-    #[test]
-    fn a_binding_that_cannot_be_restored_reaches_the_exit_notice() {
-        let fixture = AppFixture::two_waiting_sessions().with_binding(
-            FakeReturnBinding::default().failing_restore(BindingError::NotRestored {
-                saved_line: "bind-key -T root C-q send-keys example".to_string(),
-            }),
-        );
-        let writer = CapturedWriter::default();
-        let notice = ExitNotice::new(Box::new(writer.clone()));
-        let guard = BindingGuard::new(fixture.shared_binding(), notice.handle());
-
-        drop(guard);
-        let before_the_notice_drops = writer.text();
-        drop(notice);
-
-        assert_eq!(before_the_notice_drops, "");
-        assert_eq!(
-            writer.text(),
-            "ringleader: could not restore your Ctrl-Q binding, rebind it by hand: bind-key -T root C-q send-keys example\n"
-        );
-    }
-
-    #[test]
-    fn a_kept_record_at_startup_is_a_warning_and_never_a_notice() {
-        let fixture = AppFixture::two_waiting_sessions().with_binding(
-            FakeReturnBinding::default().failing_repair(BindingError::RecordKept {
-                detail: "Permission denied".to_string(),
-                saved_line: "bind-key -T root C-q send-keys example".to_string(),
-            }),
-        );
-        let writer = CapturedWriter::default();
-        let notice = ExitNotice::new(Box::new(writer.clone()));
-        let guard = BindingGuard::new(fixture.shared_binding(), notice.handle());
-
-        let warning = guard.repair_stale();
-        drop(guard);
-        drop(notice);
-
-        assert_eq!(
-            warning.as_deref(),
-            Some("kept the saved Ctrl-Q binding for a later retry: Permission denied")
-        );
-        assert_eq!(writer.text(), "");
-    }
-
-    #[test]
-    fn a_stale_binding_that_cannot_be_restored_at_startup_reaches_the_exit_notice() {
-        let fixture = AppFixture::two_waiting_sessions().with_binding(
-            FakeReturnBinding::default().failing_repair(BindingError::NotRestored {
-                saved_line: "bind-key -T root C-q send-keys example".to_string(),
-            }),
-        );
-        let writer = CapturedWriter::default();
-        let notice = ExitNotice::new(Box::new(writer.clone()));
-        let guard = BindingGuard::new(fixture.shared_binding(), notice.handle());
-
-        assert!(guard.repair_stale().is_some());
-        drop(guard);
-        drop(notice);
-
-        assert!(writer.text().contains("send-keys example"));
     }
 
     #[test]
@@ -1028,7 +906,7 @@ mod tests {
         AppFixture::press(&mut app, '?');
 
         assert!(opened.contains("┌ Help "));
-        assert!(opened.contains("n        create a session"));
+        assert!(opened.contains("n            create a session"));
         assert!(!app.dialogs.is_open());
     }
 

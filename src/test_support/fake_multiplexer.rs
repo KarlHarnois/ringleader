@@ -3,9 +3,10 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use crate::application::ports::{
-    AgentLaunch, AttachTarget, Multiplexer, MultiplexerError, SessionSpec,
+    AgentLaunch, AttachTarget, Multiplexer, MultiplexerError, ServerConfig, ServerState,
+    SessionSpec,
 };
-use crate::domain::{AgentPane, SessionMetadata, SessionObservation, TmuxAddress};
+use crate::domain::{AgentPane, ReturnKey, SessionMetadata, SessionObservation, TmuxAddress};
 
 pub struct FakeMultiplexer {
     state: Mutex<MultiplexerState>,
@@ -27,21 +28,23 @@ struct MultiplexerState {
     launches: Vec<AgentLaunch>,
     typed: Vec<TypedLine>,
     pane_pids: HashMap<String, Vec<u32>>,
-    sessions_on_other_sockets: Vec<(PathBuf, String, PathBuf)>,
     caller: Option<String>,
+    caller_in_own_pane: bool,
+    caller_in_other_tmux: bool,
     captures: HashMap<String, String>,
     failures: HashMap<&'static str, MultiplexerError>,
     failed_create_still_creates: bool,
     attached: Vec<AttachTarget>,
-    bells: usize,
     calls: Vec<String>,
     client_version: String,
-    server_version: Option<String>,
-    exit_unattached: bool,
+    server: Option<ServerState>,
+    config_current: bool,
+    server_return_key: Option<ReturnKey>,
+    socket_lost: bool,
 }
 
 impl FakeMultiplexer {
-    pub const SOCKET: &'static str = "/tmp/tmux-1000/default";
+    pub const SOCKET: &'static str = "/run/user/1000/ringleader/tmux/tmux.sock";
     pub const STATE_CHANGING: [&'static str; 7] = [
         "create_session",
         "kill_session",
@@ -62,17 +65,19 @@ impl FakeMultiplexer {
                 launches: Vec::new(),
                 typed: Vec::new(),
                 pane_pids: HashMap::new(),
-                sessions_on_other_sockets: Vec::new(),
                 caller: None,
+                caller_in_own_pane: false,
+                caller_in_other_tmux: false,
                 captures: HashMap::new(),
                 failures: HashMap::new(),
                 failed_create_still_creates: false,
                 attached: Vec::new(),
-                bells: 0,
                 calls: Vec::new(),
                 client_version: "3.6a".to_string(),
-                server_version: Some("3.6a".to_string()),
-                exit_unattached: false,
+                server: Some(ServerState::new("3.6a", 1)),
+                config_current: true,
+                server_return_key: Some(ReturnKey::default()),
+                socket_lost: false,
             }),
         }
     }
@@ -87,18 +92,13 @@ impl FakeMultiplexer {
         self
     }
 
-    pub fn with_session_on_socket(self, socket: &Path, tmux_name: &str, worktree: &Path) -> Self {
-        let entry = (
-            socket.to_path_buf(),
-            tmux_name.to_string(),
-            worktree.to_path_buf(),
-        );
-        self.edit(|state| state.sessions_on_other_sockets.push(entry));
+    pub fn with_caller(self, tmux_name: &str) -> Self {
+        self.edit(|state| state.caller = Some(tmux_name.to_string()));
         self
     }
 
-    pub fn with_caller(self, tmux_name: &str) -> Self {
-        self.edit(|state| state.caller = Some(tmux_name.to_string()));
+    pub fn called_from_own_pane(self) -> Self {
+        self.edit(|state| state.caller_in_own_pane = true);
         self
     }
 
@@ -124,13 +124,30 @@ impl FakeMultiplexer {
     pub fn with_versions(self, client: &str, server: Option<&str>) -> Self {
         self.edit(|state| {
             state.client_version = client.to_string();
-            state.server_version = server.map(str::to_string);
+            state.server = server.map(|version| ServerState::new(version, 1));
         });
         self
     }
 
-    pub fn with_exit_unattached(self) -> Self {
-        self.edit(|state| state.exit_unattached = true);
+    pub fn with_lost_socket(self) -> Self {
+        self.edit(|state| state.socket_lost = true);
+        self
+    }
+
+    pub fn with_drifted_config(self, server_return_key: &str) -> Self {
+        self.drift_config(server_return_key);
+        self
+    }
+
+    pub fn drift_config(&self, server_return_key: &str) {
+        self.edit(|state| {
+            state.config_current = false;
+            state.server_return_key = ReturnKey::parse(server_return_key);
+        });
+    }
+
+    pub fn called_from_other_tmux(self) -> Self {
+        self.edit(|state| state.caller_in_other_tmux = true);
         self
     }
 
@@ -203,10 +220,6 @@ impl FakeMultiplexer {
         self.edit(|state| state.attached.clone())
     }
 
-    pub fn bells(&self) -> usize {
-        self.edit(|state| state.bells)
-    }
-
     fn edit<T>(&self, change: impl FnOnce(&mut MultiplexerState) -> T) -> T {
         change(&mut self.state.lock().unwrap())
     }
@@ -246,15 +259,13 @@ impl MultiplexerState {
     fn find_live(&self, tmux_name: &str) -> Option<&SessionObservation> {
         self.live.iter().find(|live| live.tmux_name() == tmux_name)
     }
-
-    fn other_socket_holds(&self, socket: &Path, tmux_name: &str, worktree: &Path) -> bool {
-        self.sessions_on_other_sockets
-            .iter()
-            .any(|(on, name, claim)| on == socket && (name == tmux_name || claim == worktree))
-    }
 }
 
 impl Multiplexer for FakeMultiplexer {
+    fn socket(&self) -> PathBuf {
+        self.edit(|state| state.socket.clone())
+    }
+
     fn create_session(&self, spec: &SessionSpec) -> Result<PathBuf, MultiplexerError> {
         let result = self.call("create_session", spec.tmux_name());
         self.edit(|state| {
@@ -278,18 +289,16 @@ impl Multiplexer for FakeMultiplexer {
         Ok(self.edit(|state| state.pane_pids.get(tmux_name).cloned().unwrap_or_default()))
     }
 
-    fn has_session_on(
-        &self,
-        socket: &Path,
-        tmux_name: &str,
-        worktree: &Path,
-    ) -> Result<bool, MultiplexerError> {
-        self.call("has_session_on", &socket.display().to_string())?;
-        Ok(self.edit(|state| state.other_socket_holds(socket, tmux_name, worktree)))
+    fn caller_in_other_tmux(&self) -> bool {
+        self.edit(|state| state.caller_in_other_tmux)
     }
 
     fn caller_session(&self) -> Result<Option<String>, MultiplexerError> {
         Ok(self.edit(|state| state.caller.clone()))
+    }
+
+    fn caller_in_own_pane(&self) -> Result<bool, MultiplexerError> {
+        Ok(self.edit(|state| state.caller_in_own_pane))
     }
 
     fn observe_all(&self) -> Result<Vec<SessionObservation>, MultiplexerError> {
@@ -356,20 +365,40 @@ impl Multiplexer for FakeMultiplexer {
         Ok("@9".to_string())
     }
 
-    fn ring_bell(&self) -> Result<(), MultiplexerError> {
-        self.call("ring_bell", "")?;
-        self.edit(|state| state.bells += 1);
+    fn server_state(&self) -> Result<Option<ServerState>, MultiplexerError> {
+        self.call("server_state", "")?;
+        Ok(self.edit(|state| state.server.clone()))
+    }
+
+    fn server_config(
+        &self,
+        _return_key: &ReturnKey,
+    ) -> Result<Option<ServerConfig>, MultiplexerError> {
+        self.call("server_config", "")?;
+        Ok(self.edit(|state| {
+            state
+                .server
+                .as_ref()
+                .map(|_| ServerConfig::new(state.config_current, state.server_return_key.as_ref()))
+        }))
+    }
+
+    fn socket_lost(&self) -> bool {
+        self.edit(|state| state.socket_lost)
+    }
+
+    fn restore_socket(&self) -> Result<bool, MultiplexerError> {
+        self.call("restore_socket", "")?;
+        Ok(self.edit(|state| std::mem::take(&mut state.socket_lost)))
+    }
+
+    fn apply_config(&self, return_key: &ReturnKey) -> Result<(), MultiplexerError> {
+        self.call("apply_config", &return_key.to_string())?;
+        self.edit(|state| {
+            state.config_current = true;
+            state.server_return_key = Some(return_key.clone());
+        });
         Ok(())
-    }
-
-    fn server_version(&self) -> Result<Option<String>, MultiplexerError> {
-        self.call("server_version", "")?;
-        Ok(self.edit(|state| state.server_version.clone()))
-    }
-
-    fn server_exit_unattached(&self) -> Result<Option<bool>, MultiplexerError> {
-        self.call("server_exit_unattached", "")?;
-        Ok(Some(self.edit(|state| state.exit_unattached)))
     }
 
     fn version(&self) -> Result<String, MultiplexerError> {

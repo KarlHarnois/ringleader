@@ -13,9 +13,34 @@ pub trait HostProbe: Send + Sync {
         self.canonicalize_lenient(path)
             .unwrap_or_else(|_| path.to_path_buf())
     }
+    fn directory_access(&self, path: &Path) -> Option<DirectoryAccess>;
     fn processes_in(&self, path: &Path, excluded_sessions: &[u32]) -> Vec<ProcessInfo>;
+    fn processes_under_server(&self, path: &Path, socket: &Path) -> Vec<ProcessInfo>;
     fn session_processes(&self, sessions: &[u32]) -> Vec<ProcessInfo>;
     fn terminate(&self, pids: &[u32]) -> Vec<ProcessInfo>;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DirectoryAccess {
+    mode: u32,
+    owned_by_user: bool,
+}
+
+impl DirectoryAccess {
+    pub fn new(mode: u32, owned_by_user: bool) -> Self {
+        Self {
+            mode,
+            owned_by_user,
+        }
+    }
+
+    pub fn mode(&self) -> u32 {
+        self.mode
+    }
+
+    pub fn owned_by_user(&self) -> bool {
+        self.owned_by_user
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -34,6 +59,11 @@ impl ProcessInfo {
 
     pub fn pid(&self) -> u32 {
         self.pid
+    }
+
+    pub fn listed(processes: &[ProcessInfo]) -> String {
+        let shown: Vec<String> = processes.iter().map(ToString::to_string).collect();
+        shown.join(", ")
     }
 
     #[cfg(test)]

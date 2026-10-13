@@ -5,7 +5,7 @@ use super::list_report::ListReport;
 use super::repo_argument::RepoArgument;
 use super::{CliSession, CommandStop, DeleteArgs, ListArgs, NewArgs, RenameArgs};
 use crate::application::{
-    CreateRequest, DeleteConfirmation, DeleteImpact, ReturnMode, ServiceError, SessionService,
+    CreateRequest, DeleteConfirmation, DeleteImpact, ServiceError, SessionService,
 };
 use crate::domain::BaseBranch;
 
@@ -100,7 +100,7 @@ impl<'a> SessionCommands<'a> {
     }
 
     pub fn attach(&mut self, name: &str) -> Result<u8, CommandStop> {
-        self.service.attach(name, ReturnMode::None)?;
+        self.service.attach(name)?;
         Ok(0)
     }
 
@@ -134,7 +134,7 @@ mod tests {
 
     use signal_hook::consts::{SIGHUP, SIGINT};
 
-    use crate::application::ports::{ConfigError, DirtyState, RegistryError};
+    use crate::application::ports::{AttachTarget, ConfigError, DirtyState, RegistryError};
     use crate::cli::CliExit;
     use crate::domain::{Repo, RepoName, Session};
     use crate::test_support::{
@@ -247,6 +247,20 @@ mod tests {
     }
 
     #[test]
+    fn list_recreates_a_lost_server_socket_and_says_so() {
+        let harness = CliHarness::new(
+            ServiceFixture::new().with_multiplexer(FakeMultiplexer::new().with_lost_socket()),
+        );
+
+        assert_eq!(harness.run(&["list"]), CliExit::Code(0));
+        assert!(
+            harness
+                .stderr()
+                .contains("recreated the socket of Ringleader's tmux server")
+        );
+    }
+
+    #[test]
     fn an_unparsable_config_makes_list_and_attach_exit_one_without_tmux() {
         let harness = CliHarness::new(
             CommandFixture::live().with_broken_config(CommandFixture::broken_config()),
@@ -265,6 +279,19 @@ mod tests {
 
         assert_eq!(exit, CliExit::Code(0));
         assert!(harness.stdout().starts_with("created fix-auth"));
+    }
+
+    #[test]
+    fn new_reapplies_a_drifted_server_config_before_creating_the_session() {
+        let fixture = ServiceFixture::new()
+            .with_multiplexer(FakeMultiplexer::new().with_drifted_config("M-x"));
+        let harness = CliHarness::new(fixture);
+
+        harness.run(&["new", "--name", "fix-auth", "--repo", "example-project"]);
+
+        let calls = harness.fixture().multiplexer().calls();
+        let position = |prefix: &str| calls.iter().position(|call| call.starts_with(prefix));
+        assert!(position("apply_config").unwrap() < position("create_session").unwrap());
     }
 
     #[test]
@@ -550,10 +577,31 @@ mod tests {
     }
 
     #[test]
-    fn attach_runs_without_touching_the_return_binding() {
+    fn attach_targets_the_agent_pane_as_the_tui_does() {
         let harness = CliHarness::new(CommandFixture::live());
 
         assert_eq!(harness.run(&["attach", "fix-auth"]), CliExit::Code(0));
-        assert!(harness.fixture().binding().calls().is_empty());
+        assert_eq!(
+            harness.fixture().multiplexer().attached(),
+            [AttachTarget::Agent("ringleader-fix-auth".to_string())]
+        );
+    }
+
+    #[test]
+    fn attach_from_a_pane_of_the_own_server_exits_three() {
+        let session = CommandFixture::session();
+        let fixture = CommandFixture::live().with_multiplexer(
+            FakeMultiplexer::new()
+                .with_live(ServiceFixture::waiting(&session))
+                .called_from_own_pane(),
+        );
+        let harness = CliHarness::new(fixture);
+
+        assert_eq!(harness.run(&["attach", "fix-auth"]), CliExit::Code(3));
+        assert!(
+            harness
+                .stderr()
+                .contains("run Ringleader from another terminal")
+        );
     }
 }

@@ -10,6 +10,12 @@ pub struct NamingScheme {
 }
 
 impl NamingScheme {
+    const TMUX_PREFIX: &'static str = "ringleader-";
+
+    pub fn for_new_sessions(worktree_root: &Path) -> Self {
+        Self::new(worktree_root, Self::TMUX_PREFIX)
+    }
+
     pub fn new(worktree_root: &Path, tmux_prefix: &str) -> Self {
         Self {
             worktree_root: worktree_root.to_path_buf(),

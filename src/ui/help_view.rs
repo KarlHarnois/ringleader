@@ -11,12 +11,11 @@ use super::legend::{Legend, LegendEntry};
 use super::session_table::StateIndicator;
 use super::text_fit::TextFit;
 use super::theme::Theme;
-use crate::domain::SessionState;
+use crate::domain::{ReturnKey, SessionState};
 
 pub struct HelpView {
-    config_path: PathBuf,
-    log_path: PathBuf,
-    tmux_prefix: String,
+    return_key: String,
+    files: Vec<(String, PathBuf)>,
     home: HomePath,
     scroll: usize,
     max_scroll: Cell<usize>,
@@ -36,6 +35,7 @@ impl HelpView {
         ("↑ ↓ j k", "move the selection"),
         ("q", "quit, the sessions keep running"),
     ];
+    const RETURN_ACTION: &'static str = "detach from a session and return here";
     const STATES: [SessionState; 5] = [
         SessionState::Working,
         SessionState::Waiting,
@@ -44,16 +44,17 @@ impl HelpView {
         SessionState::Unmanaged,
     ];
     const FIRST_SPINNER_TICK: u64 = 0;
-    const LABEL_WIDTH: usize = 9;
-    const EXTRA_SHELLS: &'static str =
-        "Use t for extra shells. Output in a split pane counts as agent activity.";
+    const LABEL_WIDTH: usize = 13;
     const CLOSING: &'static str = "↑ ↓ scroll · ? Esc q close";
 
-    pub fn new(config_path: &Path, log_path: &Path, tmux_prefix: &str) -> Self {
+    pub fn new(return_key: &ReturnKey, files: &[(&str, &Path)]) -> Self {
+        let files = files
+            .iter()
+            .map(|(label, path)| (label.to_string(), path.to_path_buf()))
+            .collect();
         Self {
-            config_path: config_path.to_path_buf(),
-            log_path: log_path.to_path_buf(),
-            tmux_prefix: tmux_prefix.to_string(),
+            return_key: return_key.display(),
+            files,
             home: HomePath::default(),
             scroll: 0,
             max_scroll: Cell::new(0),
@@ -94,20 +95,20 @@ impl HelpView {
 
     fn content(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
         let sections = [
-            Self::keys(width, theme),
+            self.keys(width, theme),
             Self::legends(width, theme),
-            self.return_key(width, theme),
             self.files(width, theme),
         ];
         sections.join(&Line::default())
     }
 
-    fn keys(width: usize, theme: &Theme) -> Vec<Line<'static>> {
+    fn keys(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
         let heading = Line::styled(Self::KEYS_HEADING, theme.emphasis());
         let rows = Self::KEYS
             .iter()
             .flat_map(|(key, action)| Self::labeled(key, action, width, theme));
-        once(heading).chain(rows).collect()
+        let return_row = Self::labeled(&self.return_key, Self::RETURN_ACTION, width, theme);
+        once(heading).chain(rows).chain(return_row).collect()
     }
 
     fn legends(width: usize, theme: &Theme) -> Vec<Line<'static>> {
@@ -135,23 +136,8 @@ impl HelpView {
         Legend::new(Self::label_column("Diff"), entries)
     }
 
-    fn return_key(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
-        let paragraphs = [
-            format!(
-                "Ctrl-Q returns here from a session whose name starts with {}.",
-                self.tmux_prefix
-            ),
-            Self::EXTRA_SHELLS.to_string(),
-        ];
-        paragraphs
-            .iter()
-            .flat_map(|paragraph| TextFit::new(paragraph).styled_lines(width, theme.base()))
-            .collect()
-    }
-
     fn files(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
-        let files = [("Config", &self.config_path), ("Log", &self.log_path)];
-        files
+        self.files
             .iter()
             .flat_map(|(label, path)| Self::labeled(label, &self.home.shown(path), width, theme))
             .collect()
@@ -188,10 +174,30 @@ mod tests {
         const PAST_THE_END: usize = 50;
 
         fn help() -> HelpView {
+            Self::help_for(&ReturnKey::default())
+        }
+
+        fn help_for(return_key: &ReturnKey) -> HelpView {
             HelpView::new(
-                Path::new("/home/example/.config/ringleader/config.toml"),
-                Path::new("/home/example/.local/state/ringleader/app.log"),
-                "ringleader-",
+                return_key,
+                &[
+                    (
+                        "Config",
+                        Path::new("/home/example/.config/ringleader/config.toml"),
+                    ),
+                    (
+                        "Log",
+                        Path::new("/home/example/.local/state/ringleader/app.log"),
+                    ),
+                    (
+                        "tmux socket",
+                        Path::new("/run/user/1000/ringleader/tmux/tmux.sock"),
+                    ),
+                    (
+                        "tmux config",
+                        Path::new("/home/example/.local/state/ringleader/tmux.conf"),
+                    ),
+                ],
             )
             .with_home(HomePath::new(Some(Path::new(Self::HOME))))
         }
@@ -263,8 +269,8 @@ mod tests {
         let screen = HelpFixture::screen(HelpFixture::help(), 100, 28);
 
         assert!(screen.lines().nth(3).unwrap().contains("┌ Help "));
-        assert!(screen.contains("n        create a session"));
-        assert!(screen.contains("q        quit, the sessions keep running"));
+        assert!(screen.contains("n            create a session"));
+        assert!(screen.contains("q            quit, the sessions keep running"));
     }
 
     #[test]
@@ -276,7 +282,7 @@ mod tests {
         );
 
         assert!(screen.contains("Keys"));
-        assert!(screen.contains("Log      ~/.local/state/ringleader/app.log"));
+        assert!(screen.contains("tmux config  ~/.local/state/ringleader/tmux.conf"));
     }
 
     #[test]
@@ -290,18 +296,35 @@ mod tests {
     }
 
     #[test]
-    fn the_help_shows_the_config_and_log_paths_from_home() {
+    fn the_help_lists_the_configured_return_key() {
+        let text = HelpFixture::text(&HelpFixture::help_for(&ReturnKey::parse("M-x").unwrap()));
+
+        assert!(text.contains("Alt-x        detach from a session and return here"));
+    }
+
+    #[test]
+    fn the_help_shows_the_files_under_home_from_home() {
         let text = HelpFixture::text(&HelpFixture::help());
 
-        assert!(text.contains("Config   ~/.config/ringleader/config.toml"));
-        assert!(text.contains("Log      ~/.local/state/ringleader/app.log"));
+        assert!(text.contains("Config       ~/.config/ringleader/config.toml"));
+        assert!(text.contains("Log          ~/.local/state/ringleader/app.log"));
+        assert!(text.contains("tmux config  ~/.local/state/ringleader/tmux.conf"));
+    }
+
+    #[test]
+    fn the_help_shows_the_tmux_socket_outside_home_in_full() {
+        let text = HelpFixture::text(&HelpFixture::help());
+
+        assert!(text.contains("tmux socket  /run/user/1000/ringleader/tmux/tmux.sock"));
     }
 
     #[test]
     fn the_legend_names_the_glyph_of_every_state() {
         let text = HelpFixture::text(&HelpFixture::help());
 
-        assert!(text.contains("States   ⠋ working  ● waiting  ✗ exited  ○ stopped  ? unmanaged"));
+        assert!(
+            text.contains("States       ⠋ working  ● waiting  ✗ exited  ○ stopped  ? unmanaged")
+        );
     }
 
     #[test]
@@ -316,21 +339,13 @@ mod tests {
     fn the_legend_explains_the_diff_column() {
         let text = HelpFixture::text(&HelpFixture::help());
 
-        assert!(text.contains("Diff     +n added lines  -n removed lines  ?n untracked files"));
+        assert!(text.contains("Diff         +n added lines  -n removed lines  ?n untracked files"));
     }
 
     #[test]
     fn the_legend_colors_the_diff_markers_like_the_session_table() {
         assert_eq!(HelpFixture::span_style("+n"), Theme.insertions());
         assert_eq!(HelpFixture::span_style("-n"), Theme.deletions());
-    }
-
-    #[test]
-    fn the_help_explains_ctrl_q_with_the_tmux_prefix() {
-        let text = HelpFixture::text(&HelpFixture::help());
-
-        assert!(text.contains("from a session whose name starts with ringleader-."));
-        assert!(text.contains("Output in a split pane counts as agent activity."));
     }
 
     #[test]
