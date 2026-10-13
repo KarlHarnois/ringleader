@@ -3,7 +3,6 @@ use super::text_fit::TextFit;
 pub struct TableColumns {
     inner_width: usize,
     name: usize,
-    branch: Option<usize>,
     pull_request: Option<usize>,
     diff: Option<usize>,
 }
@@ -13,7 +12,6 @@ impl TableColumns {
     const INDICATOR_WIDTH: usize = 1;
     const GAP: usize = 1;
     const NAME_TITLE: &'static str = "Name";
-    const BRANCH_TITLE: &'static str = "Branch";
     const PULL_REQUEST_TITLE: &'static str = "PR";
     const DIFF_TITLE: &'static str = "Diff";
 
@@ -21,15 +19,9 @@ impl TableColumns {
         Self {
             inner_width,
             name: Self::widest(names, Self::NAME_TITLE).max(Self::MINIMUM_NAME_WIDTH),
-            branch: None,
             pull_request: None,
             diff: None,
         }
-    }
-
-    pub fn with_branch(self, branches: impl Iterator<Item = String>) -> Self {
-        let branch = Some(Self::widest(branches, Self::BRANCH_TITLE));
-        Self { branch, ..self }
     }
 
     pub fn with_pull_request(self, pull_requests: impl Iterator<Item = String>) -> Self {
@@ -50,9 +42,6 @@ impl TableColumns {
             self.pull_request = None;
         }
         if self.width() > self.inner_width {
-            self.branch = None;
-        }
-        if self.width() > self.inner_width {
             self.diff = None;
         }
         let room_for_name = self.inner_width.saturating_sub(self.width() - self.name);
@@ -63,20 +52,12 @@ impl TableColumns {
     pub fn header(&self) -> String {
         format!(
             " {}",
-            self.row(
-                Self::NAME_TITLE,
-                Self::BRANCH_TITLE,
-                Self::PULL_REQUEST_TITLE,
-                Self::DIFF_TITLE,
-            )
+            self.row(Self::NAME_TITLE, Self::PULL_REQUEST_TITLE, Self::DIFF_TITLE)
         )
     }
 
-    pub fn row(&self, name: &str, branch: &str, pull_request: &str, diff: &str) -> String {
+    pub fn row(&self, name: &str, pull_request: &str, diff: &str) -> String {
         let mut text = format!(" {}", Self::fit_text(name, self.name));
-        if let Some(width) = self.branch {
-            text.push_str(&format!(" {}", Self::fit_text(branch, width)));
-        }
         if let Some(width) = self.pull_request {
             text.push_str(&format!(" {}", Self::fit_text(pull_request, width)));
         }
@@ -92,7 +73,6 @@ impl TableColumns {
         Self::INDICATOR_WIDTH
             + Self::GAP
             + self.name
-            + optional(self.branch)
             + optional(self.pull_request)
             + optional(self.diff)
     }
@@ -118,50 +98,38 @@ mod tests {
 
     impl ColumnsFixture {
         const NAME: &'static str = "fix-auth";
-        const BRANCH: &'static str = "ringleader/fix-auth";
         const PULL_REQUEST: &'static str = "#142";
         const DIFF: &'static str = "+124 -31 ?2";
 
         fn fitted(inner_width: usize, name: &str) -> TableColumns {
             TableColumns::new(inner_width, [name.to_string()].into_iter())
-                .with_branch([Self::BRANCH.to_string()].into_iter())
                 .with_pull_request([Self::PULL_REQUEST.to_string()].into_iter())
                 .with_diff([Self::DIFF.to_string()].into_iter())
                 .fitted()
         }
 
         fn row(inner_width: usize, name: &str) -> String {
-            Self::fitted(inner_width, name).row(name, Self::BRANCH, Self::PULL_REQUEST, Self::DIFF)
+            Self::fitted(inner_width, name).row(name, Self::PULL_REQUEST, Self::DIFF)
         }
     }
 
     #[test]
-    fn a_wide_table_shows_name_branch_pull_request_and_diff() {
-        let row = ColumnsFixture::row(51, ColumnsFixture::NAME);
+    fn a_wide_table_shows_name_pull_request_and_diff() {
+        let row = ColumnsFixture::row(31, ColumnsFixture::NAME);
 
-        assert_eq!(row, " fix-auth     ringleader/fix-auth #142 +124 -31 ?2");
+        assert_eq!(row, " fix-auth     #142 +124 -31 ?2");
     }
 
     #[test]
     fn a_tight_table_drops_the_pull_request_first() {
-        let row = ColumnsFixture::row(46, ColumnsFixture::NAME);
-
-        assert_eq!(
-            row.trim_end(),
-            " fix-auth     ringleader/fix-auth +124 -31 ?2"
-        );
-    }
-
-    #[test]
-    fn a_tighter_table_drops_the_branch_next() {
-        let row = ColumnsFixture::row(40, ColumnsFixture::NAME);
+        let row = ColumnsFixture::row(30, ColumnsFixture::NAME);
 
         assert_eq!(row.trim_end(), " fix-auth     +124 -31 ?2");
     }
 
     #[test]
     fn the_tightest_table_drops_the_diff_last() {
-        let row = ColumnsFixture::row(20, ColumnsFixture::NAME);
+        let row = ColumnsFixture::row(25, ColumnsFixture::NAME);
 
         assert_eq!(row.trim_end(), " fix-auth");
     }
@@ -182,21 +150,15 @@ mod tests {
 
     #[test]
     fn the_header_names_each_shown_column() {
-        let columns = ColumnsFixture::fitted(48, ColumnsFixture::NAME);
+        let columns = ColumnsFixture::fitted(30, ColumnsFixture::NAME);
 
-        assert_eq!(
-            columns.header().trim_end(),
-            "  Name         Branch              Diff"
-        );
+        assert_eq!(columns.header().trim_end(), "  Name         Diff");
     }
 
     #[test]
     fn a_wide_header_names_the_pull_request_column() {
-        let columns = ColumnsFixture::fitted(51, ColumnsFixture::NAME);
+        let columns = ColumnsFixture::fitted(31, ColumnsFixture::NAME);
 
-        assert_eq!(
-            columns.header().trim_end(),
-            "  Name         Branch              PR   Diff"
-        );
+        assert_eq!(columns.header().trim_end(), "  Name         PR   Diff");
     }
 }

@@ -222,7 +222,7 @@ mod tests {
         let screen = ViewFixture::render(&ViewFixture::rows(), 60, 12);
 
         assert!(!screen.contains("Preview"));
-        assert!(screen.contains("Branch"));
+        assert!(screen.contains("Diff"));
     }
 
     #[test]
@@ -230,7 +230,7 @@ mod tests {
         let screen = ViewFixture::render(&ViewFixture::rows(), 36, 8);
 
         assert!(screen.contains("● fix-auth"));
-        assert!(!screen.contains("Branch"));
+        assert!(!screen.contains("Diff"));
         assert!(!screen.contains("Name"));
     }
 
