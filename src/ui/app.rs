@@ -59,7 +59,9 @@ impl App {
                 AppRequest::Redraw
             }
             _ if self.dialogs.is_open() => match self.dialogs.handle_event(event, &self.service) {
-                DialogStep::Request(request) => self.request(request),
+                DialogStep::Request(request) | DialogStep::CloseWith(request) => {
+                    self.request(request)
+                }
                 DialogStep::Stay | DialogStep::Close => AppRequest::Continue,
             },
             Event::Key(key) if key.kind != KeyEventKind::Release => self.handle_key(key),
@@ -88,6 +90,7 @@ impl App {
         let outcome = self.service.attach(name);
         self.home.returned_from(name);
         self.observe();
+        self.home.select(name, &self.service);
         if let Err(error) = outcome {
             self.report_failure(error);
         }
@@ -162,6 +165,10 @@ impl App {
             KeyAction::JumpToRepo(number) => self.home.jump_to_repo(number, &self.service),
             KeyAction::Open(opening) => {
                 self.dialogs.open(Dialog::open(opening, &self.service));
+            }
+            KeyAction::FindSession => {
+                let names = self.home.sessions().names();
+                self.dialogs.open(Dialog::find_session(names));
             }
             KeyAction::Reload => self.reload(),
             KeyAction::Refuse(refusal) => self.status.error(refusal),
@@ -985,6 +992,18 @@ mod tests {
     }
 
     #[test]
+    fn a_paste_goes_to_the_session_finder() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, '/');
+        app.handle_event(&Event::Paste("fix".to_string()));
+
+        let request = app.handle_event(&UiHarness::key(KeyCode::Enter));
+
+        assert_eq!(request, AppRequest::Attach("fix-auth".to_string()));
+    }
+
+    #[test]
     fn a_paste_on_the_home_screen_is_ignored() {
         let fixture = AppFixture::two_waiting_sessions();
         let mut app = AppFixture::started(&fixture, 100, 28);
@@ -1307,6 +1326,82 @@ mod tests {
                 "the config failed; recreated the socket".to_string()
             ))
         );
+    }
+
+    #[test]
+    fn slash_then_enter_asks_to_attach_the_typed_session_and_closes_the_finder() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, '/');
+        AppFixture::press(&mut app, 'f');
+        AppFixture::press(&mut app, 'a');
+
+        let request = app.handle_event(&UiHarness::key(KeyCode::Enter));
+
+        assert_eq!(request, AppRequest::Attach("fix-auth".to_string()));
+        assert!(!app.dialogs.is_open());
+    }
+
+    #[test]
+    fn control_k_opens_the_session_finder() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        app.handle_event(&UiHarness::control('k'));
+
+        assert!(AppFixture::screen(&app, 100, 28).contains("┌ Find session "));
+    }
+
+    #[test]
+    fn control_q_closes_every_dialog() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        for opener in ['/', 'n', 'R', '?'] {
+            AppFixture::press(&mut app, opener);
+            let opened = app.dialogs.is_open();
+            app.handle_event(&UiHarness::control('q'));
+
+            assert!(opened, "{opener} opened no dialog");
+            assert!(
+                !app.dialogs.is_open(),
+                "Ctrl-Q left the {opener} dialog open"
+            );
+        }
+    }
+
+    #[test]
+    fn control_q_cancels_the_delete_confirmation() {
+        let fixture = AppFixture::deletable();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        let measure = app.handle_event(&UiHarness::character('d'));
+        AppFixture::perform(&mut app, measure);
+
+        let request = app.handle_event(&UiHarness::control('q'));
+
+        assert_eq!(request, AppRequest::Continue);
+        assert!(!app.dialogs.is_open());
+        assert_eq!(fixture.registry().sessions().len(), 1);
+    }
+
+    #[test]
+    fn control_q_on_the_home_screen_does_not_quit() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        let request = app.handle_event(&UiHarness::control('q'));
+
+        assert_eq!(request, AppRequest::Continue);
+    }
+
+    #[test]
+    fn attaching_selects_the_attached_session() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        app.attach("fix-auth");
+
+        assert_eq!(AppFixture::selected(&app).as_deref(), Some("fix-auth"));
     }
 
     #[test]

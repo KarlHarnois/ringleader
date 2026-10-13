@@ -2,6 +2,20 @@
 
 This file is the living reference for agents working in this repository.
 
+## Values
+
+When no rule covers a case, choose what these values favor. When two conflict, the earlier one wins.
+
+- **The user's own setup stays untouched.** Ringleader runs its own tmux server and never changes the user's tmux server, tmux config, or key bindings. It deletes or renames only the branches it marked as its own, and it assumes no particular personal setup. The private socket on every tmux call, the throwaway state for manual runs, the `ringleaderManaged` marker, and the consumer-agnostic repository all come from this.
+- **Refuse before losing work.** When an action could destroy work, Ringleader stops and says why instead of guessing. Delete measures uncommitted files and unmerged commits and asks first, rename refuses a branch that has been pushed, a failed create or rename undoes what it did, and a refused action exits with code 3.
+- **Intuitive, with several ways to do each thing.** Each way comes from an ecosystem users already know and keeps the meaning it has there, so a user who guesses a key is right.
+  - Vim: `j k` move, `gg G` jump to the ends, and `/` would open a session finder.
+  - fzf and readline: `Ctrl-J Ctrl-K` and `Ctrl-N Ctrl-P` move in the repo search, and `Ctrl-W Ctrl-U` edit text.
+  - Command palettes: `Ctrl-K` would also open the session finder.
+  - The arrows work wherever `j k` do, `?` `Esc` `q` all close the help, and create, delete, rename, restart, and attach work from both the TUI and the CLI.
+- **Side work never blocks or breaks the main action.** Typing an agent's startup input and looking up pull requests run in the background, and their failures are logged, never raised. A missing tool such as `gh` turns its feature off instead of failing the program. Logs go to a file, never to the terminal.
+- **Less is more.** Ringleader stays minimal in what it shows, what it asks for, and what it documents. Hint lines name only Ringleader's own keys and leave out the editing keys every terminal user already knows, and the README stays short with no architecture. Convention wins over configuration: every setting except the agent list has a working default, repos are found by scanning home, a session's branch and tmux session follow from its name, the diff base is found without a setting, and the new session dialog starts on the repo Ringleader was launched in or the newest session's repo. A new setting needs a case the convention cannot serve.
+
 ## Ground rules
 
 - Keep functions small, each doing one thing at one level of abstraction, with callers above the functions they call. Avoid flag arguments and side effects a name does not announce, keep commands separate from queries, and state each piece of knowledge once. Talk to direct collaborators instead of reaching through chains of objects. Errors use `Result` with the operation that failed in their message, and absence uses `Option`.
@@ -177,6 +191,7 @@ viewer exits.
     │   ├── diff_stat.rs          # DiffStat
     │   ├── session_summary.rs    # SessionSummary
     │   ├── agent.rs              # Agent
+    │   ├── agent_mode.rs         # AgentMode, build or plan, the mode a new session's agent starts in
     │   ├── repo.rs               # Repo
     │   ├── repo_name.rs          # RepoName
     │   ├── repo_draft.rs         # RepoDraft, a [[repos]] entry before the load checks
@@ -304,6 +319,7 @@ viewer exits.
     │   ├── mod.rs
     │   ├── app.rs                  # App
     │   ├── action_gate.rs          # ActionGate, which actions the selected row allows
+    │   ├── back_key.rs             # BackKey, Ctrl-Q, which closes any dialog and never quits
     │   ├── key_sequence.rs         # KeySequence, the g that waits for a second g to make gg
     │   ├── home_state.rs           # HomeState, the polled rows, selection, and preview
     │   ├── session_list.rs         # SessionList, rows sorted by repo, state, and name, the selected session or heading, and the folded repos
@@ -341,20 +357,24 @@ viewer exits.
     │       ├── dialog_labels.rs         # DialogLabels, full or abbreviated field labels
     │       ├── text_field.rs            # TextField, typing and paste rules for name and path fields
     │       ├── new_session_dialog.rs    # NewSessionDialog
-    │       ├── new_session_view.rs      # NewSessionView, draws the n dialog's fields, error, and hints into its area
-    │       ├── new_session_layout.rs    # NewSessionLayout, the rows the n dialog gives its repo search, prompt, and error
+    │       ├── new_session_view.rs      # NewSessionView, draws the n dialog's fields, mode, error, and hints into its area
+    │       ├── new_session_layout.rs    # NewSessionLayout, the rows the n dialog gives its repo search, mode, prompt, and error
     │       ├── prompt_field.rs          # PromptField, the n dialog's multiline prompt on ratatui-textarea
     │       ├── new_session_field.rs     # NewSessionField, the n dialog's fields in Tab order with their labels and hints
     │       ├── repo_picker.rs           # RepoPicker, the n dialog's Repo field and its search
     │       ├── chosen_repo.rs           # ChosenRepo, the default repo until the search picks another
     │       ├── repo_finder.rs           # RepoFinder, the fuzzy search over the repos under home
     │       ├── repo_filter.rs           # RepoFilter, ranks repo paths against a fuzzy query
+    │       ├── fuzzy_ranker.rs          # FuzzyRanker, ranks names or paths against a fuzzy query
+    │       ├── match_list.rs            # MatchList, the ranked matches of a fuzzy search and the cursor over them
     │       ├── repo_scan.rs             # RepoScan, one home search and its result
+    │       ├── search_query.rs          # SearchQuery, a finder's typed query shown after its prompt
     │       ├── typed_repo_check.rs      # TypedRepoCheck, the git check of a typed repo path
     │       ├── home_path.rs             # HomePath, a path shown from ~ when it is under home
     │       ├── agent_picker.rs          # AgentPicker, the n dialog's agent list
     │       ├── delete_session_dialog.rs # DeleteSessionDialog
-    │       └── rename_session_dialog.rs # RenameSessionDialog
+    │       ├── rename_session_dialog.rs # RenameSessionDialog
+    │       └── session_finder.rs        # SessionFinder, the / and Ctrl-K search over session names that attaches to the pick
     └── test_support/               # #[cfg(test)] doubles and fixtures shared by unit tests
         ├── mod.rs
         ├── tmux_test_server.rs      # TmuxTestServer: private socket, generated config, control-mode clients, kill-server on drop

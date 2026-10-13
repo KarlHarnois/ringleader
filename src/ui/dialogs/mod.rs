@@ -4,7 +4,9 @@ pub mod delete_session_dialog;
 pub mod dialog;
 pub mod dialog_labels;
 pub mod dialog_slot;
+pub mod fuzzy_ranker;
 pub mod home_path;
+pub mod match_list;
 pub mod new_session_dialog;
 pub mod new_session_field;
 pub mod new_session_layout;
@@ -15,6 +17,8 @@ pub mod repo_filter;
 pub mod repo_finder;
 pub mod repo_picker;
 pub mod repo_scan;
+pub mod search_query;
+pub mod session_finder;
 pub mod text_field;
 pub mod typed_repo_check;
 

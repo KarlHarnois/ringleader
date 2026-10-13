@@ -13,11 +13,6 @@ impl NewSessionField {
         Self::ORDER[(self.position() + 1) % Self::ORDER.len()]
     }
 
-    pub fn previous(self) -> Self {
-        let count = Self::ORDER.len();
-        Self::ORDER[(self.position() + count - 1) % count]
-    }
-
     pub fn is_last(self) -> bool {
         Self::ORDER.last() == Some(&self)
     }
@@ -33,10 +28,10 @@ impl NewSessionField {
 
     pub fn hints(self) -> &'static str {
         match self {
-            Self::Name => "Enter next field · Ctrl-S create · Esc cancel",
+            Self::Name => "Enter next field · Ctrl-S create · Shift-Tab mode · Esc cancel",
             Self::Repo => "Type to find a repo · Enter next field · Ctrl-S create · Esc cancel",
             Self::Agent => "↑ ↓ j k choose · Enter next field · Ctrl-S create · Esc cancel",
-            Self::Prompt => "Enter create · Esc cancel",
+            Self::Prompt => "Enter create · Shift-Tab mode · Esc cancel",
         }
     }
 
@@ -55,10 +50,5 @@ mod tests {
     #[test]
     fn next_wraps_from_the_last_field_to_the_first() {
         assert_eq!(NewSessionField::Prompt.next(), NewSessionField::Name);
-    }
-
-    #[test]
-    fn previous_wraps_from_the_first_field_to_the_last() {
-        assert_eq!(NewSessionField::Name.previous(), NewSessionField::Prompt);
     }
 }
