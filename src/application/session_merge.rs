@@ -77,7 +77,7 @@ impl SessionMerge {
         }
         if dirty.dirty_files() > 0 {
             return Err(ServiceError::Conflict(format!(
-                "session {} has uncommitted changes, commit or stash them before merging",
+                "session {} has uncommitted changes, have its agent commit them before merging",
                 session.name()
             )));
         }
@@ -433,7 +433,7 @@ mod tests {
         assert_eq!(
             error,
             ServiceError::Conflict(
-                "session fix-auth has uncommitted changes, commit or stash them before merging"
+                "session fix-auth has uncommitted changes, have its agent commit them before merging"
                     .to_string()
             )
         );
