@@ -1,5 +1,6 @@
 use std::io;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::Duration;
 
 use super::agent_launcher::{LauncherCommand, PreparedLaunch};
@@ -134,16 +135,23 @@ impl TmuxMultiplexer {
         Ok(TmuxListing::new(&output).agent_pane())
     }
 
-    fn attach_in_foreground(&self, target: &str) -> Result<(), MultiplexerError> {
-        let attach = TmuxScripts::attach_session(target);
-        let child =
-            self.tmux
-                .foreground(&attach)
-                .spawn()
-                .map_err(|error| MultiplexerError::Failed {
-                    subcommand: "attach-session".to_string(),
-                    detail: error.to_string(),
-                })?;
+    fn attach_command(&self, target: &AttachTarget) -> Result<Command, MultiplexerError> {
+        let resolved = match target {
+            AttachTarget::Agent(tmux_name) => self
+                .agent_pane(tmux_name)?
+                .unwrap_or_else(|| TmuxScripts::exact(tmux_name)),
+            AttachTarget::Shell(window) => window.clone(),
+        };
+        Ok(self
+            .tmux
+            .foreground(&TmuxScripts::attach_session(&resolved)))
+    }
+
+    fn attach_in_foreground(&self, mut attach: Command) -> Result<(), MultiplexerError> {
+        let child = attach.spawn().map_err(|error| MultiplexerError::Failed {
+            subcommand: "attach-session".to_string(),
+            detail: error.to_string(),
+        })?;
         let Ok(pid) = libc::pid_t::try_from(child.id()) else {
             return Ok(());
         };
@@ -257,13 +265,8 @@ impl Multiplexer for TmuxMultiplexer {
     }
 
     fn attach(&self, target: &AttachTarget) -> Result<(), MultiplexerError> {
-        let resolved = match target {
-            AttachTarget::Agent(tmux_name) => self
-                .agent_pane(tmux_name)?
-                .unwrap_or_else(|| TmuxScripts::exact(tmux_name)),
-            AttachTarget::Shell(window) => window.clone(),
-        };
-        self.attach_in_foreground(&resolved)
+        let attach = self.attach_command(target)?;
+        self.attach_in_foreground(attach)
     }
 
     fn capture_pane(&self, tmux_name: &str) -> Result<String, MultiplexerError> {
@@ -469,6 +472,19 @@ mod tests {
 
         fn created_pane(&self, tmux_name: &str) -> String {
             self.server.pane_of(&format!("={tmux_name}:0.0"))
+        }
+
+        fn attached_to(&self, target: &AttachTarget) -> Vec<String> {
+            let attach = self.server.multiplexer().attach_command(target).unwrap();
+            let arguments: Vec<String> = attach
+                .get_args()
+                .map(|argument| argument.to_string_lossy().into_owned())
+                .collect();
+            let subcommand = arguments
+                .iter()
+                .position(|argument| argument == "attach-session")
+                .unwrap();
+            arguments[subcommand..].to_vec()
         }
 
         fn signal(pid: &str, signal: &str) {
@@ -1146,9 +1162,22 @@ mod tests {
 
     #[test]
     fn the_attach_targets_the_agent_pane_id() {
-        let argv = TmuxScripts::attach_session("%3").argv();
+        let fixture = MultiplexerFixture::new();
+        fixture.create("fix-auth").unwrap();
+        let agent = fixture.tagged_panes("ringleader-fix-auth").pop().unwrap();
 
-        assert_eq!(argv, ["attach-session", "-t", "%3"]);
+        let attach = fixture.attached_to(&AttachTarget::Agent("ringleader-fix-auth".to_string()));
+
+        assert_eq!(attach, ["attach-session", "-t", agent.as_str()]);
+    }
+
+    #[test]
+    fn the_attach_to_a_session_without_an_agent_pane_targets_its_exact_name() {
+        let fixture = MultiplexerFixture::with_holder();
+
+        let attach = fixture.attached_to(&AttachTarget::Agent("holder".to_string()));
+
+        assert_eq!(attach, ["attach-session", "-t", "=holder:"]);
     }
 
     #[test]
