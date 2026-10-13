@@ -12,6 +12,7 @@ pub struct PullRequestCatalog {
     cached: HashMap<String, PullRequest>,
     pending: Option<Pending<HashMap<String, Option<PullRequest>>>>,
     next_refresh: Option<Instant>,
+    refresh_requested: bool,
 }
 
 impl PullRequestCatalog {
@@ -21,6 +22,7 @@ impl PullRequestCatalog {
             cached: HashMap::new(),
             pending: None,
             next_refresh: None,
+            refresh_requested: false,
         }
     }
 
@@ -31,7 +33,7 @@ impl PullRequestCatalog {
         visible: &[Session],
     ) -> &HashMap<String, PullRequest> {
         self.collect(now, interval);
-        let due = self.next_refresh.is_none_or(|due| now >= due);
+        let due = self.refresh_requested || self.next_refresh.is_none_or(|due| now >= due);
         if self.pull_requests.is_some() && self.pending.is_none() && !visible.is_empty() && due {
             self.start(now, interval, visible);
         }
@@ -47,7 +49,7 @@ impl PullRequestCatalog {
     }
 
     pub fn refresh_soon(&mut self) {
-        self.next_refresh = None;
+        self.refresh_requested = true;
     }
 
     fn collect(&mut self, now: Instant, interval: Duration) {
@@ -58,18 +60,12 @@ impl PullRequestCatalog {
             None => self.pending = Some(pending),
             Some(Ok(found)) => {
                 self.merge(found);
-                self.reschedule(now, interval);
+                self.next_refresh = Some(now + interval);
             }
             Some(Err(error)) => {
                 log::warn!("could not look up pull requests: {error}");
-                self.reschedule(now, interval);
+                self.next_refresh = Some(now + interval);
             }
-        }
-    }
-
-    fn reschedule(&mut self, now: Instant, interval: Duration) {
-        if self.next_refresh.is_some() {
-            self.next_refresh = Some(now + interval);
         }
     }
 
@@ -79,6 +75,7 @@ impl PullRequestCatalog {
         };
         let queries: Vec<PullRequestQuery> = visible.iter().map(PullRequestQuery::of).collect();
         self.next_refresh = Some(now + interval);
+        self.refresh_requested = false;
         self.pending = Some(Pending::start(move || Ok(Self::fetch(port, queries))));
     }
 
