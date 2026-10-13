@@ -115,11 +115,18 @@ impl ServerAudit {
             }
         }
         if self.multiplexer.caller_in_other_tmux() {
-            let keys: Vec<String> = key_bindings.all().map(HotKey::display).collect();
             report.info(format!(
-                "this runs inside your own tmux, so sessions open nested; your tmux must not use any of {} as its prefix or bind them in its root table, which doctor cannot check without reading your tmux server",
-                keys.join(", ")
+                "this runs inside your own tmux, so sessions open nested; your tmux must not use {} in its root table, which doctor cannot check without reading your tmux server",
+                Self::outer_key_rule(key_bindings)
             ));
+        }
+    }
+
+    fn outer_key_rule(key_bindings: &KeyBindings) -> String {
+        let keys: Vec<String> = key_bindings.all().map(HotKey::display).collect();
+        match keys.as_slice() {
+            [key] => format!("{key} as its prefix or bind it"),
+            _ => format!("any of {} as its prefix or bind them", keys.join(", ")),
         }
     }
 
@@ -367,6 +374,22 @@ mod tests {
             &fixture,
             "info:",
             "your tmux must not use any of Ctrl-Q, Alt-j, Alt-↓, Alt-k, Alt-↑ as its prefix or bind them in its root table"
+        ));
+    }
+
+    #[test]
+    fn inside_another_tmux_a_lone_return_key_reads_as_one_key() {
+        let none: [&str; 0] = [];
+        let draft = AuditFixture::draft()
+            .next_session_keys(&none)
+            .previous_session_keys(&none);
+        let fixture = AuditFixture::with_draft(draft)
+            .with_multiplexer(FakeMultiplexer::new().called_from_other_tmux());
+
+        assert!(AuditFixture::line_with(
+            &fixture,
+            "info:",
+            "your tmux must not use Ctrl-Q as its prefix or bind it in its root table"
         ));
     }
 
