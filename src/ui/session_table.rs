@@ -4,11 +4,12 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
+use super::colored_row::ColoredRow;
 use super::empty_state::EmptyState;
 use super::home_view::LayoutTier;
 use super::table_columns::TableColumns;
 use super::theme::Theme;
-use crate::domain::{SessionState, SessionSummary};
+use crate::domain::{DiffStat, SessionState, SessionSummary};
 
 pub struct SessionTable<'a> {
     rows: &'a [SessionSummary],
@@ -131,57 +132,38 @@ impl<'a> SessionTable<'a> {
             indicator.glyph().to_string(),
             indicator.style(&self.theme),
         )];
-        spans.extend(self.colored_cells(text, row, &pull_request_text, &diff_text));
+        spans.extend(self.colored_cells(&text, row, &pull_request_text, &diff_text));
         Line::from(spans)
     }
 
     fn colored_cells(
         &self,
-        text: String,
+        text: &str,
         row: &SessionSummary,
         pull_request_text: &str,
         diff_text: &str,
     ) -> Vec<Span<'static>> {
-        let mut spans = Vec::new();
-        let mut remaining = text.as_str();
-        if let Some(pull_request) = row.pull_request().filter(|_| !pull_request_text.is_empty())
-            && let Some(start) = remaining.find(pull_request_text)
-        {
-            let (before, rest) = remaining.split_at(start);
-            spans.push(Span::styled(before.to_string(), self.theme.base()));
-            spans.push(Span::styled(
-                pull_request_text.to_string(),
-                self.theme.pull_request(pull_request.state()),
-            ));
-            remaining = &rest[pull_request_text.len()..];
+        let mut colored = ColoredRow::new(text, self.theme.base());
+        if let Some(pull_request) = row.pull_request() {
+            let style = self.theme.pull_request(pull_request.state());
+            let cell = vec![Span::styled(pull_request_text.to_string(), style)];
+            colored = colored.color_first(pull_request_text, cell);
         }
-        if let Some(diff) = row.diff().filter(|_| !diff_text.is_empty())
-            && let Some(start) = remaining.rfind(diff_text)
-        {
-            let (before, rest) = remaining.split_at(start);
-            let untracked = diff.untracked_marker().map(|marker| format!(" {marker}"));
-            spans.push(Span::styled(before.to_string(), self.theme.base()));
-            spans.push(Span::styled(
-                format!("+{}", diff.insertions()),
-                self.theme.insertions(),
-            ));
-            spans.push(Span::styled(
-                format!(" -{}", diff.deletions()),
-                self.theme.deletions(),
-            ));
-            spans.push(Span::styled(
-                format!(
-                    "{}{}",
-                    untracked.unwrap_or_default(),
-                    &rest[diff_text.len()..]
-                ),
-                self.theme.base(),
-            ));
-            remaining = "";
+        if let Some(diff) = row.diff() {
+            colored = colored.color_last(diff_text, self.diff_spans(diff));
         }
-        if !remaining.is_empty() {
-            spans.push(Span::styled(remaining.to_string(), self.theme.base()));
-        }
+        colored.into_spans()
+    }
+
+    fn diff_spans(&self, diff: DiffStat) -> Vec<Span<'static>> {
+        let mut spans = vec![
+            Span::styled(format!("+{}", diff.insertions()), self.theme.insertions()),
+            Span::styled(format!(" -{}", diff.deletions()), self.theme.deletions()),
+        ];
+        spans.extend(
+            diff.untracked_marker()
+                .map(|marker| Span::styled(format!(" {marker}"), self.theme.base())),
+        );
         spans
     }
 

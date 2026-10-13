@@ -2,6 +2,7 @@ pub mod action_gate;
 pub mod app;
 pub mod bell;
 pub mod blocking_operation;
+pub mod colored_row;
 pub mod dialogs;
 pub mod diff_queue;
 pub mod empty_state;
