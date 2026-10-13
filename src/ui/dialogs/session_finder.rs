@@ -19,8 +19,7 @@ pub struct SessionFinder {
 
 impl SessionFinder {
     pub const TITLE: &'static str = " Find session ";
-    const HINTS: &'static str =
-        "Type to search · ↑ ↓ ctrl-j ctrl-k choose · Enter attach · Esc cancel";
+    const HINTS: &'static str = "Enter attach · Esc cancel · ↑ ↓ ctrl-j ctrl-k choose";
 
     pub fn open(names: Vec<String>) -> Self {
         let mut finder = Self {
@@ -99,18 +98,34 @@ impl SessionFinder {
 #[cfg(test)]
 mod tests {
     use crossterm::event::KeyModifiers;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
 
     use super::*;
+    use crate::ui::dialogs::Dialog;
 
     struct FinderFixture;
 
     impl FinderFixture {
         const WIDTH: usize = 74;
         const HEIGHT: usize = 8;
+        const SMALLEST_SCREEN: (u16, u16) = (36, 8);
+
+        fn names() -> Vec<String> {
+            let names = ["fix-auth", "dark-mode", "docs"];
+            names.iter().map(|name| name.to_string()).collect()
+        }
 
         fn finder() -> SessionFinder {
-            let names = ["fix-auth", "dark-mode", "docs"];
-            SessionFinder::open(names.iter().map(|name| name.to_string()).collect())
+            SessionFinder::open(Self::names())
+        }
+
+        fn screen((width, height): (u16, u16)) -> String {
+            let dialog = Dialog::find_session(Self::names());
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| dialog.render(frame, &Theme)).unwrap();
+            let cells = terminal.backend().buffer().content();
+            cells.iter().map(|cell| cell.symbol()).collect()
         }
 
         fn press(finder: &mut SessionFinder, code: KeyCode, modifiers: KeyModifiers) -> DialogStep {
@@ -168,6 +183,13 @@ mod tests {
 
         assert_eq!(rows.len(), FinderFixture::HEIGHT);
         assert_eq!(rows.last().unwrap(), SessionFinder::HINTS);
+    }
+
+    #[test]
+    fn the_smallest_screen_keeps_enter_and_esc_in_view() {
+        let screen = FinderFixture::screen(FinderFixture::SMALLEST_SCREEN);
+
+        assert!(screen.contains("Enter attach · Esc cancel"), "{screen}");
     }
 
     #[test]
