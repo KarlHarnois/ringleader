@@ -95,10 +95,12 @@ struct GhQuery {
 }
 
 impl GhQuery {
-    const NEWEST_FIRST: &'static str = "first: 1, orderBy: {field: CREATED_AT, direction: DESC}";
-    const FIELDS: &'static str = "number state isDraft createdAt";
-    const RESHAPE: &'static str = ".data.repository \
-        | map_values(.nodes[0] | if . then .createdAt |= fromdateiso8601 else . end)";
+    const CANDIDATES: &'static str = "first: 10, orderBy: {field: CREATED_AT, direction: DESC}";
+    const FIELDS: &'static str = "number state isDraft createdAt headRepositoryOwner { login }";
+    const RESHAPE: &'static str = ".data | {viewer: .viewer.login, \
+        owner: .repository.owner.login, \
+        branches: (.repository | del(.owner) | map_values([.nodes[] | {number, state, isDraft, \
+        createdAt: (.createdAt | fromdateiso8601), headOwner: .headRepositoryOwner.login}]))}";
 
     fn new(branches: &[String]) -> Self {
         Self {
@@ -130,14 +132,15 @@ impl GhQuery {
             .collect();
         format!(
             "query($owner: String!, $name: String!{variables}) \
-             {{ repository(owner: $owner, name: $name) {{{fields} }} }}"
+             {{ viewer {{ login }} \
+             repository(owner: $owner, name: $name) {{ owner {{ login }}{fields} }} }}"
         )
     }
 
     fn field(alias: &str) -> String {
         format!(
             " {alias}: pullRequests(headRefName: ${alias}, {}) {{ nodes {{ {} }} }}",
-            Self::NEWEST_FIRST,
+            Self::CANDIDATES,
             Self::FIELDS
         )
     }
@@ -156,22 +159,28 @@ impl GhQuery {
     }
 }
 
+#[derive(Deserialize)]
 struct GhListing {
-    entries: HashMap<String, Option<GhEntry>>,
+    viewer: String,
+    owner: String,
+    branches: HashMap<String, Vec<GhEntry>>,
 }
 
 impl GhListing {
     fn parse(text: &str) -> Result<Self, serde_json::Error> {
-        Ok(Self {
-            entries: serde_json::from_str(text)?,
-        })
+        serde_json::from_str(text)
     }
 
     fn pull_request(&self, alias: &str) -> Option<PullRequest> {
-        self.entries
-            .get(alias)
-            .and_then(Option::as_ref)
+        self.branches
+            .get(alias)?
+            .iter()
+            .find(|entry| self.owns(entry))
             .and_then(GhEntry::pull_request)
+    }
+
+    fn owns(&self, entry: &GhEntry) -> bool {
+        entry.has_head_owner(&self.viewer) || entry.has_head_owner(&self.owner)
     }
 }
 
@@ -183,6 +192,8 @@ struct GhEntry {
     is_draft: bool,
     #[serde(rename = "createdAt")]
     created_at: u64,
+    #[serde(rename = "headOwner")]
+    head_owner: Option<String>,
 }
 
 impl GhEntry {
@@ -195,6 +206,10 @@ impl GhEntry {
             _ => return None,
         };
         Some(PullRequest::new(self.number, state, self.created_at))
+    }
+
+    fn has_head_owner(&self, login: &str) -> bool {
+        self.head_owner.as_deref() == Some(login)
     }
 }
 
@@ -219,8 +234,8 @@ listing=''
 while [ $# -gt 0 ]; do
   if [ "$1" = "-f" ]; then
     case "$2" in
-      branch*=fix-auth) entry='{"number":42,"state":"OPEN","isDraft":false,"createdAt":1700000000}' ;;
-      branch*=*) entry=null ;;
+      branch*=fix-auth) entry='[{"number":42,"state":"OPEN","isDraft":false,"createdAt":1700000000,"headOwner":"octocat"}]' ;;
+      branch*=*) entry='[]' ;;
       *) entry='' ;;
     esac
     if [ -n "$entry" ]; then listing="$listing${listing:+,}\"${2%%=*}\":$entry"; fi
@@ -228,12 +243,16 @@ while [ $# -gt 0 ]; do
   fi
   shift
 done
-printf '{%s}' "$listing"
+printf '{"viewer":"octocat","owner":"example-org","branches":{%s}}' "$listing"
 "#;
 
-        fn pull_request(entry: &str) -> Option<PullRequest> {
-            let listing = GhListing::parse(&format!(r#"{{"branch0":{entry}}}"#)).unwrap();
-            listing.pull_request("branch0")
+        fn pull_request(entries: &str) -> Option<PullRequest> {
+            let listing = GhListing::parse(&Self::listing(&format!(r#""branch0":[{entries}]"#)));
+            listing.unwrap().pull_request("branch0")
+        }
+
+        fn listing(branches: &str) -> String {
+            format!(r#"{{"viewer":"octocat","owner":"example-org","branches":{{{branches}}}}}"#)
         }
 
         fn branches() -> Vec<String> {
@@ -269,7 +288,7 @@ printf '{%s}' "$listing"
     #[test]
     fn an_open_pull_request_is_read_with_its_number() {
         let found = ParseFixture::pull_request(
-            r#"{"number":142,"state":"OPEN","isDraft":false,"createdAt":1700000000}"#,
+            r#"{"number":142,"state":"OPEN","isDraft":false,"createdAt":1700000000,"headOwner":"octocat"}"#,
         );
 
         assert_eq!(
@@ -285,7 +304,7 @@ printf '{%s}' "$listing"
     #[test]
     fn a_draft_reads_as_a_draft() {
         let found = ParseFixture::pull_request(
-            r#"{"number":5,"state":"OPEN","isDraft":true,"createdAt":1700000000}"#,
+            r#"{"number":5,"state":"OPEN","isDraft":true,"createdAt":1700000000,"headOwner":"octocat"}"#,
         );
 
         assert_eq!(
@@ -301,7 +320,7 @@ printf '{%s}' "$listing"
     #[test]
     fn a_merged_pull_request_reads_as_merged() {
         let found = ParseFixture::pull_request(
-            r#"{"number":9,"state":"MERGED","isDraft":false,"createdAt":1700000000}"#,
+            r#"{"number":9,"state":"MERGED","isDraft":false,"createdAt":1700000000,"headOwner":"octocat"}"#,
         );
 
         assert_eq!(
@@ -317,7 +336,7 @@ printf '{%s}' "$listing"
     #[test]
     fn a_closed_pull_request_reads_as_closed() {
         let found = ParseFixture::pull_request(
-            r#"{"number":3,"state":"CLOSED","isDraft":false,"createdAt":1700000000}"#,
+            r#"{"number":3,"state":"CLOSED","isDraft":false,"createdAt":1700000000,"headOwner":"octocat"}"#,
         );
 
         assert_eq!(
@@ -332,14 +351,56 @@ printf '{%s}' "$listing"
 
     #[test]
     fn no_pull_request_reads_as_none() {
-        assert_eq!(ParseFixture::pull_request("null"), None);
+        assert_eq!(ParseFixture::pull_request(""), None);
+    }
+
+    #[test]
+    fn a_strangers_newer_fork_pull_request_is_skipped() {
+        let found = ParseFixture::pull_request(
+            r#"{"number":300,"state":"OPEN","isDraft":false,"createdAt":1700000900,"headOwner":"stranger"},
+               {"number":42,"state":"OPEN","isDraft":false,"createdAt":1700000000,"headOwner":"octocat"}"#,
+        );
+
+        assert_eq!(
+            found,
+            Some(PullRequest::new(
+                42,
+                PullRequestState::Open,
+                ParseFixture::OPENED_AT
+            ))
+        );
+    }
+
+    #[test]
+    fn a_pull_request_headed_in_the_repository_owner_counts_as_own() {
+        let found = ParseFixture::pull_request(
+            r#"{"number":8,"state":"OPEN","isDraft":false,"createdAt":1700000000,"headOwner":"example-org"}"#,
+        );
+
+        assert_eq!(
+            found,
+            Some(PullRequest::new(
+                8,
+                PullRequestState::Open,
+                ParseFixture::OPENED_AT
+            ))
+        );
+    }
+
+    #[test]
+    fn only_strangers_pull_requests_read_as_none() {
+        let found = ParseFixture::pull_request(
+            r#"{"number":300,"state":"OPEN","isDraft":false,"createdAt":1700000900,"headOwner":"stranger"}"#,
+        );
+
+        assert_eq!(found, None);
     }
 
     #[test]
     fn an_unknown_state_reads_as_none() {
         assert_eq!(
             ParseFixture::pull_request(
-                r#"{"number":1,"state":"QUEUED","isDraft":false,"createdAt":1700000000}"#
+                r#"{"number":1,"state":"QUEUED","isDraft":false,"createdAt":1700000000,"headOwner":"octocat"}"#
             ),
             None
         );
@@ -355,7 +416,9 @@ printf '{%s}' "$listing"
         let query = GhQuery::new(&ParseFixture::branches());
         let output = ParseFixture::output(
             0,
-            r#"{"branch0":{"number":7,"state":"OPEN","isDraft":false,"createdAt":1700000000},"branch1":null}"#,
+            &ParseFixture::listing(
+                r#""branch0":[{"number":7,"state":"OPEN","isDraft":false,"createdAt":1700000000,"headOwner":"octocat"}],"branch1":[]"#,
+            ),
         );
 
         let found = GhPullRequests::pull_requests(&output, &query).unwrap();
@@ -437,6 +500,8 @@ printf '{%s}' "$listing"
 
         assert!(text.contains("$branch0: String!, $branch1: String!"));
         assert!(text.contains("branch1: pullRequests(headRefName: $branch1,"));
+        assert!(text.contains("viewer { login }"));
+        assert!(text.contains("headRepositoryOwner { login }"));
     }
 
     #[test]
