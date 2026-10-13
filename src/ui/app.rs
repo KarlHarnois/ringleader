@@ -39,8 +39,13 @@ impl App {
         }
     }
 
-    pub fn with_message(mut self, message: Option<String>) -> Self {
-        self.status.show(message.map(StatusMessage::Error));
+    pub fn with_startup_messages(mut self, warnings: &[String], note: Option<String>) -> Self {
+        if warnings.is_empty() {
+            self.status.show(note.map(StatusMessage::Info));
+            return self;
+        }
+        let reported: Vec<String> = warnings.iter().cloned().chain(note).collect();
+        self.status.error(reported.join("; "));
         self
     }
 
@@ -1020,10 +1025,39 @@ mod tests {
     }
 
     #[test]
+    fn a_startup_note_without_warnings_shows_as_information() {
+        let fixture = AppFixture::two_waiting_sessions();
+
+        let app = AppFixture::started(&fixture, 100, 28)
+            .with_startup_messages(&[], Some("recreated the socket".to_string()));
+
+        assert_eq!(
+            app.status.message(),
+            Some(&StatusMessage::Info("recreated the socket".to_string()))
+        );
+    }
+
+    #[test]
+    fn a_startup_note_follows_the_warnings_it_comes_with() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let warnings = ["the config failed".to_string()];
+
+        let app = AppFixture::started(&fixture, 100, 28)
+            .with_startup_messages(&warnings, Some("recreated the socket".to_string()));
+
+        assert_eq!(
+            app.status.message(),
+            Some(&StatusMessage::Error(
+                "the config failed; recreated the socket".to_string()
+            ))
+        );
+    }
+
+    #[test]
     fn a_key_press_clears_a_shown_message() {
         let fixture = AppFixture::two_waiting_sessions();
         let mut app = AppFixture::started(&fixture, 100, 28)
-            .with_message(Some("the config failed".to_string()));
+            .with_startup_messages(&["the config failed".to_string()], None);
 
         AppFixture::press(&mut app, 'j');
 
