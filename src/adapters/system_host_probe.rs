@@ -274,6 +274,7 @@ mod tests {
 
     #[test]
     fn a_process_outside_any_tmux_server_is_not_under_one() {
+        let server = TmuxTestServer::with_session("probe");
         let directory = tempfile::tempdir().unwrap();
         std::process::Command::new("sh")
             .args(["-c", "nohup sleep 33 >/dev/null 2>&1 &"])
@@ -283,7 +284,7 @@ mod tests {
         let probe = ProbeFixture::probe();
         let orphan = probe.processes_in(directory.path(), &[]);
 
-        let under = probe.processes_under_server(directory.path(), Path::new("/run/example.sock"));
+        let under = probe.processes_under_server(directory.path(), server.socket());
 
         probe.terminate(&orphan.iter().map(ProcessInfo::pid).collect::<Vec<_>>());
         assert_eq!(orphan.len(), 1);
