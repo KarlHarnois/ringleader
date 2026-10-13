@@ -129,7 +129,7 @@ impl<'a> SessionTable<'a> {
 
     fn line(&self, line: &TreeLine, columns: &TableColumns, width: usize) -> Line<'static> {
         let spans = match line {
-            TreeLine::Heading(heading) => heading.spans(self.tick, &self.theme),
+            TreeLine::Heading(heading) => heading.spans(self.tick, &self.theme, width),
             TreeLine::Session { row, branch } => self.row_spans(row, *branch, columns),
         };
         if self.is_selected(line) {

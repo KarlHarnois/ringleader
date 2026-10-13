@@ -1,10 +1,12 @@
 use std::collections::HashSet;
+use std::iter::once;
 
 use ratatui::text::Span;
 
 use super::list_selection::ListSelection;
 use super::repo_group::RepoGroup;
 use super::state_indicator::StateIndicator;
+use super::text_fit::TextFit;
 use super::theme::Theme;
 use crate::domain::{SessionState, SessionSummary};
 
@@ -57,21 +59,34 @@ impl<'a> RepoHeading<'a> {
         self.rows
     }
 
-    pub fn spans(&self, tick: u64, theme: &Theme) -> Vec<Span<'static>> {
-        let mut spans = self.title_spans(theme);
-        spans.extend(self.count_spans(tick, theme));
-        spans
+    pub fn spans(&self, tick: u64, theme: &Theme, width: usize) -> Vec<Span<'static>> {
+        let lead = self.lead_spans(theme);
+        let tail = self.tail_spans(tick, theme);
+        let room_for_name = width.saturating_sub(Self::width_of(&lead) + Self::width_of(&tail));
+        let name = self.name_span(theme, room_for_name);
+        lead.into_iter().chain(once(name)).chain(tail).collect()
     }
 
-    fn title_spans(&self, theme: &Theme) -> Vec<Span<'static>> {
+    fn lead_spans(&self, theme: &Theme) -> Vec<Span<'static>> {
         vec![
             Span::styled(self.number_label(), theme.dim()),
             Span::styled(format!(" {} ", self.arrow()), theme.base()),
-            Span::styled(self.group.to_string(), theme.emphasis()),
+        ]
+    }
+
+    fn name_span(&self, theme: &Theme, room: usize) -> Span<'static> {
+        let name = TextFit::new(&self.group.to_string()).right_truncated(room);
+        Span::styled(name, theme.emphasis())
+    }
+
+    fn tail_spans(&self, tick: u64, theme: &Theme) -> Vec<Span<'static>> {
+        let mut spans = vec![
             Span::styled(" ", theme.base()),
             Span::styled(format!("({})", self.rows.len()), theme.dim()),
             Span::styled(" ", theme.base()),
-        ]
+        ];
+        spans.extend(self.count_spans(tick, theme));
+        spans
     }
 
     fn count_spans(&self, tick: u64, theme: &Theme) -> Vec<Span<'static>> {
@@ -87,6 +102,10 @@ impl<'a> RepoHeading<'a> {
         let indicator = StateIndicator::new(state, tick);
         let text = format!("{}{count}", indicator.glyph());
         (count > 0).then(|| Span::styled(text, indicator.style(theme)))
+    }
+
+    fn width_of(spans: &[Span]) -> usize {
+        spans.iter().map(Span::width).sum()
     }
 
     fn arrow(&self) -> char {
@@ -112,12 +131,18 @@ mod tests {
     struct HeadingFixture;
 
     impl HeadingFixture {
+        const WIDE: usize = 80;
+
         fn row(name: &str, state: SessionState) -> SessionSummary {
             ServiceFixture::summary_in(name, "/repos/alpha", state)
         }
 
         fn text(heading: &RepoHeading) -> String {
-            let spans = heading.spans(0, &Theme);
+            Self::text_within(heading, Self::WIDE)
+        }
+
+        fn text_within(heading: &RepoHeading, width: usize) -> String {
+            let spans = heading.spans(0, &Theme, width);
             spans.iter().map(|span| span.content.as_ref()).collect()
         }
     }
@@ -145,6 +170,22 @@ mod tests {
 
         assert_eq!(HeadingFixture::text(&heading), "1 ▸ alpha (1)  ●1");
         assert!(heading.shown_rows().is_empty());
+    }
+
+    #[test]
+    fn a_narrow_heading_shortens_the_repo_name_and_keeps_the_counts_whole() {
+        let repo = "/repos/example-project-dashboard";
+        let rows = [
+            ServiceFixture::summary_in("docs", repo, SessionState::Working),
+            ServiceFixture::summary_in("fix-auth", repo, SessionState::Waiting),
+        ];
+
+        let heading = RepoHeading::new(1, &rows);
+
+        assert_eq!(
+            HeadingFixture::text_within(&heading, 30),
+            "1 ▾ example-projec… (2)  ⠋1 ●1"
+        );
     }
 
     #[test]
