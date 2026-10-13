@@ -187,7 +187,9 @@ pub enum WorkspaceError {
     NoUpstream { worktree: PathBuf },
     #[error("{worktree} has a merge in progress, finish or abort it before merging again")]
     MergeInProgress { worktree: PathBuf },
-    #[error("{cause}; ran git merge --abort, so the worktree is back where it was")]
+    #[error("{worktree} has staged changes, commit them before merging")]
+    StagedChanges { worktree: PathBuf },
+    #[error("{cause}; undid the unfinished merge, so the worktree is back where it was")]
     MergeAborted { cause: String },
     #[error(
         "base branch {base} matches neither {local_ref} nor {remote_ref}{}",

@@ -26,6 +26,7 @@ impl<'a> UpstreamMerger<'a> {
         base_branch: Option<&BaseBranch>,
     ) -> Result<UpstreamMerge, WorkspaceError> {
         self.refuse_merge_in_progress(worktree)?;
+        self.refuse_staged_changes(worktree)?;
         let branch = self.upstream_branch(worktree, base_branch)?;
         self.fetch(worktree, &branch)?;
         let commit = self.commit_of(worktree, &branch.origin_ref())?;
@@ -36,6 +37,15 @@ impl<'a> UpstreamMerger<'a> {
     fn refuse_merge_in_progress(&self, worktree: &Path) -> Result<(), WorkspaceError> {
         if self.is_merging(worktree)? {
             return Err(WorkspaceError::MergeInProgress {
+                worktree: worktree.to_path_buf(),
+            });
+        }
+        Ok(())
+    }
+
+    fn refuse_staged_changes(&self, worktree: &Path) -> Result<(), WorkspaceError> {
+        if self.has_staged_changes(worktree)? {
+            return Err(WorkspaceError::StagedChanges {
                 worktree: worktree.to_path_buf(),
             });
         }
@@ -157,16 +167,27 @@ impl<'a> UpstreamMerger<'a> {
         worktree: &Path,
         failure: WorkspaceError,
     ) -> Result<WorkspaceError, WorkspaceError> {
-        if !self.is_merging(worktree)? {
+        let undo = if self.is_merging(worktree)? {
+            GitInvocation::in_worktree(worktree, "merge").arg("--abort")
+        } else if self.has_staged_changes(worktree)? {
+            GitInvocation::in_worktree(worktree, "reset").args(["--merge", Self::HEAD])
+        } else {
             return Ok(failure);
-        }
-        let abort = GitInvocation::in_worktree(worktree, "merge")
-            .writing()
-            .arg("--abort");
-        self.git.run_checked(&abort)?;
+        };
+        self.git.run_checked(&undo.writing())?;
         Ok(WorkspaceError::MergeAborted {
             cause: failure.to_string(),
         })
+    }
+
+    fn has_staged_changes(&self, worktree: &Path) -> Result<bool, WorkspaceError> {
+        let compare = GitInvocation::in_worktree(worktree, "diff-index").args([
+            "--cached",
+            "--quiet",
+            Self::HEAD,
+            "--",
+        ]);
+        Ok(self.git.lookup(&compare)?.is_none())
     }
 
     fn is_merging(&self, worktree: &Path) -> Result<bool, WorkspaceError> {
@@ -179,6 +200,7 @@ mod tests {
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
+    use std::time::Duration;
 
     use super::*;
     use crate::application::ports::Workspace;
@@ -195,6 +217,7 @@ mod tests {
         const SHARED_FILE: &'static str = "shared.txt";
         const EXECUTABLE: u32 = 0o755;
         const RESOLUTION: &'static str = "both sides kept\n";
+        const SHORT_DEADLINE: Duration = Duration::from_secs(1);
         const IGNORED_FILE: &'static str = "settings.local";
         const LOCAL_TEXT: &'static str = "mine\n";
 
@@ -301,9 +324,28 @@ mod tests {
         }
 
         fn reject_commit_messages(&self) {
-            let hook = self.clone.join(".git/hooks/commit-msg");
-            fs::write(&hook, "#!/bin/sh\necho 'needs a ticket id' >&2\nexit 1\n").unwrap();
+            self.install_hook("commit-msg", "echo 'needs a ticket id' >&2\nexit 1");
+        }
+
+        fn stall_merge_commits(&self) {
+            self.install_hook("pre-merge-commit", "sleep 20");
+        }
+
+        fn install_hook(&self, name: &str, body: &str) {
+            let hook = self.clone.join(".git/hooks").join(name);
+            fs::write(&hook, format!("#!/bin/sh\n{body}\n")).unwrap();
             fs::set_permissions(&hook, fs::Permissions::from_mode(Self::EXECUTABLE)).unwrap();
+        }
+
+        fn merge_within(&self, deadline: Duration) -> Result<UpstreamMerge, WorkspaceError> {
+            self.origin
+                .workspace_with_deadline(deadline)
+                .merge_upstream(&self.worktree, None)
+        }
+
+        fn stage_a_change(&self) {
+            fs::write(self.worktree.join("staged.txt"), "staged\n").unwrap();
+            self.origin.git(&self.worktree, &["add", "staged.txt"]);
         }
 
         fn is_clean(&self) -> bool {
@@ -531,6 +573,41 @@ mod tests {
             "{error:?}"
         );
         assert_eq!(fixture.ignored_text(), MergeFixture::LOCAL_TEXT);
+    }
+
+    #[test]
+    fn a_merge_killed_before_it_wrote_merge_head_is_undone() {
+        let fixture = MergeFixture::new();
+        fixture.commit_on_branch("work.txt");
+        fixture.commit_upstream("news.txt");
+        fixture.stall_merge_commits();
+
+        let error = fixture
+            .merge_within(MergeFixture::SHORT_DEADLINE)
+            .unwrap_err();
+
+        assert!(
+            matches!(error, WorkspaceError::MergeAborted { .. }),
+            "{error:?}"
+        );
+        assert!(fixture.is_clean());
+    }
+
+    #[test]
+    fn staged_changes_are_refused_and_kept() {
+        let fixture = MergeFixture::new();
+        fixture.commit_upstream("news.txt");
+        fixture.stage_a_change();
+
+        let error = fixture.merge().unwrap_err();
+
+        assert_eq!(
+            error,
+            WorkspaceError::StagedChanges {
+                worktree: fixture.worktree.clone()
+            }
+        );
+        assert!(!fixture.is_clean());
     }
 
     #[test]
