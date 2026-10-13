@@ -1,3 +1,4 @@
+use std::iter::once;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -14,8 +15,8 @@ use super::repo_draft::RepoDraft;
 pub struct ConfigDraft {
     worktree_root: PathBuf,
     return_key: String,
-    next_session_keys: Vec<String>,
-    previous_session_keys: Vec<String>,
+    next_session_keys: Option<Vec<String>>,
+    previous_session_keys: Option<Vec<String>>,
     state_poll_ms: u64,
     preview_refresh_ms: u64,
     diff_refresh_ms: u64,
@@ -33,8 +34,8 @@ impl ConfigDraft {
         Self {
             worktree_root: default_worktree_root.to_path_buf(),
             return_key: KeyBindings::RETURN_KEY.to_string(),
-            next_session_keys: Self::owned(&KeyBindings::NEXT_SESSION_KEYS),
-            previous_session_keys: Self::owned(&KeyBindings::PREVIOUS_SESSION_KEYS),
+            next_session_keys: None,
+            previous_session_keys: None,
             state_poll_ms: 1000,
             preview_refresh_ms: 750,
             diff_refresh_ms: 3000,
@@ -64,14 +65,14 @@ impl ConfigDraft {
 
     pub fn next_session_keys(self, keys: &[impl AsRef<str>]) -> Self {
         Self {
-            next_session_keys: Self::owned(keys),
+            next_session_keys: Some(Self::owned(keys)),
             ..self
         }
     }
 
     pub fn previous_session_keys(self, keys: &[impl AsRef<str>]) -> Self {
         Self {
-            previous_session_keys: Self::owned(keys),
+            previous_session_keys: Some(Self::owned(keys)),
             ..self
         }
     }
@@ -151,12 +152,18 @@ impl ConfigDraft {
         &self.return_key
     }
 
-    pub(super) fn raw_next_session_keys(&self) -> &[String] {
-        &self.next_session_keys
+    pub(super) fn raw_next_session_keys(&self) -> Vec<String> {
+        self.written_or_default(
+            self.next_session_keys.as_deref(),
+            &KeyBindings::NEXT_SESSION_KEYS,
+        )
     }
 
-    pub(super) fn raw_previous_session_keys(&self) -> &[String] {
-        &self.previous_session_keys
+    pub(super) fn raw_previous_session_keys(&self) -> Vec<String> {
+        self.written_or_default(
+            self.previous_session_keys.as_deref(),
+            &KeyBindings::PREVIOUS_SESSION_KEYS,
+        )
     }
 
     pub(super) fn raw_activity_idle_seconds(&self) -> i64 {
@@ -198,11 +205,11 @@ impl ConfigDraft {
     }
 
     pub(super) fn next_session_keys_value(&self) -> Vec<HotKey> {
-        HotKey::parse_valid(&self.next_session_keys)
+        HotKey::parse_valid(self.raw_next_session_keys())
     }
 
     pub(super) fn previous_session_keys_value(&self) -> Vec<HotKey> {
-        HotKey::parse_valid(&self.previous_session_keys)
+        HotKey::parse_valid(self.raw_previous_session_keys())
     }
 
     pub(super) fn activity_idle_seconds_value(&self) -> u64 {
@@ -227,6 +234,30 @@ impl ConfigDraft {
 
     pub(super) fn agents_value(&self) -> &[Agent] {
         &self.agents
+    }
+
+    fn written_or_default(&self, written: Option<&[String]>, defaults: &[&str]) -> Vec<String> {
+        match written {
+            Some(keys) => keys.to_vec(),
+            None => self.defaults_not_written_elsewhere(defaults),
+        }
+    }
+
+    fn defaults_not_written_elsewhere(&self, defaults: &[&str]) -> Vec<String> {
+        let written = self.written_keys();
+        defaults
+            .iter()
+            .filter(|key| HotKey::parse(key).is_some_and(|key| !written.contains(&key)))
+            .map(|key| key.to_string())
+            .collect()
+    }
+
+    fn written_keys(&self) -> Vec<HotKey> {
+        let lists = [&self.next_session_keys, &self.previous_session_keys]
+            .into_iter()
+            .flatten()
+            .flatten();
+        HotKey::parse_valid(once(&self.return_key).chain(lists))
     }
 
     fn owned(keys: &[impl AsRef<str>]) -> Vec<String> {

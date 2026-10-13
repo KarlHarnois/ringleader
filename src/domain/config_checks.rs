@@ -68,12 +68,13 @@ impl<'a> ConfigChecks<'a> {
         self.check_repeated_keys(&settings);
     }
 
-    fn key_settings(&self) -> Vec<(&'static str, &'a str)> {
+    fn key_settings(&self) -> Vec<(&'static str, String)> {
         let draft = self.draft;
-        let listed = |setting: &'static str, keys: &'a [String]| {
-            keys.iter().map(move |key| (setting, key.as_str()))
+        let listed = |setting: &'static str, keys: Vec<String>| {
+            keys.into_iter().map(move |key| (setting, key))
         };
-        once((KeyBindings::RETURN_KEY_SETTING, draft.raw_return_key()))
+        let return_key = draft.raw_return_key().to_string();
+        once((KeyBindings::RETURN_KEY_SETTING, return_key))
             .chain(listed(
                 KeyBindings::NEXT_SESSION_SETTING,
                 draft.raw_next_session_keys(),
@@ -94,7 +95,7 @@ impl<'a> ConfigChecks<'a> {
         }
     }
 
-    fn check_repeated_keys(&mut self, settings: &[(&str, &str)]) {
+    fn check_repeated_keys(&mut self, settings: &[(&str, String)]) {
         let mut seen: Vec<(&str, HotKey)> = Vec::new();
         for (setting, raw) in settings {
             let Some(key) = HotKey::parse(raw) else {
@@ -358,7 +359,9 @@ mod tests {
                 "previous_session_keys",
             ),
             (
-                ChecksFixture::draft().previous_session_keys(&["M-Down"]),
+                ChecksFixture::draft()
+                    .next_session_keys(&["M-Down"])
+                    .previous_session_keys(&["M-Down"]),
                 "previous_session_keys",
             ),
             (
@@ -380,6 +383,16 @@ mod tests {
         ] {
             ChecksFixture::fails_on(draft, setting);
         }
+    }
+
+    #[test]
+    fn a_written_key_takes_itself_out_of_a_default_list_it_would_repeat() {
+        let draft = ChecksFixture::draft().next_session_keys(&["M-k"]);
+
+        let config = crate::domain::Config::new(&draft).unwrap();
+
+        let previous = config.key_bindings().previous_session();
+        assert_eq!(previous, HotKey::parse_valid(["M-Up"]));
     }
 
     #[test]

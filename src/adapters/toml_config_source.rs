@@ -308,6 +308,17 @@ mod tests {
     }
 
     #[test]
+    fn an_older_config_whose_return_key_is_a_default_session_key_still_loads() {
+        let fixture = SourceFixture::with_text("return_key = \"M-k\"\n");
+
+        let config = fixture.source().load().unwrap();
+
+        let bindings = config.key_bindings();
+        assert_eq!(bindings.return_key().to_string(), "M-k");
+        assert_eq!(SourceFixture::names(bindings.previous_session()), ["M-Up"]);
+    }
+
+    #[test]
     fn the_first_run_template_loads_the_default_key_bindings() {
         let fixture = SourceFixture::new();
 
