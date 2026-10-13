@@ -80,7 +80,7 @@ impl SessionList {
     }
 
     pub fn show(&mut self, mut rows: Vec<SessionSummary>) {
-        rows.sort_by_cached_key(|row| (RepoGroup::of(row), row.state(), row.name().to_string()));
+        SessionTree::sort(&mut rows);
         self.rows = rows;
         self.selection = self.repaired_selection();
     }

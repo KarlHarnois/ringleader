@@ -21,6 +21,10 @@ impl<'a> SessionTree<'a> {
         Self { rows, lines }
     }
 
+    pub fn sort(rows: &mut [SessionSummary]) {
+        rows.sort_by_cached_key(|row| (RepoGroup::of(row), row.state(), row.name().to_string()));
+    }
+
     pub fn rows(&self) -> &'a [SessionSummary] {
         self.rows
     }
