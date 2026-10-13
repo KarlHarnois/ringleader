@@ -12,7 +12,7 @@ use super::legend::{Legend, LegendEntry};
 use super::state_indicator::StateIndicator;
 use super::text_fit::TextFit;
 use super::theme::Theme;
-use crate::domain::{ReturnKey, SessionState};
+use crate::domain::{PullRequestState, ReturnKey, SessionState};
 
 pub struct HelpView {
     return_key: String,
@@ -40,6 +40,7 @@ impl HelpView {
     ];
     const RETURN_ACTION: &'static str = "detach from a session and return here";
     const FIRST_SPINNER_TICK: u64 = 0;
+    const PULL_REQUEST_SYMBOL: &'static str = "#n";
     const CLOSE_HINT: &'static str = "? Esc q close";
     const SCROLL_HINT: &'static str = "↑ ↓ scroll · ";
 
@@ -97,12 +98,11 @@ impl HelpView {
     }
 
     fn content(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
-        let sections = [
-            self.keys(width, theme),
-            Self::legends(width, theme),
-            self.files(width, theme),
-        ];
-        sections.join(&Line::default())
+        let mut content = self.keys(width, theme);
+        content.extend(Self::legends(width, theme));
+        content.push(Line::default());
+        content.extend(self.files(width, theme));
+        content
     }
 
     fn keys(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
@@ -115,7 +115,11 @@ impl HelpView {
     }
 
     fn legends(width: usize, theme: &Theme) -> Vec<Line<'static>> {
-        let legends = [Self::state_legend(theme), Self::diff_legend(theme)];
+        let legends = [
+            Self::state_legend(theme),
+            Self::pull_request_legend(theme),
+            Self::diff_legend(theme),
+        ];
         legends
             .iter()
             .flat_map(|legend| legend.lines(width, theme))
@@ -128,6 +132,17 @@ impl HelpView {
             LegendEntry::new(indicator.glyph(), indicator.style(theme), state.label())
         });
         Legend::new("States", entries.collect())
+    }
+
+    fn pull_request_legend(theme: &Theme) -> Legend {
+        let entries = PullRequestState::ALL.iter().map(|&state| {
+            LegendEntry::new(
+                Self::PULL_REQUEST_SYMBOL,
+                theme.pull_request(state),
+                state.label(),
+            )
+        });
+        Legend::new("PRs", entries.collect())
     }
 
     fn diff_legend(theme: &Theme) -> Legend {
@@ -243,6 +258,20 @@ mod tests {
                 .find(|span| span.content == symbol)
                 .unwrap();
             span.style
+        }
+
+        fn pull_request_styles() -> Vec<Style> {
+            let lines = Self::page(&Self::help(), Self::WIDE_WIDTH);
+            let legend = lines
+                .iter()
+                .find(|line| line.to_string().starts_with("PRs"))
+                .unwrap();
+            legend
+                .spans
+                .iter()
+                .filter(|span| span.content == HelpView::PULL_REQUEST_SYMBOL)
+                .map(|span| span.style)
+                .collect()
         }
 
         fn press(help: &mut HelpView, code: KeyCode) -> DialogStep {
@@ -384,6 +413,26 @@ mod tests {
     fn the_legend_colors_the_diff_markers_like_the_session_table() {
         assert_eq!(HelpFixture::span_style("+n"), Theme.insertions());
         assert_eq!(HelpFixture::span_style("-n"), Theme.deletions());
+    }
+
+    #[test]
+    fn the_legend_names_every_pull_request_state() {
+        let text = HelpFixture::text(&HelpFixture::help());
+
+        assert!(text.contains("PRs          #n open  #n draft  #n merged  #n closed"));
+    }
+
+    #[test]
+    fn the_legend_colors_each_pull_request_state_like_the_session_table() {
+        assert_eq!(
+            HelpFixture::pull_request_styles(),
+            vec![
+                Theme.pull_request(PullRequestState::Open),
+                Theme.pull_request(PullRequestState::Draft),
+                Theme.pull_request(PullRequestState::Merged),
+                Theme.pull_request(PullRequestState::Closed),
+            ]
+        );
     }
 
     #[test]
