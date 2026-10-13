@@ -470,6 +470,16 @@ mod tests {
     }
 
     #[test]
+    fn merging_origin_main_without_an_origin_head_counts_only_the_session_changes() {
+        let fixture = DiffBaseFixture::started();
+        fixture.commit_in_session("session.md");
+        fixture.commit_only_on_the_origin_copy_of(GitTestRepo::BRANCH, "news.md");
+        fixture.merge_into_session(DiffBaseFixture::ORIGIN_SHORT_NAME);
+
+        assert_eq!(fixture.diff().files(), 1);
+    }
+
+    #[test]
     fn a_configured_base_branch_counts_only_the_session_changes_after_merging_it() {
         let fixture = DiffBaseFixture::started_in(DiffBaseFixture::repo_on_new_branch("develop"));
         fixture.commit_in_session("session.md");

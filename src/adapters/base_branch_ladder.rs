@@ -9,6 +9,7 @@ pub struct BaseBranchLadder {
 impl BaseBranchLadder {
     pub const ORIGIN_HEAD: &'static str = "refs/remotes/origin/HEAD";
     const ORIGIN_BRANCH_PREFIX: &'static str = "refs/remotes/origin/";
+    const LOCAL_BRANCH_PREFIX: &'static str = "refs/heads/";
     const CONVENTIONAL_DEFAULT_BRANCHES: [&'static str; 2] =
         ["refs/heads/main", "refs/heads/master"];
 
@@ -29,8 +30,8 @@ impl BaseBranchLadder {
         match self.origin_default {
             Some(_) => self.origin_rung(),
             None => Self::first_conventional_branch_in(existing_branches)
-                .into_iter()
-                .collect(),
+                .map(Self::with_origin_copy)
+                .unwrap_or_default(),
         }
     }
 
@@ -50,6 +51,18 @@ impl BaseBranchLadder {
             .into_iter()
             .find(|branch| existing_branches.contains(branch))
             .map(String::from)
+    }
+
+    fn with_origin_copy(local_ref: String) -> Vec<String> {
+        let origin_copy = Self::origin_counterpart(&local_ref);
+        iter::once(local_ref).chain(origin_copy).collect()
+    }
+
+    fn origin_counterpart(local_ref: &str) -> Option<String> {
+        local_ref
+            .strip_prefix(Self::LOCAL_BRANCH_PREFIX)
+            .and_then(BaseBranch::new)
+            .map(|branch| branch.origin_ref())
     }
 
     fn local_counterpart(origin_ref: &str) -> Option<String> {
@@ -90,12 +103,12 @@ mod tests {
     }
 
     #[test]
-    fn without_an_origin_default_the_first_rung_is_main_when_main_and_master_exist() {
+    fn without_an_origin_default_the_first_rung_is_main_and_its_origin_copy_when_both_exist() {
         let ladder = BaseBranchLadder::new(None);
 
         assert_eq!(
             ladder.first_rung(&["refs/heads/master", "refs/heads/main"]),
-            ["refs/heads/main"]
+            ["refs/heads/main", "refs/remotes/origin/main"]
         );
     }
 
@@ -105,7 +118,7 @@ mod tests {
 
         assert_eq!(
             ladder.first_rung(&["refs/heads/master"]),
-            ["refs/heads/master"]
+            ["refs/heads/master", "refs/remotes/origin/master"]
         );
     }
 
