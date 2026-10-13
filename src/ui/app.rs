@@ -764,6 +764,18 @@ mod tests {
     }
 
     #[test]
+    fn a_paste_goes_to_the_session_finder() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, '/');
+        app.handle_event(&Event::Paste("fix".to_string()));
+
+        let request = app.handle_event(&UiHarness::key(KeyCode::Enter));
+
+        assert_eq!(request, AppRequest::Attach("fix-auth".to_string()));
+    }
+
+    #[test]
     fn a_paste_on_the_home_screen_is_ignored() {
         let fixture = AppFixture::two_waiting_sessions();
         let mut app = AppFixture::started(&fixture, 100, 28);
