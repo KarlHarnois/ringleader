@@ -156,7 +156,9 @@ mostly the cold worker build.
    `Rust coverage will score 0%` is not a result: fix the cause and rerun.
 2. `nix develop .#metrics -c dryer src`. Remove every duplicate candidate that
    includes lines the change added, or tell the project owner why the pair is
-   not real duplication.
+   not real duplication. Skip a pair of struct-update builders, methods shaped
+   like `fn with_x(self, x: X) -> Self { Self { x, ..self } }`, which configure
+   fakes and plans across the codebase and make up most candidates.
 3. `nix develop .#metrics -c mutator --scan <file>` for each changed file. Its
    first line reads `Scan: N mutation sites in <file>`. Tell the project owner
    about any file over 50 sites and offer to split it.
