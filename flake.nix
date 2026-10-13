@@ -53,13 +53,10 @@
             python.pkgs.buildPythonApplication {
               pname = name;
               inherit version;
-              format = "pyproject";
+              pyproject = true;
               src = source;
               doCheck = false;
-              build-system = [
-                python.pkgs.setuptools
-                python.pkgs.wheel
-              ];
+              build-system = [ python.pkgs.setuptools ];
               dependencies = treeSitterDeps ++ extraDependencies;
             };
           dryerTool = buildTool "dryer" dryer [ ];
