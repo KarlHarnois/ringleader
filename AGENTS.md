@@ -35,7 +35,7 @@ nix build .#
 nix flake check
 ```
 
-These are the commands `.github/workflows/ci.yml` runs. All of them run on pushes to `master` and on merge-queue runs, and the first three also run on pull requests. A change is done when all of them pass.
+These are the commands `.github/workflows/ci.yml` runs. All of them run on pushes to `master` and on merge-queue runs, and the first three also run on pull requests. A change is done when all of them pass and, for a change under `src/`, the Metrics completion steps pass too.
 
 ## Architecture
 
@@ -64,13 +64,14 @@ The one exception is a driving adapter's own channel to the user: the terminal f
 
 ## Metrics
 
-Local, on-demand code-health tools. CI never builds or runs them. Do not add them
-to `checks`, to the default dev shell, or to `.github/workflows/ci.yml`. The flake
-builds them as `apps` so `nix flake check` only evaluates them, and puts them in
-the `metrics` dev shell, which extends the default one. That evaluation still
-downloads the four upstream inputs, so if one can no longer be fetched, CI's
-flake check fails until its input is repinned or removed. `dryer`, `crapper`, and
-`mutator` write snapshots under `.metrics/`, which is gitignored.
+Local code-health tools that agents run before finishing a change. CI never
+builds or runs them. Do not add them to `checks`, to the default dev shell, or to
+`.github/workflows/ci.yml`. The flake builds them as `apps` so `nix flake check`
+only evaluates them, and puts them in the `metrics` dev shell, which extends the
+default one. That evaluation still downloads the four upstream inputs, so if one
+can no longer be fetched, CI's flake check fails until its input is repinned or
+removed. `dryer`, `crapper`, and `mutator` write snapshots under `.metrics/`,
+which is gitignored.
 Run them from the repository root, and pass `dryer` and `crapper` the `src` path.
 A pathless run also walks nested checkouts such as `.claude/worktrees` and scores
 every copy under the same namespaces, and `crapper` reruns coverage for each.
@@ -138,6 +139,36 @@ until that companion answers. `--restart` skips the companion and loads the EDN
 at once. It still looks for a companion with `tmux has-session`, so the `env`
 prefix sends those lookups to an empty private directory, removed after the
 viewer exits.
+
+### Completion steps
+
+A change under `src/` is not done until these pass, after the Commands above. Run
+them one at a time and never alongside another command, because the tests start
+real tmux servers and share `target/`. Changed functions are the ones the
+change's diff adds or edits. Changed files are the files under `src/`, outside
+`src/test_support/`, that `git status` shows. Expect about a minute for `crapper`
+and two to three minutes per changed file for `mutator`, mostly the cold worker
+build.
+
+1. `nix develop .#metrics -c crapper src`. Every changed function scores 8 or
+   less. Reduce its complexity or add tests until it does. Leave the scores of
+   functions the change did not touch. A run that prints
+   `Rust coverage will score 0%` is not a result: fix the cause and rerun.
+2. `nix develop .#metrics -c dryer src`. Remove every duplicate candidate that
+   includes lines the change added, or tell the project owner why the pair is
+   not real duplication.
+3. `nix develop .#metrics -c mutator --scan <file>` for each changed file. Its
+   first line reads `Scan: N mutation sites in <file>`. Tell the project owner
+   about any file over 50 sites and offer to split it.
+4. `nix develop .#metrics -c mutator --reuse-coverage --max-workers 2 --timeout-factor 60 <file>`
+   for each changed file. The first run reuses the coverage step 1 wrote. Add or
+   strengthen tests until the file has no survivors and no uncovered sites. Exit
+   code 3 means a mutant survived. Uncovered sites still exit 0, so read the
+   `Uncovered` column.
+
+An edit to production code during these steps restarts them from step 1. An
+edit to tests only reruns step 4 for that file without `--reuse-coverage`,
+because the new tests changed the coverage.
 
 ## Layout
 
@@ -410,7 +441,7 @@ A command interrupted by a signal before its use case starts never runs it, and 
 
 ## Commits
 
-- One commit per finished change, after every command in Commands passes.
+- One commit per finished change, after every command in Commands and the Metrics completion steps pass.
 - The title starts with a capital letter, uses the imperative mood, and stays under 72 characters. The body says what changed in plain language.
 - Push only when the project owner asks.
 
