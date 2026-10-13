@@ -1,19 +1,19 @@
 use crossterm::event::KeyEvent;
-use ratatui::text::Line;
 
 use super::text_field::{FieldKind, TextField};
 
 pub struct SearchQuery {
     field: TextField,
+    prompt: &'static str,
 }
 
 impl SearchQuery {
-    const LABEL: &'static str = "Find: ";
     const CURSOR: char = '█';
 
-    pub fn new(kind: FieldKind) -> Self {
+    pub fn new(kind: FieldKind, prompt: &'static str) -> Self {
         Self {
             field: TextField::new(kind),
+            prompt,
         }
     }
 
@@ -29,10 +29,10 @@ impl SearchQuery {
         self.field.paste(text)
     }
 
-    pub fn line(&self, width: usize) -> Line<'static> {
-        let room = width.saturating_sub(Self::LABEL.len());
+    pub fn shown(&self, width: usize) -> String {
+        let room = width.saturating_sub(self.prompt.chars().count());
         let shown_query = self.field.visible(room, Some(Self::CURSOR));
-        Line::from(format!("{}{shown_query}", Self::LABEL))
+        format!("{}{shown_query}", self.prompt)
     }
 }
 
@@ -40,18 +40,24 @@ impl SearchQuery {
 mod tests {
     use super::*;
 
-    #[test]
-    fn an_empty_query_shows_the_label_and_the_cursor() {
-        let query = SearchQuery::new(FieldKind::Name);
+    struct QueryFixture;
 
-        assert_eq!(query.line(40).to_string(), "Find: █");
+    impl QueryFixture {
+        const PROMPT: &'static str = "❯ ";
     }
 
     #[test]
-    fn a_long_query_shows_its_end_after_the_label() {
-        let mut query = SearchQuery::new(FieldKind::Name);
+    fn an_empty_query_shows_the_prompt_and_the_cursor() {
+        let query = SearchQuery::new(FieldKind::Name, QueryFixture::PROMPT);
+
+        assert_eq!(query.shown(40), "❯ █");
+    }
+
+    #[test]
+    fn a_long_query_shows_its_end_after_the_prompt() {
+        let mut query = SearchQuery::new(FieldKind::Name, QueryFixture::PROMPT);
         query.paste("refactor-the-reconciler").unwrap();
 
-        assert_eq!(query.line(14).to_string(), "Find: onciler█");
+        assert_eq!(query.shown(10), "❯ onciler█");
     }
 }

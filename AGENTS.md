@@ -363,7 +363,7 @@ viewer exits.
     │       ├── fuzzy_ranker.rs          # FuzzyRanker, ranks names or paths against a fuzzy query
     │       ├── match_list.rs            # MatchList, the ranked matches of a fuzzy search and the cursor over them
     │       ├── repo_scan.rs             # RepoScan, one home search and its result
-    │       ├── search_query.rs          # SearchQuery, a finder's typed query and its labeled Find line
+    │       ├── search_query.rs          # SearchQuery, a finder's typed query shown after its prompt
     │       ├── typed_repo_check.rs      # TypedRepoCheck, the git check of a typed repo path
     │       ├── home_path.rs             # HomePath, a path shown from ~ when it is under home
     │       ├── agent_picker.rs          # AgentPicker, the n dialog's agent list

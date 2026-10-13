@@ -1,5 +1,5 @@
 use crossterm::event::{KeyCode, KeyEvent};
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 
 use super::dialog::DialogStep;
 use super::fuzzy_ranker::FuzzyRanker;
@@ -19,11 +19,13 @@ pub struct SessionFinder {
 
 impl SessionFinder {
     pub const TITLE: &'static str = " Find session ";
-    const HINTS: &'static str = "Enter attach · Esc cancel · ↑ ↓ Ctrl-J Ctrl-K choose";
+    const PROMPT: &'static str = "❯ ";
+    const RULE: char = '─';
+    const COUNT_GAP: usize = 1;
 
     pub fn open(names: Vec<String>) -> Self {
         let mut finder = Self {
-            query: SearchQuery::new(FieldKind::Name),
+            query: SearchQuery::new(FieldKind::Name, Self::PROMPT),
             names,
             ranker: FuzzyRanker::for_names(),
             matches: MatchList::default(),
@@ -50,14 +52,9 @@ impl SessionFinder {
     }
 
     pub fn lines(&self, width: usize, height: usize, theme: &Theme) -> Vec<Line<'static>> {
-        let hints = TextFit::new(Self::HINTS).styled_lines(width, theme.dim());
-        let mut lines = vec![
-            self.query.line(width),
-            Line::styled(self.count(), theme.dim()),
-        ];
-        let rows = height.saturating_sub(lines.len() + hints.len()).max(1);
+        let mut lines = vec![self.query_line(width, theme), Self::rule(width, theme)];
+        let rows = height.saturating_sub(lines.len()).max(1);
         lines.extend(self.match_rows(width, rows, theme));
-        lines.extend(hints);
         lines
     }
 
@@ -82,34 +79,43 @@ impl SessionFinder {
         self.matches.replace(ranked);
     }
 
+    fn query_line(&self, width: usize, theme: &Theme) -> Line<'static> {
+        let count = self.count();
+        let query_room = width.saturating_sub(count.chars().count());
+        let query = self.query.shown(query_room.saturating_sub(Self::COUNT_GAP));
+        let padded_query = TextFit::new(&query).padded(query_room);
+        Line::from(vec![
+            Span::raw(padded_query),
+            Span::styled(count, theme.dim()),
+        ])
+    }
+
+    fn rule(width: usize, theme: &Theme) -> Line<'static> {
+        Line::styled(Self::RULE.to_string().repeat(width), theme.dim())
+    }
+
     fn count(&self) -> String {
-        format!("{}/{} sessions", self.matches.len(), self.names.len())
+        format!("{}/{}", self.matches.len(), self.names.len())
     }
 
     fn match_rows(&self, width: usize, rows: usize, theme: &Theme) -> Vec<Line<'static>> {
-        let mut lines = self.matches.lines(rows, theme, |index| {
+        self.matches.lines(rows, theme, |index| {
             TextFit::new(&self.names[index]).right_truncated(width)
-        });
-        lines.resize(rows, Line::default());
-        lines
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use crossterm::event::KeyModifiers;
-    use ratatui::Terminal;
-    use ratatui::backend::TestBackend;
 
     use super::*;
-    use crate::ui::dialogs::Dialog;
 
     struct FinderFixture;
 
     impl FinderFixture {
-        const WIDTH: usize = 74;
+        const WIDTH: usize = 20;
         const HEIGHT: usize = 8;
-        const SMALLEST_SCREEN: (u16, u16) = (36, 8);
 
         fn names() -> Vec<String> {
             let names = ["fix-auth", "dark-mode", "docs"];
@@ -118,14 +124,6 @@ mod tests {
 
         fn finder() -> SessionFinder {
             SessionFinder::open(Self::names())
-        }
-
-        fn screen((width, height): (u16, u16)) -> String {
-            let dialog = Dialog::find_session(Self::names());
-            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-            terminal.draw(|frame| dialog.render(frame, &Theme)).unwrap();
-            let cells = terminal.backend().buffer().content();
-            cells.iter().map(|cell| cell.symbol()).collect()
         }
 
         fn press(finder: &mut SessionFinder, code: KeyCode, modifiers: KeyModifiers) -> DialogStep {
@@ -153,15 +151,25 @@ mod tests {
         fn attach(name: &str) -> DialogStep {
             DialogStep::CloseWith(AppRequest::Attach(name.to_string()))
         }
+
+        fn rule() -> String {
+            "─".repeat(Self::WIDTH)
+        }
     }
 
     #[test]
-    fn every_session_is_listed_before_any_typing() {
+    fn every_session_is_listed_under_the_query_and_a_rule() {
         let rows = FinderFixture::rows(&FinderFixture::finder());
 
         assert_eq!(
-            rows[..5],
-            ["Find: █", "3/3 sessions", "fix-auth", "dark-mode", "docs"]
+            rows,
+            [
+                "❯ █              3/3".to_string(),
+                FinderFixture::rule(),
+                "fix-auth".to_string(),
+                "dark-mode".to_string(),
+                "docs".to_string(),
+            ]
         );
     }
 
@@ -172,24 +180,22 @@ mod tests {
         FinderFixture::type_text(&mut finder, "fa");
 
         assert_eq!(
-            FinderFixture::rows(&finder)[..4],
-            ["Find: fa█", "1/3 sessions", "fix-auth", ""]
+            FinderFixture::rows(&finder),
+            [
+                "❯ fa█            1/3".to_string(),
+                FinderFixture::rule(),
+                "fix-auth".to_string(),
+            ]
         );
     }
 
     #[test]
-    fn the_hints_sit_on_the_last_row() {
-        let rows = FinderFixture::rows(&FinderFixture::finder());
+    fn a_long_query_keeps_the_count_in_view() {
+        let mut finder = FinderFixture::finder();
 
-        assert_eq!(rows.len(), FinderFixture::HEIGHT);
-        assert_eq!(rows.last().unwrap(), SessionFinder::HINTS);
-    }
+        FinderFixture::type_text(&mut finder, "abcdefghijklmnopqrstuvwxyz");
 
-    #[test]
-    fn the_smallest_screen_keeps_enter_and_esc_in_view() {
-        let screen = FinderFixture::screen(FinderFixture::SMALLEST_SCREEN);
-
-        assert!(screen.contains("Enter attach · Esc cancel"), "{screen}");
+        assert_eq!(FinderFixture::rows(&finder)[0], "❯ nopqrstuvwxyz█ 0/3");
     }
 
     #[test]
@@ -239,7 +245,7 @@ mod tests {
 
         FinderFixture::type_text(&mut finder, "jk");
 
-        assert_eq!(FinderFixture::rows(&finder)[0], "Find: jk█");
+        assert!(FinderFixture::rows(&finder)[0].starts_with("❯ jk█"));
     }
 
     #[test]

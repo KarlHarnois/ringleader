@@ -22,13 +22,14 @@ pub struct RepoFinder {
 }
 
 impl RepoFinder {
+    const PROMPT: &'static str = "Find: ";
     const SEARCHING: &'static str = "Searching ~ for repos…";
     const NO_MATCH: &'static str = "no repo matches, Enter picks the typed path";
     const HINTS: &'static str = "Type to search · ↑ ↓ Ctrl-J Ctrl-K choose · Enter pick · Esc back";
 
     pub fn open(service: &SessionService) -> Self {
         Self {
-            query: SearchQuery::new(FieldKind::Path),
+            query: Self::empty_query(),
             scan: RepoScan::start(service),
             filter: RepoFilter::new(HomePath::new(service.home_directory())),
             matches: MatchList::default(),
@@ -41,7 +42,7 @@ impl RepoFinder {
     }
 
     pub fn begin(&mut self, first_key: &KeyEvent) {
-        self.query = SearchQuery::new(FieldKind::Path);
+        self.query = Self::empty_query();
         self.query.edit(first_key);
         self.query_changed();
     }
@@ -84,13 +85,17 @@ impl RepoFinder {
     }
 
     pub fn lines(&self, width: usize, room: usize, theme: &Theme) -> Vec<Line<'static>> {
-        let mut lines = vec![self.query.line(width)];
+        let mut lines = vec![Line::from(self.query.shown(width))];
         lines.extend(self.summary_lines(width, theme));
         let footer = self.footer(width, theme);
         let rows = room.saturating_sub(lines.len() + footer.len()).max(1);
         lines.extend(self.match_lines(width, rows, theme));
         lines.extend(footer);
         lines
+    }
+
+    fn empty_query() -> SearchQuery {
+        SearchQuery::new(FieldKind::Path, Self::PROMPT)
     }
 
     fn typed_path(&self) -> Option<&str> {
