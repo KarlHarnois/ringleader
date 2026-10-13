@@ -185,6 +185,8 @@ pub enum WorkspaceError {
         "{worktree} has no origin/HEAD, origin/main, or origin/master, set base_branch for its repo"
     )]
     NoUpstream { worktree: PathBuf },
+    #[error("{cause}; ran git merge --abort, so the worktree is back where it was")]
+    MergeAborted { cause: String },
     #[error(
         "base branch {base} matches neither {local_ref} nor {remote_ref}{}",
         .suggestion.as_ref().map(|name| format!(", did you mean {name}?")).unwrap_or_default()

@@ -13,6 +13,7 @@ pub struct UpstreamMerger<'a> {
 
 impl<'a> UpstreamMerger<'a> {
     const REMOTE: &'static str = "origin";
+    const MERGE_HEAD: &'static str = "MERGE_HEAD";
 
     pub fn new(git: &'a GitRunner) -> Self {
         Self { git }
@@ -108,15 +109,33 @@ impl<'a> UpstreamMerger<'a> {
         ]);
         let conflicts = self.git.run_checked(&unmerged)?.paths();
         if conflicts.is_empty() {
-            return Err(failure);
+            return Err(self.undo_unfinished_merge(worktree, failure)?);
         }
         Ok(MergeOutcome::Conflicted(conflicts))
+    }
+
+    fn undo_unfinished_merge(
+        &self,
+        worktree: &Path,
+        failure: WorkspaceError,
+    ) -> Result<WorkspaceError, WorkspaceError> {
+        if self.git.resolve(worktree, Self::MERGE_HEAD)?.is_none() {
+            return Ok(failure);
+        }
+        let abort = GitInvocation::in_worktree(worktree, "merge")
+            .writing()
+            .arg("--abort");
+        self.git.run_checked(&abort)?;
+        Ok(WorkspaceError::MergeAborted {
+            cause: failure.to_string(),
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
 
     use super::*;
@@ -132,6 +151,7 @@ mod tests {
     impl MergeFixture {
         const BRANCH: &'static str = "fix-auth";
         const SHARED_FILE: &'static str = "shared.txt";
+        const EXECUTABLE: u32 = 0o755;
 
         fn new() -> Self {
             let origin = GitTestRepo::new();
@@ -228,6 +248,18 @@ mod tests {
             let shadow = format!("origin/{}", GitTestRepo::BRANCH);
             self.origin.git(&self.clone, &["branch", &shadow]);
             self
+        }
+
+        fn reject_commit_messages(&self) {
+            let hook = self.clone.join(".git/hooks/commit-msg");
+            fs::write(&hook, "#!/bin/sh\necho 'needs a ticket id' >&2\nexit 1\n").unwrap();
+            fs::set_permissions(&hook, fs::Permissions::from_mode(Self::EXECUTABLE)).unwrap();
+        }
+
+        fn is_clean(&self) -> bool {
+            self.origin
+                .git(&self.worktree, &["status", "--porcelain"])
+                .is_empty()
         }
 
         fn without_remote(self) -> Self {
@@ -350,6 +382,23 @@ mod tests {
         fixture.merge().unwrap();
 
         assert!(fixture.has_merged(&upstream_tip));
+    }
+
+    #[test]
+    fn a_merge_commit_refused_by_a_hook_is_undone() {
+        let fixture = MergeFixture::new();
+        fixture.commit_on_branch("work.txt");
+        fixture.commit_upstream("news.txt");
+        fixture.reject_commit_messages();
+
+        let error = fixture.merge().unwrap_err();
+
+        assert!(
+            matches!(error, WorkspaceError::MergeAborted { .. }),
+            "{error:?}"
+        );
+        assert!(!fixture.is_merging());
+        assert!(fixture.is_clean());
     }
 
     #[test]
