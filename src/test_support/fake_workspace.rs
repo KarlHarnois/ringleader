@@ -55,6 +55,7 @@ impl FakeWorkspace {
         "mark_branch_managed",
     ];
     pub const DEFAULT_START: &'static str = "0123456789abcdef0123456789abcdef01234567";
+    pub const NO_BASE_BRANCH: &'static str = "-";
 
     pub fn with_branch(self, repo: &Path, branch: &str, tip: &str) -> Self {
         self.edit(|state| state.add_branch(repo, branch, tip));
@@ -504,7 +505,9 @@ impl Workspace for FakeWorkspace {
     }
 
     fn diff_stat(&self, worktree: &Path, base: &DiffBase) -> Result<DiffStat, WorkspaceError> {
-        let base_branch = base.base_branch().map_or("-", BaseBranch::as_str);
+        let base_branch = base
+            .base_branch()
+            .map_or(Self::NO_BASE_BRANCH, BaseBranch::as_str);
         self.call("diff_stat", format!("{} {base_branch}", worktree.display()))?;
         Ok(self.edit(|state| state.diffs.get(worktree).copied().unwrap_or_default()))
     }

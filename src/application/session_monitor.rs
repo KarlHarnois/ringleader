@@ -71,14 +71,13 @@ mod tests {
     use std::path::Path;
 
     use crate::domain::{BaseBranch, Config, Repo, RepoName};
-    use crate::test_support::ServiceFixture;
+    use crate::test_support::{FakeWorkspace, ServiceFixture};
 
     struct MonitorFixture;
 
     impl MonitorFixture {
         const SESSION: &'static str = "alpha";
         const BASE_BRANCH: &'static str = "develop";
-        const NO_BASE_BRANCH: &'static str = "-";
         const SYMLINKED_REPO: &'static str = "/links/example-project";
         const OTHER_REPO: &'static str = "/repos/other-project";
 
@@ -149,7 +148,7 @@ mod tests {
         assert_eq!(
             MonitorFixture::diff_calls(&fixture),
             [MonitorFixture::diff_call_against(
-                MonitorFixture::NO_BASE_BRANCH
+                FakeWorkspace::NO_BASE_BRANCH
             )]
         );
     }
