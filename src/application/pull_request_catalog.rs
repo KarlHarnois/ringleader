@@ -29,11 +29,6 @@ impl PullRequestCatalog {
         Pending::start(move || Ok(catalog.fetch(queries)))
     }
 
-    #[cfg(test)]
-    fn is_failing(&self, repo: &Path) -> bool {
-        self.failing_repos().contains(repo)
-    }
-
     fn fetch(&self, queries: Vec<PullRequestQuery>) -> HashMap<String, Option<PullRequest>> {
         let mut found = HashMap::new();
         for (repo, group) in Self::by_repo(queries) {
@@ -106,7 +101,7 @@ mod tests {
 
     use super::*;
     use crate::domain::PullRequestState;
-    use crate::test_support::{FakePullRequests, ServiceFixture};
+    use crate::test_support::{FakePullRequests, LogCapture, ServiceFixture};
 
     struct CatalogFixture;
 
@@ -222,28 +217,42 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_lookup_marks_its_repo_as_failing() {
-        let session = ServiceFixture::session("fix-auth");
+    fn a_repo_that_keeps_failing_is_warned_about_once() {
+        let log = LogCapture::installed();
+        let session = ServiceFixture::session_at(
+            "fix-auth",
+            "/repos/always-failing",
+            ServiceFixture::CREATED_AT,
+        );
         let fake = Arc::new(FakePullRequests::new());
         fake.fail();
         let catalog = PullRequestCatalog::new(fake);
 
-        CatalogFixture::settle(&catalog, &[&session]);
+        for _ in 0..3 {
+            CatalogFixture::settle(&catalog, &[&session]);
+        }
 
-        assert!(catalog.is_failing(Path::new(ServiceFixture::REPO)));
+        assert_eq!(log.count_containing("/repos/always-failing"), 1);
     }
 
     #[test]
-    fn a_successful_lookup_clears_the_failure_of_its_repo() {
-        let session = ServiceFixture::session("fix-auth");
+    fn a_repo_that_fails_again_after_recovering_is_warned_about_again() {
+        let log = LogCapture::installed();
+        let session = ServiceFixture::session_at(
+            "fix-auth",
+            "/repos/failing-again",
+            ServiceFixture::CREATED_AT,
+        );
         let fake = Arc::new(FakePullRequests::new());
-        fake.fail();
         let catalog = PullRequestCatalog::new(fake.clone());
-        CatalogFixture::settle(&catalog, &[&session]);
 
+        fake.fail();
+        CatalogFixture::settle(&catalog, &[&session]);
         fake.recover();
         CatalogFixture::settle(&catalog, &[&session]);
+        fake.fail();
+        CatalogFixture::settle(&catalog, &[&session]);
 
-        assert!(!catalog.is_failing(Path::new(ServiceFixture::REPO)));
+        assert_eq!(log.count_containing("/repos/failing-again"), 2);
     }
 }

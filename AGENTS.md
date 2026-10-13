@@ -274,6 +274,7 @@ The one exception is a driving adapter's own channel to the user: the terminal f
         ├── fake_config_source.rs    # FakeConfigSource
         ├── fake_repo_scanner.rs     # FakeRepoScanner
         ├── fake_pull_requests.rs    # FakePullRequests
+        ├── log_capture.rs           # LogCapture, the test logger that keeps warnings for assertions
         ├── fake_host_probe.rs       # FakeHostProbe
         ├── fake_clock.rs            # FakeClock
         ├── recording_screen_mode.rs # RecordingScreenMode, the screen mode that records each switch
