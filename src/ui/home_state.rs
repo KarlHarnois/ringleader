@@ -87,8 +87,8 @@ impl HomeState {
         let visible = self.sessions.visible_managed(self.table_rows);
         let measured = self.diffs.tick(now, &visible, service);
         self.sessions.apply_diffs(self.diffs.diffs());
-        let pull_requests = service.poll_pull_requests(now, &visible).clone();
-        self.sessions.apply_pull_requests(&pull_requests);
+        let pull_requests = service.poll_pull_requests(now, &visible);
+        self.sessions.apply_pull_requests(pull_requests);
         observed.and(measured)
     }
 
@@ -107,8 +107,7 @@ impl HomeState {
         self.sessions.apply_diffs(self.diffs.diffs());
         let names = self.sessions.names();
         service.prune_pull_requests(&names);
-        let pull_requests = service.pull_requests().clone();
-        self.sessions.apply_pull_requests(&pull_requests);
+        self.sessions.apply_pull_requests(service.pull_requests());
         self.bell.watch(self.sessions.rows(), service);
         Ok(())
     }

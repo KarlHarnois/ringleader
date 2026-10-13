@@ -30,7 +30,7 @@ impl PullRequestCatalog {
         &mut self,
         now: Instant,
         interval: Duration,
-        visible: &[Session],
+        visible: &[&Session],
     ) -> &HashMap<String, PullRequest> {
         self.collect(now, interval);
         let due = self.refresh_requested || self.next_refresh.is_none_or(|due| now >= due);
@@ -69,11 +69,14 @@ impl PullRequestCatalog {
         }
     }
 
-    fn start(&mut self, now: Instant, interval: Duration, visible: &[Session]) {
+    fn start(&mut self, now: Instant, interval: Duration, visible: &[&Session]) {
         let Some(port) = self.pull_requests.clone() else {
             return;
         };
-        let queries: Vec<PullRequestQuery> = visible.iter().map(PullRequestQuery::of).collect();
+        let queries: Vec<PullRequestQuery> = visible
+            .iter()
+            .map(|session| PullRequestQuery::of(session))
+            .collect();
         self.next_refresh = Some(now + interval);
         self.refresh_requested = false;
         self.pending = Some(Pending::start(move || Ok(Self::fetch(port, queries))));
@@ -167,7 +170,7 @@ mod tests {
         fn settle(
             catalog: &mut PullRequestCatalog,
             fake: &FakePullRequests,
-            sessions: &[Session],
+            sessions: &[&Session],
         ) -> HashMap<String, PullRequest> {
             let deadline = Instant::now() + Self::LIMIT;
             while Instant::now() < deadline {
@@ -187,8 +190,7 @@ mod tests {
         let fake = CatalogFixture::cached(&session, 142);
         let mut catalog = PullRequestCatalog::new(Some(fake.clone()));
 
-        let found =
-            CatalogFixture::settle(&mut catalog, fake.as_ref(), std::slice::from_ref(&session));
+        let found = CatalogFixture::settle(&mut catalog, fake.as_ref(), &[&session]);
 
         assert_eq!(found.get("fix-auth"), Some(&CatalogFixture::open(142)));
     }
@@ -199,8 +201,7 @@ mod tests {
         let fake = Arc::new(FakePullRequests::new());
         let mut catalog = PullRequestCatalog::new(Some(fake.clone()));
 
-        let found =
-            CatalogFixture::settle(&mut catalog, fake.as_ref(), std::slice::from_ref(&session));
+        let found = CatalogFixture::settle(&mut catalog, fake.as_ref(), &[&session]);
 
         assert!(found.is_empty());
     }
@@ -210,7 +211,7 @@ mod tests {
         let session = ServiceFixture::session("fix-auth");
         let mut catalog = PullRequestCatalog::new(None);
 
-        let found = catalog.poll(Instant::now(), CatalogFixture::INTERVAL, &[session]);
+        let found = catalog.poll(Instant::now(), CatalogFixture::INTERVAL, &[&session]);
 
         assert!(found.is_empty());
     }
@@ -220,18 +221,14 @@ mod tests {
         let session = ServiceFixture::session("fix-auth");
         let fake = CatalogFixture::cached(&session, 142);
         let mut catalog = PullRequestCatalog::new(Some(fake.clone()));
-        CatalogFixture::settle(&mut catalog, fake.as_ref(), std::slice::from_ref(&session));
+        CatalogFixture::settle(&mut catalog, fake.as_ref(), &[&session]);
         let recorded = fake.calls().len();
 
         fake.fail();
         catalog.refresh_soon();
         let deadline = Instant::now() + CatalogFixture::LIMIT;
         while Instant::now() < deadline {
-            catalog.poll(
-                Instant::now(),
-                CatalogFixture::INTERVAL,
-                std::slice::from_ref(&session),
-            );
+            catalog.poll(Instant::now(), CatalogFixture::INTERVAL, &[&session]);
             if fake.calls().len() > recorded && catalog.pending.is_none() {
                 break;
             }
@@ -259,7 +256,7 @@ mod tests {
                 .failing_repo(Path::new("/repos/local-only")),
         );
         let mut catalog = PullRequestCatalog::new(Some(fake.clone()));
-        let sessions = [reachable.clone(), unreachable];
+        let sessions = [&reachable, &unreachable];
 
         let found = CatalogFixture::settle(&mut catalog, fake.as_ref(), &sessions);
 
@@ -272,13 +269,13 @@ mod tests {
         let session = ServiceFixture::session("fix-auth");
         let fake = CatalogFixture::cached(&session, 142);
         let mut catalog = PullRequestCatalog::new(Some(fake.clone()));
-        let sessions = std::slice::from_ref(&session);
-        CatalogFixture::settle(&mut catalog, fake.as_ref(), sessions);
+        let sessions = [&session];
+        CatalogFixture::settle(&mut catalog, fake.as_ref(), &sessions);
 
         catalog.refresh_soon();
-        catalog.poll(Instant::now(), CatalogFixture::INTERVAL, sessions);
+        catalog.poll(Instant::now(), CatalogFixture::INTERVAL, &sessions);
         catalog.refresh_soon();
-        CatalogFixture::settle(&mut catalog, fake.as_ref(), sessions);
+        CatalogFixture::settle(&mut catalog, fake.as_ref(), &sessions);
 
         assert_eq!(fake.calls().len(), 3);
     }
@@ -288,7 +285,7 @@ mod tests {
         let session = ServiceFixture::session("fix-auth");
         let fake = CatalogFixture::cached(&session, 142);
         let mut catalog = PullRequestCatalog::new(Some(fake.clone()));
-        CatalogFixture::settle(&mut catalog, fake.as_ref(), std::slice::from_ref(&session));
+        CatalogFixture::settle(&mut catalog, fake.as_ref(), &[&session]);
 
         catalog.keep_only(&["other".to_string()]);
 

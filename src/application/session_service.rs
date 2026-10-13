@@ -185,12 +185,22 @@ impl SessionService {
         now: Instant,
         names: &[String],
     ) -> &HashMap<String, PullRequest> {
-        let visible: Vec<Session> = names
+        let Self {
+            entries,
+            pull_request_catalog,
+            config,
+            ..
+        } = self;
+        let visible: Vec<&Session> = names
             .iter()
-            .filter_map(|name| self.entry(name).cloned())
+            .filter_map(|name| {
+                entries
+                    .iter()
+                    .find(|entry| entry.name().as_str() == name.as_str())
+            })
             .collect();
-        let interval = self.config().intervals().pull_request_refresh();
-        self.pull_request_catalog.poll(now, interval, &visible)
+        let interval = config.config().intervals().pull_request_refresh();
+        pull_request_catalog.poll(now, interval, &visible)
     }
 
     pub fn pull_requests(&self) -> &HashMap<String, PullRequest> {
