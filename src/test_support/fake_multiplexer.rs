@@ -254,6 +254,15 @@ impl FakeMultiplexer {
         change(&mut self.state.lock().unwrap())
     }
 
+    fn pass_typing_gate(&self, tmux_name: &str) -> Result<(), MultiplexerError> {
+        match self.typing_gate.wait_up_to(Self::TYPING_GATE_LIMIT) {
+            true => Ok(()),
+            false => Err(MultiplexerError::AgentNotReady {
+                tmux_name: tmux_name.to_string(),
+            }),
+        }
+    }
+
     fn call(&self, operation: &'static str, detail: &str) -> Result<(), MultiplexerError> {
         let hook = self.hooks.lock().unwrap().get(operation).cloned();
         if let Some(hook) = hook {
@@ -375,7 +384,7 @@ impl Multiplexer for FakeMultiplexer {
 
     fn type_when_ready(&self, tmux_name: &str, lines: &[String]) -> Result<(), MultiplexerError> {
         self.call("type_when_ready", tmux_name)?;
-        self.typing_gate.wait_up_to(Self::TYPING_GATE_LIMIT);
+        self.pass_typing_gate(tmux_name)?;
         self.edit(|state| state.type_lines("type_when_ready", tmux_name, lines));
         Ok(())
     }
