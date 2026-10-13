@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -13,6 +13,7 @@ pub struct FakePullRequests {
 #[derive(Default)]
 struct FakeState {
     pull_requests: HashMap<(PathBuf, String), PullRequest>,
+    failing_repos: HashSet<PathBuf>,
     calls: Vec<String>,
     failure: bool,
 }
@@ -35,8 +36,25 @@ impl FakePullRequests {
         self.state.lock().unwrap().failure = true;
     }
 
+    pub fn failing_repo(self, repo: &Path) -> Self {
+        self.state
+            .lock()
+            .unwrap()
+            .failing_repos
+            .insert(repo.to_path_buf());
+        self
+    }
+
     pub fn calls(&self) -> Vec<String> {
         self.state.lock().unwrap().calls.clone()
+    }
+
+    fn failure() -> PullRequestError {
+        PullRequestError::Failed {
+            subcommand: "pr list".to_string(),
+            status: "exit status: 1".to_string(),
+            stderr: "not logged in".to_string(),
+        }
     }
 }
 
@@ -45,28 +63,27 @@ impl PullRequests for FakePullRequests {
         &self,
         repo: &Path,
         branches: &[String],
-    ) -> Result<HashMap<String, Option<PullRequest>>, PullRequestError> {
+    ) -> HashMap<String, Result<Option<PullRequest>, PullRequestError>> {
         let mut state = self.state.lock().unwrap();
         state
             .calls
             .push(format!("lookup {} {}", repo.display(), branches.len()));
-        if state.failure {
-            return Err(PullRequestError::Failed {
-                subcommand: "pr list".to_string(),
-                status: "exit status: 1".to_string(),
-                stderr: "not logged in".to_string(),
-            });
+        if state.failure || state.failing_repos.contains(repo) {
+            return branches
+                .iter()
+                .map(|branch| (branch.clone(), Err(Self::failure())))
+                .collect();
         }
         let repo = repo.to_path_buf();
-        Ok(branches
+        branches
             .iter()
             .map(|branch| {
                 let found = state
                     .pull_requests
                     .get(&(repo.clone(), branch.clone()))
                     .copied();
-                (branch.clone(), found)
+                (branch.clone(), Ok(found))
             })
-            .collect())
+            .collect()
     }
 }

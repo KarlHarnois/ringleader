@@ -5,7 +5,6 @@ use std::time::{Duration, Instant};
 
 use super::pending::Pending;
 use super::ports::PullRequests;
-use super::service_error::ServiceError;
 use crate::domain::{PullRequest, Session};
 
 pub struct PullRequestCatalog {
@@ -74,13 +73,13 @@ impl PullRequestCatalog {
         };
         let queries: Vec<PullRequestQuery> = visible.iter().map(PullRequestQuery::of).collect();
         self.next_refresh = Some(now + interval);
-        self.pending = Some(Pending::start(move || Self::fetch(port, queries)));
+        self.pending = Some(Pending::start(move || Ok(Self::fetch(port, queries))));
     }
 
     fn fetch(
         port: Arc<dyn PullRequests>,
         queries: Vec<PullRequestQuery>,
-    ) -> Result<HashMap<String, Option<PullRequest>>, ServiceError> {
+    ) -> HashMap<String, Option<PullRequest>> {
         let mut by_repo: BTreeMap<PathBuf, Vec<PullRequestQuery>> = BTreeMap::new();
         for query in queries {
             by_repo.entry(query.repo.clone()).or_default().push(query);
@@ -88,12 +87,22 @@ impl PullRequestCatalog {
         let mut found = HashMap::new();
         for (repo, group) in by_repo {
             let branches: Vec<String> = group.iter().map(|query| query.branch.clone()).collect();
-            let listed = port.lookup(&repo, &branches)?;
+            let listed = port.lookup(&repo, &branches);
             for query in group {
-                found.insert(query.name, listed.get(&query.branch).cloned().flatten());
+                match listed.get(&query.branch) {
+                    Some(Ok(pull_request)) => {
+                        found.insert(query.name, *pull_request);
+                    }
+                    Some(Err(error)) => log::warn!(
+                        "could not look up the pull request of {} in {}: {error}",
+                        query.branch,
+                        repo.display()
+                    ),
+                    None => {}
+                }
             }
         }
-        Ok(found)
+        found
     }
 
     fn merge(&mut self, found: HashMap<String, Option<PullRequest>>) {
@@ -155,15 +164,11 @@ mod tests {
         fn settle(
             catalog: &mut PullRequestCatalog,
             fake: &FakePullRequests,
-            session: &Session,
+            sessions: &[Session],
         ) -> HashMap<String, PullRequest> {
             let deadline = Instant::now() + Self::LIMIT;
             while Instant::now() < deadline {
-                catalog.poll(
-                    Instant::now(),
-                    Self::INTERVAL,
-                    std::slice::from_ref(session),
-                );
+                catalog.poll(Instant::now(), Self::INTERVAL, sessions);
                 if !fake.calls().is_empty() && catalog.pending.is_none() {
                     break;
                 }
@@ -179,7 +184,8 @@ mod tests {
         let fake = CatalogFixture::cached(&session, 142);
         let mut catalog = PullRequestCatalog::new(Some(fake.clone()));
 
-        let found = CatalogFixture::settle(&mut catalog, fake.as_ref(), &session);
+        let found =
+            CatalogFixture::settle(&mut catalog, fake.as_ref(), std::slice::from_ref(&session));
 
         assert_eq!(found.get("fix-auth"), Some(&CatalogFixture::open(142)));
     }
@@ -190,7 +196,8 @@ mod tests {
         let fake = Arc::new(FakePullRequests::new());
         let mut catalog = PullRequestCatalog::new(Some(fake.clone()));
 
-        let found = CatalogFixture::settle(&mut catalog, fake.as_ref(), &session);
+        let found =
+            CatalogFixture::settle(&mut catalog, fake.as_ref(), std::slice::from_ref(&session));
 
         assert!(found.is_empty());
     }
@@ -210,7 +217,7 @@ mod tests {
         let session = ServiceFixture::session("fix-auth");
         let fake = CatalogFixture::cached(&session, 142);
         let mut catalog = PullRequestCatalog::new(Some(fake.clone()));
-        CatalogFixture::settle(&mut catalog, fake.as_ref(), &session);
+        CatalogFixture::settle(&mut catalog, fake.as_ref(), std::slice::from_ref(&session));
         let recorded = fake.calls().len();
 
         fake.fail();
@@ -235,11 +242,34 @@ mod tests {
     }
 
     #[test]
+    fn a_repo_that_fails_does_not_block_another_repos_lookup() {
+        let reachable = ServiceFixture::session("fix-auth");
+        let unreachable =
+            ServiceFixture::session_at("local", "/repos/local-only", ServiceFixture::CREATED_AT);
+        let fake = Arc::new(
+            FakePullRequests::new()
+                .with_pull_request(
+                    Path::new(ServiceFixture::REPO),
+                    reachable.branch(),
+                    CatalogFixture::open(142),
+                )
+                .failing_repo(Path::new("/repos/local-only")),
+        );
+        let mut catalog = PullRequestCatalog::new(Some(fake.clone()));
+        let sessions = [reachable.clone(), unreachable];
+
+        let found = CatalogFixture::settle(&mut catalog, fake.as_ref(), &sessions);
+
+        assert_eq!(found.get("fix-auth"), Some(&CatalogFixture::open(142)));
+        assert_eq!(found.get("local"), None);
+    }
+
+    #[test]
     fn pruning_drops_the_pull_requests_of_vanished_sessions() {
         let session = ServiceFixture::session("fix-auth");
         let fake = CatalogFixture::cached(&session, 142);
         let mut catalog = PullRequestCatalog::new(Some(fake.clone()));
-        CatalogFixture::settle(&mut catalog, fake.as_ref(), &session);
+        CatalogFixture::settle(&mut catalog, fake.as_ref(), std::slice::from_ref(&session));
 
         catalog.keep_only(&["other".to_string()]);
 

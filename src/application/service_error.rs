@@ -1,16 +1,13 @@
 use thiserror::Error;
 
 use super::delete_impact::DeleteImpact;
-use super::ports::{
-    ConfigError, HostProbeError, MultiplexerError, PullRequestError, RegistryError, WorkspaceError,
-};
+use super::ports::{ConfigError, HostProbeError, MultiplexerError, RegistryError, WorkspaceError};
 use crate::domain::InvalidName;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tool {
     Git,
     Tmux,
-    Gh,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -92,19 +89,6 @@ impl From<MultiplexerError> for ServiceError {
                 message,
             },
             false => ServiceError::Failed(message),
-        }
-    }
-}
-
-impl From<PullRequestError> for ServiceError {
-    fn from(error: PullRequestError) -> Self {
-        let message = error.to_string();
-        match error {
-            PullRequestError::TimedOut { .. } => ServiceError::TimedOut {
-                tool: Tool::Gh,
-                message,
-            },
-            PullRequestError::Failed { .. } => ServiceError::Failed(message),
         }
     }
 }

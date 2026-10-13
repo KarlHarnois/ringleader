@@ -96,10 +96,10 @@ impl PullRequests for GhPullRequests {
         &self,
         repo: &Path,
         branches: &[String],
-    ) -> Result<HashMap<String, Option<PullRequest>>, PullRequestError> {
+    ) -> HashMap<String, Result<Option<PullRequest>, PullRequestError>> {
         branches
             .iter()
-            .map(|branch| Ok((branch.clone(), self.branch_pull_request(repo, branch)?)))
+            .map(|branch| (branch.clone(), self.branch_pull_request(repo, branch)))
             .collect()
     }
 }
