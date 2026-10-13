@@ -12,6 +12,8 @@ pub struct DiffBaseResolver<'a> {
 }
 
 impl<'a> DiffBaseResolver<'a> {
+    const HEAD: &'static str = "HEAD";
+
     pub fn new(git: &'a GitRunner) -> Self {
         Self { git }
     }
@@ -41,22 +43,23 @@ impl<'a> DiffBaseResolver<'a> {
         recorded: &str,
         base_branch: Option<&BaseBranch>,
     ) -> Result<Option<String>, WorkspaceError> {
-        let Some(head) = self.head(worktree)? else {
+        let Some(checked_out) = self.checked_out_ref(worktree)? else {
             return Ok(None);
         };
-        let candidates = self.candidates(worktree, recorded, base_branch)?;
+        let mut candidates = self.candidates(worktree, recorded, base_branch)?;
+        candidates.retain(|candidate| *candidate != checked_out);
         let commits = self.existing_commits(worktree, &candidates)?;
         if commits.is_empty() {
             return Ok(None);
         }
-        let bases = self.best_common_ancestors(worktree, &head, &commits)?;
+        let bases = self.best_common_ancestors(worktree, &commits)?;
         Ok(Self::preferred_base(bases, recorded))
     }
 
-    fn head(&self, worktree: &Path) -> Result<Option<String>, WorkspaceError> {
+    fn checked_out_ref(&self, worktree: &Path) -> Result<Option<String>, WorkspaceError> {
         let verify = GitInvocation::in_worktree(worktree, "rev-parse")
             .diffing()
-            .args(["--verify", "-q", "HEAD"]);
+            .args(["--verify", "-q", "--symbolic-full-name", Self::HEAD]);
         self.git.resolved_from(&verify)
     }
 
@@ -107,12 +110,11 @@ impl<'a> DiffBaseResolver<'a> {
     fn best_common_ancestors(
         &self,
         worktree: &Path,
-        head: &str,
         commits: &[String],
     ) -> Result<Vec<String>, WorkspaceError> {
         let find = GitInvocation::in_worktree(worktree, "merge-base")
             .diffing()
-            .args(["--all", head])
+            .args(["--all", Self::HEAD])
             .args(commits);
         let bases = self.git.lookup(&find)?;
         Ok(bases
@@ -161,7 +163,11 @@ mod tests {
         }
 
         fn started_in(repo: GitTestRepo) -> Self {
-            let worktree = repo.add_worktree(Self::SESSION, Self::SESSION);
+            Self::started_on_branch(repo, Self::SESSION)
+        }
+
+        fn started_on_branch(repo: GitTestRepo, branch: &str) -> Self {
+            let worktree = repo.add_worktree(Self::SESSION, branch);
             let recorded = repo.git(&worktree, &["rev-parse", "HEAD"]);
             Self {
                 repo,
@@ -426,6 +432,15 @@ mod tests {
         fixture.merge_into_session("trunk");
 
         assert_eq!(fixture.diff().files(), 2);
+    }
+
+    #[test]
+    fn a_session_branch_named_like_a_missing_default_branch_still_counts_its_commits() {
+        let repo = DiffBaseFixture::repo_with_only("master");
+        let fixture = DiffBaseFixture::started_on_branch(repo, "main");
+        fixture.commit_in_session("session.md");
+
+        assert_eq!(fixture.diff().files(), 1);
     }
 
     #[test]
