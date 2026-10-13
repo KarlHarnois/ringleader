@@ -419,7 +419,7 @@ mod tests {
     }
 
     #[test]
-    fn a_pushed_branch_onto_a_taken_name_is_refused_as_pushed() {
+    fn a_pushed_branch_onto_a_taken_branch_name_is_refused_as_pushed() {
         let session = ServiceFixture::session("fix-auth");
         let repo = Path::new(ServiceFixture::REPO);
         let fixture = RenameFixture::stopped("fix-auth").with_workspace(
@@ -463,13 +463,31 @@ mod tests {
     }
 
     #[test]
-    fn an_unmarked_branch_onto_a_taken_name_is_refused_for_its_marker() {
+    fn an_unmarked_branch_onto_a_taken_branch_name_is_refused_for_its_marker() {
         let session = ServiceFixture::session("fix-auth");
         let repo = Path::new(ServiceFixture::REPO);
         let fixture = RenameFixture::stopped("fix-auth").with_workspace(
             ServiceFixture::workspace_for(&[&session])
                 .without_marker(repo, session.branch())
                 .with_branch(repo, "fix-login", ServiceFixture::TIP),
+        );
+
+        let error = fixture
+            .service()
+            .rename_session("fix-auth", "fix-login")
+            .unwrap_err();
+
+        assert!(error.to_string().contains("has no Ringleader marker"));
+    }
+
+    #[test]
+    fn an_unmarked_branch_onto_another_sessions_name_is_refused_for_its_marker() {
+        let session = ServiceFixture::session("fix-auth");
+        let other = ServiceFixture::session("fix-login");
+        let repo = Path::new(ServiceFixture::REPO);
+        let fixture = RenameFixture::live(&["fix-auth", "fix-login"]).with_workspace(
+            ServiceFixture::workspace_for(&[&session, &other])
+                .without_marker(repo, session.branch()),
         );
 
         let error = fixture
