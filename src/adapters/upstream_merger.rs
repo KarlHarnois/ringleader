@@ -91,7 +91,12 @@ impl<'a> UpstreamMerger<'a> {
         }
         let merge = GitInvocation::in_worktree(worktree, "merge")
             .writing()
-            .args(["--no-edit", "--no-rerere-autoupdate", origin_ref]);
+            .args([
+                "--no-edit",
+                "--no-rerere-autoupdate",
+                "--no-overwrite-ignore",
+                origin_ref,
+            ]);
         match self.git.run_checked(&merge) {
             Ok(_) => Ok(MergeOutcome::Merged),
             Err(failure) => self.conflicts_or(worktree, failure),
@@ -167,6 +172,8 @@ mod tests {
         const SHARED_FILE: &'static str = "shared.txt";
         const EXECUTABLE: u32 = 0o755;
         const RESOLUTION: &'static str = "both sides kept\n";
+        const IGNORED_FILE: &'static str = "settings.local";
+        const LOCAL_TEXT: &'static str = "mine\n";
 
         fn new() -> Self {
             let origin = GitTestRepo::new();
@@ -307,6 +314,16 @@ mod tests {
 
         fn shared_text(&self) -> String {
             fs::read_to_string(self.worktree.join(Self::SHARED_FILE)).unwrap()
+        }
+
+        fn keep_an_ignored_local_file(&self) {
+            let exclude = self.clone.join(".git/info/exclude");
+            fs::write(&exclude, format!("{}\n", Self::IGNORED_FILE)).unwrap();
+            fs::write(self.worktree.join(Self::IGNORED_FILE), Self::LOCAL_TEXT).unwrap();
+        }
+
+        fn ignored_text(&self) -> String {
+            fs::read_to_string(self.worktree.join(Self::IGNORED_FILE)).unwrap()
         }
 
         fn keep_our_side_without_committing(&self) {
@@ -457,6 +474,21 @@ mod tests {
             [MergeFixture::SHARED_FILE]
         );
         assert_eq!(fixture.shared_text(), MergeFixture::RESOLUTION);
+    }
+
+    #[test]
+    fn a_fast_forward_keeps_an_ignored_local_file_upstream_starts_tracking() {
+        let fixture = MergeFixture::new();
+        fixture.keep_an_ignored_local_file();
+        fixture.commit_upstream(MergeFixture::IGNORED_FILE);
+
+        let error = fixture.merge().unwrap_err();
+
+        assert!(
+            matches!(&error, WorkspaceError::Failed { stderr, .. } if stderr.contains("would be overwritten by merge")),
+            "{error:?}"
+        );
+        assert_eq!(fixture.ignored_text(), MergeFixture::LOCAL_TEXT);
     }
 
     #[test]
