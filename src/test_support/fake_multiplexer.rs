@@ -122,8 +122,12 @@ impl FakeMultiplexer {
     }
 
     pub fn on_call(self, operation: &'static str, hook: impl Fn() + Send + Sync + 'static) -> Self {
-        self.hooks.lock().unwrap().insert(operation, Arc::new(hook));
+        self.add_call_hook(operation, hook);
         self
+    }
+
+    pub fn add_call_hook(&self, operation: &'static str, hook: impl Fn() + Send + Sync + 'static) {
+        self.hooks.lock().unwrap().insert(operation, Arc::new(hook));
     }
 
     pub fn with_versions(self, client: &str, server: Option<&str>) -> Self {

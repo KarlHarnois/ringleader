@@ -297,7 +297,6 @@ mod tests {
     use signal_hook::consts::SIGINT;
 
     use super::*;
-    use crate::adapters::signal_flags::SignalFlags;
     use crate::test_support::{
         CliHarness, Deadline, FakeLock, FakeMultiplexer, Gate, ServiceFixture,
     };
@@ -446,16 +445,13 @@ mod tests {
 
     #[test]
     fn a_signal_during_the_command_skips_the_wait_note() {
-        let signals = SignalFlags::unregistered();
-        let raised = signals.clone();
-        let multiplexer = FakeMultiplexer::new()
-            .blocking_typing()
-            .on_call("create_session", move || raised.raise(SIGINT));
         let fixture = ServiceFixture::new()
             .with_config(ServiceFixture::config_with_input())
-            .with_multiplexer(multiplexer);
+            .with_multiplexer(FakeMultiplexer::new().blocking_typing());
         let typing = fixture.shared_multiplexer();
-        let harness = CliHarness::new(fixture).with_signals(signals);
+        let harness = CliHarness::new(fixture);
+        let signals = harness.signals().clone();
+        typing.add_call_hook("create_session", move || signals.raise(SIGINT));
 
         harness.run(&["new", "--name", "Fix Auth", "--repo", "example-project"]);
 
