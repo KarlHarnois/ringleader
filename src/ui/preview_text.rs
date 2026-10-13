@@ -22,11 +22,12 @@ impl PreviewText {
     }
 
     pub fn bottom_lines(&self, room: usize) -> Vec<Line<'static>> {
-        let mut lines = Self::squeezed(&self.lines, room);
-        let shown = lines.split_off(lines.len().saturating_sub(room));
+        let kept = self.kept_rows(room);
+        let shown = &kept[kept.len().saturating_sub(room)..];
         let padding = room.saturating_sub(shown.len());
+        let shown_lines = shown.iter().map(|&index| self.lines[index].clone());
         std::iter::repeat_n(Line::default(), padding)
-            .chain(shown)
+            .chain(shown_lines)
             .collect()
     }
 
@@ -53,9 +54,9 @@ impl PreviewText {
         plain
     }
 
-    fn squeezed(lines: &[Line<'static>], room: usize) -> Vec<Line<'static>> {
-        let mut runs = Self::blank_runs(lines);
-        let mut excess = lines.len().saturating_sub(room);
+    fn kept_rows(&self, room: usize) -> Vec<usize> {
+        let mut runs = Self::blank_runs(&self.lines);
+        let mut excess = self.lines.len().saturating_sub(room);
         while excess > 0 {
             let shrinkable = runs.iter_mut().filter(|run| run.kept > 1);
             let Some(longest) = shrinkable.max_by_key(|run| run.kept) else {
@@ -64,11 +65,8 @@ impl PreviewText {
             longest.kept -= 1;
             excess -= 1;
         }
-        lines
-            .iter()
-            .enumerate()
-            .filter(|(index, _)| runs.iter().all(|run| run.keeps(*index)))
-            .map(|(_, line)| line.clone())
+        (0..self.lines.len())
+            .filter(|index| runs.iter().all(|run| run.keeps(*index)))
             .collect()
     }
 
