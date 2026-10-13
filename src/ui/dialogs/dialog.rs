@@ -6,6 +6,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use super::delete_session_dialog::DeleteSessionDialog;
 use super::dialog_labels::DialogLabels;
+use super::home_path::HomePath;
 use super::new_session_dialog::NewSessionDialog;
 use super::rename_session_dialog::RenameSessionDialog;
 use crate::adapters::app_log::AppLog;
@@ -63,7 +64,12 @@ impl Dialog {
             ("tmux socket", paths.tmux_socket()),
             ("tmux config", paths.tmux_config()),
         ];
-        Self::Help(Box::new(HelpView::new(&service.shown_return_key(), &files)))
+        let home = HomePath::new(service.home_directory());
+        Self::Help(Box::new(HelpView::new(
+            &service.shown_return_key(),
+            &files,
+            &home,
+        )))
     }
 
     pub fn poll(&mut self) {

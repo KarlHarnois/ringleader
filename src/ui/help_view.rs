@@ -1,23 +1,30 @@
 use std::cell::Cell;
+use std::iter::once;
 use std::path::Path;
 
 use crossterm::event::{KeyCode, KeyEvent};
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 
 use super::dialogs::DialogStep;
+use super::dialogs::home_path::HomePath;
+use super::label_column::LabelColumn;
+use super::legend::{Legend, LegendEntry};
+use super::state_indicator::StateIndicator;
 use super::text_fit::TextFit;
 use super::theme::Theme;
-use crate::domain::ReturnKey;
+use crate::domain::{ReturnKey, SessionState};
 
 pub struct HelpView {
-    sections: Vec<(String, Vec<String>)>,
+    return_key: String,
+    files: Vec<(String, String)>,
     scroll: usize,
     max_scroll: Cell<usize>,
 }
 
 impl HelpView {
-    pub const TITLE: &'static str = " Help ";
-    const KEYS: [(&'static str, &'static str); 10] = [
+    pub const TITLE: &'static str = concat!(" Help · ringleader ", env!("CARGO_PKG_VERSION"), " ");
+    const KEYS_HEADING: &'static str = "Keys";
+    const KEYS: [(&'static str, &'static str); 9] = [
         ("n", "create a session"),
         ("d", "delete the selected session"),
         ("R", "rename the selected session"),
@@ -26,27 +33,21 @@ impl HelpView {
         ("s", "restart an exited or stopped session"),
         ("r", "reload the config and the registry and refresh diffs"),
         ("↑ ↓ j k h l", "move the selection"),
-        ("?", "show or close this help"),
         ("q", "quit, the sessions keep running"),
     ];
-    const KEY_WIDTH: usize = 12;
-    const FILE_LABEL_WIDTH: usize = 13;
-    const CLOSING: &'static str = "↑ ↓ scroll · ? Esc q close";
+    const RETURN_ACTION: &'static str = "detach from a session and return here";
+    const FIRST_SPINNER_TICK: u64 = 0;
+    const CLOSE_HINT: &'static str = "? Esc q close";
+    const SCROLL_HINT: &'static str = "↑ ↓ scroll · ";
 
-    pub fn new(return_key: &ReturnKey, files: &[(&str, &Path)]) -> Self {
-        let keys = Self::KEYS
+    pub fn new(return_key: &ReturnKey, files: &[(&str, &Path)], home: &HomePath) -> Self {
+        let files = files
             .iter()
-            .map(|(key, action)| format!("{key:<width$}{action}", width = Self::KEY_WIDTH))
+            .map(|(label, path)| (label.to_string(), home.shown(path)))
             .collect();
-        let key = return_key.display();
-        let sections = vec![
-            ("Keys".to_string(), keys),
-            (format!("Returning with {key}"), Self::return_key(&key)),
-            ("Bell".to_string(), Self::bell()),
-            ("Files".to_string(), Self::files(files)),
-        ];
         Self {
-            sections,
+            return_key: return_key.display(),
+            files,
             scroll: 0,
             max_scroll: Cell::new(0),
         }
@@ -67,52 +68,88 @@ impl HelpView {
     }
 
     pub fn lines(&self, width: usize, height: usize, theme: &Theme) -> Vec<Line<'static>> {
-        let mut content = Vec::new();
-        for (heading, paragraphs) in &self.sections {
-            content.push(Line::styled(heading.clone(), theme.emphasis()));
-            for paragraph in paragraphs {
-                content.extend(TextFit::new(paragraph).styled_lines(width, theme.base()));
-            }
-            content.push(Line::from(""));
-        }
+        let content = self.content(width, theme);
         let room = height.saturating_sub(1);
         self.max_scroll.set(content.len().saturating_sub(room));
         let shown = content.into_iter().skip(self.visible_scroll()).take(room);
         let mut lines: Vec<Line<'static>> = shown.collect();
-        lines.push(Line::styled(Self::CLOSING, theme.dim()));
+        lines.push(Line::styled(self.hint(), theme.dim()));
         lines
+    }
+
+    fn hint(&self) -> String {
+        if self.scrolls() {
+            format!("{}{}", Self::SCROLL_HINT, Self::CLOSE_HINT)
+        } else {
+            Self::CLOSE_HINT.to_string()
+        }
+    }
+
+    fn scrolls(&self) -> bool {
+        self.max_scroll.get() > 0
     }
 
     fn visible_scroll(&self) -> usize {
         self.scroll.min(self.max_scroll.get())
     }
 
-    fn return_key(key: &str) -> Vec<String> {
-        vec![
-            format!("{key} detaches from any session and brings you back here. Set return_key in the config and press r to use another key."),
-            format!("Sessions run on Ringleader's own tmux server, whose socket is listed under Files. They have no prefix key, and the mouse is on. Inside your own tmux a session opens nested, so your tmux must not use {key} as its prefix or bind it in its root table."),
-            "Open extra shells with t instead of splitting the agent window, since output in a split pane counts as agent activity.".to_string(),
-        ]
+    fn content(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
+        let sections = [
+            self.keys(width, theme),
+            Self::legends(width, theme),
+            self.files(width, theme),
+        ];
+        sections.join(&Line::default())
     }
 
-    fn bell() -> Vec<String> {
-        vec![
-            "With bell_on_waiting on, the bell rings when an agent goes from working to waiting, unless a client shows its agent window. An exit never rings.".to_string(),
-            "This screen is suspended while you are attached to a session, so the bell rings only while this screen shows.".to_string(),
-        ]
-    }
-
-    fn files(files: &[(&str, &Path)]) -> Vec<String> {
-        let version = format!("ringleader {}", env!("CARGO_PKG_VERSION"));
-        files
+    fn keys(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
+        let heading = Line::styled(Self::KEYS_HEADING, theme.emphasis());
+        let rows = Self::KEYS
             .iter()
-            .map(|(label, path)| Self::file_line(label, &path.display().to_string()))
-            .chain([Self::file_line("Version", &version)])
+            .flat_map(|(key, action)| Self::labeled(key, action, width, theme));
+        let return_row = Self::labeled(&self.return_key, Self::RETURN_ACTION, width, theme);
+        once(heading).chain(rows).chain(return_row).collect()
+    }
+
+    fn legends(width: usize, theme: &Theme) -> Vec<Line<'static>> {
+        let legends = [Self::state_legend(theme), Self::diff_legend(theme)];
+        legends
+            .iter()
+            .flat_map(|legend| legend.lines(width, theme))
             .collect()
     }
 
-    fn file_line(label: &str, value: &str) -> String {
-        format!("{label:<width$}{value}", width = Self::FILE_LABEL_WIDTH)
+    fn state_legend(theme: &Theme) -> Legend {
+        let entries = SessionState::ALL.iter().map(|&state| {
+            let indicator = StateIndicator::new(state, Self::FIRST_SPINNER_TICK);
+            LegendEntry::new(indicator.glyph(), indicator.style(theme), state.label())
+        });
+        Legend::new("States", entries.collect())
+    }
+
+    fn diff_legend(theme: &Theme) -> Legend {
+        let entries = vec![
+            LegendEntry::new("+n", theme.insertions(), "added lines"),
+            LegendEntry::new("-n", theme.deletions(), "removed lines"),
+            LegendEntry::new("?n", theme.base(), "untracked files"),
+        ];
+        Legend::new("Diff", entries)
+    }
+
+    fn files(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
+        self.files
+            .iter()
+            .flat_map(|(label, shown_path)| Self::labeled(label, shown_path, width, theme))
+            .collect()
+    }
+
+    fn labeled(label: &str, text: &str, width: usize, theme: &Theme) -> Vec<Line<'static>> {
+        let column = LabelColumn::new(label);
+        let wrapped = TextFit::new(text).wrapped(column.room(width));
+        let rows = wrapped
+            .into_iter()
+            .map(|line| vec![Span::styled(line, theme.base())]);
+        column.lines(rows, theme)
     }
 }
 
@@ -121,13 +158,22 @@ mod tests {
     use crossterm::event::KeyModifiers;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
+    use ratatui::style::Style;
 
     use super::*;
     use crate::ui::dialogs::Dialog;
+    use crate::ui::home_view::LayoutTier;
 
     struct HelpFixture;
 
     impl HelpFixture {
+        const HOME: &'static str = "/home/example";
+        const WIDE_WIDTH: usize = 70;
+        const EVERY_ROW_HEIGHT: usize = 200;
+        const SHORT_WIDTH: usize = 56;
+        const SHORT_HEIGHT: usize = 8;
+        const PAST_THE_END: usize = 50;
+
         fn help() -> HelpView {
             Self::help_for(&ReturnKey::default())
         }
@@ -136,14 +182,24 @@ mod tests {
             HelpView::new(
                 return_key,
                 &[
-                    ("Config", Path::new("/config/ringleader/config.toml")),
-                    ("Log", Path::new("/state/ringleader/app.log")),
+                    (
+                        "Config",
+                        Path::new("/home/example/.config/ringleader/config.toml"),
+                    ),
+                    (
+                        "Log",
+                        Path::new("/home/example/.local/state/ringleader/app.log"),
+                    ),
                     (
                         "tmux socket",
                         Path::new("/run/user/1000/ringleader/tmux/tmux.sock"),
                     ),
-                    ("tmux config", Path::new("/state/ringleader/tmux.conf")),
+                    (
+                        "tmux config",
+                        Path::new("/home/example/.local/state/ringleader/tmux.conf"),
+                    ),
                 ],
+                &HomePath::new(Some(Path::new(Self::HOME))),
             )
         }
 
@@ -161,22 +217,30 @@ mod tests {
                 .join("\n")
         }
 
-        fn text(help: &HelpView) -> String {
-            help.lines(70, 200, &Theme)
-                .iter()
-                .map(|line| {
-                    line.spans
-                        .iter()
-                        .map(|span| span.content.as_ref())
-                        .collect::<String>()
-                })
-                .collect::<Vec<_>>()
-                .join(" ")
+        fn page(help: &HelpView, width: usize) -> Vec<Line<'static>> {
+            help.lines(width, Self::EVERY_ROW_HEIGHT, &Theme)
         }
 
-        const SHORT_WIDTH: usize = 56;
-        const SHORT_HEIGHT: usize = 8;
-        const PAST_THE_END: usize = 50;
+        fn rows(help: &HelpView, width: usize) -> Vec<String> {
+            Self::page(help, width)
+                .iter()
+                .map(ToString::to_string)
+                .collect()
+        }
+
+        fn text(help: &HelpView) -> String {
+            Self::rows(help, Self::WIDE_WIDTH).join(" ")
+        }
+
+        fn span_style(symbol: &str) -> Style {
+            let lines = Self::page(&Self::help(), Self::WIDE_WIDTH);
+            let span = lines
+                .iter()
+                .flat_map(|line| line.spans.iter())
+                .find(|span| span.content == symbol)
+                .unwrap();
+            span.style
+        }
 
         fn press(help: &mut HelpView, code: KeyCode) -> DialogStep {
             help.handle_key(&KeyEvent::new(code, KeyModifiers::NONE))
@@ -205,37 +269,118 @@ mod tests {
         let screen = HelpFixture::screen(HelpFixture::help(), 100, 28);
 
         assert!(screen.lines().nth(3).unwrap().contains("┌ Help "));
-        assert!(screen.contains("n           create a session"));
-        assert!(screen.contains("q           quit, the sessions keep running"));
+        assert!(screen.contains("n            create a session"));
+        assert!(screen.contains("q            quit, the sessions keep running"));
     }
 
     #[test]
-    fn the_help_names_the_files_and_the_version() {
-        let text = HelpFixture::text(&HelpFixture::help());
+    fn a_wrapped_key_row_continues_under_its_action() {
+        let rows = HelpFixture::rows(&HelpFixture::help(), HelpFixture::SHORT_WIDTH);
 
-        assert!(text.contains("Config       /config/ringleader/config.toml"));
-        assert!(text.contains("Log          /state/ringleader/app.log"));
-        assert!(text.contains("tmux socket  /run/user/1000/ringleader/tmux/tmux.sock"));
-        assert!(text.contains("tmux config  /state/ringleader/tmux.conf"));
-        assert!(text.contains(&format!(
-            "Version      ringleader {}",
+        assert!(rows.contains(&"t            open a shell in the selected session's".to_string()));
+        assert!(rows.contains(&"             worktree".to_string()));
+    }
+
+    #[test]
+    fn the_whole_help_fits_the_smallest_full_size_dialog() {
+        let (width, height) = LayoutTier::smallest_full_size();
+
+        let screen = HelpFixture::screen(HelpFixture::help(), width, height);
+
+        assert!(screen.contains("Keys"));
+        assert!(screen.contains("tmux config  ~/.local/state/ringleader/tmux.conf"));
+    }
+
+    #[test]
+    fn a_help_that_fits_offers_no_scroll_keys() {
+        let (width, height) = LayoutTier::smallest_full_size();
+
+        let screen = HelpFixture::screen(HelpFixture::help(), width, height);
+
+        assert!(screen.contains("? Esc q close"));
+        assert!(!screen.contains("scroll"));
+    }
+
+    #[test]
+    fn a_help_that_overflows_offers_the_scroll_keys() {
+        let page = HelpFixture::short_page(&HelpFixture::help());
+
+        assert_eq!(
+            page.last().unwrap().spans[0].content,
+            "↑ ↓ scroll · ? Esc q close"
+        );
+    }
+
+    #[test]
+    fn the_title_names_the_version() {
+        let screen = HelpFixture::screen(HelpFixture::help(), 100, 28);
+
+        assert!(screen.contains(&format!(
+            "┌ Help · ringleader {} ",
             env!("CARGO_PKG_VERSION")
         )));
     }
 
     #[test]
-    fn the_help_explains_the_configured_return_key_and_nesting() {
+    fn the_help_lists_the_configured_return_key() {
         let text = HelpFixture::text(&HelpFixture::help_for(&ReturnKey::parse("M-x").unwrap()));
 
-        assert!(text.contains("Returning with Alt-x"));
-        assert!(text.contains("Alt-x detaches from any session and brings you back here."));
-        assert!(text.contains(
-            "so your tmux must not use Alt-x as its prefix or bind it in its root table"
-        ));
-        assert!(text.contains("Open extra shells with t instead of splitting the agent window"));
-        assert!(text.contains("the bell rings only while this screen shows"));
-        assert!(!text.contains("tmux_prefix"));
-        assert!(!text.contains("env -u TMUX"));
+        assert!(text.contains("Alt-x        detach from a session and return here"));
+    }
+
+    #[test]
+    fn a_long_return_key_shows_in_full_with_a_gap_before_its_action() {
+        let long_key = ReturnKey::parse("C-M-S-F12").unwrap();
+
+        let text = HelpFixture::text(&HelpFixture::help_for(&long_key));
+
+        assert!(text.contains("Ctrl-Alt-Shift-F12  detach from a session and return here"));
+    }
+
+    #[test]
+    fn the_help_shows_the_files_under_home_from_home() {
+        let text = HelpFixture::text(&HelpFixture::help());
+
+        assert!(text.contains("Config       ~/.config/ringleader/config.toml"));
+        assert!(text.contains("Log          ~/.local/state/ringleader/app.log"));
+        assert!(text.contains("tmux config  ~/.local/state/ringleader/tmux.conf"));
+    }
+
+    #[test]
+    fn the_help_shows_the_tmux_socket_outside_home_in_full() {
+        let text = HelpFixture::text(&HelpFixture::help());
+
+        assert!(text.contains("tmux socket  /run/user/1000/ringleader/tmux/tmux.sock"));
+    }
+
+    #[test]
+    fn the_legend_names_the_glyph_of_every_state() {
+        let text = HelpFixture::text(&HelpFixture::help());
+
+        assert!(
+            text.contains("States       ⠋ working  ● waiting  ✗ exited  ○ stopped  ? unmanaged")
+        );
+    }
+
+    #[test]
+    fn the_legend_colors_each_glyph_like_the_session_table() {
+        assert_eq!(
+            HelpFixture::span_style("●"),
+            Theme.state(SessionState::Waiting)
+        );
+    }
+
+    #[test]
+    fn the_legend_explains_the_diff_column() {
+        let text = HelpFixture::text(&HelpFixture::help());
+
+        assert!(text.contains("Diff         +n added lines  -n removed lines  ?n untracked files"));
+    }
+
+    #[test]
+    fn the_legend_colors_the_diff_markers_like_the_session_table() {
+        assert_eq!(HelpFixture::span_style("+n"), Theme.insertions());
+        assert_eq!(HelpFixture::span_style("-n"), Theme.deletions());
     }
 
     #[test]
@@ -250,10 +395,10 @@ mod tests {
     #[test]
     fn a_short_terminal_scrolls_the_help() {
         let mut help = HelpFixture::help();
-        let top = help.lines(56, 8, &Theme);
+        let top = HelpFixture::short_page(&help);
 
         HelpFixture::press(&mut help, KeyCode::Down);
-        let scrolled = help.lines(56, 8, &Theme);
+        let scrolled = HelpFixture::short_page(&help);
 
         assert_eq!(top[0].spans[0].content, "Keys");
         assert_eq!(scrolled[0], top[1]);

@@ -974,7 +974,7 @@ mod tests {
         AppFixture::press(&mut app, '?');
 
         assert!(opened.contains("┌ Help "));
-        assert!(opened.contains("n           create a session"));
+        assert!(opened.contains("n            create a session"));
         assert!(!app.dialogs.is_open());
     }
 
