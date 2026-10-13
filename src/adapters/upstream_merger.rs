@@ -138,7 +138,7 @@ impl<'a> UpstreamMerger<'a> {
             ]);
         match self.git.run_checked(&merge) {
             Ok(_) => Ok(MergeOutcome::Merged),
-            Err(failure) => self.conflicts_or(worktree, failure),
+            Err(failure) => self.conflicts_or(worktree, commit, failure),
         }
     }
 
@@ -183,6 +183,7 @@ impl<'a> UpstreamMerger<'a> {
     fn conflicts_or(
         &self,
         worktree: &Path,
+        commit: &str,
         failure: WorkspaceError,
     ) -> Result<MergeOutcome, WorkspaceError> {
         let unmerged = GitInvocation::in_worktree(worktree, "diff").args([
@@ -192,9 +193,37 @@ impl<'a> UpstreamMerger<'a> {
         ]);
         let conflicts = self.git.run_checked(&unmerged)?.paths();
         if conflicts.is_empty() {
-            return Err(self.undo_unfinished_merge(worktree, failure)?);
+            return Err(self.settle_failed_merge(worktree, commit, failure)?);
         }
         Ok(MergeOutcome::Conflicted(conflicts))
+    }
+
+    fn settle_failed_merge(
+        &self,
+        worktree: &Path,
+        commit: &str,
+        failure: WorkspaceError,
+    ) -> Result<WorkspaceError, WorkspaceError> {
+        if self.head_contains(worktree, commit)? {
+            return self.forget_landed_merge(worktree, failure);
+        }
+        self.undo_unfinished_merge(worktree, failure)
+    }
+
+    fn forget_landed_merge(
+        &self,
+        worktree: &Path,
+        failure: WorkspaceError,
+    ) -> Result<WorkspaceError, WorkspaceError> {
+        if self.is_merging(worktree)? {
+            let quit = GitInvocation::in_worktree(worktree, "merge")
+                .writing()
+                .arg("--quit");
+            self.git.run_checked(&quit)?;
+        }
+        Ok(WorkspaceError::MergeLanded {
+            cause: failure.to_string(),
+        })
     }
 
     fn undo_unfinished_merge(
@@ -378,6 +407,10 @@ mod tests {
 
         fn reject_commit_messages(&self) {
             self.install_hook("commit-msg", "echo 'needs a ticket id' >&2\nexit 1");
+        }
+
+        fn stall_after_merging(&self) {
+            self.install_hook("post-merge", "sleep 20");
         }
 
         fn stall_merge_commits(&self) {
@@ -643,6 +676,25 @@ mod tests {
             "{error:?}"
         );
         assert!(fixture.is_clean());
+    }
+
+    #[test]
+    fn a_merge_killed_after_its_commit_landed_is_reported_as_landed() {
+        let fixture = MergeFixture::new();
+        fixture.commit_on_branch("work.txt");
+        let upstream_tip = fixture.commit_upstream("news.txt");
+        fixture.stall_after_merging();
+
+        let error = fixture
+            .merge_within(MergeFixture::SHORT_DEADLINE)
+            .unwrap_err();
+
+        assert!(
+            matches!(error, WorkspaceError::MergeLanded { .. }),
+            "{error:?}"
+        );
+        assert!(fixture.has_merged(&upstream_tip));
+        assert!(!fixture.is_merging());
     }
 
     #[test]
