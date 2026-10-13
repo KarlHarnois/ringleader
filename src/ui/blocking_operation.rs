@@ -174,7 +174,7 @@ mod tests {
         assert_eq!(
             outcome,
             OperationOutcome::Done {
-                message: "merging origin/main into fix-auth stopped on a conflict in 1 file, asked its agent to resolve them".to_string(),
+                message: "merging origin/main into fix-auth stopped on a conflict in 1 file, asked its agent to finish the merge".to_string(),
                 select: Some("fix-auth".to_string()),
             }
         );

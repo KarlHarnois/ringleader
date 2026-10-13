@@ -152,11 +152,11 @@ impl MergeReport {
             (MergeOutcome::UpToDate, _) => format!("{name} already has {upstream}"),
             (MergeOutcome::Merged, _) => format!("merged {upstream} into {name}"),
             (MergeOutcome::Conflicted(paths), ConflictHandoff::Refused(error)) => format!(
-                "merging {upstream} into {name} stopped on {}, and its agent was not asked to resolve them: {error}",
+                "merging {upstream} into {name} stopped on {}, and its agent was not asked to finish the merge: {error}",
                 Self::conflicts(paths)
             ),
             (MergeOutcome::Conflicted(paths), _) => format!(
-                "merging {upstream} into {name} stopped on {}, asked its agent to resolve them",
+                "merging {upstream} into {name} stopped on {}, asked its agent to finish the merge",
                 Self::conflicts(paths)
             ),
         }
@@ -293,7 +293,7 @@ mod tests {
 
         assert_eq!(
             report.summary(),
-            "merging origin/main into fix-auth stopped on conflicts in 2 files, asked its agent to resolve them"
+            "merging origin/main into fix-auth stopped on conflicts in 2 files, asked its agent to finish the merge"
         );
         assert!(!report.needs_attention());
     }
@@ -331,7 +331,7 @@ mod tests {
         assert!(report.needs_attention());
         assert_eq!(
             report.summary(),
-            "merging origin/main into fix-auth stopped on conflicts in 2 files, and its agent was not asked to resolve them: the agent in tmux session ringleader-fix-auth is not at its prompt"
+            "merging origin/main into fix-auth stopped on conflicts in 2 files, and its agent was not asked to finish the merge: the agent in tmux session ringleader-fix-auth is not at its prompt"
         );
     }
 
@@ -344,7 +344,7 @@ mod tests {
 
         assert_eq!(
             report.summary(),
-            "merging origin/main into fix-auth stopped on a conflict in 1 file, asked its agent to resolve them"
+            "merging origin/main into fix-auth stopped on a conflict in 1 file, asked its agent to finish the merge"
         );
     }
 
