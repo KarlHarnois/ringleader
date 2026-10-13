@@ -1,13 +1,9 @@
-use std::cmp::Reverse;
-
-use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
-use nucleo_matcher::{Config, Matcher, Utf32Str};
-
+use super::fuzzy_ranker::FuzzyRanker;
 use super::home_path::HomePath;
 use crate::domain::Repo;
 
 pub struct RepoFilter {
-    matcher: Matcher,
+    ranker: FuzzyRanker,
     home: HomePath,
     shown_paths: Vec<String>,
 }
@@ -15,7 +11,7 @@ pub struct RepoFilter {
 impl RepoFilter {
     pub fn new(home: HomePath) -> Self {
         Self {
-            matcher: Self::path_matcher(),
+            ranker: FuzzyRanker::for_paths(),
             home,
             shown_paths: Vec::new(),
         }
@@ -33,26 +29,7 @@ impl RepoFilter {
     }
 
     pub fn ranked(&mut self, query: &str) -> Vec<usize> {
-        let pattern = Pattern::parse(query, CaseMatching::Smart, Normalization::Smart);
-        let mut buffer = Vec::new();
-        let mut scored: Vec<(usize, u32)> = self
-            .shown_paths
-            .iter()
-            .enumerate()
-            .filter_map(|(index, shown)| {
-                let haystack = Utf32Str::new(shown, &mut buffer);
-                let score = pattern.score(haystack, &mut self.matcher)?;
-                Some((index, score))
-            })
-            .collect();
-        scored.sort_by_key(|(_, score)| Reverse(*score));
-        scored.into_iter().map(|(index, _)| index).collect()
-    }
-
-    fn path_matcher() -> Matcher {
-        let mut config = Config::DEFAULT;
-        config.set_match_paths();
-        Matcher::new(config)
+        self.ranker.ranked(query, &self.shown_paths)
     }
 }
 

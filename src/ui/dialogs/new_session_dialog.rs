@@ -201,7 +201,7 @@ mod tests {
             "↑ ↓ j k choose · Enter next field · Ctrl-S create · Esc cancel";
         const PROMPT_HINTS: &'static str = "Enter create · Shift-Tab mode · Esc cancel";
         const SEARCH_HINTS: &'static str =
-            "Type to search · ↑ ↓ ctrl-j ctrl-k choose · Enter pick · Esc back";
+            "Type to search · ↑ ↓ Ctrl-J Ctrl-K choose · Enter pick · Esc back";
         const SEVEN_LINES: &'static str = "one\ntwo\nthree\nfour\nfive\nsix\nseven";
 
         fn launched_in_repo() -> ServiceFixture {
