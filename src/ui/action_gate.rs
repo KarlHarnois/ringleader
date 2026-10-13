@@ -9,6 +9,7 @@ use crate::domain::{Session, SessionState, SessionSummary};
 pub struct ActionGate<'a> {
     selected: Option<&'a SessionSummary>,
     config_error: Option<&'a ConfigError>,
+    heading_selected: bool,
 }
 
 impl<'a> ActionGate<'a> {
@@ -21,6 +22,15 @@ impl<'a> ActionGate<'a> {
         Self {
             selected,
             config_error,
+            heading_selected: false,
+        }
+    }
+
+    pub fn on_heading(config_error: Option<&'a ConfigError>) -> Self {
+        Self {
+            selected: None,
+            config_error,
+            heading_selected: true,
         }
     }
 
@@ -36,7 +46,9 @@ impl<'a> ActionGate<'a> {
                 self.writable()
                     .map(|()| KeyAction::Open(DialogOpening::NewSession)),
             ),
-            KeyCode::Enter => KeyAction::from(self.attach().map(KeyAction::Request)),
+            KeyCode::Char(' ') => KeyAction::Fold,
+            KeyCode::Char(digit @ '1'..='9') => KeyAction::JumpToRepo(Self::repo_number(digit)),
+            KeyCode::Enter => self.enter(),
             KeyCode::Char('t') => KeyAction::from(self.shell().map(KeyAction::Request)),
             KeyCode::Char('s') => KeyAction::from(self.restart().map(KeyAction::Request)),
             KeyCode::Char('d') => KeyAction::from(self.delete().map(KeyAction::Request)),
@@ -46,6 +58,18 @@ impl<'a> ActionGate<'a> {
             ),
             _ => KeyAction::Ignore,
         }
+    }
+
+    fn repo_number(digit: char) -> usize {
+        let number = digit.to_digit(10).unwrap_or_default();
+        usize::try_from(number).unwrap_or_default()
+    }
+
+    fn enter(&self) -> KeyAction {
+        if self.heading_selected {
+            return KeyAction::Fold;
+        }
+        KeyAction::from(self.attach().map(KeyAction::Request))
     }
 
     pub fn attach(&self) -> Result<AppRequest, String> {
@@ -117,6 +141,8 @@ pub enum KeyAction {
     Move(isize),
     SelectFirst,
     SelectLast,
+    Fold,
+    JumpToRepo(usize),
     Open(DialogOpening),
     Reload,
     Refuse(String),
@@ -353,6 +379,59 @@ mod tests {
             ActionGate::new(Some(&unmanaged), None).rename(),
             Err("mystery is unmanaged, so it cannot be renamed.".to_string())
         );
+    }
+
+    #[test]
+    fn enter_on_a_heading_folds_it() {
+        let key = KeyEvent::from(KeyCode::Enter);
+
+        assert_eq!(
+            ActionGate::on_heading(None).action_for(&key),
+            KeyAction::Fold
+        );
+    }
+
+    #[test]
+    fn enter_on_a_session_attaches() {
+        let row = GateFixture::row(SessionState::Waiting);
+        let key = KeyEvent::from(KeyCode::Enter);
+
+        assert_eq!(
+            ActionGate::new(Some(&row), None).action_for(&key),
+            KeyAction::Request(AppRequest::Attach("fix-auth".to_string()))
+        );
+    }
+
+    #[test]
+    fn space_folds() {
+        let key = KeyEvent::from(KeyCode::Char(' '));
+
+        assert_eq!(
+            ActionGate::on_heading(None).action_for(&key),
+            KeyAction::Fold
+        );
+    }
+
+    #[test]
+    fn a_digit_jumps_to_that_repo() {
+        let gate = ActionGate::new(None, None);
+        let action = |character| gate.action_for(&KeyEvent::from(KeyCode::Char(character)));
+
+        assert_eq!(action('3'), KeyAction::JumpToRepo(3));
+        assert_eq!(action('0'), KeyAction::Ignore);
+    }
+
+    #[test]
+    fn a_heading_refuses_the_session_actions() {
+        let gate = ActionGate::on_heading(None);
+        let refusal = |character| gate.action_for(&KeyEvent::from(KeyCode::Char(character)));
+
+        for character in ['d', 'R', 's', 't'] {
+            assert_eq!(
+                refusal(character),
+                KeyAction::Refuse("No session is selected.".to_string())
+            );
+        }
     }
 
     #[test]

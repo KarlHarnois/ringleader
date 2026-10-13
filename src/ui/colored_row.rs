@@ -16,6 +16,11 @@ impl<'t> ColoredRow<'t> {
         }
     }
 
+    pub fn skip(self, cell: &str) -> Self {
+        let unstyled = vec![Span::styled(cell.to_string(), self.base)];
+        self.color_first(cell, unstyled)
+    }
+
     pub fn color_first(self, cell: &str, styled: Vec<Span<'static>>) -> Self {
         let start = self.remaining.find(cell);
         self.color_at(start, cell, styled)
@@ -86,6 +91,21 @@ mod tests {
 
         assert_eq!(RowFixture::texts(&spans), ["fix-auth ", "#142", " main"]);
         assert_eq!(spans[1].style.fg, Some(Color::Red));
+    }
+
+    #[test]
+    fn a_skipped_cell_hides_its_text_from_the_next_cell() {
+        let spans = ColoredRow::new("claude-docs claude", RowFixture::base())
+            .skip("claude-docs")
+            .color_first("claude", RowFixture::red("claude"))
+            .into_spans();
+
+        let last = spans.last().unwrap();
+        assert_eq!(RowFixture::texts(&spans).concat(), "claude-docs claude");
+        assert_eq!(
+            (last.content.as_ref(), last.style.fg),
+            ("claude", Some(Color::Red))
+        );
     }
 
     #[test]

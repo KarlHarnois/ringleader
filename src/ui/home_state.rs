@@ -132,6 +132,14 @@ impl HomeState {
         self.change_selection(service, SessionList::select_last);
     }
 
+    pub fn toggle_fold(&mut self, service: &SessionService) {
+        self.change_selection(service, SessionList::toggle_fold);
+    }
+
+    pub fn jump_to_repo(&mut self, number: usize, service: &SessionService) {
+        self.change_selection(service, |sessions| sessions.jump_to_repo(number));
+    }
+
     fn change_selection(
         &mut self,
         service: &SessionService,
