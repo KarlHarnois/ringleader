@@ -523,6 +523,20 @@ mod tests {
     }
 
     #[test]
+    fn a_restart_that_recreates_the_server_socket_says_so() {
+        let fixture = UiHarness::exited_session_fixture("fix-auth");
+        fixture.multiplexer().lose_socket();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        app.perform(BlockingOperation::Restart("fix-auth".to_string()));
+
+        assert!(
+            AppFixture::flattened_screen(&app, 100, 28)
+                .contains("Restarted fix-auth. Also recreated the socket")
+        );
+    }
+
+    #[test]
     fn s_on_a_waiting_session_explains_the_refusal() {
         let fixture = AppFixture::two_waiting_sessions();
         let mut app = AppFixture::started(&fixture, 100, 28);

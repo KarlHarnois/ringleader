@@ -40,8 +40,15 @@ impl BlockingOperation {
 
     fn restart(service: &mut SessionService, name: String) -> OperationOutcome {
         match service.restart_session(&name) {
-            Ok(()) => OperationOutcome::done(format!("Restarted {name}."), Some(name)),
+            Ok(recovery) => OperationOutcome::done(Self::restarted(&name, recovery), Some(name)),
             Err(error) => OperationOutcome::Failed(error),
+        }
+    }
+
+    fn restarted(name: &str, recovery: Option<String>) -> String {
+        match recovery {
+            Some(note) => format!("Restarted {name}. Also {note}."),
+            None => format!("Restarted {name}."),
         }
     }
 

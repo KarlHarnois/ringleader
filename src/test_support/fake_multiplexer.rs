@@ -139,8 +139,12 @@ impl FakeMultiplexer {
     }
 
     pub fn with_lost_socket(self) -> Self {
-        self.edit(|state| state.socket_lost = true);
+        self.lose_socket();
         self
+    }
+
+    pub fn lose_socket(&self) {
+        self.edit(|state| state.socket_lost = true);
     }
 
     pub fn with_drifted_config(self, server_return_key: &str) -> Self {
@@ -339,7 +343,10 @@ impl Multiplexer for FakeMultiplexer {
 
     fn observe_all(&self) -> Result<Vec<SessionObservation>, MultiplexerError> {
         self.call("observe_all", "")?;
-        Ok(self.edit(|state| state.live.clone()))
+        Ok(self.edit(|state| match state.socket_lost {
+            true => Vec::new(),
+            false => state.live.clone(),
+        }))
     }
 
     fn attach(&self, target: &AttachTarget) -> Result<(), MultiplexerError> {

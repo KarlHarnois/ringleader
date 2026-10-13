@@ -117,7 +117,9 @@ impl<'a> SessionCommands<'a> {
     pub fn restart(&mut self, name: &str) -> Result<u8, CommandStop> {
         self.service.observe(true)?;
         self.session.stop_if_signaled()?;
-        self.service.restart_session(name)?;
+        if let Some(note) = self.service.restart_session(name)? {
+            self.session.output().note(&note);
+        }
         self.session.output().line(&format!("restarted {name}"));
         Ok(0)
     }

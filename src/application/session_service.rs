@@ -228,14 +228,15 @@ impl SessionService {
             .examine(self.config(), self.read_only_reason(), &self.config_path())
     }
 
-    pub fn restart_session(&mut self, name: &str) -> Result<(), ServiceError> {
+    pub fn restart_session(&mut self, name: &str) -> Result<Option<String>, ServiceError> {
+        let recovery = self.lifecycle.restore_server_socket()?;
         let reconciliation = self.reconcile()?;
         let config_path = self.config_path();
         let restarted =
             self.lifecycle
                 .restart(&reconciliation, name, self.config(), &config_path)?;
         self.entries = reconciliation.entries_with(name, restarted);
-        Ok(())
+        Ok(recovery)
     }
 
     pub fn attach(&mut self, name: &str) -> Result<(), ServiceError> {

@@ -140,6 +140,14 @@ mod tests {
             )
         }
 
+        fn exited_behind_a_lost_socket() -> ServiceFixture {
+            Self::stopped().with_multiplexer(
+                FakeMultiplexer::new()
+                    .with_live(ServiceFixture::exited(&Self::session()))
+                    .with_lost_socket(),
+            )
+        }
+
         fn tmux_failure() -> MultiplexerError {
             MultiplexerError::Failed {
                 subcommand: "new-session".to_string(),
@@ -148,7 +156,7 @@ mod tests {
         }
 
         fn restart(fixture: &ServiceFixture) -> Result<(), ServiceError> {
-            fixture.service().restart_session("fix-auth")
+            fixture.service().restart_session("fix-auth").map(drop)
         }
     }
 
@@ -167,6 +175,26 @@ mod tests {
                 .iter()
                 .any(|call| call.starts_with("respawn_agent"))
         );
+    }
+
+    #[test]
+    fn an_exited_session_behind_a_lost_socket_is_respawned_once_the_socket_is_back() {
+        let fixture = RestartFixture::exited_behind_a_lost_socket();
+
+        RestartFixture::restart(&fixture).unwrap();
+
+        let calls = fixture.multiplexer().state_changing_calls();
+        assert!(calls.iter().any(|call| call.starts_with("respawn_agent")));
+        assert!(calls.iter().all(|call| !call.starts_with("create_session")));
+    }
+
+    #[test]
+    fn a_restart_that_recreates_the_socket_says_so() {
+        let fixture = RestartFixture::exited_behind_a_lost_socket();
+
+        let recovery = fixture.service().restart_session("fix-auth").unwrap();
+
+        assert!(recovery.unwrap().contains("recreated the socket"));
     }
 
     #[test]
