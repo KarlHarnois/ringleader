@@ -40,10 +40,17 @@ impl LiveProcess {
     }
 
     pub fn is_tmux(&self) -> bool {
-        let executable = self.executable.trim_end_matches(Self::DELETED_SUFFIX);
-        Path::new(executable)
+        self.executable_path()
             .file_name()
             .is_some_and(|name| name == Self::TMUX)
+    }
+
+    pub fn runs(&self, executable: &Path) -> bool {
+        self.executable_path() == executable
+    }
+
+    fn executable_path(&self) -> &Path {
+        Path::new(self.executable.trim_end_matches(Self::DELETED_SUFFIX))
     }
 
     pub fn runs_under_server(&self, by_pid: &HashMap<u32, &LiveProcess>, socket: &str) -> bool {

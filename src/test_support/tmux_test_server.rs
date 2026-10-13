@@ -53,10 +53,18 @@ impl TmuxTestServer {
     pub fn under_program_name(name: &str) -> Self {
         let mut server = Self::new();
         let program = server.directory().join(name);
-        std::os::unix::fs::symlink(Self::tmux_on_path(), &program)
-            .expect("a link to tmux under another name");
+        let copied = Command::new("cp")
+            .arg(Self::tmux_on_path())
+            .arg(&program)
+            .status()
+            .expect("cp runs");
+        assert!(copied.success(), "a copy of tmux under another name");
         server.program = program.into_os_string();
         server
+    }
+
+    pub fn program(&self) -> &std::ffi::OsStr {
+        &self.program
     }
 
     pub fn with_session(name: &str) -> Self {

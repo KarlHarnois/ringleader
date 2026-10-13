@@ -276,7 +276,10 @@ impl CompositionRoot {
             Arc::new(config_source),
             clock,
         );
-        let host = Arc::new(SystemHostProbe::new(&self.environment));
+        let host = Arc::new(SystemHostProbe::new(
+            &self.environment,
+            self.programs.tmux(),
+        ));
         let pull_requests = Self::pull_requests(&host, bounded);
         let repos = RepoPorts::new(
             Arc::new(GitWorkspace::new(self.programs.git(), bounded)),
