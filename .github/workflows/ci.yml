@@ -41,8 +41,8 @@ jobs:
       - name: Test
         run: nix develop -c cargo test
       - name: Build
-        if: github.event_name == 'push'
+        if: github.event_name != 'pull_request'
         run: nix build .#
       - name: Flake check
-        if: github.event_name == 'push'
+        if: github.event_name != 'pull_request'
         run: nix flake check
