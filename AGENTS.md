@@ -235,6 +235,7 @@ viewer exits.
     │       ├── mod.rs
     │       ├── session_registry.rs   # SessionRegistry trait
     │       ├── workspace.rs          # Workspace trait
+    │       ├── diff_base.rs          # DiffBase, the recorded commit and configured base branch a session diff measures from
     │       ├── branch_marker.rs      # BranchMarker, the git config entry that marks a branch Ringleader created
     │       ├── dirty_state.rs        # DirtyState, the uncommitted files and nested repos of a worktree
     │       ├── unmerged_commits.rs   # UnmergedCommits, commits on no other ref with the tip and HEAD
@@ -273,7 +274,9 @@ viewer exits.
     │   ├── git_porcelain.rs      # GitPorcelain, parses git's machine-readable output
     │   ├── git_branches.rs       # GitBranches: compare-and-swap delete, rename, the managed-branch marker, and whether a branch has been pushed
     │   ├── branch_section.rs     # BranchSection, the git config section and upstream keys of one branch
-    │   ├── start_point_resolver.rs # StartPointResolver, the base branch ladder
+    │   ├── start_point_resolver.rs # StartPointResolver, the commit a new worktree starts from
+    │   ├── base_branch_ladder.rs # BaseBranchLadder, the origin default, main, and master refs tried when no base branch is set
+    │   ├── diff_base_resolver.rs # DiffBaseResolver, the merge base of a worktree's HEAD with its base branch, which its diff measures from
     │   ├── submodule_commits.rs  # SubmoduleCommits, the submodule walk of unmerged_commits
     │   ├── system_clock.rs       # SystemClock, reads `SystemTime`
     │   ├── system_host_probe.rs  # SystemHostProbe
