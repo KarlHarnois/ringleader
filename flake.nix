@@ -154,7 +154,6 @@
             packages = [
               pkgs.cargo-llvm-cov
               pkgs.clojure
-              pkgs.jdk21
               tools.dryerTool
               tools.crapperTool
               tools.mutatorTool
