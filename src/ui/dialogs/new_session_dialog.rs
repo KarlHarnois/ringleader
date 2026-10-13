@@ -239,13 +239,9 @@ mod tests {
         fn focused_on_prompt(fixture: &ServiceFixture) -> (NewSessionDialog, SessionService) {
             let (mut dialog, service) = Self::opened(fixture);
             Self::type_text(&mut dialog, &service, "fix-auth");
-            for _ in [
-                NewSessionField::Repo,
-                NewSessionField::Agent,
-                NewSessionField::Prompt,
-            ] {
-                Self::press(&mut dialog, &service, KeyCode::Tab);
-            }
+            Self::press(&mut dialog, &service, KeyCode::Tab);
+            Self::press(&mut dialog, &service, KeyCode::Tab);
+            Self::press(&mut dialog, &service, KeyCode::Tab);
             (dialog, service)
         }
 
