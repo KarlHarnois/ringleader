@@ -7,11 +7,12 @@ pub struct HotKey {
 }
 
 impl HotKey {
-    const NAMED_KEYS: [&'static str; 30] = [
+    const NAMED_KEYS: [&'static str; 28] = [
         "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12", "Escape",
         "Enter", "Tab", "BTab", "Space", "BSpace", "Home", "End", "IC", "DC", "PageUp", "PageDown",
-        "PPage", "NPage", "Up", "Down", "Left", "Right",
+        "Up", "Down", "Left", "Right",
     ];
+    const ALIASES: [(&'static str, &'static str); 2] = [("PPage", "PageUp"), ("NPage", "PageDown")];
     const UNMODIFIABLE_KEYS: [&'static str; 6] =
         ["Enter", "Tab", "BTab", "Escape", "BSpace", "Space"];
     const SPACE: &'static str = "Space";
@@ -24,12 +25,7 @@ impl HotKey {
     ];
 
     pub fn parse(text: &str) -> Option<Self> {
-        let mut rest = text;
-        let mut modifiers = Vec::new();
-        while let Some((modifier, after)) = Modifier::strip(rest) {
-            modifiers.push(modifier);
-            rest = after;
-        }
+        let (modifiers, rest) = Modifier::split(text);
         let key = Self {
             key: Self::normalized(&modifiers, rest),
             modifiers,
@@ -63,8 +59,15 @@ impl HotKey {
         let control_character = modifiers.contains(&Modifier::Control) && key.chars().count() == 1;
         match control_character {
             true => key.to_ascii_lowercase(),
-            false => key.to_string(),
+            false => Self::unaliased(key).to_string(),
         }
+    }
+
+    fn unaliased(key: &str) -> &str {
+        Self::ALIASES
+            .iter()
+            .find(|(alias, _)| *alias == key)
+            .map_or(key, |(_, name)| name)
     }
 
     fn displayed_key(&self) -> String {
@@ -128,7 +131,7 @@ impl fmt::Display for HotKey {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Modifier {
     Control,
     Meta,
@@ -137,6 +140,18 @@ enum Modifier {
 
 impl Modifier {
     const ALL: [Self; 3] = [Self::Control, Self::Meta, Self::Shift];
+
+    fn split(text: &str) -> (Vec<Self>, &str) {
+        let mut rest = text;
+        let mut modifiers = Vec::new();
+        while let Some((modifier, after)) = Self::strip(rest) {
+            modifiers.push(modifier);
+            rest = after;
+        }
+        modifiers.sort();
+        modifiers.dedup();
+        (modifiers, rest)
+    }
 
     fn strip(text: &str) -> Option<(Self, &str)> {
         Self::ALL.into_iter().find_map(|modifier| {
@@ -212,6 +227,18 @@ mod tests {
         let key = HotKey::parse("C-Q").unwrap();
 
         assert_eq!(key, HotKey::parse("C-q").unwrap());
+    }
+
+    #[test]
+    fn modifier_order_and_page_key_aliases_name_the_same_key() {
+        for (text, same) in [
+            ("M-C-x", "C-M-x"),
+            ("C-C-x", "C-x"),
+            ("NPage", "PageDown"),
+            ("C-PPage", "C-PageUp"),
+        ] {
+            assert_eq!(HotKey::parse(text), HotKey::parse(same), "{text}");
+        }
     }
 
     #[test]

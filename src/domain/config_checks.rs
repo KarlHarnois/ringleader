@@ -365,6 +365,18 @@ mod tests {
                 ChecksFixture::draft().next_session_keys(&["M-j", "M-j"]),
                 "next_session_keys",
             ),
+            (
+                ChecksFixture::draft()
+                    .return_key("C-M-x")
+                    .next_session_keys(&["M-C-x"]),
+                "next_session_keys",
+            ),
+            (
+                ChecksFixture::draft()
+                    .next_session_keys(&["PageDown"])
+                    .previous_session_keys(&["NPage"]),
+                "previous_session_keys",
+            ),
         ] {
             ChecksFixture::fails_on(draft, setting);
         }
