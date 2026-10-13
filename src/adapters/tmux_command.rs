@@ -2,7 +2,8 @@ use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
 use std::process::Command;
 
-use super::bounded_command::{BoundedCommand, Call, CallKind, Deadlines};
+use super::bounded_command::{BoundedCommand, Call};
+use super::deadlines::{CallKind, Deadlines};
 use super::process_environment::ProcessEnvironment;
 use super::server_files::ServerFiles;
 use super::tmux_error::TmuxError;

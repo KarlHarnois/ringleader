@@ -265,6 +265,7 @@ viewer exits.
     │   ├── gh_listing.rs         # GhListing, the viewer's or repo owner's newest pull request per branch in a gh response
     │   ├── null_pull_requests.rs # NullPullRequests, finds no pull request on a host without gh
     │   ├── bounded_command.rs    # BoundedCommand, runs git, tmux, and gh children in a new session with a deadline
+    │   ├── deadlines.rs          # Deadlines and CallKind, the deadline of each kind of child call
     │   ├── command_output.rs     # CommandOutput, a finished child's status and output
     │   ├── host_path.rs          # HostPath, lenient canonicalization and directory listing
     │   ├── git_workspace.rs      # GitWorkspace

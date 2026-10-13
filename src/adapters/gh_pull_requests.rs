@@ -4,8 +4,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use super::bounded_command::{BoundedCommand, Call, CallKind, CommandError};
+use super::bounded_command::{BoundedCommand, Call, CommandError};
 use super::command_output::CommandOutput;
+use super::deadlines::CallKind;
 use super::gh_listing::GhListing;
 use super::gh_query::GhQuery;
 use super::git_invocation::GitInvocation;
@@ -163,7 +164,7 @@ mod tests {
     use std::process::ExitStatus;
 
     use super::*;
-    use crate::adapters::bounded_command::Deadlines;
+    use crate::adapters::Deadlines;
     use crate::domain::PullRequestState;
 
     struct ParseFixture;

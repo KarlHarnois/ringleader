@@ -5,6 +5,7 @@ pub mod bounded_command;
 pub mod branch_section;
 pub mod command_output;
 pub mod config_file_writer;
+pub mod deadlines;
 pub mod directory_repo_scanner;
 pub mod durable_file;
 pub mod file_lock;
@@ -45,5 +46,6 @@ pub mod tmux_server_config;
 pub mod toml_config_source;
 pub mod xdg_paths;
 
-pub use bounded_command::{BoundedCommand, Deadlines};
+pub use bounded_command::BoundedCommand;
+pub use deadlines::Deadlines;
 pub use git_workspace::GitWorkspace;
