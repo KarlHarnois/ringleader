@@ -15,6 +15,7 @@ impl ReturnKey {
     ];
     const UNMODIFIABLE_KEYS: [&'static str; 6] =
         ["Enter", "Tab", "BTab", "Escape", "BSpace", "Space"];
+    const KEYS_THAT_LOSE_META: [&'static str; 2] = ["BSpace", "BTab"];
     const SPACE: &'static str = "Space";
     const REFUSED_CHARACTERS: [char; 3] = ['\'', '"', '\\'];
     const CONTROL_PUNCTUATION: [char; 3] = [']', '^', '_'];
@@ -103,7 +104,8 @@ impl ReturnKey {
             return true;
         }
         let control_reaches = !self.has(Modifier::Control) || key == Self::SPACE;
-        control_reaches && !self.has(Modifier::Shift)
+        let meta_reaches = !self.has(Modifier::Meta) || !Self::KEYS_THAT_LOSE_META.contains(&key);
+        control_reaches && meta_reaches && !self.has(Modifier::Shift)
     }
 
     fn single_character(&self) -> Option<char> {
@@ -225,6 +227,12 @@ mod tests {
         KeyFixture::assert_refused(&[
             "C-Enter", "C-Tab", "C-Escape", "C-BSpace", "S-Tab", "S-Space",
         ]);
+    }
+
+    #[test]
+    fn meta_with_backspace_or_backtab_is_refused_because_the_bytes_lose_the_meta() {
+        KeyFixture::assert_parse(&["M-Enter", "M-Tab", "M-Escape", "M-Space"]);
+        KeyFixture::assert_refused(&["M-BSpace", "M-BTab"]);
     }
 
     #[test]
