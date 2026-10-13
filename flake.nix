@@ -77,6 +77,7 @@
             runtimeInputs = with pkgs; [
               cargo
               rustc
+              stdenv.cc
               cargo-llvm-cov
               tmux
               git
