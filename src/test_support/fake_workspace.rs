@@ -503,8 +503,9 @@ impl Workspace for FakeWorkspace {
         Ok(self.edit(|state| state.next_unmerged(repo, branch, worktree)))
     }
 
-    fn diff_stat(&self, worktree: &Path, _base: &DiffBase) -> Result<DiffStat, WorkspaceError> {
-        self.call("diff_stat", worktree.display().to_string())?;
+    fn diff_stat(&self, worktree: &Path, base: &DiffBase) -> Result<DiffStat, WorkspaceError> {
+        let base_branch = base.base_branch().map_or("-", BaseBranch::as_str);
+        self.call("diff_stat", format!("{} {base_branch}", worktree.display()))?;
         Ok(self.edit(|state| state.diffs.get(worktree).copied().unwrap_or_default()))
     }
 
