@@ -141,6 +141,7 @@ impl App {
             KeyAction::Request(request) => return self.request(request),
             KeyAction::Move(offset) => self.home.move_selection(offset, &self.service),
             KeyAction::Fold => self.home.toggle_fold(&self.service),
+            KeyAction::JumpToRepo(number) => self.home.jump_to_repo(number, &self.service),
             KeyAction::Open(opening) => {
                 self.dialogs.open(Dialog::open(opening, &self.service));
             }
@@ -466,6 +467,20 @@ mod tests {
         assert!(screen.contains("1 ▸ alpha (1)"));
         assert!(!screen.contains("docs"));
         assert!(screen.contains("fix-auth"));
+    }
+
+    #[test]
+    fn a_digit_jumps_to_that_repo_and_previews_its_first_session() {
+        let fixture = AppFixture::two_repos();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press(&mut app, '2');
+
+        assert_eq!(AppFixture::selected(&app).as_deref(), Some("fix-auth"));
+        assert_eq!(
+            AppFixture::captures(&fixture).last().unwrap(),
+            "capture_pane ringleader-fix-auth"
+        );
     }
 
     #[test]

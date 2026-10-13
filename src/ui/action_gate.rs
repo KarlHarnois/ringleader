@@ -46,6 +46,7 @@ impl<'a> ActionGate<'a> {
                     .map(|()| KeyAction::Open(DialogOpening::NewSession)),
             ),
             KeyCode::Char(' ') => KeyAction::Fold,
+            KeyCode::Char(digit @ '1'..='9') => KeyAction::JumpToRepo(Self::repo_number(digit)),
             KeyCode::Enter => self.enter(),
             KeyCode::Char('t') => KeyAction::from(self.shell().map(KeyAction::Request)),
             KeyCode::Char('s') => KeyAction::from(self.restart().map(KeyAction::Request)),
@@ -56,6 +57,11 @@ impl<'a> ActionGate<'a> {
             ),
             _ => KeyAction::Ignore,
         }
+    }
+
+    fn repo_number(digit: char) -> usize {
+        let number = digit.to_digit(10).unwrap_or_default();
+        usize::try_from(number).unwrap_or_default()
     }
 
     fn enter(&self) -> KeyAction {
@@ -133,6 +139,7 @@ pub enum KeyAction {
     Request(AppRequest),
     Move(isize),
     Fold,
+    JumpToRepo(usize),
     Open(DialogOpening),
     Reload,
     Refuse(String),
@@ -390,6 +397,15 @@ mod tests {
             ActionGate::on_heading(None).action_for(&key),
             KeyAction::Fold
         );
+    }
+
+    #[test]
+    fn a_digit_jumps_to_that_repo() {
+        let gate = ActionGate::new(None, None);
+        let action = |character| gate.action_for(&KeyEvent::from(KeyCode::Char(character)));
+
+        assert_eq!(action('3'), KeyAction::JumpToRepo(3));
+        assert_eq!(action('0'), KeyAction::Ignore);
     }
 
     #[test]

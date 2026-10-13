@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::list_selection::ListSelection;
 use super::repo_group::RepoGroup;
+use super::repo_heading::RepoHeading;
 use super::session_table::SessionTable;
 use super::session_tree::{SessionTree, TreeLine};
 use super::theme::Theme;
@@ -107,6 +108,12 @@ impl SessionList {
         }
     }
 
+    pub fn jump_to_repo(&mut self, number: usize) {
+        if let Some(target) = self.jump_target(number) {
+            self.selection = Some(target);
+        }
+    }
+
     fn tree(&self) -> SessionTree<'_> {
         SessionTree::new(&self.rows, &self.folded)
     }
@@ -129,6 +136,10 @@ impl SessionList {
         };
         let group = self.row(name).map(RepoGroup::of)?;
         Some(ListSelection::Repo(group))
+    }
+
+    fn jump_target(&self, number: usize) -> Option<ListSelection> {
+        self.tree().heading(number).map(RepoHeading::jump_target)
     }
 
     fn selection_moved_by(&self, offset: isize) -> Option<ListSelection> {
@@ -360,6 +371,47 @@ mod tests {
         list.show(ListFixture::two_repos()[..2].to_vec());
 
         assert_eq!(list.selected_name(), Some("a-one"));
+    }
+
+    #[test]
+    fn jumping_to_a_repo_selects_its_first_session() {
+        let mut list = ListFixture::showing(ListFixture::two_repos());
+
+        list.jump_to_repo(2);
+
+        assert_eq!(list.selected_name(), Some("c-three"));
+    }
+
+    #[test]
+    fn jumping_to_a_folded_repo_selects_its_heading() {
+        let mut list = ListFixture::showing(ListFixture::two_repos());
+        list.toggle_fold();
+        list.select("c-three");
+
+        list.jump_to_repo(1);
+        list.toggle_fold();
+
+        assert_eq!(list.visible_managed(10), ["a-one", "b-two", "c-three"]);
+    }
+
+    #[test]
+    fn jumping_past_the_last_repo_keeps_the_selection() {
+        let mut list = ListFixture::showing(ListFixture::two_repos());
+        list.select("b-two");
+
+        list.jump_to_repo(3);
+
+        assert_eq!(list.selected_name(), Some("b-two"));
+    }
+
+    #[test]
+    fn a_single_repo_has_no_repo_to_jump_to() {
+        let mut list = ListFixture::showing(ListFixture::two_repos()[..2].to_vec());
+        list.select("b-two");
+
+        list.jump_to_repo(1);
+
+        assert_eq!(list.selected_name(), Some("b-two"));
     }
 
     #[test]

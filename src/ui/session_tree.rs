@@ -30,7 +30,12 @@ impl<'a> SessionTree<'a> {
     }
 
     pub fn is_grouped(&self) -> bool {
-        self.lines.iter().any(TreeLine::is_heading)
+        self.lines.iter().any(|line| line.heading().is_some())
+    }
+
+    pub fn heading(&self, number: usize) -> Option<&RepoHeading<'a>> {
+        let mut headings = self.lines.iter().filter_map(TreeLine::heading);
+        headings.find(|heading| heading.number() == number)
     }
 
     pub fn visible(
@@ -117,8 +122,11 @@ impl<'a> TreeLine<'a> {
         }
     }
 
-    fn is_heading(&self) -> bool {
-        matches!(self, Self::Heading(_))
+    fn heading(&self) -> Option<&RepoHeading<'a>> {
+        match self {
+            Self::Heading(heading) => Some(heading),
+            Self::Session { .. } => None,
+        }
     }
 }
 

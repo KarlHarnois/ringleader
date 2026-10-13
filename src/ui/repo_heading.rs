@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use ratatui::text::Span;
 
+use super::list_selection::ListSelection;
 use super::repo_group::RepoGroup;
 use super::state_indicator::StateIndicator;
 use super::theme::Theme;
@@ -36,6 +37,17 @@ impl<'a> RepoHeading<'a> {
 
     pub fn group(&self) -> &RepoGroup {
         &self.group
+    }
+
+    pub fn number(&self) -> usize {
+        self.number
+    }
+
+    pub fn jump_target(&self) -> ListSelection {
+        match self.shown_rows().first() {
+            Some(row) => ListSelection::Session(row.name().to_string()),
+            None => ListSelection::Repo(self.group.clone()),
+        }
     }
 
     pub fn shown_rows(&self) -> &'a [SessionSummary] {
