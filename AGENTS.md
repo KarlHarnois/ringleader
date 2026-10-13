@@ -62,8 +62,10 @@ snapshot exists, a rerun only runs survivors and sites in changed functions.
 Never pass `--changed` with a path: it drops the path and mutates every changed
 file in `git status`. `crapper` and `mutator` need `cargo-llvm-cov`
 and the LLVM tools named by `LLVM_COV` and `LLVM_PROFDATA`, which the `metrics`
-shell and the apps set. Without them every function scores 0% coverage and the
-run still exits 0. This crate is bin-only, so a scoped `mutator` test command is
+shell and the apps set. When `cargo llvm-cov` fails, whether from a missing tool
+or one failing test, every function scores 0% coverage and the run still exits 0.
+Check the output for `Rust coverage will score 0%` before trusting the snapshot.
+This crate is bin-only, so a scoped `mutator` test command is
 `--test-command "cargo test --bin ringleader <module::path>"`.
 
 uml-viewer reads `.metrics/crap.edn` and `.metrics/mutate/`. It ignores
