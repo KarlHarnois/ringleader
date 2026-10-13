@@ -52,7 +52,7 @@ Dependencies point inward only. An inner layer never imports an outer one.
 
 The code breaks the `ui` and `cli` rule in four places today: `SignalFlags` in `ui/event_loop.rs`, `cli/cli_session.rs`, and a test in `cli/session_commands.rs`, and `AppLog` in `ui/dialogs/dialog.rs`. They are violations to fix, not precedent to copy.
 
-A new capability that reaches outside the process goes through a port, whichever layer needs it:
+A new capability that `application`, `ui`, or `cli` needs from outside the process goes through a port, because none of them may import `adapters`. `CompositionRoot` and the types in `adapters` reach the outside directly. The steps for a port:
 
 1. Define the trait in a new file under `application/ports/`, named after the role, with an error type beside it when any of its methods can fail, and re-export them from `ports/mod.rs`.
 2. Implement it in `adapters/`, named after the technology and the role.
@@ -60,7 +60,7 @@ A new capability that reaches outside the process goes through a port, whichever
 4. Inject the port as a trait object. A port the use cases need joins a bundle in `ServicePorts` as an `Arc<dyn Trait>`. Any other port, like `Lock`, is handed by `CompositionRoot` to the type that uses it.
 5. Build the adapter in `CompositionRoot` and pass it in.
 
-The one exception is the I/O an adapter does to play its own role: the terminal for the TUI, including the shell it runs there, and the `exec` that replaces the process for the agent launcher. That I/O stays in the adapter as a trait beside its real implementation, with its fake in that adapter's tests or harness. The TUI owns `InputSource`, `ScreenMode`, and `ShellRunner` this way, with their fakes in `UiHarness`, and `AgentLauncher` owns `ExecSeam`.
+The one exception is the terminal, which the TUI talks to the user through, including the shell it runs there. That I/O stays in `ui` as a trait beside its real implementation, with its fake in `src/test_support/`. The TUI owns `InputSource`, `ScreenMode`, and `ShellRunner` this way. A test seam inside `adapters`, like `AgentLauncher`'s `ExecSeam`, has the same shape with its fake in the adapter's own tests.
 
 ## Layout
 
