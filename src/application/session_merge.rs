@@ -550,6 +550,12 @@ mod tests {
                 .calls()
                 .contains(&format!("fetch_upstream {worktree} develop"))
         );
+        assert!(
+            fixture
+                .workspace()
+                .calls()
+                .contains(&format!("merge_upstream {worktree} develop"))
+        );
     }
 
     #[test]
