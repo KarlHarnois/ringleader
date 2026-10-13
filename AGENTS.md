@@ -112,7 +112,7 @@ viewer exits.
 ├── Cargo.lock
 ├── rustfmt.toml            # max_width = 100
 ├── LICENSE                 # MIT
-├── .gitignore              # /target, /result, /result-*, /.direnv, /.claude/worktrees, /.metrics, /.uml-viewer
+├── .gitignore              # /target, /result, /result-*, /.direnv, /.claude/worktrees, /.metrics, /.uml-viewer, /uml-viewer-log.txt
 ├── flake.nix
 ├── flake.lock
 ├── .envrc                  # direnv: use flake, loads the dev shell
