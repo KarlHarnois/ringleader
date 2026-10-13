@@ -33,17 +33,23 @@ impl SessionMerge {
 
     pub fn merge(&self, row: &ManagedRow, config: &Config) -> Result<MergeReport, ServiceError> {
         let session = row.session();
+        self.refuse_unsafe_merge(row)?;
+        let base_branch =
+            RepoMerge::new(self.host.as_ref()).base_branch_of(session, config.repos());
+        let worktree = session.worktree_path();
+        let branch_on_origin = self.workspace.fetch_upstream(worktree, base_branch)?;
+        self.refuse_unsafe_merge(row)?;
+        let merge = self.workspace.merge_upstream(worktree, &branch_on_origin)?;
+        let handoff = self.hand_off_conflicts(session, &merge);
+        Ok(MergeReport::new(session.name(), merge, handoff))
+    }
+
+    fn refuse_unsafe_merge(&self, row: &ManagedRow) -> Result<(), ServiceError> {
+        let session = row.session();
         Self::refuse_unless_waiting(row)?;
         self.refuse_unless_at_prompt(session)?;
         self.refuse_unclean_worktree(session)?;
-        self.refuse_off_its_branch(session)?;
-        let base_branch =
-            RepoMerge::new(self.host.as_ref()).base_branch_of(session, config.repos());
-        let merge = self
-            .workspace
-            .merge_upstream(session.worktree_path(), base_branch)?;
-        let handoff = self.hand_off_conflicts(session, &merge);
-        Ok(MergeReport::new(session.name(), merge, handoff))
+        self.refuse_off_its_branch(session)
     }
 
     fn refuse_unless_waiting(row: &ManagedRow) -> Result<(), ServiceError> {
@@ -422,6 +428,27 @@ mod tests {
     }
 
     #[test]
+    fn an_agent_that_leaves_its_prompt_during_the_fetch_is_refused_before_git_merges() {
+        let fixture = MergeFixture::stopped().with_multiplexer(
+            FakeMultiplexer::new()
+                .with_live(ServiceFixture::waiting(&MergeFixture::session()))
+                .with_prompt_checks(MergeFixture::TMUX_NAME, &[true, false]),
+        );
+
+        let error = MergeFixture::merge(&fixture).unwrap_err();
+
+        assert!(matches!(error, ServiceError::Conflict(_)), "{error:?}");
+        assert!(
+            fixture
+                .workspace()
+                .calls()
+                .iter()
+                .any(|call| call.starts_with("fetch_upstream"))
+        );
+        assert!(!MergeFixture::merged_upstream(&fixture));
+    }
+
+    #[test]
     fn uncommitted_changes_are_refused_before_git_merges() {
         let worktree = MergeFixture::session().worktree_path().to_path_buf();
         let dirty =
@@ -495,19 +522,19 @@ mod tests {
             fixture
                 .workspace()
                 .calls()
-                .contains(&format!("merge_upstream {worktree} develop"))
+                .contains(&format!("fetch_upstream {worktree} develop"))
         );
     }
 
     #[test]
-    fn a_failed_merge_types_nothing() {
+    fn a_failed_fetch_types_nothing() {
         let failure = WorkspaceError::Failed {
             subcommand: "fetch".to_string(),
             status: "exit status: 128".to_string(),
             stderr: "fatal: could not read from remote repository".to_string(),
         };
         let fixture = MergeFixture::waiting()
-            .with_workspace(MergeFixture::workspace().failing("merge_upstream", failure));
+            .with_workspace(MergeFixture::workspace().failing("fetch_upstream", failure));
 
         let error = MergeFixture::merge(&fixture).unwrap_err();
 

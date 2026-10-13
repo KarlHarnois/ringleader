@@ -234,12 +234,20 @@ impl Workspace for GitWorkspace {
         Ok(DiffStat::from_changes(changes, untracked_count))
     }
 
-    fn merge_upstream(
+    fn fetch_upstream(
         &self,
         worktree: &Path,
         base_branch: Option<&BaseBranch>,
+    ) -> Result<BaseBranch, WorkspaceError> {
+        UpstreamMerger::new(&self.git).fetch(worktree, base_branch)
+    }
+
+    fn merge_upstream(
+        &self,
+        worktree: &Path,
+        branch_on_origin: &BaseBranch,
     ) -> Result<UpstreamMerge, WorkspaceError> {
-        UpstreamMerger::new(&self.git).merge(worktree, base_branch)
+        UpstreamMerger::new(&self.git).merge(worktree, branch_on_origin)
     }
 
     fn validate_repo(&self, path: &Path) -> Result<PathBuf, WorkspaceError> {

@@ -20,17 +20,25 @@ impl<'a> UpstreamMerger<'a> {
         Self { git }
     }
 
-    pub fn merge(
+    pub fn fetch(
         &self,
         worktree: &Path,
         base_branch: Option<&BaseBranch>,
+    ) -> Result<BaseBranch, WorkspaceError> {
+        let branch = self.upstream_branch(worktree, base_branch)?;
+        self.fetch_branch(worktree, &branch)?;
+        Ok(branch)
+    }
+
+    pub fn merge(
+        &self,
+        worktree: &Path,
+        branch: &BaseBranch,
     ) -> Result<UpstreamMerge, WorkspaceError> {
         self.refuse_merge_in_progress(worktree)?;
         self.refuse_staged_changes(worktree)?;
-        let branch = self.upstream_branch(worktree, base_branch)?;
-        self.fetch(worktree, &branch)?;
         let commit = self.commit_of(worktree, &branch.origin_ref())?;
-        let outcome = self.merge_unless_contained(worktree, &branch, &commit)?;
+        let outcome = self.merge_unless_contained(worktree, branch, &commit)?;
         Ok(UpstreamMerge::new(&branch.origin_suggestion(), outcome))
     }
 
@@ -76,7 +84,7 @@ impl<'a> UpstreamMerger<'a> {
         Ok(None)
     }
 
-    fn fetch(&self, worktree: &Path, branch: &BaseBranch) -> Result<(), WorkspaceError> {
+    fn fetch_branch(&self, worktree: &Path, branch: &BaseBranch) -> Result<(), WorkspaceError> {
         let refspec = format!("+{}:{}", branch.local_ref(), branch.origin_ref());
         let fetch = GitInvocation::in_worktree(worktree, "fetch")
             .writing()
@@ -203,6 +211,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+    use crate::adapters::GitWorkspace;
     use crate::application::ports::Workspace;
     use crate::test_support::GitTestRepo;
 
@@ -257,7 +266,16 @@ mod tests {
         }
 
         fn merge_from(&self, base: Option<&BaseBranch>) -> Result<UpstreamMerge, WorkspaceError> {
-            self.origin.workspace().merge_upstream(&self.worktree, base)
+            Self::fetch_and_merge(&self.origin.workspace(), &self.worktree, base)
+        }
+
+        fn fetch_and_merge(
+            workspace: &GitWorkspace,
+            worktree: &Path,
+            base: Option<&BaseBranch>,
+        ) -> Result<UpstreamMerge, WorkspaceError> {
+            let branch = workspace.fetch_upstream(worktree, base)?;
+            workspace.merge_upstream(worktree, &branch)
         }
 
         fn commit_upstream(&self, file: &str) -> String {
@@ -338,9 +356,8 @@ mod tests {
         }
 
         fn merge_within(&self, deadline: Duration) -> Result<UpstreamMerge, WorkspaceError> {
-            self.origin
-                .workspace_with_deadline(deadline)
-                .merge_upstream(&self.worktree, None)
+            let workspace = self.origin.workspace_with_deadline(deadline);
+            Self::fetch_and_merge(&workspace, &self.worktree, None)
         }
 
         fn stage_a_change(&self) {

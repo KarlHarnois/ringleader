@@ -47,7 +47,7 @@ enum FailedCreateLeftover {
 }
 
 impl FakeWorkspace {
-    pub const STATE_CHANGING: [&'static str; 8] = [
+    pub const STATE_CHANGING: [&'static str; 9] = [
         "create_worktree",
         "remove_worktree",
         "unlock_worktree",
@@ -55,11 +55,13 @@ impl FakeWorkspace {
         "rename_branch",
         "drop_stale_upstream",
         "mark_branch_managed",
+        "fetch_upstream",
         "merge_upstream",
     ];
     pub const DEFAULT_START: &'static str = "0123456789abcdef0123456789abcdef01234567";
     pub const NO_BASE_BRANCH: &'static str = "-";
     pub const UPSTREAM: &'static str = "origin/main";
+    pub const UPSTREAM_BRANCH: &'static str = "main";
 
     pub fn with_branch(self, repo: &Path, branch: &str, tip: &str) -> Self {
         self.edit(|state| state.add_branch(repo, branch, tip));
@@ -522,13 +524,29 @@ impl Workspace for FakeWorkspace {
         Ok(self.edit(|state| state.diffs.get(worktree).copied().unwrap_or_default()))
     }
 
-    fn merge_upstream(
+    fn fetch_upstream(
         &self,
         worktree: &Path,
         base_branch: Option<&BaseBranch>,
-    ) -> Result<UpstreamMerge, WorkspaceError> {
+    ) -> Result<BaseBranch, WorkspaceError> {
         let base = base_branch.map_or(Self::NO_BASE_BRANCH, BaseBranch::as_str);
-        self.call("merge_upstream", format!("{} {base}", worktree.display()))?;
+        self.call("fetch_upstream", format!("{} {base}", worktree.display()))?;
+        let default_branch = BaseBranch::new(Self::UPSTREAM_BRANCH);
+        Ok(base_branch
+            .and_then(BaseBranch::on_origin)
+            .or(default_branch)
+            .expect("the fake's upstream branch has a name"))
+    }
+
+    fn merge_upstream(
+        &self,
+        worktree: &Path,
+        branch_on_origin: &BaseBranch,
+    ) -> Result<UpstreamMerge, WorkspaceError> {
+        self.call(
+            "merge_upstream",
+            format!("{} {branch_on_origin}", worktree.display()),
+        )?;
         Ok(self.edit(|state| {
             state
                 .upstream_merge

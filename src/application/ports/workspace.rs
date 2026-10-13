@@ -56,10 +56,15 @@ pub trait Workspace: Send + Sync {
         worktree: &Path,
     ) -> Result<UnmergedCommits, WorkspaceError>;
     fn diff_stat(&self, worktree: &Path, base: &DiffBase) -> Result<DiffStat, WorkspaceError>;
-    fn merge_upstream(
+    fn fetch_upstream(
         &self,
         worktree: &Path,
         base_branch: Option<&BaseBranch>,
+    ) -> Result<BaseBranch, WorkspaceError>;
+    fn merge_upstream(
+        &self,
+        worktree: &Path,
+        branch_on_origin: &BaseBranch,
     ) -> Result<UpstreamMerge, WorkspaceError>;
     fn validate_repo(&self, path: &Path) -> Result<PathBuf, WorkspaceError>;
     fn version(&self) -> Result<String, WorkspaceError>;

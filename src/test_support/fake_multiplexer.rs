@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -45,6 +45,7 @@ struct MultiplexerState {
     server_return_key: Option<ReturnKey>,
     socket_lost: bool,
     away_from_prompt: Vec<String>,
+    prompt_checks: HashMap<String, VecDeque<bool>>,
 }
 
 impl FakeMultiplexer {
@@ -85,6 +86,7 @@ impl FakeMultiplexer {
                 server_return_key: Some(ReturnKey::default()),
                 socket_lost: false,
                 away_from_prompt: Vec::new(),
+                prompt_checks: HashMap::new(),
             }),
         }
     }
@@ -114,6 +116,15 @@ impl FakeMultiplexer {
             state
                 .captures
                 .insert(tmux_name.to_string(), text.to_string())
+        });
+        self
+    }
+
+    pub fn with_prompt_checks(self, tmux_name: &str, answers: &[bool]) -> Self {
+        self.edit(|state| {
+            state
+                .prompt_checks
+                .insert(tmux_name.to_string(), answers.iter().copied().collect())
         });
         self
     }
@@ -299,6 +310,14 @@ impl MultiplexerState {
         }));
     }
 
+    fn prompt_answer(&mut self, tmux_name: &str) -> bool {
+        let scripted = self
+            .prompt_checks
+            .get_mut(tmux_name)
+            .and_then(VecDeque::pop_front);
+        scripted.unwrap_or_else(|| !self.away_from_prompt.iter().any(|name| name == tmux_name))
+    }
+
     fn find_live(&self, tmux_name: &str) -> Option<&SessionObservation> {
         self.live.iter().find(|live| live.tmux_name() == tmux_name)
     }
@@ -401,7 +420,7 @@ impl Multiplexer for FakeMultiplexer {
 
     fn agent_at_prompt(&self, tmux_name: &str) -> Result<bool, MultiplexerError> {
         self.call("agent_at_prompt", tmux_name)?;
-        Ok(self.edit(|state| !state.away_from_prompt.iter().any(|name| name == tmux_name)))
+        Ok(self.edit(|state| state.prompt_answer(tmux_name)))
     }
 
     fn ensure_shell_window(
