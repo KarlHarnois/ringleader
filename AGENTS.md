@@ -176,8 +176,9 @@ most that scores 8 or less at 0% coverage. Then tell the project owner which of
 its sites step 4 still reports as uncovered.
 
 An edit to production code during these steps restarts them from step 1. An
-edit to tests only reruns step 4 for that file without `--reuse-coverage`,
-because the new tests changed the coverage.
+edit to tests only reruns step 2, because `dryer` also scans
+`src/test_support/`, then step 4 without `--reuse-coverage` for each changed file
+the new tests cover, because they changed the coverage.
 
 ## Layout
 
