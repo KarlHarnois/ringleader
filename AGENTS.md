@@ -164,7 +164,7 @@ mostly the cold worker build.
    first line reads `Scan: N mutation sites in <file>`. Tell the project owner
    about any file over 50 sites and offer to split it.
 4. `nix develop .#metrics -c mutator --reuse-coverage --max-workers 2 --timeout-factor 60 <file>`
-   for each changed file. The first run reuses the coverage step 1 wrote. Add or
+   for each changed file. Each run reuses the coverage step 1 wrote. Add or
    strengthen tests until every changed function's row reads 0 under `Survived`
    and `Uncovered`. Leave the rows of functions the change did not touch. Read
    the rows, not the exit code: 3 means a mutant survived anywhere in the file,
@@ -178,14 +178,11 @@ logic into functions that tests reach until it has complexity 2 or less, the
 most that scores 8 or less at 0% coverage. Then tell the project owner which of
 its sites step 4 still reports as uncovered.
 
-An edit to production code during these steps restarts them from step 1. An
-edit to tests only reruns step 2, because `dryer` also scans
-`src/test_support/`, then step 4 for each changed file the new tests cover.
-Drop `--reuse-coverage` on the first of those runs only, because the new tests
-changed the coverage and that run rewrites it for the whole crate. A step 4 run
-that prints `Rust coverage will score 0%` reads every site as uncovered, usually
-because a test failed: fix the cause and rerun. Once the steps pass after any
-edit, run the Commands again, because none of these tools runs `cargo fmt` or
+Any edit during these steps restarts them from step 1, an edit to tests
+included, because `crapper` is the only coverage check for a function with no
+mutation sites. After an edit to tests only, skip step 3 and run step 4 only for
+the changed files the edited tests cover. Once the steps pass after any edit,
+run the Commands again, because none of these tools runs `cargo fmt` or
 `clippy`.
 
 ## Layout
