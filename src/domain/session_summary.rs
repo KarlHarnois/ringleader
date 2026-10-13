@@ -206,8 +206,10 @@ mod tests {
         let observation = SessionObservation::new(tmux, 1_700_000_000);
         let summary = SessionSummary::unmanaged(UnmanagedSession::new("mystery", observation));
 
-        let summary =
-            summary.with_pull_request(PullRequest::new(1, crate::domain::PullRequestState::Open));
+        let summary = summary.with_pull_request(crate::test_support::ServiceFixture::pull_request(
+            1,
+            crate::domain::PullRequestState::Open,
+        ));
 
         assert_eq!(summary.pull_request(), None);
     }

@@ -86,7 +86,7 @@ mod tests {
         const LIMIT: Duration = Duration::from_secs(2);
 
         fn open(number: u64) -> PullRequest {
-            PullRequest::new(number, PullRequestState::Open)
+            ServiceFixture::pull_request(number, PullRequestState::Open)
         }
 
         fn with_pull_request(number: u64) -> ServiceFixture {

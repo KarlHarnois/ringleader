@@ -11,8 +11,9 @@ use crate::application::{
     SessionService, StatePorts, TmuxPorts,
 };
 use crate::domain::{
-    Agent, AgentPane, Config, NamingScheme, Registration, Repo, RepoName, Session, SessionMetadata,
-    SessionName, SessionObservation, SessionRepo, SessionWorktree, TmuxAddress,
+    Agent, AgentPane, Config, NamingScheme, PullRequest, PullRequestState, Registration, Repo,
+    RepoName, Session, SessionMetadata, SessionName, SessionObservation, SessionRepo,
+    SessionWorktree, TmuxAddress,
 };
 
 pub struct ServiceFixture {
@@ -222,6 +223,10 @@ impl ServiceFixture {
 
     pub fn naming() -> NamingScheme {
         Self::config().naming().clone()
+    }
+
+    pub fn pull_request(number: u64, state: PullRequestState) -> PullRequest {
+        PullRequest::new(number, state, Self::NOW)
     }
 
     pub fn session(name: &str) -> Session {

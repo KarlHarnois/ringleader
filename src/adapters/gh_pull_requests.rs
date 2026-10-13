@@ -96,8 +96,9 @@ struct GhQuery {
 
 impl GhQuery {
     const NEWEST_FIRST: &'static str = "first: 1, orderBy: {field: CREATED_AT, direction: DESC}";
-    const FIELDS: &'static str = "number state isDraft";
-    const RESHAPE: &'static str = ".data.repository | map_values(.nodes[0])";
+    const FIELDS: &'static str = "number state isDraft createdAt";
+    const RESHAPE: &'static str = ".data.repository \
+        | map_values(.nodes[0] | if . then .createdAt |= fromdateiso8601 else . end)";
 
     fn new(branches: &[String]) -> Self {
         Self {
@@ -180,6 +181,8 @@ struct GhEntry {
     state: String,
     #[serde(default, rename = "isDraft")]
     is_draft: bool,
+    #[serde(rename = "createdAt")]
+    created_at: u64,
 }
 
 impl GhEntry {
@@ -191,7 +194,7 @@ impl GhEntry {
             "CLOSED" => PullRequestState::Closed,
             _ => return None,
         };
-        Some(PullRequest::new(self.number, state))
+        Some(PullRequest::new(self.number, state, self.created_at))
     }
 }
 
@@ -209,13 +212,14 @@ mod tests {
     struct ParseFixture;
 
     impl ParseFixture {
+        const OPENED_AT: u64 = 1_700_000_000;
         const STAND_IN: &'static str = r#"#!/bin/sh
 echo call >> "$0.calls"
 listing=''
 while [ $# -gt 0 ]; do
   if [ "$1" = "-f" ]; then
     case "$2" in
-      branch*=fix-auth) entry='{"number":42,"state":"OPEN","isDraft":false}' ;;
+      branch*=fix-auth) entry='{"number":42,"state":"OPEN","isDraft":false,"createdAt":1700000000}' ;;
       branch*=*) entry=null ;;
       *) entry='' ;;
     esac
@@ -264,30 +268,66 @@ printf '{%s}' "$listing"
 
     #[test]
     fn an_open_pull_request_is_read_with_its_number() {
-        let found = ParseFixture::pull_request(r#"{"number":142,"state":"OPEN","isDraft":false}"#);
+        let found = ParseFixture::pull_request(
+            r#"{"number":142,"state":"OPEN","isDraft":false,"createdAt":1700000000}"#,
+        );
 
-        assert_eq!(found, Some(PullRequest::new(142, PullRequestState::Open)));
+        assert_eq!(
+            found,
+            Some(PullRequest::new(
+                142,
+                PullRequestState::Open,
+                ParseFixture::OPENED_AT
+            ))
+        );
     }
 
     #[test]
     fn a_draft_reads_as_a_draft() {
-        let found = ParseFixture::pull_request(r#"{"number":5,"state":"OPEN","isDraft":true}"#);
+        let found = ParseFixture::pull_request(
+            r#"{"number":5,"state":"OPEN","isDraft":true,"createdAt":1700000000}"#,
+        );
 
-        assert_eq!(found, Some(PullRequest::new(5, PullRequestState::Draft)));
+        assert_eq!(
+            found,
+            Some(PullRequest::new(
+                5,
+                PullRequestState::Draft,
+                ParseFixture::OPENED_AT
+            ))
+        );
     }
 
     #[test]
     fn a_merged_pull_request_reads_as_merged() {
-        let found = ParseFixture::pull_request(r#"{"number":9,"state":"MERGED","isDraft":false}"#);
+        let found = ParseFixture::pull_request(
+            r#"{"number":9,"state":"MERGED","isDraft":false,"createdAt":1700000000}"#,
+        );
 
-        assert_eq!(found, Some(PullRequest::new(9, PullRequestState::Merged)));
+        assert_eq!(
+            found,
+            Some(PullRequest::new(
+                9,
+                PullRequestState::Merged,
+                ParseFixture::OPENED_AT
+            ))
+        );
     }
 
     #[test]
     fn a_closed_pull_request_reads_as_closed() {
-        let found = ParseFixture::pull_request(r#"{"number":3,"state":"CLOSED","isDraft":false}"#);
+        let found = ParseFixture::pull_request(
+            r#"{"number":3,"state":"CLOSED","isDraft":false,"createdAt":1700000000}"#,
+        );
 
-        assert_eq!(found, Some(PullRequest::new(3, PullRequestState::Closed)));
+        assert_eq!(
+            found,
+            Some(PullRequest::new(
+                3,
+                PullRequestState::Closed,
+                ParseFixture::OPENED_AT
+            ))
+        );
     }
 
     #[test]
@@ -298,7 +338,9 @@ printf '{%s}' "$listing"
     #[test]
     fn an_unknown_state_reads_as_none() {
         assert_eq!(
-            ParseFixture::pull_request(r#"{"number":1,"state":"QUEUED","isDraft":false}"#),
+            ParseFixture::pull_request(
+                r#"{"number":1,"state":"QUEUED","isDraft":false,"createdAt":1700000000}"#
+            ),
             None
         );
     }
@@ -313,14 +355,18 @@ printf '{%s}' "$listing"
         let query = GhQuery::new(&ParseFixture::branches());
         let output = ParseFixture::output(
             0,
-            r#"{"branch0":{"number":7,"state":"OPEN","isDraft":false},"branch1":null}"#,
+            r#"{"branch0":{"number":7,"state":"OPEN","isDraft":false,"createdAt":1700000000},"branch1":null}"#,
         );
 
         let found = GhPullRequests::pull_requests(&output, &query).unwrap();
 
         assert_eq!(
             found.get("fix-auth"),
-            Some(&Some(PullRequest::new(7, PullRequestState::Open)))
+            Some(&Some(PullRequest::new(
+                7,
+                PullRequestState::Open,
+                ParseFixture::OPENED_AT
+            )))
         );
         assert_eq!(found.get("dark-mode"), Some(&None));
     }
@@ -404,7 +450,11 @@ printf '{%s}' "$listing"
 
         assert_eq!(
             found.get("fix-auth"),
-            Some(&Some(PullRequest::new(42, PullRequestState::Open)))
+            Some(&Some(PullRequest::new(
+                42,
+                PullRequestState::Open,
+                ParseFixture::OPENED_AT
+            )))
         );
         assert_eq!(found.get("dark-mode"), Some(&None));
         assert_eq!(ParseFixture::calls(&directory), 1);

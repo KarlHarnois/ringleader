@@ -108,7 +108,7 @@ The one exception is a driving adapter's own channel to the user: the terminal f
     │   ├── config_draft.rs       # ConfigDraft, the raw config values the Config constructor checks
     │   ├── config_checks.rs      # ConfigChecks, the checks every config load runs
     │   ├── naming_scheme.rs      # NamingScheme, the worktree root and tmux prefix a session records
-    │   ├── pull_request.rs       # PullRequest, its number and state
+    │   ├── pull_request.rs       # PullRequest, its number, state, and opening time
     │   └── return_key.rs         # ReturnKey, the key that detaches from a session back to Ringleader
     ├── application/
     │   ├── mod.rs

@@ -244,7 +244,7 @@ mod tests {
     use ratatui::style::{Color, Modifier};
 
     use super::*;
-    use crate::domain::{DiffStat, PullRequest, PullRequestState, UnmanagedSession};
+    use crate::domain::{DiffStat, PullRequestState, UnmanagedSession};
     use crate::test_support::ServiceFixture;
 
     struct TableFixture;
@@ -391,7 +391,7 @@ mod tests {
     #[test]
     fn a_row_with_a_pull_request_shows_its_number_in_the_state_colour() {
         let row = TableFixture::managed("fix-auth", SessionState::Waiting)
-            .with_pull_request(PullRequest::new(142, PullRequestState::Open));
+            .with_pull_request(ServiceFixture::pull_request(142, PullRequestState::Open));
 
         let terminal = TableFixture::render(&[row], None, 0, 6);
         let line = TableFixture::line(&terminal, 2);
@@ -406,7 +406,7 @@ mod tests {
     #[test]
     fn a_merged_pull_request_shows_in_magenta() {
         let row = TableFixture::managed("fix-auth", SessionState::Waiting)
-            .with_pull_request(PullRequest::new(9, PullRequestState::Merged));
+            .with_pull_request(ServiceFixture::pull_request(9, PullRequestState::Merged));
 
         let terminal = TableFixture::render(&[row], None, 0, 6);
         let line = TableFixture::line(&terminal, 2);
@@ -420,7 +420,7 @@ mod tests {
     #[test]
     fn a_draft_pull_request_shows_in_yellow() {
         let row = TableFixture::managed("fix-auth", SessionState::Waiting)
-            .with_pull_request(PullRequest::new(5, PullRequestState::Draft));
+            .with_pull_request(ServiceFixture::pull_request(5, PullRequestState::Draft));
 
         let terminal = TableFixture::render(&[row], None, 0, 6);
         let line = TableFixture::line(&terminal, 2);
@@ -434,7 +434,7 @@ mod tests {
     #[test]
     fn a_closed_pull_request_shows_in_red() {
         let row = TableFixture::managed("fix-auth", SessionState::Waiting)
-            .with_pull_request(PullRequest::new(3, PullRequestState::Closed));
+            .with_pull_request(ServiceFixture::pull_request(3, PullRequestState::Closed));
 
         let terminal = TableFixture::render(&[row], None, 0, 6);
         let line = TableFixture::line(&terminal, 2);

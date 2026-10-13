@@ -208,7 +208,7 @@ mod tests {
 
     use super::*;
     use crate::application::ports::{ConfigError, MultiplexerError, UnmergedCommits};
-    use crate::domain::{Config, ConfigDraft, DiffStat, PullRequest, PullRequestState};
+    use crate::domain::{Config, ConfigDraft, DiffStat, PullRequestState};
     use crate::test_support::{FakeMultiplexer, FakePullRequests, ServiceFixture, UiHarness};
 
     struct AppFixture;
@@ -869,7 +869,7 @@ mod tests {
             .with_pull_requests(FakePullRequests::new().with_pull_request(
                 Path::new(ServiceFixture::REPO),
                 session.branch(),
-                PullRequest::new(142, PullRequestState::Open),
+                ServiceFixture::pull_request(142, PullRequestState::Open),
             ));
         let start = Instant::now();
         let mut app = AppFixture::started(&fixture, 100, 28);

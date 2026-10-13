@@ -59,6 +59,7 @@ struct PullRequestQuery {
     name: String,
     repo: PathBuf,
     branch: String,
+    created_at: u64,
 }
 
 impl PullRequestQuery {
@@ -67,6 +68,7 @@ impl PullRequestQuery {
             name: session.name().to_string(),
             repo: session.repo_path().to_path_buf(),
             branch: session.branch().to_string(),
+            created_at: session.created_at(),
         }
     }
 
@@ -74,8 +76,9 @@ impl PullRequestQuery {
         self,
         listed: &HashMap<String, Option<PullRequest>>,
     ) -> Option<(String, Option<PullRequest>)> {
-        let pull_request = *listed.get(&self.branch)?;
-        Some((self.name, pull_request))
+        let newest = *listed.get(&self.branch)?;
+        let own = newest.filter(|pull_request| pull_request.opened_since(self.created_at));
+        Some((self.name, own))
     }
 }
 
@@ -91,7 +94,7 @@ mod tests {
 
     impl CatalogFixture {
         fn open(number: u64) -> PullRequest {
-            PullRequest::new(number, PullRequestState::Open)
+            ServiceFixture::pull_request(number, PullRequestState::Open)
         }
 
         fn with_pull_request(session: &Session, number: u64) -> Arc<FakePullRequests> {
@@ -145,6 +148,25 @@ mod tests {
             fake.calls(),
             vec![format!("lookup {} 2", ServiceFixture::REPO)]
         );
+    }
+
+    #[test]
+    fn a_pull_request_opened_before_the_session_is_not_its_own() {
+        let session = ServiceFixture::session("fix-auth");
+        let older = PullRequest::new(
+            1600,
+            PullRequestState::Merged,
+            ServiceFixture::CREATED_AT - 1,
+        );
+        let fake = Arc::new(FakePullRequests::new().with_pull_request(
+            Path::new(ServiceFixture::REPO),
+            session.branch(),
+            older,
+        ));
+
+        let found = CatalogFixture::found(fake, &[&session]);
+
+        assert_eq!(found.get("fix-auth"), Some(&None));
     }
 
     #[test]
