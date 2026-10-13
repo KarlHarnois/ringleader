@@ -279,7 +279,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
 - 2: a session name that was not found.
 - 3: a conflict, including a refused guard, an `Unmanaged` target, a session that is live and healthy, or the lock being held.
 
-A command interrupted by a signal before its use case starts never runs it, and one interrupted during its use case finishes it and then ends by that signal.
+A command interrupted by a signal before its use case starts never runs it, and one interrupted during its use case finishes it and then ends by that signal. One interrupted while it waits for queued startup input stops waiting, logs the abandoned input, and ends by that signal, though its use case succeeded.
 
 ## Tests
 
