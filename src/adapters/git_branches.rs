@@ -113,15 +113,23 @@ impl<'a> GitBranches<'a> {
             .collect())
     }
 
-    pub fn is_published(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError> {
+    pub fn is_published(
+        &self,
+        repo: &Path,
+        branch: &str,
+        base_commit: &str,
+    ) -> Result<bool, WorkspaceError> {
         if !self.has_ref(repo, branch)? {
             return Ok(false);
         }
         if self.has_live_upstream(repo, branch)? {
             return Ok(true);
         }
+        let settled = Self::settled_history(base_commit);
         for remote_ref in self.remote_copies(repo, branch)? {
-            if self.holds_work_pushed_from(repo, branch, &remote_ref)? {
+            if self.branch_contains(repo, branch, &remote_ref)?
+                && self.holds_commits_outside(repo, &remote_ref, &settled)?
+            {
                 return Ok(true);
             }
         }
@@ -193,28 +201,24 @@ impl<'a> GitBranches<'a> {
         Ok(copies)
     }
 
-    fn holds_work_pushed_from(
-        &self,
-        repo: &Path,
-        branch: &str,
-        remote_ref: &str,
-    ) -> Result<bool, WorkspaceError> {
-        Ok(self.branch_contains(repo, branch, remote_ref)?
-            && self.is_ahead_of_the_default_branches(repo, remote_ref)?)
+    fn settled_history(base_commit: &str) -> Vec<String> {
+        let default_branches = format!("--glob={}/*/HEAD", Self::REMOTE_REFS);
+        let session_start = (!base_commit.is_empty()).then(|| base_commit.to_string());
+        [default_branches]
+            .into_iter()
+            .chain(session_start)
+            .collect()
     }
 
-    fn is_ahead_of_the_default_branches(
+    fn holds_commits_outside(
         &self,
         repo: &Path,
         remote_ref: &str,
+        settled: &[String],
     ) -> Result<bool, WorkspaceError> {
-        let default_branches = format!("--glob={}/*/HEAD", Self::REMOTE_REFS);
-        let list = GitInvocation::in_repo(repo, "rev-list").args([
-            "-n1",
-            remote_ref,
-            "--not",
-            &default_branches,
-        ]);
+        let list = GitInvocation::in_repo(repo, "rev-list")
+            .args(["--ignore-missing", "-n1", remote_ref, "--not"])
+            .args(settled);
         Ok(!self.git.run_checked(&list)?.first_line().is_empty())
     }
 

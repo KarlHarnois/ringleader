@@ -180,8 +180,13 @@ impl Workspace for GitWorkspace {
         GitBranches::new(&self.git).list_managed(repo)
     }
 
-    fn is_branch_published(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError> {
-        GitBranches::new(&self.git).is_published(repo, branch)
+    fn is_branch_published(
+        &self,
+        repo: &Path,
+        branch: &str,
+        base_commit: &str,
+    ) -> Result<bool, WorkspaceError> {
+        GitBranches::new(&self.git).is_published(repo, branch, base_commit)
     }
 
     fn resolve_start_point(
@@ -285,6 +290,8 @@ mod tests {
     struct WorktreeFixture;
 
     impl WorktreeFixture {
+        const NO_BASE_COMMIT: &'static str = "";
+
         fn target(fixture: &GitTestRepo) -> PathBuf {
             fixture.sibling("worktrees").join("fix-auth")
         }
@@ -415,10 +422,22 @@ mod tests {
         }
 
         fn is_published(fixture: &GitTestRepo, repo: &Path) -> bool {
+            Self::is_published_from(fixture, repo, Self::NO_BASE_COMMIT)
+        }
+
+        fn is_published_from(fixture: &GitTestRepo, repo: &Path, base_commit: &str) -> bool {
             fixture
                 .workspace()
-                .is_branch_published(repo, BRANCH)
+                .is_branch_published(repo, BRANCH, base_commit)
                 .unwrap()
+        }
+
+        fn dangle_the_remote_head(fixture: &GitTestRepo, clone: &Path) {
+            let retired = "refs/remotes/origin/retired";
+            fixture.git(
+                clone,
+                &["symbolic-ref", "refs/remotes/origin/HEAD", retired],
+            );
         }
 
         fn hook(fixture: &GitTestRepo, name: &str, script: &str) {
@@ -518,6 +537,22 @@ mod tests {
         let clone = WorktreeFixture::clone_with_branch(&origin);
 
         assert!(!WorktreeFixture::is_published(&origin, &clone));
+    }
+
+    #[test]
+    fn a_remote_branch_already_in_the_session_base_does_not_publish_it() {
+        let origin = GitTestRepo::new();
+        WorktreeFixture::merge_into_the_default_branch(&origin, BRANCH);
+        let clone = WorktreeFixture::clone_with_branch(&origin);
+        let base_commit = origin.git(&clone, &["rev-parse", BRANCH]);
+
+        WorktreeFixture::dangle_the_remote_head(&origin, &clone);
+
+        assert!(!WorktreeFixture::is_published_from(
+            &origin,
+            &clone,
+            &base_commit
+        ));
     }
 
     #[test]
