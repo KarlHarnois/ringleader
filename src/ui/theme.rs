@@ -1,6 +1,6 @@
 use ratatui::style::{Color, Modifier, Style};
 
-use crate::domain::SessionState;
+use crate::domain::{PullRequestState, SessionState};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Theme;
@@ -49,6 +49,15 @@ impl Theme {
             SessionState::Exited => self.base().fg(Color::Red),
             SessionState::Stopped => self.dim(),
             SessionState::Unmanaged => self.warning(),
+        }
+    }
+
+    pub fn pull_request(&self, state: PullRequestState) -> Style {
+        match state {
+            PullRequestState::Open => self.base().fg(Color::Green),
+            PullRequestState::Draft => self.warning(),
+            PullRequestState::Merged => self.base().fg(Color::Magenta),
+            PullRequestState::Closed => self.base().fg(Color::Red),
         }
     }
 }

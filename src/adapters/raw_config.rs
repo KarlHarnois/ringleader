@@ -13,6 +13,7 @@ pub struct RawConfig {
     state_poll_ms: Option<u64>,
     preview_refresh_ms: Option<u64>,
     diff_refresh_ms: Option<u64>,
+    pull_request_refresh_ms: Option<u64>,
     activity_idle_seconds: Option<i64>,
     session_size: Option<String>,
     bell_on_waiting: Option<bool>,
@@ -56,6 +57,9 @@ impl RawConfig {
         }
         if let Some(value) = self.diff_refresh_ms {
             draft = draft.diff_refresh_ms(value);
+        }
+        if let Some(value) = self.pull_request_refresh_ms {
+            draft = draft.pull_request_refresh_ms(value);
         }
         if let Some(value) = self.activity_idle_seconds {
             draft = draft.activity_idle_seconds(value);

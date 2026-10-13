@@ -15,6 +15,7 @@ pub mod home_repo_search;
 pub mod orphan_audit;
 pub mod pending;
 pub mod ports;
+pub mod pull_request_catalog;
 pub mod reconciliation;
 pub mod registry_audit;
 pub mod rename_request;

@@ -5,6 +5,7 @@ use super::diff_queue::DiffQueue;
 use super::home_view::LayoutTier;
 use super::preview_feed::PreviewFeed;
 use super::preview_panel::PreviewPanel;
+use super::pull_request_feed::PullRequestFeed;
 use super::session_list::SessionList;
 use super::session_table::SessionTable;
 use super::status_bar::StatusNote;
@@ -16,6 +17,7 @@ pub struct HomeState {
     bell: Bell,
     preview: PreviewFeed,
     diffs: DiffQueue,
+    pull_requests: PullRequestFeed,
     table_rows: usize,
     next_observe: Instant,
     tmux_paused_until: Option<Instant>,
@@ -30,6 +32,7 @@ impl HomeState {
             bell,
             preview: PreviewFeed::new(now),
             diffs: DiffQueue::default(),
+            pull_requests: PullRequestFeed::default(),
             table_rows: 0,
             next_observe: now,
             tmux_paused_until: None,
@@ -63,6 +66,7 @@ impl HomeState {
     pub fn refresh_now(&mut self) {
         self.tmux_paused_until = None;
         self.diffs.refresh_soon();
+        self.pull_requests.refresh_soon();
     }
 
     pub fn pause_after(&mut self, error: &ServiceError) {
@@ -86,6 +90,9 @@ impl HomeState {
         let visible = self.sessions.visible_managed(self.table_rows);
         let measured = self.diffs.tick(now, &visible, service);
         self.sessions.apply_diffs(self.diffs.diffs());
+        self.pull_requests.tick(now, &visible, service);
+        self.sessions
+            .apply_pull_requests(self.pull_requests.pull_requests());
         observed.and(measured)
     }
 
@@ -102,6 +109,9 @@ impl HomeState {
         self.change_selection(service, |sessions| sessions.show(rows));
         self.diffs.keep_only(&self.sessions.names());
         self.sessions.apply_diffs(self.diffs.diffs());
+        self.pull_requests.keep_only(&self.sessions.names());
+        self.sessions
+            .apply_pull_requests(self.pull_requests.pull_requests());
         self.bell.watch(self.sessions.rows(), service);
         Ok(())
     }

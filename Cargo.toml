@@ -14,6 +14,7 @@ crossterm = { version = "0.29.0", features = ["use-dev-tty"] }
 dirs = "7.0.0"
 env_logger = { version = "0.11.11", default-features = false, features = ["humantime"] }
 libc = "0.2.190"
+jiff = { version = "0.2.37", default-features = false, features = ["std"] }
 log = "0.4.34"
 nucleo-matcher = "0.3.1"
 ratatui = "0.30.2"

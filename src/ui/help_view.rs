@@ -31,7 +31,10 @@ impl HelpView {
         ("Enter", "attach to the selected session"),
         ("t", "open a shell in the selected session's worktree"),
         ("s", "restart an exited or stopped session"),
-        ("r", "reload the config and the registry and refresh diffs"),
+        (
+            "r",
+            "reload the config and the registry and refresh diffs and PRs",
+        ),
         ("↑ ↓ j k h l", "move the selection"),
         ("q", "quit, the sessions keep running"),
     ];

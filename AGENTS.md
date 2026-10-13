@@ -46,7 +46,7 @@ Dependencies point inward only. An inner layer never imports an outer one.
 - `domain` holds the entities, value types, and pure rules. It imports nothing else from the crate.
 - `application` holds the use cases and the ports, and imports only `domain`. It never shells out, never touches the filesystem directly, and never reads the system clock. Ports are traits in `application/ports/`, named after the role they play, such as `Workspace` and `Multiplexer`, with any error type in the same file.
 - `adapters` holds the driven adapters, which implement the ports with git, tmux, files, and `/proc`, and the process-level types `CompositionRoot` uses directly, such as `ProcessEnvironment`, `XdgPaths`, and `AgentLauncher`. They import `application` and `domain`, never `ui` or `cli`. Each port adapter is named after its technology and the port it implements, such as `GitWorkspace` and `TmuxMultiplexer`.
-- `ui` and `cli` are the driving adapters. They import `application` and `domain`, never `adapters` or each other. They reach the use cases only through the `SessionService` facade, which composes `SessionLifecycle`, `SessionMonitor`, `SessionAccess`, `RepoCatalog`, and `Doctor`, so `ui` and `cli` never call those directly. A port handed to a `ui` or `cli` type, like `Lock`, is called by that type.
+- `ui` and `cli` are the driving adapters. They import `application` and `domain`, never `adapters` or each other. They reach the use cases only through the `SessionService` facade, which composes `SessionLifecycle`, `SessionMonitor`, `SessionAccess`, `RepoCatalog`, `PullRequestCatalog`, and `Doctor`, so `ui` and `cli` never call those directly. A port handed to a `ui` or `cli` type, like `Lock`, is called by that type.
 - `main.rs` is the composition root and the only production code that imports every layer. The Wiring section says what it builds.
 - `src/test_support/` may import any layer, because it fakes the ports and drives the outer layers under test. Inline `#[cfg(test)]` modules follow their layer's rule, except that any of them may also import `src/test_support/`.
 
@@ -58,7 +58,7 @@ A new capability that `application`, `ui`, or `cli` needs from outside the proce
 2. Implement it in `adapters/`, named after the technology and the role.
 3. Add a hand-written fake in `src/test_support/`. Wire the fake of a port the use cases need into `ServiceFixture`, and the fake of any other port into `CliHarness` or `UiHarness`.
 4. Inject the port as a trait object. A port the use cases need joins a bundle in `ServicePorts` as an `Arc<dyn Trait>`. Any other port, like `Lock`, is handed by `CompositionRoot` to the type that uses it.
-5. Build the adapter in `CompositionRoot` and pass it in.
+5. Build the adapter in `CompositionRoot` and pass it in. When the host can lack the technology behind the port, pass a null adapter that does nothing instead, like `NullPullRequests` without `gh`, so a port is never an `Option`.
 
 The one exception is a driving adapter's own channel to the user: the terminal for the TUI, including the shell it runs there, and the standard streams for the CLI. That I/O stays in `ui` or `cli`, behind a trait beside its real implementation or a std `Read` or `Write`, with its fake in `src/test_support/`. The TUI owns `InputSource`, `ScreenMode`, and `ShellRunner` this way, and the CLI writes through the `Write` streams `CliOutput` holds. A test seam inside `adapters`, like `AgentLauncher`'s `ExecSeam`, has the same shape with its fake in the adapter's own tests.
 
@@ -185,6 +185,7 @@ viewer exits.
     │   ├── config_draft.rs       # ConfigDraft, the raw config values the Config constructor checks
     │   ├── config_checks.rs      # ConfigChecks, the checks every config load runs
     │   ├── naming_scheme.rs      # NamingScheme, the worktree root and tmux prefix a session records
+    │   ├── pull_request.rs       # PullRequest, its number, state, and opening time
     │   └── return_key.rs         # ReturnKey, the key that detaches from a session back to Ringleader
     ├── application/
     │   ├── mod.rs
@@ -216,6 +217,7 @@ viewer exits.
     │   ├── reconciliation.rs     # Reconciliation, the reconciled entries and rows
     │   ├── session_access.rs     # SessionAccess: attach and open_shell, and the refusal from a pane of the private server
     │   ├── repo_catalog.rs       # RepoCatalog: discover, find, add, and remove repos
+    │   ├── pull_request_catalog.rs # PullRequestCatalog, looks up the pull requests of sessions in the background
     │   ├── repo_merge.rs         # RepoMerge, joins configured and scanned repos, configured entries winning
     │   ├── home_repo_search.rs   # HomeRepoSearch, the repos under home the repo search offers
     │   ├── default_repo.rs       # DefaultRepo, the launch repo or the newest session's repo
@@ -240,6 +242,7 @@ viewer exits.
     │       ├── agent_launch.rs       # AgentLaunch, the argv, environment, and worktree an agent starts with
     │       ├── config_source.rs      # ConfigSource trait
     │       ├── repo_scanner.rs       # RepoScanner trait
+    │       ├── pull_requests.rs      # PullRequests trait
     │       ├── host_probe.rs         # HostProbe trait
     │       ├── clock.rs              # Clock trait
     │       └── lock.rs               # Lock trait
@@ -257,7 +260,11 @@ viewer exits.
     │   ├── config_file_writer.rs # ConfigFileWriter, the read-only checks and mode-keeping config write
     │   ├── json_session_registry.rs # JsonSessionRegistry
     │   ├── file_lock.rs          # FileLock
-    │   ├── bounded_command.rs    # BoundedCommand, runs git and tmux children in a new session with a deadline
+    │   ├── gh_pull_requests.rs   # GhPullRequests, looks up the pull requests of a repo's branches in one gh GraphQL call
+    │   ├── gh_query.rs           # GhQuery, the aliased GraphQL query for a repo's branches
+    │   ├── gh_listing.rs         # GhListing, the viewer's or repo owner's newest pull request per branch in a gh response
+    │   ├── null_pull_requests.rs # NullPullRequests, finds no pull request on a host without gh
+    │   ├── bounded_command.rs    # BoundedCommand, runs git, tmux, and gh children in a new session with a deadline
     │   ├── command_output.rs     # CommandOutput, a finished child's status and output
     │   ├── host_path.rs          # HostPath, lenient canonicalization and directory listing
     │   ├── git_workspace.rs      # GitWorkspace
@@ -295,6 +302,7 @@ viewer exits.
     │   ├── session_list.rs         # SessionList, sorted rows and name-based selection
     │   ├── preview_feed.rs         # PreviewFeed, the preview capture and its timer
     │   ├── diff_queue.rs           # DiffQueue, round-robin diffs of visible rows
+    │   ├── pull_request_feed.rs    # PullRequestFeed, the pull requests of visible rows and their timer
     │   ├── bell.rs                 # Bell, rings on a Working to Waiting edge
     │   ├── shell_runner.rs         # ShellRunner, runs the ephemeral t shell
     │   ├── blocking_operation.rs   # BlockingOperation, a create, delete, rename, or restart run behind a busy message
@@ -305,6 +313,7 @@ viewer exits.
     │   ├── home_view.rs            # HomeView
     │   ├── empty_state.rs          # EmptyState, the no-sessions message with the logo above it when it fits
     │   ├── session_table.rs        # SessionTable, the home screen's session list
+    │   ├── colored_row.rs          # ColoredRow, a row's text split around its coloured cells
     │   ├── state_indicator.rs      # StateIndicator, the glyph and color of a session state
     │   ├── table_columns.rs        # TableColumns, column widths and dropping
     │   ├── preview_panel.rs        # PreviewPanel, the Full tier's preview
@@ -345,6 +354,8 @@ viewer exits.
         ├── fake_multiplexer.rs      # FakeMultiplexer
         ├── fake_config_source.rs    # FakeConfigSource
         ├── fake_repo_scanner.rs     # FakeRepoScanner
+        ├── fake_pull_requests.rs    # FakePullRequests
+        ├── log_capture.rs           # LogCapture, the test logger that keeps warnings for assertions
         ├── fake_host_probe.rs       # FakeHostProbe
         ├── fake_clock.rs            # FakeClock
         ├── gate.rs                  # Gate: a test gate that blocks a call until it is opened or a deadline passes

@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::{
-    FakeClock, FakeConfigSource, FakeHostProbe, FakeMultiplexer, FakeRepoScanner,
+    FakeClock, FakeConfigSource, FakeHostProbe, FakeMultiplexer, FakePullRequests, FakeRepoScanner,
     FakeSessionRegistry, FakeWorkspace,
 };
 use crate::application::ports::{ConfigError, WorktreeEntry};
@@ -11,8 +11,9 @@ use crate::application::{
     SessionService, StatePorts, TmuxPorts,
 };
 use crate::domain::{
-    Agent, AgentPane, Config, NamingScheme, Registration, Repo, RepoName, Session, SessionMetadata,
-    SessionName, SessionObservation, SessionRepo, SessionWorktree, TmuxAddress,
+    Agent, AgentPane, Config, NamingScheme, PullRequest, PullRequestState, Registration, Repo,
+    RepoName, Session, SessionMetadata, SessionName, SessionObservation, SessionRepo,
+    SessionWorktree, TmuxAddress,
 };
 
 pub struct ServiceFixture {
@@ -22,6 +23,7 @@ pub struct ServiceFixture {
     config_source: Arc<FakeConfigSource>,
     scanner: Arc<FakeRepoScanner>,
     host: Arc<FakeHostProbe>,
+    pull_requests: Arc<FakePullRequests>,
     clock: Arc<FakeClock>,
     config_error: Option<ConfigError>,
     launch_directory: PathBuf,
@@ -52,6 +54,7 @@ impl ServiceFixture {
             config_source: Arc::new(FakeConfigSource::with_config(Self::config())),
             scanner: Arc::new(FakeRepoScanner::finding(vec![Self::repo()])),
             host: Arc::new(Self::host_for(&[])),
+            pull_requests: Arc::new(FakePullRequests::new()),
             clock: Arc::new(FakeClock::at(Self::NOW)),
             config_error: None,
             launch_directory: PathBuf::from(Self::REPO),
@@ -114,6 +117,13 @@ impl ServiceFixture {
     pub fn with_host(self, host: FakeHostProbe) -> Self {
         Self {
             host: Arc::new(host),
+            ..self
+        }
+    }
+
+    pub fn with_pull_requests(self, pull_requests: FakePullRequests) -> Self {
+        Self {
+            pull_requests: Arc::new(pull_requests),
             ..self
         }
     }
@@ -183,6 +193,10 @@ impl ServiceFixture {
         &self.host
     }
 
+    pub fn pull_requests(&self) -> &FakePullRequests {
+        &self.pull_requests
+    }
+
     pub fn repo() -> Repo {
         Repo::discovered(
             RepoName::parse("example-project").unwrap(),
@@ -213,6 +227,10 @@ impl ServiceFixture {
 
     pub fn naming() -> NamingScheme {
         Self::config().naming().clone()
+    }
+
+    pub fn pull_request(number: u64, state: PullRequestState) -> PullRequest {
+        PullRequest::new(number, state, Self::NOW)
     }
 
     pub fn session(name: &str) -> Session {
@@ -331,6 +349,7 @@ impl ServiceFixture {
                 self.workspace.clone(),
                 self.scanner.clone(),
                 self.host.clone(),
+                self.pull_requests.clone(),
             ),
             TmuxPorts::new(self.multiplexer.clone()),
         )

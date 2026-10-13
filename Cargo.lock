@@ -1410,6 +1410,7 @@ dependencies = [
  "crossterm",
  "dirs",
  "env_logger",
+ "jiff",
  "libc",
  "log",
  "nucleo-matcher",

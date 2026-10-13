@@ -12,6 +12,15 @@ pub struct CommandOutput {
 }
 
 impl CommandOutput {
+    #[cfg(test)]
+    pub fn new(status: ExitStatus, stdout: Vec<u8>, stderr: Vec<u8>) -> Self {
+        Self {
+            status,
+            stdout,
+            stderr,
+        }
+    }
+
     pub fn succeeded(&self) -> bool {
         self.status.success()
     }

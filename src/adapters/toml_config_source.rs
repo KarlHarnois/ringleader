@@ -26,6 +26,7 @@ return_key = "C-q"
 state_poll_ms = 1000
 preview_refresh_ms = 750
 diff_refresh_ms = 3000
+pull_request_refresh_ms = 30000
 activity_idle_seconds = 3
 session_size = "200x50"
 # Ring the terminal bell when an agent finishes working and waits for input.
