@@ -136,7 +136,7 @@
       );
 
       devShells = forEachSystemWithMetricsTools (
-        pkgs: tools: {
+        pkgs: tools: rec {
           default = pkgs.mkShell {
             packages = [
               pkgs.rustc
@@ -147,6 +147,11 @@
               pkgs.git
               pkgs.nixfmt
               pkgs.util-linux
+            ];
+          };
+          metrics = pkgs.mkShell {
+            inputsFrom = [ default ];
+            packages = [
               pkgs.cargo-llvm-cov
               pkgs.clojure
               pkgs.jdk21

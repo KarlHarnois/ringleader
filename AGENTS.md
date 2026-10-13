@@ -41,16 +41,17 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
 ## Metrics
 
 Local, on-demand code-health tools. They are never part of CI. Do not add them to
-`checks` or to `.github/workflows/ci.yml`. The flake builds them as `apps` so
-`nix flake check` only evaluates them, and puts them in the dev shell. `dryer`,
-`crapper`, and `mutator` write snapshots under `.metrics/`, which is gitignored.
+`checks`, to the default dev shell, or to `.github/workflows/ci.yml`. The flake
+builds them as `apps` so `nix flake check` only evaluates them, and puts them in
+the `metrics` dev shell, which extends the default one. `dryer`, `crapper`, and
+`mutator` write snapshots under `.metrics/`, which is gitignored.
 Run them from the repository root; a scoped run reads `git status` for `--changed`.
 
 ```sh
-nix develop -c dryer --changed                 # duplicate candidates; writes .metrics/dry.edn
-nix develop -c crapper                          # CC plus coverage plus CRAP; writes .metrics/crap.edn
-nix develop -c mutator --changed --max-workers N src/<module>.rs
-nix run .#dryer -- --changed                    # the apps also work outside the dev shell
+nix develop .#metrics -c dryer --changed       # duplicate candidates; writes .metrics/dry.edn
+nix develop .#metrics -c crapper               # CC plus coverage plus CRAP; writes .metrics/crap.edn
+nix develop .#metrics -c mutator --changed --max-workers N src/<module>.rs
+nix run .#dryer -- --changed                   # the apps also work outside any dev shell
 nix run .#crapper -- --help
 nix run .#mutator -- --help
 ```
@@ -58,8 +59,8 @@ nix run .#mutator -- --help
 `mutator` runs every covered mutant and many tests start real tmux servers. Never
 run it whole-repo. Name one module or file, cap `--max-workers`, and use
 `--changed` for differential reruns. `crapper` needs `cargo-llvm-cov`, which the
-dev shell provides. This crate is bin-only, so a scoped `mutator` test command is
-`--test-command "cargo test --bin ringleader <module::path>"`.
+`metrics` shell provides. This crate is bin-only, so a scoped `mutator` test
+command is `--test-command "cargo test --bin ringleader <module::path>"`.
 
 uml-viewer reads `.metrics/crap.edn` and `.metrics/mutate/`. It ignores
 `.metrics/dry.edn`, so `dryer` output stays a text report and never reaches the
@@ -75,9 +76,9 @@ the policy to the gitignored `.uml-viewer/ringleader.policy.edn`:
 
 Leave the policy-level `:prefix` unset. The overlay joins a `crate::module::Type`
 snapshot to the module class through the class id's crate path, and stripping the
-crate name from the id breaks that join. `$UML_VIEWER_DEPS`, set by the dev shell,
-points the Clojure CLI at the `uml-viewer` flake input. Generate the IR, then open
-the viewer:
+crate name from the id breaks that join. `$UML_VIEWER_DEPS`, set by the `metrics`
+shell, points the Clojure CLI at the `uml-viewer` flake input. Inside
+`nix develop .#metrics`, generate the IR, then open the viewer:
 
 ```sh
 clojure -Sdeps "$UML_VIEWER_DEPS" -M:ir .uml-viewer/ringleader.policy.edn
