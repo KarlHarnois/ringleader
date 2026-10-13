@@ -219,24 +219,39 @@ mod tests {
 
     use super::*;
     use crate::application::ports::{ConfigError, MultiplexerError, UnmergedCommits};
-    use crate::domain::{Config, ConfigDraft, DiffStat, PullRequestState};
+    use crate::domain::{Config, ConfigDraft, DiffStat, PullRequestState, Session};
     use crate::test_support::{FakeMultiplexer, FakePullRequests, ServiceFixture, UiHarness};
 
     struct AppFixture;
 
     impl AppFixture {
         fn two_waiting_sessions() -> ServiceFixture {
-            let first = ServiceFixture::session("dark-mode");
-            let second = ServiceFixture::session("fix-auth");
+            Self::waiting_sessions(&["dark-mode", "fix-auth"])
+        }
+
+        fn three_waiting_sessions() -> ServiceFixture {
+            Self::waiting_sessions(&["dark-mode", "fix-auth", "spike-tui"])
+        }
+
+        fn waiting_sessions(names: &[&str]) -> ServiceFixture {
+            let sessions: Vec<Session> =
+                names.iter().copied().map(ServiceFixture::session).collect();
+            let multiplexer = sessions
+                .iter()
+                .fold(FakeMultiplexer::new(), Self::with_waiting);
             ServiceFixture::new()
-                .with_sessions(&[first.clone(), second.clone()])
-                .with_multiplexer(
-                    FakeMultiplexer::new()
-                        .with_live(ServiceFixture::waiting(&first))
-                        .with_live(ServiceFixture::waiting(&second))
-                        .with_capture("ringleader-dark-mode", "dark mode output")
-                        .with_capture("ringleader-fix-auth", "fix auth output"),
-                )
+                .with_sessions(&sessions)
+                .with_multiplexer(multiplexer)
+        }
+
+        fn with_waiting(multiplexer: FakeMultiplexer, session: &Session) -> FakeMultiplexer {
+            multiplexer
+                .with_live(ServiceFixture::waiting(session))
+                .with_capture(session.tmux_name(), &Self::preview_of(session))
+        }
+
+        fn preview_of(session: &Session) -> String {
+            format!("{} output", session.name().as_str().replace('-', " "))
         }
 
         fn blocked_startup_input() -> ServiceFixture {
@@ -441,17 +456,21 @@ mod tests {
 
     #[test]
     fn capital_g_selects_the_last_session() {
-        let fixture = AppFixture::two_waiting_sessions();
+        let fixture = AppFixture::three_waiting_sessions();
         let mut app = AppFixture::started(&fixture, 100, 28);
 
         AppFixture::press(&mut app, 'G');
 
-        assert_eq!(AppFixture::selected(&app).as_deref(), Some("fix-auth"));
+        assert_eq!(AppFixture::selected(&app).as_deref(), Some("spike-tui"));
+        assert_eq!(
+            AppFixture::captures(&fixture).last().unwrap(),
+            "capture_pane ringleader-spike-tui"
+        );
     }
 
     #[test]
     fn gg_selects_the_first_session() {
-        let fixture = AppFixture::two_waiting_sessions();
+        let fixture = AppFixture::three_waiting_sessions();
         let mut app = AppFixture::started(&fixture, 100, 28);
         AppFixture::press(&mut app, 'G');
 
@@ -459,6 +478,10 @@ mod tests {
         AppFixture::press(&mut app, 'g');
 
         assert_eq!(AppFixture::selected(&app).as_deref(), Some("dark-mode"));
+        assert_eq!(
+            AppFixture::captures(&fixture).last().unwrap(),
+            "capture_pane ringleader-dark-mode"
+        );
     }
 
     #[test]
