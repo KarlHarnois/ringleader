@@ -357,19 +357,6 @@ mod tests {
             );
         }
 
-        fn track(fixture: &GitTestRepo, remote: &str, branch: &str) {
-            let section = format!("branch.{BRANCH}");
-            let merge = format!("refs/heads/{branch}");
-            fixture.git(
-                fixture.path(),
-                &["config", &format!("{section}.remote"), remote],
-            );
-            fixture.git(
-                fixture.path(),
-                &["config", &format!("{section}.merge"), &merge],
-            );
-        }
-
         fn is_published(fixture: &GitTestRepo, repo: &Path) -> bool {
             fixture
                 .workspace()
@@ -522,20 +509,24 @@ mod tests {
 
     #[test]
     fn tracking_the_base_branch_does_not_publish_the_branch() {
-        let fixture = GitTestRepo::new();
-        WorktreeFixture::created(&fixture);
+        let origin = GitTestRepo::new();
+        let clone = WorktreeFixture::clone_with_branch(&origin);
 
-        WorktreeFixture::track(&fixture, "origin", "main");
+        let base = format!("origin/{}", GitTestRepo::BRANCH);
+        origin.git(
+            &clone,
+            &["branch", "-q", "--set-upstream-to", &base, BRANCH],
+        );
 
-        assert!(!WorktreeFixture::is_published(&fixture, fixture.path()));
+        assert!(!WorktreeFixture::is_published(&origin, &clone));
     }
 
     #[test]
-    fn a_local_upstream_does_not_publish_the_branch() {
+    fn pushing_the_branch_into_its_own_repo_does_not_publish_it() {
         let fixture = GitTestRepo::new();
         WorktreeFixture::created(&fixture);
 
-        WorktreeFixture::track(&fixture, ".", BRANCH);
+        fixture.git(fixture.path(), &["push", "-q", "-u", ".", BRANCH]);
 
         assert!(!WorktreeFixture::is_published(&fixture, fixture.path()));
     }
