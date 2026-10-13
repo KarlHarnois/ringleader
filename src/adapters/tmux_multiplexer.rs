@@ -137,14 +137,18 @@ impl TmuxMultiplexer {
 
     fn attach_command(&self, target: &AttachTarget) -> Result<Command, MultiplexerError> {
         let resolved = match target {
-            AttachTarget::Agent(tmux_name) => self
-                .agent_pane(tmux_name)?
-                .unwrap_or_else(|| TmuxScripts::exact(tmux_name)),
+            AttachTarget::Agent(tmux_name) => self.shown_pane(tmux_name)?,
             AttachTarget::Shell(window) => window.clone(),
         };
         Ok(self
             .tmux
             .foreground(&TmuxScripts::attach_session(&resolved)))
+    }
+
+    fn shown_pane(&self, tmux_name: &str) -> Result<String, MultiplexerError> {
+        Ok(self
+            .agent_pane(tmux_name)?
+            .unwrap_or_else(|| TmuxScripts::exact(tmux_name)))
     }
 
     fn attach_in_foreground(&self, mut attach: Command) -> Result<(), MultiplexerError> {
@@ -270,7 +274,7 @@ impl Multiplexer for TmuxMultiplexer {
     }
 
     fn capture_pane(&self, tmux_name: &str) -> Result<String, MultiplexerError> {
-        let pane = self.required_agent_pane(tmux_name)?;
+        let pane = self.shown_pane(tmux_name)?;
         let output = self.tmux.query(&TmuxScripts::capture(&pane))?;
         if !output.succeeded() && output.stdout().is_empty() {
             return Err(TmuxError::failed("capture-pane", &output).into());
@@ -1218,6 +1222,29 @@ mod tests {
         });
 
         assert!(captured);
+    }
+
+    #[test]
+    fn capture_reads_a_session_without_an_agent_pane() {
+        let fixture = MultiplexerFixture::new();
+        fixture.server.text(&[
+            "new-session",
+            "-d",
+            "-s",
+            "handmade",
+            "sh",
+            "-c",
+            "printf 'made by hand\\n'; sleep 30",
+        ]);
+        let multiplexer = fixture.server.multiplexer();
+
+        let captured = fixture.server.wait_for(|| {
+            multiplexer
+                .capture_pane("handmade")
+                .is_ok_and(|text| text.contains("made by hand"))
+        });
+
+        assert!(captured, "{:?}", multiplexer.capture_pane("handmade"));
     }
 
     #[test]
