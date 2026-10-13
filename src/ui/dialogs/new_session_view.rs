@@ -1,7 +1,7 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use super::agent_picker::AgentPicker;
@@ -11,6 +11,7 @@ use super::new_session_layout::NewSessionLayout;
 use super::prompt_field::{PromptField, PromptStyle};
 use super::repo_picker::RepoPicker;
 use super::text_field::TextField;
+use crate::domain::AgentMode;
 use crate::ui::text_fit::TextFit;
 use crate::ui::theme::Theme;
 
@@ -20,12 +21,15 @@ pub struct NewSessionView<'a> {
     agents: &'a AgentPicker,
     prompt: &'a PromptField,
     focus: NewSessionField,
+    mode: AgentMode,
     error: Option<&'a str>,
 }
 
 impl<'a> NewSessionView<'a> {
     const CURSOR: char = '█';
     const NAME_ROWS: usize = 1;
+    const MODE_LABEL: &'static str = "Mode";
+    const UNSUPPORTED_MODE_MARK: &'static str = " · this agent has no plan_args";
 
     pub fn new(
         name: &'a TextField,
@@ -39,12 +43,17 @@ impl<'a> NewSessionView<'a> {
             agents,
             prompt,
             focus: NewSessionField::Name,
+            mode: AgentMode::default(),
             error: None,
         }
     }
 
     pub fn focused_on(self, focus: NewSessionField) -> Self {
         Self { focus, ..self }
+    }
+
+    pub fn in_mode(self, mode: AgentMode) -> Self {
+        Self { mode, ..self }
     }
 
     pub fn with_error(self, error: Option<&'a str>) -> Self {
@@ -55,8 +64,10 @@ impl<'a> NewSessionView<'a> {
         let errors = self.error_lines(usize::from(area.width), theme);
         let layout = self.layout(area, labels, errors.len(), theme);
         let upper = self.upper_lines(labels.field_width(area), layout.repo_room(), labels, theme);
-        let [upper_area, prompt_area, error_area, hints_area] = layout.areas(upper.len());
+        let [upper_area, mode_area, prompt_area, error_area, hints_area] =
+            layout.areas(upper.len());
         self.render_upper(frame, upper_area, upper);
+        frame.render_widget(Paragraph::new(self.mode_lines(labels, theme)), mode_area);
         self.prompt
             .render(frame, prompt_area, labels, self.prompt_style(theme));
         frame.render_widget(Paragraph::new(errors), error_area);
@@ -93,6 +104,20 @@ impl<'a> NewSessionView<'a> {
         lines.extend(labels.labeled(NewSessionField::Repo.label(), repo_lines));
         lines.extend(labels.labeled(NewSessionField::Agent.label(), agent_lines));
         lines
+    }
+
+    fn mode_lines(&self, labels: DialogLabels, theme: &Theme) -> Vec<Line<'static>> {
+        let mut mode_line = Line::from(self.mode.name());
+        if self.selected_agent_lacks_the_mode() {
+            mode_line.push_span(Span::styled(Self::UNSUPPORTED_MODE_MARK, theme.warning()));
+        }
+        labels.labeled(Self::MODE_LABEL, vec![mode_line])
+    }
+
+    fn selected_agent_lacks_the_mode(&self) -> bool {
+        self.agents
+            .selected()
+            .is_ok_and(|agent| !agent.supports(self.mode))
     }
 
     fn render_upper(&self, frame: &mut Frame, area: Rect, lines: Vec<Line<'static>>) {

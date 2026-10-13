@@ -3,6 +3,7 @@ use ratatui::Frame;
 
 use super::dialog::{Dialog, DialogStep};
 use crate::application::SessionService;
+use crate::ui::back_key::BackKey;
 use crate::ui::theme::Theme;
 
 #[derive(Default)]
@@ -33,8 +34,11 @@ impl DialogSlot {
         let Some(dialog) = &mut self.dialog else {
             return DialogStep::Stay;
         };
-        let step = dialog.handle_event(event, service);
-        if step == DialogStep::Close {
+        let step = match event {
+            Event::Key(key) if BackKey::matches(key) => DialogStep::Close,
+            _ => dialog.handle_event(event, service),
+        };
+        if matches!(step, DialogStep::Close | DialogStep::CloseWith(_)) {
             self.close();
         }
         step
