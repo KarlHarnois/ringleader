@@ -39,11 +39,11 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
 
 ## Architecture
 
-Ringleader follows hexagonal architecture, also called ports and adapters. The core holds the domain and the use cases. It never runs tmux or git, never touches the filesystem or the terminal, and never imports an adapter. It reaches them through traits it owns, which adapters outside the core implement.
+Ringleader follows hexagonal architecture, also called ports and adapters. The core holds the domain and the use cases. It never imports an adapter, `crossterm`, `ratatui`, or `std::process`. It never runs tmux or git or touches the filesystem or the terminal itself, and reaches them through traits it owns, which adapters outside the core implement.
 
 Dependencies point inward only. An inner layer never imports an outer one.
 
-- `domain` holds the entities, value types, and pure rules. It imports nothing else from the crate, and never imports `crossterm`, `ratatui`, or `std::process`.
+- `domain` holds the entities, value types, and pure rules. It imports nothing else from the crate.
 - `application` holds the use cases and the ports, and imports only `domain`. It never shells out, never touches the filesystem directly, and never reads the system clock. Ports are traits in `application/ports/`, named after the role they play, such as `Workspace` and `Multiplexer`, with any error type in the same file.
 - `adapters` holds the driven adapters, which implement the ports with git, tmux, files, and `/proc`, and the process-level types `CompositionRoot` uses directly, such as `ProcessEnvironment`, `XdgPaths`, and `AgentLauncher`. They import `application` and `domain`, never `ui` or `cli`. Each port adapter is named after its technology and the port it implements, such as `GitWorkspace` and `TmuxMultiplexer`.
 - `ui` and `cli` are the driving adapters. They import `application` and `domain`, never `adapters`. They reach the use cases only through the `SessionService` facade, which composes `SessionLifecycle`, `SessionMonitor`, `SessionAccess`, `RepoCatalog`, and `Doctor`, so `ui` and `cli` never call those directly. A port handed to a `ui` or `cli` type, like `Lock`, is called by that type.
