@@ -85,6 +85,8 @@
           crapperApp = wrapTool "crapper" crapperTool;
           mutatorApp = wrapTool "mutator" mutatorTool;
         };
+
+      forEachSystemWithMetricsTools = build: forEachSystem (pkgs: build pkgs (metricsTools pkgs));
     in
     {
       packages = forEachSystem (pkgs: {
@@ -113,49 +115,53 @@
         };
       });
 
-      apps = forEachSystem (pkgs: {
-        dryer = {
-          type = "app";
-          program = "${(metricsTools pkgs).dryerTool}/bin/dryer";
-          meta.description = "Find candidate duplicate code";
-        };
-        crapper = {
-          type = "app";
-          program = "${(metricsTools pkgs).crapperApp}/bin/crapper";
-          meta.description = "Score complexity, coverage, and CRAP";
-        };
-        mutator = {
-          type = "app";
-          program = "${(metricsTools pkgs).mutatorApp}/bin/mutator";
-          meta.description = "Run mutation testing";
-        };
-      });
+      apps = forEachSystemWithMetricsTools (
+        pkgs: tools: {
+          dryer = {
+            type = "app";
+            program = "${tools.dryerTool}/bin/dryer";
+            meta.description = "Find candidate duplicate code";
+          };
+          crapper = {
+            type = "app";
+            program = "${tools.crapperApp}/bin/crapper";
+            meta.description = "Score complexity, coverage, and CRAP";
+          };
+          mutator = {
+            type = "app";
+            program = "${tools.mutatorApp}/bin/mutator";
+            meta.description = "Run mutation testing";
+          };
+        }
+      );
 
-      devShells = forEachSystem (pkgs: {
-        default = pkgs.mkShell {
-          packages = [
-            pkgs.rustc
-            pkgs.cargo
-            pkgs.clippy
-            pkgs.rustfmt
-            pkgs.tmux
-            pkgs.git
-            pkgs.nixfmt
-            pkgs.util-linux
-            pkgs.cargo-llvm-cov
-            pkgs.clojure
-            pkgs.jdk21
-            (metricsTools pkgs).dryerTool
-            (metricsTools pkgs).crapperTool
-            (metricsTools pkgs).mutatorTool
-          ];
-          UML_VIEWER_SRC = "${uml-viewer}";
-          UML_VIEWER_DEPS = ''
-            {:deps {uml-viewer/uml-viewer {:local/root "${uml-viewer}"} quil/quil {:mvn/version "4.3.1563"}}
-             :aliases {:ir {:main-opts ["-m" "uml-viewer.main.ir-generator"]}
-                       :run {:main-opts ["-m" "uml-viewer.main.uml-viewer"]}}}'';
-        };
-      });
+      devShells = forEachSystemWithMetricsTools (
+        pkgs: tools: {
+          default = pkgs.mkShell {
+            packages = [
+              pkgs.rustc
+              pkgs.cargo
+              pkgs.clippy
+              pkgs.rustfmt
+              pkgs.tmux
+              pkgs.git
+              pkgs.nixfmt
+              pkgs.util-linux
+              pkgs.cargo-llvm-cov
+              pkgs.clojure
+              pkgs.jdk21
+              tools.dryerTool
+              tools.crapperTool
+              tools.mutatorTool
+            ];
+            UML_VIEWER_SRC = "${uml-viewer}";
+            UML_VIEWER_DEPS = ''
+              {:deps {uml-viewer/uml-viewer {:local/root "${uml-viewer}"} quil/quil {:mvn/version "4.3.1563"}}
+               :aliases {:ir {:main-opts ["-m" "uml-viewer.main.ir-generator"]}
+                         :run {:main-opts ["-m" "uml-viewer.main.uml-viewer"]}}}'';
+          };
+        }
+      );
 
       formatter = forEachSystem (pkgs: pkgs.nixfmt-tree);
 
