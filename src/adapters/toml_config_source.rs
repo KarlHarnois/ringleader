@@ -69,6 +69,7 @@ name = "opencode"
 command = "opencode"
 env = ["OPENAI_API_KEY"]
 prompt_args = ["--prompt={prompt}"]
+plan_args = ["--agent", "plan"]
 "#;
     const REPOS_KEY: &'static str = "repos";
 
@@ -483,6 +484,23 @@ mod tests {
                 .unwrap()
                 .launch_argv(&session, AgentMode::Plan, ""),
             ["claude", "--name", "fix-auth", "--permission-mode", "plan"]
+        );
+    }
+
+    #[test]
+    fn the_first_run_template_starts_opencode_in_its_plan_agent() {
+        let fixture = SourceFixture::new();
+        fixture.source().write_first_run_template().unwrap();
+
+        let config = fixture.source().load().unwrap();
+
+        let session = SessionName::new("fix-auth").unwrap();
+        assert_eq!(
+            config
+                .agent("opencode")
+                .unwrap()
+                .launch_argv(&session, AgentMode::Plan, ""),
+            ["opencode", "--agent", "plan"]
         );
     }
 
