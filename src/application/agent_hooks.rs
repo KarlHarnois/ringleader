@@ -49,8 +49,8 @@ impl AgentHooks {
     }
 
     pub fn startup_wait_note(&self) -> Option<&'static str> {
-        let queued = self.jobs().has_unawaited();
-        queued.then_some(Self::STARTUP_WAIT_NOTE)
+        let typing = self.jobs().has_running();
+        typing.then_some(Self::STARTUP_WAIT_NOTE)
     }
 
     pub fn wait_startup_input(&self, stop: impl Fn() -> bool) {
@@ -129,8 +129,8 @@ impl StartupJobs {
         self.in_flight.iter().map(String::as_str)
     }
 
-    fn has_unawaited(&self) -> bool {
-        !self.pending.is_empty()
+    fn has_running(&self) -> bool {
+        !self.in_flight.is_empty()
     }
 
     fn drop_finished(&mut self) {
@@ -178,6 +178,17 @@ mod tests {
             let started = Instant::now();
             hooks.wait_startup_input(|| started.elapsed() > Self::WAIT_LIMIT);
         }
+
+        fn wait_for_note_to_clear(hooks: &AgentHooks) -> bool {
+            let deadline = Instant::now() + Self::WAIT_LIMIT;
+            while Instant::now() < deadline {
+                if hooks.startup_wait_note().is_none() {
+                    return true;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            false
+        }
     }
 
     #[test]
@@ -207,6 +218,19 @@ mod tests {
             multiplexer.typed_when_ready(HooksFixture::TMUX_NAME),
             ["/color", "/color"]
         );
+    }
+
+    #[test]
+    fn the_wait_note_lasts_only_while_a_job_runs() {
+        let multiplexer = Arc::new(FakeMultiplexer::new().blocking_typing());
+        let hooks = HooksFixture::hooks(&multiplexer);
+        let session = ServiceFixture::session("fix-auth");
+        hooks.after_start(&session, &ServiceFixture::agent_with_input());
+        assert!(hooks.startup_wait_note().is_some());
+
+        multiplexer.release_typing();
+
+        assert!(HooksFixture::wait_for_note_to_clear(&hooks));
     }
 
     #[test]

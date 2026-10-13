@@ -389,7 +389,10 @@ mod tests {
 
     #[test]
     fn new_notes_that_it_waits_for_the_startup_input() {
-        let fixture = ServiceFixture::new().with_config(ServiceFixture::config_with_input());
+        let fixture = ServiceFixture::new()
+            .with_config(ServiceFixture::config_with_input())
+            .with_multiplexer(FakeMultiplexer::new().blocking_typing());
+        LockFlowFixture::release_typing_later(&fixture.shared_multiplexer());
         let harness = CliHarness::new(fixture);
 
         harness.run(&["new", "--name", "Fix Auth", "--repo", "example-project"]);
