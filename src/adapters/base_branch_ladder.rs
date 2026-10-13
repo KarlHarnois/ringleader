@@ -1,3 +1,5 @@
+use std::iter;
+
 use crate::domain::BaseBranch;
 
 pub struct BaseBranchLadder {
@@ -14,7 +16,25 @@ impl BaseBranchLadder {
         Self { origin_default }
     }
 
+    pub fn rung_lookup_refs() -> impl Iterator<Item = &'static str> {
+        iter::once(Self::ORIGIN_HEAD).chain(Self::CONVENTIONAL_DEFAULT_BRANCHES)
+    }
+
     pub fn candidates(&self) -> Vec<String> {
+        let conventional = Self::CONVENTIONAL_DEFAULT_BRANCHES.map(String::from);
+        self.origin_rung().into_iter().chain(conventional).collect()
+    }
+
+    pub fn first_rung(&self, existing_branches: &[&str]) -> Vec<String> {
+        match self.origin_default {
+            Some(_) => self.origin_rung(),
+            None => Self::first_conventional_branch_in(existing_branches)
+                .into_iter()
+                .collect(),
+        }
+    }
+
+    fn origin_rung(&self) -> Vec<String> {
         let local_default = self
             .origin_default
             .as_deref()
@@ -22,8 +42,14 @@ impl BaseBranchLadder {
         local_default
             .into_iter()
             .chain(self.origin_default.clone())
-            .chain(Self::CONVENTIONAL_DEFAULT_BRANCHES.map(String::from))
             .collect()
+    }
+
+    fn first_conventional_branch_in(existing_branches: &[&str]) -> Option<String> {
+        Self::CONVENTIONAL_DEFAULT_BRANCHES
+            .into_iter()
+            .find(|branch| existing_branches.contains(branch))
+            .map(String::from)
     }
 
     fn local_counterpart(origin_ref: &str) -> Option<String> {
@@ -50,6 +76,36 @@ mod tests {
                 "refs/heads/main",
                 "refs/heads/master"
             ]
+        );
+    }
+
+    #[test]
+    fn with_an_origin_default_the_first_rung_is_its_local_and_origin_pair() {
+        let ladder = BaseBranchLadder::new(Some("refs/remotes/origin/trunk".to_string()));
+
+        assert_eq!(
+            ladder.first_rung(&["refs/heads/main"]),
+            ["refs/heads/trunk", "refs/remotes/origin/trunk"]
+        );
+    }
+
+    #[test]
+    fn without_an_origin_default_the_first_rung_is_main_when_main_and_master_exist() {
+        let ladder = BaseBranchLadder::new(None);
+
+        assert_eq!(
+            ladder.first_rung(&["refs/heads/master", "refs/heads/main"]),
+            ["refs/heads/main"]
+        );
+    }
+
+    #[test]
+    fn without_an_origin_default_the_first_rung_falls_to_master_when_main_is_missing() {
+        let ladder = BaseBranchLadder::new(None);
+
+        assert_eq!(
+            ladder.first_rung(&["refs/heads/master"]),
+            ["refs/heads/master"]
         );
     }
 

@@ -1,4 +1,3 @@
-use std::iter;
 use std::path::Path;
 
 use super::base_branch_ladder::BaseBranchLadder;
@@ -13,6 +12,7 @@ pub struct DiffBaseResolver<'a> {
 
 impl<'a> DiffBaseResolver<'a> {
     const HEAD: &'static str = "HEAD";
+    const NAME_AND_TARGET_FORMAT: &'static str = "--format=%(refname) %(symref)";
 
     pub fn new(git: &'a GitRunner) -> Self {
         Self { git }
@@ -46,9 +46,8 @@ impl<'a> DiffBaseResolver<'a> {
         let Some(checked_out) = self.checked_out_ref(worktree)? else {
             return Ok(None);
         };
-        let mut candidates = self.candidates(worktree, recorded, base_branch)?;
-        candidates.retain(|candidate| *candidate != checked_out);
-        let commits = self.existing_commits(worktree, &candidates)?;
+        let branch_refs = self.branch_refs(worktree, base_branch, &checked_out)?;
+        let commits = self.existing_commits(worktree, recorded, &branch_refs)?;
         if commits.is_empty() {
             return Ok(None);
         }
@@ -63,18 +62,18 @@ impl<'a> DiffBaseResolver<'a> {
         self.git.resolved_from(&verify)
     }
 
-    fn candidates(
+    fn branch_refs(
         &self,
         worktree: &Path,
-        recorded: &str,
         base_branch: Option<&BaseBranch>,
+        checked_out: &str,
     ) -> Result<Vec<String>, WorkspaceError> {
-        let branch_refs = match base_branch {
+        let mut branch_refs = match base_branch {
             Some(branch) => Self::configured_refs(branch),
-            None => self.origin_ladder(worktree)?.candidates(),
+            None => self.ladder_rung(worktree, checked_out)?,
         };
-        let lower_bound = iter::once(recorded.to_string());
-        Ok(lower_bound.chain(branch_refs).collect())
+        branch_refs.retain(|branch_ref| branch_ref != checked_out);
+        Ok(branch_refs)
     }
 
     fn configured_refs(branch: &BaseBranch) -> Vec<String> {
@@ -86,22 +85,48 @@ impl<'a> DiffBaseResolver<'a> {
             .collect()
     }
 
-    fn origin_ladder(&self, worktree: &Path) -> Result<BaseBranchLadder, WorkspaceError> {
-        let origin_head = GitInvocation::in_worktree(worktree, "symbolic-ref")
+    fn ladder_rung(
+        &self,
+        worktree: &Path,
+        checked_out: &str,
+    ) -> Result<Vec<String>, WorkspaceError> {
+        let listed = self.listed_rung_refs(worktree)?;
+        let origin_default = listed
+            .iter()
+            .find(|(name, _)| name == BaseBranchLadder::ORIGIN_HEAD)
+            .map(|(_, target)| target.clone());
+        let existing_branches: Vec<&str> = listed
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .filter(|name| *name != checked_out)
+            .collect();
+        Ok(BaseBranchLadder::new(origin_default).first_rung(&existing_branches))
+    }
+
+    fn listed_rung_refs(&self, worktree: &Path) -> Result<Vec<(String, String)>, WorkspaceError> {
+        let list = GitInvocation::in_worktree(worktree, "for-each-ref")
             .diffing()
-            .args(["-q", BaseBranchLadder::ORIGIN_HEAD]);
-        Ok(BaseBranchLadder::new(self.git.resolved_from(&origin_head)?))
+            .arg(Self::NAME_AND_TARGET_FORMAT)
+            .args(BaseBranchLadder::rung_lookup_refs());
+        let listing = self.git.run_checked(&list)?;
+        Ok(listing
+            .lines()
+            .into_iter()
+            .filter_map(|line| line.split_once(' '))
+            .map(|(name, target)| (name.to_string(), target.to_string()))
+            .collect())
     }
 
     fn existing_commits(
         &self,
         worktree: &Path,
-        candidates: &[String],
+        recorded: &str,
+        branch_refs: &[String],
     ) -> Result<Vec<String>, WorkspaceError> {
         let filter = GitInvocation::in_worktree(worktree, "rev-list")
             .diffing()
-            .args(["--no-walk", "--ignore-missing"])
-            .args(candidates)
+            .args(["--no-walk", "--ignore-missing", recorded])
+            .args(branch_refs)
             .arg("--");
         let commits = self.git.run_checked(&filter)?;
         Ok(commits.lines().into_iter().map(str::to_string).collect())
@@ -205,6 +230,19 @@ mod tests {
             repo
         }
 
+        fn repo_developing_ahead_of_main() -> GitTestRepo {
+            let repo = Self::repo_on_new_branch("develop");
+            repo.commit(repo.path(), "unreleased-1.md");
+            let develop = repo.commit(repo.path(), "unreleased-2.md");
+            let origin_copy = BaseBranch::new("develop").unwrap().origin_ref();
+            repo.git(repo.path(), &["update-ref", &origin_copy, &develop]);
+            repo.git(
+                repo.path(),
+                &["symbolic-ref", BaseBranchLadder::ORIGIN_HEAD, &origin_copy],
+            );
+            repo
+        }
+
         fn repo_with_only(branch: &str) -> GitTestRepo {
             let repo = GitTestRepo::new();
             repo.git(repo.path(), &["branch", "-m", GitTestRepo::BRANCH, branch]);
@@ -217,6 +255,13 @@ mod tests {
 
         fn edit_in_session(&self, file: &str) {
             fs::write(self.worktree.join(file), "edited\n").unwrap();
+        }
+
+        fn commit_on(&self, branch: &str, file: &str) {
+            let repo = self.repo.path();
+            self.repo.git(repo, &["checkout", "-q", branch]);
+            self.repo.commit(repo, file);
+            self.repo.git(repo, &["checkout", "-q", "-"]);
         }
 
         fn advance_the_checked_out_branch(&self, file: &str) {
@@ -365,6 +410,16 @@ mod tests {
     }
 
     #[test]
+    fn merging_main_into_a_session_based_on_the_origin_default_keeps_measuring_from_it() {
+        let fixture = DiffBaseFixture::started_in(DiffBaseFixture::repo_developing_ahead_of_main());
+        fixture.commit_in_session("session.md");
+        fixture.commit_on(GitTestRepo::BRANCH, "hotfix.md");
+        fixture.merge_into_session(GitTestRepo::BRANCH);
+
+        assert_eq!(fixture.diff().files(), 2);
+    }
+
+    #[test]
     fn a_configured_base_branch_counts_only_the_session_changes_after_merging_it() {
         let fixture = DiffBaseFixture::started_in(DiffBaseFixture::repo_on_new_branch("develop"));
         fixture.commit_in_session("session.md");
@@ -439,6 +494,17 @@ mod tests {
         let repo = DiffBaseFixture::repo_with_only("master");
         let fixture = DiffBaseFixture::started_on_branch(repo, "main");
         fixture.commit_in_session("session.md");
+
+        assert_eq!(fixture.diff().files(), 1);
+    }
+
+    #[test]
+    fn a_session_branch_named_like_a_missing_default_branch_measures_from_the_one_that_exists() {
+        let repo = DiffBaseFixture::repo_with_only("master");
+        let fixture = DiffBaseFixture::started_on_branch(repo, "main");
+        fixture.commit_in_session("session.md");
+        fixture.advance_the_checked_out_branch("news.md");
+        fixture.merge_into_session("master");
 
         assert_eq!(fixture.diff().files(), 1);
     }
