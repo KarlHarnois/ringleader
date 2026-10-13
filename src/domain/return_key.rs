@@ -36,7 +36,7 @@ impl ReturnKey {
             key: Self::normalized(&modifiers, rest),
             modifiers,
         };
-        key.is_reachable().then_some(key)
+        (key.has_distinct_modifiers() && key.is_reachable()).then_some(key)
     }
 
     pub fn shadows_agent_input(&self) -> bool {
@@ -76,6 +76,13 @@ impl ReturnKey {
     fn tmux_name(&self) -> String {
         let prefixes: String = self.modifiers.iter().map(Modifier::prefix).collect();
         format!("{prefixes}{}", self.key)
+    }
+
+    fn has_distinct_modifiers(&self) -> bool {
+        self.modifiers
+            .iter()
+            .enumerate()
+            .all(|(index, modifier)| !self.modifiers[..index].contains(modifier))
     }
 
     fn is_reachable(&self) -> bool {
@@ -207,6 +214,11 @@ mod tests {
     #[test]
     fn ctrl_i_and_ctrl_m_are_refused_because_terminals_send_tab_and_enter_for_them() {
         KeyFixture::assert_refused(&["C-i", "C-m", "C-M-i", "C-M-m", "C-I", "C-M"]);
+    }
+
+    #[test]
+    fn a_repeated_modifier_is_refused() {
+        KeyFixture::assert_refused(&["C-C-c", "M-M-x", "C-M-C-q", "S-S-F1"]);
     }
 
     #[test]
