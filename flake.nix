@@ -53,17 +53,18 @@
       metricsTools =
         pkgs:
         let
-          version = "0.1.0";
           python = pkgs.python3;
           treeSitterDeps = [
             python.pkgs.tree-sitter
             python.pkgs.tree-sitter-language-pack
           ];
+          pyprojectVersion =
+            source: (builtins.fromTOML (builtins.readFile "${source}/pyproject.toml")).project.version;
           buildTool =
             name: source: extraDependencies:
             python.pkgs.buildPythonApplication {
               pname = name;
-              inherit version;
+              version = pyprojectVersion source;
               pyproject = true;
               src = source;
               doCheck = false;
