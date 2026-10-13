@@ -366,7 +366,7 @@ mod tests {
         assert!(AuditFixture::line_with(
             &fixture,
             "info:",
-            "your tmux must not use any of Ctrl-Q, Alt-j, Alt-Down, Alt-k, Alt-Up as its prefix or bind them in its root table"
+            "your tmux must not use any of Ctrl-Q, Alt-j, Alt-↓, Alt-k, Alt-↑ as its prefix or bind them in its root table"
         ));
     }
 

@@ -13,6 +13,8 @@ impl HotKey {
         "Up", "Down", "Left", "Right",
     ];
     const ALIASES: [(&'static str, &'static str); 2] = [("PPage", "PageUp"), ("NPage", "PageDown")];
+    const ARROWS: [(&'static str, &'static str); 4] =
+        [("Up", "↑"), ("Down", "↓"), ("Left", "←"), ("Right", "→")];
     const UNMODIFIABLE_KEYS: [&'static str; 6] =
         ["Enter", "Tab", "BTab", "Escape", "BSpace", "Space"];
     const SPACE: &'static str = "Space";
@@ -73,8 +75,15 @@ impl HotKey {
     fn displayed_key(&self) -> String {
         match self.has(Modifier::Control) && self.single_character().is_some() {
             true => self.key.to_uppercase(),
-            false => self.key.clone(),
+            false => Self::arrow(&self.key).unwrap_or(&self.key).to_string(),
         }
+    }
+
+    fn arrow(key: &str) -> Option<&'static str> {
+        Self::ARROWS
+            .iter()
+            .find(|(name, _)| *name == key)
+            .map(|(_, arrow)| *arrow)
     }
 
     fn is_typed_character(&self) -> bool {
@@ -266,7 +275,7 @@ mod tests {
         let shown =
             ["C-q", "M-x", "S-F1", "C-Up", "~"].map(|text| HotKey::parse(text).unwrap().display());
 
-        assert_eq!(shown, ["Ctrl-Q", "Alt-x", "Shift-F1", "Ctrl-Up", "~"]);
+        assert_eq!(shown, ["Ctrl-Q", "Alt-x", "Shift-F1", "Ctrl-↑", "~"]);
     }
 
     #[test]

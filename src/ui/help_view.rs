@@ -424,6 +424,20 @@ mod tests {
     }
 
     #[test]
+    fn the_default_session_key_rows_line_up_with_the_other_keys() {
+        let rows = HelpFixture::rows(&HelpFixture::help(), HelpFixture::WIDE_WIDTH);
+
+        assert!(
+            rows.contains(&"Alt-j Alt-↓  switch to the next session while attached".to_string())
+        );
+        assert!(
+            rows.contains(
+                &"Alt-k Alt-↑  switch to the previous session while attached".to_string()
+            )
+        );
+    }
+
+    #[test]
     fn a_session_direction_without_keys_has_no_row() {
         let bindings = KeyBindings::default().with_next_session(Vec::new());
 
