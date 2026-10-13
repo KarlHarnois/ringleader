@@ -82,6 +82,7 @@ impl SessionList {
     pub fn show(&mut self, mut rows: Vec<SessionSummary>) {
         SessionTree::sort(&mut rows);
         self.rows = rows;
+        self.forget_folds_without_a_heading();
         self.selection = self.repaired_selection();
     }
 
@@ -116,6 +117,15 @@ impl SessionList {
 
     fn tree(&self) -> SessionTree<'_> {
         SessionTree::new(&self.rows, &self.folded)
+    }
+
+    fn forget_folds_without_a_heading(&mut self) {
+        let tree = self.tree();
+        let headed: HashSet<RepoGroup> = tree
+            .headings()
+            .map(|heading| heading.group().clone())
+            .collect();
+        self.folded.retain(|group| headed.contains(group));
     }
 
     fn repaired_selection(&self) -> Option<ListSelection> {
@@ -344,16 +354,35 @@ mod tests {
     }
 
     #[test]
-    fn a_selected_session_in_a_folded_repo_gives_way_to_its_heading() {
+    fn a_selected_session_that_reappears_in_a_folded_repo_gives_way_to_its_heading() {
         let mut list = ListFixture::showing(ListFixture::two_repos());
+        list.select("c-three");
+        list.move_selection(-1);
         list.toggle_fold();
-        list.show(ListFixture::two_repos()[..2].to_vec());
+        list.select("a-one");
 
-        list.show(ListFixture::two_repos());
+        list.show(vec![
+            ServiceFixture::summary_in("b-two", "/repos/alpha", SessionState::Waiting),
+            ServiceFixture::summary_in("a-one", "/repos/beta", SessionState::Waiting),
+            ServiceFixture::summary_in("c-three", "/repos/beta", SessionState::Waiting),
+        ]);
         let on_heading = list.heading_selected();
         list.toggle_fold();
 
         assert!(on_heading);
+        assert_eq!(list.visible_managed(10), ["b-two", "a-one", "c-three"]);
+    }
+
+    #[test]
+    fn a_fold_is_forgotten_once_its_repo_loses_its_heading() {
+        let mut list = ListFixture::showing(ListFixture::two_repos());
+        list.select("c-three");
+        list.move_selection(-1);
+        list.toggle_fold();
+
+        list.show(ListFixture::two_repos()[2..].to_vec());
+        list.show(ListFixture::two_repos());
+
         assert_eq!(list.visible_managed(10), ["a-one", "b-two", "c-three"]);
     }
 

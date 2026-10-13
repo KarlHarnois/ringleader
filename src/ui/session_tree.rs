@@ -38,8 +38,11 @@ impl<'a> SessionTree<'a> {
     }
 
     pub fn heading(&self, number: usize) -> Option<&RepoHeading<'a>> {
-        let mut headings = self.lines.iter().filter_map(TreeLine::heading);
-        headings.find(|heading| heading.number() == number)
+        self.headings().find(|heading| heading.number() == number)
+    }
+
+    pub fn headings(&self) -> impl Iterator<Item = &RepoHeading<'a>> {
+        self.lines.iter().filter_map(TreeLine::heading)
     }
 
     pub fn visible(
