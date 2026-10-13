@@ -12,6 +12,9 @@ pub struct StartPointResolver<'a> {
 impl<'a> StartPointResolver<'a> {
     const ORIGIN_HEAD: &'static str = "refs/remotes/origin/HEAD";
     const ORIGIN_BRANCH_PREFIX: &'static str = "refs/remotes/origin/";
+    const LOCAL_BRANCH_PREFIX: &'static str = "refs/heads/";
+    const REMOTE_TRACKING_PREFIX: &'static str = "refs/remotes/";
+    const ORIGIN_REMOTE: &'static str = "origin";
     const CONVENTIONAL_DEFAULT_BRANCHES: [&'static str; 2] =
         ["refs/heads/main", "refs/heads/master"];
 
@@ -35,17 +38,19 @@ impl<'a> StartPointResolver<'a> {
         repo: &Path,
         base: &BaseBranch,
     ) -> Result<StartPoint, WorkspaceError> {
-        let candidates = [base.local_ref(), base.remote_tracking_ref()];
+        let local_ref = Self::local_ref(base.as_str());
+        let remote_ref = Self::remote_tracking_ref(base.as_str());
+        let candidates = [local_ref.clone(), remote_ref.clone()];
         if let Some(sha) = self.first_commit(repo, candidates)? {
             return Ok(StartPoint::Commit(sha));
         }
-        let suggestion = base.origin_suggestion();
-        let origin_ref = format!("refs/remotes/{suggestion}");
+        let suggestion = format!("{}/{base}", Self::ORIGIN_REMOTE);
+        let origin_ref = Self::remote_tracking_ref(&suggestion);
         let origin_exists = self.commit_of(repo, &origin_ref)?.is_some();
         Err(WorkspaceError::BaseBranchNotFound {
             base: base.to_string(),
-            local_ref: base.local_ref(),
-            remote_ref: base.remote_tracking_ref(),
+            local_ref,
+            remote_ref,
             suggestion: origin_exists.then_some(suggestion),
         })
     }
@@ -91,7 +96,15 @@ impl<'a> StartPointResolver<'a> {
         origin_ref
             .strip_prefix(Self::ORIGIN_BRANCH_PREFIX)
             .and_then(BaseBranch::new)
-            .map(|branch| branch.local_ref())
+            .map(|branch| Self::local_ref(branch.as_str()))
+    }
+
+    fn local_ref(branch: &str) -> String {
+        format!("{}{branch}", Self::LOCAL_BRANCH_PREFIX)
+    }
+
+    fn remote_tracking_ref(branch: &str) -> String {
+        format!("{}{branch}", Self::REMOTE_TRACKING_PREFIX)
     }
 
     fn first_commit(
