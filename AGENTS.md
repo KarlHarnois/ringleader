@@ -2,6 +2,20 @@
 
 This file is the living reference for agents working in this repository.
 
+## Values
+
+When no rule covers a case, choose what these values favor. When two conflict, the earlier one wins.
+
+- **The user's own setup stays untouched.** Ringleader runs its own tmux server and never changes the user's tmux server, tmux config, or key bindings. It deletes or renames only the branches it marked as its own, and it assumes no particular personal setup. The private socket on every tmux call, the throwaway state for manual runs, the `ringleaderManaged` marker, and the consumer-agnostic repository all come from this.
+- **Refuse before losing work.** When an action could destroy work, Ringleader stops and says why instead of guessing. Delete measures uncommitted files and unmerged commits and asks first, rename refuses a branch that has been pushed, a failed create or rename undoes what it did, and a refused action exits with code 3.
+- **Intuitive, with several ways to do each thing.** Each way comes from an ecosystem users already know and keeps the meaning it has there, so a user who guesses a key is right.
+  - Vim: `j k` move, `gg G` jump to the ends, and `/` would open a session finder.
+  - fzf and readline: `Ctrl-J Ctrl-K` and `Ctrl-N Ctrl-P` move in the repo search, and `Ctrl-W Ctrl-U` edit text.
+  - Command palettes: `Ctrl-K` would also open the session finder.
+  - The arrows work wherever `j k` do, `?` `Esc` `q` all close the help, and create, delete, rename, restart, and attach work from both the TUI and the CLI.
+- **Side work never blocks or breaks the main action.** Typing an agent's startup input and looking up pull requests run in the background, and their failures are logged, never raised. A missing tool such as `gh` turns its feature off instead of failing the program. Logs go to a file, never to the terminal.
+- **Less is more.** Ringleader stays minimal in what it shows, what it asks for, and what it documents. Hint lines name only Ringleader's own keys and leave out the editing keys every terminal user already knows, and the README stays short with no architecture. Convention wins over configuration: every setting except the agent list has a working default, repos are found by scanning home, a session's branch and tmux session follow from its name, the diff base is found without a setting, and the new session dialog starts on the repo Ringleader was launched in or the newest session's repo. A new setting needs a case the convention cannot serve.
+
 ## Ground rules
 
 - Keep functions small, each doing one thing at one level of abstraction, with callers above the functions they call. Avoid flag arguments and side effects a name does not announce, keep commands separate from queries, and state each piece of knowledge once. Talk to direct collaborators instead of reaching through chains of objects. Errors use `Result` with the operation that failed in their message, and absence uses `Option`.
