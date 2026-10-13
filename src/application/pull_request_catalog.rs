@@ -1,7 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 use super::pending::Pending;
 use super::ports::PullRequests;
@@ -9,75 +8,20 @@ use crate::domain::{PullRequest, Session};
 
 pub struct PullRequestCatalog {
     pull_requests: Arc<dyn PullRequests>,
-    cached: HashMap<String, PullRequest>,
-    pending: Option<Pending<HashMap<String, Option<PullRequest>>>>,
-    next_refresh: Option<Instant>,
-    refresh_requested: bool,
 }
 
 impl PullRequestCatalog {
     pub fn new(pull_requests: Arc<dyn PullRequests>) -> Self {
-        Self {
-            pull_requests,
-            cached: HashMap::new(),
-            pending: None,
-            next_refresh: None,
-            refresh_requested: false,
-        }
+        Self { pull_requests }
     }
 
-    pub fn poll(
-        &mut self,
-        now: Instant,
-        interval: Duration,
-        visible: &[&Session],
-    ) -> &HashMap<String, PullRequest> {
-        self.collect(now, interval);
-        let due = self.refresh_requested || self.next_refresh.is_none_or(|due| now >= due);
-        if self.pending.is_none() && !visible.is_empty() && due {
-            self.start(now, interval, visible);
-        }
-        &self.cached
-    }
-
-    pub fn snapshot(&self) -> &HashMap<String, PullRequest> {
-        &self.cached
-    }
-
-    pub fn keep_only(&mut self, names: &[String]) {
-        self.cached.retain(|name, _| names.contains(name));
-    }
-
-    pub fn refresh_soon(&mut self) {
-        self.refresh_requested = true;
-    }
-
-    fn collect(&mut self, now: Instant, interval: Duration) {
-        let Some(pending) = self.pending.take() else {
-            return;
-        };
-        match pending.poll() {
-            None => self.pending = Some(pending),
-            Some(Ok(found)) => {
-                self.merge(found);
-                self.next_refresh = Some(now + interval);
-            }
-            Some(Err(error)) => {
-                log::warn!("could not look up pull requests: {error}");
-                self.next_refresh = Some(now + interval);
-            }
-        }
-    }
-
-    fn start(&mut self, now: Instant, interval: Duration, visible: &[&Session]) {
+    pub fn find(&self, sessions: &[&Session]) -> Pending<HashMap<String, Option<PullRequest>>> {
         let port = Arc::clone(&self.pull_requests);
-        let queries: Vec<PullRequestQuery> = visible
+        let queries: Vec<PullRequestQuery> = sessions
             .iter()
             .map(|session| PullRequestQuery::of(session))
             .collect();
-        self.next_refresh = Some(now + interval);
-        self.refresh_requested = false;
-        self.pending = Some(Pending::start(move || Ok(Self::fetch(port, queries))));
+        Pending::start(move || Ok(Self::fetch(port, queries)))
     }
 
     fn fetch(
@@ -108,19 +52,6 @@ impl PullRequestCatalog {
         }
         found
     }
-
-    fn merge(&mut self, found: HashMap<String, Option<PullRequest>>) {
-        for (name, pull_request) in found {
-            match pull_request {
-                Some(pull_request) => {
-                    self.cached.insert(name, pull_request);
-                }
-                None => {
-                    self.cached.remove(&name);
-                }
-            }
-        }
-    }
 }
 
 struct PullRequestQuery {
@@ -150,14 +81,11 @@ mod tests {
     struct CatalogFixture;
 
     impl CatalogFixture {
-        const INTERVAL: Duration = Duration::from_secs(30);
-        const LIMIT: Duration = Duration::from_secs(2);
-
         fn open(number: u64) -> PullRequest {
             PullRequest::new(number, PullRequestState::Open)
         }
 
-        fn cached(session: &Session, number: u64) -> Arc<FakePullRequests> {
+        fn with_pull_request(session: &Session, number: u64) -> Arc<FakePullRequests> {
             Arc::new(FakePullRequests::new().with_pull_request(
                 Path::new(ServiceFixture::REPO),
                 session.branch(),
@@ -165,67 +93,48 @@ mod tests {
             ))
         }
 
-        fn settle(
-            catalog: &mut PullRequestCatalog,
-            fake: &FakePullRequests,
+        fn found(
+            fake: Arc<FakePullRequests>,
             sessions: &[&Session],
-        ) -> HashMap<String, PullRequest> {
-            let deadline = Instant::now() + Self::LIMIT;
-            while Instant::now() < deadline {
-                catalog.poll(Instant::now(), Self::INTERVAL, sessions);
-                if !fake.calls().is_empty() && catalog.pending.is_none() {
-                    break;
-                }
-                std::thread::sleep(Duration::from_millis(5));
-            }
-            catalog.snapshot().clone()
+        ) -> HashMap<String, Option<PullRequest>> {
+            let pending = PullRequestCatalog::new(fake).find(sessions);
+            pending.wait_unless(|| false).unwrap().unwrap()
         }
     }
 
     #[test]
-    fn a_refresh_caches_the_pull_request_of_a_visible_session() {
+    fn a_lookup_finds_the_pull_request_of_a_session() {
         let session = ServiceFixture::session("fix-auth");
-        let fake = CatalogFixture::cached(&session, 142);
-        let mut catalog = PullRequestCatalog::new(fake.clone());
+        let fake = CatalogFixture::with_pull_request(&session, 142);
 
-        let found = CatalogFixture::settle(&mut catalog, fake.as_ref(), &[&session]);
-
-        assert_eq!(found.get("fix-auth"), Some(&CatalogFixture::open(142)));
-    }
-
-    #[test]
-    fn a_branch_without_a_pull_request_is_left_out_of_the_cache() {
-        let session = ServiceFixture::session("fix-auth");
-        let fake = Arc::new(FakePullRequests::new());
-        let mut catalog = PullRequestCatalog::new(fake.clone());
-
-        let found = CatalogFixture::settle(&mut catalog, fake.as_ref(), &[&session]);
-
-        assert!(found.is_empty());
-    }
-
-    #[test]
-    fn a_failing_lookup_keeps_the_previous_cache() {
-        let session = ServiceFixture::session("fix-auth");
-        let fake = CatalogFixture::cached(&session, 142);
-        let mut catalog = PullRequestCatalog::new(fake.clone());
-        CatalogFixture::settle(&mut catalog, fake.as_ref(), &[&session]);
-        let recorded = fake.calls().len();
-
-        fake.fail();
-        catalog.refresh_soon();
-        let deadline = Instant::now() + CatalogFixture::LIMIT;
-        while Instant::now() < deadline {
-            catalog.poll(Instant::now(), CatalogFixture::INTERVAL, &[&session]);
-            if fake.calls().len() > recorded && catalog.pending.is_none() {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        }
+        let found = CatalogFixture::found(fake, &[&session]);
 
         assert_eq!(
-            catalog.snapshot().get("fix-auth"),
-            Some(&CatalogFixture::open(142))
+            found.get("fix-auth"),
+            Some(&Some(CatalogFixture::open(142)))
+        );
+    }
+
+    #[test]
+    fn a_branch_without_a_pull_request_is_found_as_none() {
+        let session = ServiceFixture::session("fix-auth");
+
+        let found = CatalogFixture::found(Arc::new(FakePullRequests::new()), &[&session]);
+
+        assert_eq!(found.get("fix-auth"), Some(&None));
+    }
+
+    #[test]
+    fn sessions_of_one_repo_share_one_lookup() {
+        let first = ServiceFixture::session("fix-auth");
+        let second = ServiceFixture::session("add-search");
+        let fake = Arc::new(FakePullRequests::new());
+
+        CatalogFixture::found(fake.clone(), &[&first, &second]);
+
+        assert_eq!(
+            fake.calls(),
+            vec![format!("lookup {} 2", ServiceFixture::REPO)]
         );
     }
 
@@ -243,40 +152,13 @@ mod tests {
                 )
                 .failing_repo(Path::new("/repos/local-only")),
         );
-        let mut catalog = PullRequestCatalog::new(fake.clone());
-        let sessions = [&reachable, &unreachable];
 
-        let found = CatalogFixture::settle(&mut catalog, fake.as_ref(), &sessions);
+        let found = CatalogFixture::found(fake, &[&reachable, &unreachable]);
 
-        assert_eq!(found.get("fix-auth"), Some(&CatalogFixture::open(142)));
+        assert_eq!(
+            found.get("fix-auth"),
+            Some(&Some(CatalogFixture::open(142)))
+        );
         assert_eq!(found.get("local"), None);
-    }
-
-    #[test]
-    fn a_refresh_requested_during_a_fetch_runs_as_soon_as_it_finishes() {
-        let session = ServiceFixture::session("fix-auth");
-        let fake = CatalogFixture::cached(&session, 142);
-        let mut catalog = PullRequestCatalog::new(fake.clone());
-        let sessions = [&session];
-        CatalogFixture::settle(&mut catalog, fake.as_ref(), &sessions);
-
-        catalog.refresh_soon();
-        catalog.poll(Instant::now(), CatalogFixture::INTERVAL, &sessions);
-        catalog.refresh_soon();
-        CatalogFixture::settle(&mut catalog, fake.as_ref(), &sessions);
-
-        assert_eq!(fake.calls().len(), 3);
-    }
-
-    #[test]
-    fn pruning_drops_the_pull_requests_of_vanished_sessions() {
-        let session = ServiceFixture::session("fix-auth");
-        let fake = CatalogFixture::cached(&session, 142);
-        let mut catalog = PullRequestCatalog::new(fake.clone());
-        CatalogFixture::settle(&mut catalog, fake.as_ref(), &[&session]);
-
-        catalog.keep_only(&["other".to_string()]);
-
-        assert!(catalog.snapshot().is_empty());
     }
 }

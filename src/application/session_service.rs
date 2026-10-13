@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Instant;
 
 use super::creation_plan::CreateRequest;
 use super::delete_impact::{DeleteConfirmation, DeleteImpact};
@@ -180,39 +179,12 @@ impl SessionService {
         self.monitor.preview(tmux_name)
     }
 
-    pub fn poll_pull_requests(
-        &mut self,
-        now: Instant,
+    pub fn find_pull_requests(
+        &self,
         names: &[String],
-    ) -> &HashMap<String, PullRequest> {
-        let Self {
-            entries,
-            pull_request_catalog,
-            config,
-            ..
-        } = self;
-        let visible: Vec<&Session> = names
-            .iter()
-            .filter_map(|name| {
-                entries
-                    .iter()
-                    .find(|entry| entry.name().as_str() == name.as_str())
-            })
-            .collect();
-        let interval = config.config().intervals().pull_request_refresh();
-        pull_request_catalog.poll(now, interval, &visible)
-    }
-
-    pub fn pull_requests(&self) -> &HashMap<String, PullRequest> {
-        self.pull_request_catalog.snapshot()
-    }
-
-    pub fn prune_pull_requests(&mut self, names: &[String]) {
-        self.pull_request_catalog.keep_only(names);
-    }
-
-    pub fn refresh_pull_requests(&mut self) {
-        self.pull_request_catalog.refresh_soon();
+    ) -> Pending<HashMap<String, Option<PullRequest>>> {
+        let sessions: Vec<&Session> = names.iter().filter_map(|name| self.entry(name)).collect();
+        self.pull_request_catalog.find(&sessions)
     }
 
     pub fn create_session(&mut self, request: &CreateRequest) -> Result<Session, ServiceError> {

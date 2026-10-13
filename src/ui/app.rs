@@ -156,7 +156,7 @@ impl App {
     fn reload(&mut self) {
         let outcome = self.service.reload();
         let restored = self.service.restore_server_socket();
-        self.home.refresh_now(&mut self.service);
+        self.home.refresh_now();
         self.observe();
         let reloaded = match &restored {
             Ok(Some(note)) => format!("{} Also {note}.", Self::RELOADED),

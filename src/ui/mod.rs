@@ -12,6 +12,7 @@ pub mod home_view;
 pub mod preview_feed;
 pub mod preview_panel;
 pub mod preview_text;
+pub mod pull_request_feed;
 pub mod session_list;
 pub mod session_table;
 pub mod shell_runner;

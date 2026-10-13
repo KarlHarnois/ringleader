@@ -46,7 +46,7 @@ Dependencies point inward only. An inner layer never imports an outer one.
 - `domain` holds the entities, value types, and pure rules. It imports nothing else from the crate.
 - `application` holds the use cases and the ports, and imports only `domain`. It never shells out, never touches the filesystem directly, and never reads the system clock. Ports are traits in `application/ports/`, named after the role they play, such as `Workspace` and `Multiplexer`, with any error type in the same file.
 - `adapters` holds the driven adapters, which implement the ports with git, tmux, files, and `/proc`, and the process-level types `CompositionRoot` uses directly, such as `ProcessEnvironment`, `XdgPaths`, and `AgentLauncher`. They import `application` and `domain`, never `ui` or `cli`. Each port adapter is named after its technology and the port it implements, such as `GitWorkspace` and `TmuxMultiplexer`.
-- `ui` and `cli` are the driving adapters. They import `application` and `domain`, never `adapters` or each other. They reach the use cases only through the `SessionService` facade, which composes `SessionLifecycle`, `SessionMonitor`, `SessionAccess`, `RepoCatalog`, and `Doctor`, so `ui` and `cli` never call those directly. A port handed to a `ui` or `cli` type, like `Lock`, is called by that type.
+- `ui` and `cli` are the driving adapters. They import `application` and `domain`, never `adapters` or each other. They reach the use cases only through the `SessionService` facade, which composes `SessionLifecycle`, `SessionMonitor`, `SessionAccess`, `RepoCatalog`, `PullRequestCatalog`, and `Doctor`, so `ui` and `cli` never call those directly. A port handed to a `ui` or `cli` type, like `Lock`, is called by that type.
 - `main.rs` is the composition root and the only production code that imports every layer. The Wiring section says what it builds.
 - `src/test_support/` may import any layer, because it fakes the ports and drives the outer layers under test. Inline `#[cfg(test)]` modules follow their layer's rule, except that any of them may also import `src/test_support/`.
 
@@ -139,7 +139,7 @@ The one exception is a driving adapter's own channel to the user: the terminal f
     │   ├── reconciliation.rs     # Reconciliation, the reconciled entries and rows
     │   ├── session_access.rs     # SessionAccess: attach and open_shell, and the refusal from a pane of the private server
     │   ├── repo_catalog.rs       # RepoCatalog: discover, find, add, and remove repos
-    │   ├── pull_request_catalog.rs # PullRequestCatalog, the polled pull requests of visible sessions
+    │   ├── pull_request_catalog.rs # PullRequestCatalog, looks up the pull requests of sessions in the background
     │   ├── repo_merge.rs         # RepoMerge, joins configured and scanned repos, configured entries winning
     │   ├── home_repo_search.rs   # HomeRepoSearch, the repos under home the repo search offers
     │   ├── default_repo.rs       # DefaultRepo, the launch repo or the newest session's repo
@@ -221,6 +221,7 @@ The one exception is a driving adapter's own channel to the user: the terminal f
     │   ├── session_list.rs         # SessionList, sorted rows and name-based selection
     │   ├── preview_feed.rs         # PreviewFeed, the preview capture and its timer
     │   ├── diff_queue.rs           # DiffQueue, round-robin diffs of visible rows
+    │   ├── pull_request_feed.rs    # PullRequestFeed, the pull requests of visible rows and their timer
     │   ├── bell.rs                 # Bell, rings on a Working to Waiting edge
     │   ├── shell_runner.rs         # ShellRunner, runs the ephemeral t shell
     │   ├── blocking_operation.rs   # BlockingOperation, a create, delete, rename, or restart run behind a busy message
