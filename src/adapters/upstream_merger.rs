@@ -14,6 +14,7 @@ pub struct UpstreamMerger<'a> {
 impl<'a> UpstreamMerger<'a> {
     const REMOTE: &'static str = "origin";
     const MERGE_HEAD: &'static str = "MERGE_HEAD";
+    const HEAD: &'static str = "HEAD";
 
     pub fn new(git: &'a GitRunner) -> Self {
         Self { git }
@@ -27,9 +28,8 @@ impl<'a> UpstreamMerger<'a> {
         self.refuse_merge_in_progress(worktree)?;
         let branch = self.upstream_branch(worktree, base_branch)?;
         self.fetch(worktree, &branch)?;
-        let origin_ref = branch.origin_ref();
-        let commit = self.commit_of(worktree, &origin_ref)?;
-        let outcome = self.merge_unless_contained(worktree, &origin_ref, &commit)?;
+        let commit = self.commit_of(worktree, &branch.origin_ref())?;
+        let outcome = self.merge_unless_contained(worktree, &branch, &commit)?;
         Ok(UpstreamMerge::new(&branch.origin_suggestion(), outcome))
     }
 
@@ -83,19 +83,22 @@ impl<'a> UpstreamMerger<'a> {
     fn merge_unless_contained(
         &self,
         worktree: &Path,
-        origin_ref: &str,
+        branch: &BaseBranch,
         commit: &str,
     ) -> Result<MergeOutcome, WorkspaceError> {
         if self.head_contains(worktree, commit)? {
             return Ok(MergeOutcome::UpToDate);
         }
+        let message = self.merge_message(worktree, branch)?;
         let merge = GitInvocation::in_worktree(worktree, "merge")
             .writing()
             .args([
                 "--no-edit",
                 "--no-rerere-autoupdate",
                 "--no-overwrite-ignore",
-                origin_ref,
+                "-m",
+                &message,
+                &branch.origin_ref(),
             ]);
         match self.git.run_checked(&merge) {
             Ok(_) => Ok(MergeOutcome::Merged),
@@ -103,11 +106,31 @@ impl<'a> UpstreamMerger<'a> {
         }
     }
 
+    fn merge_message(
+        &self,
+        worktree: &Path,
+        branch: &BaseBranch,
+    ) -> Result<String, WorkspaceError> {
+        let message = format!(
+            "Merge remote-tracking branch '{}'",
+            branch.origin_suggestion()
+        );
+        let checked_out = GitInvocation::in_worktree(worktree, "symbolic-ref").args([
+            "--short",
+            "-q",
+            Self::HEAD,
+        ]);
+        Ok(match self.git.resolved_from(&checked_out)? {
+            Some(current) => format!("{message} into {current}"),
+            None => message,
+        })
+    }
+
     fn head_contains(&self, worktree: &Path, commit: &str) -> Result<bool, WorkspaceError> {
         let ancestry = GitInvocation::in_worktree(worktree, "merge-base").args([
             "--is-ancestor",
             commit,
-            "HEAD",
+            Self::HEAD,
         ]);
         Ok(self.git.lookup(&ancestry)?.is_some())
     }
@@ -234,6 +257,11 @@ mod tests {
             ancestry.status.success()
         }
 
+        fn head_subject(&self) -> String {
+            self.origin
+                .git(&self.worktree, &["log", "-1", "--format=%s"])
+        }
+
         fn is_merging(&self) -> bool {
             let merge_head = self.origin.try_git(
                 &self.worktree,
@@ -357,6 +385,20 @@ mod tests {
             UpstreamMerge::new("origin/main", MergeOutcome::Merged)
         );
         assert!(fixture.has_merged(&upstream_tip));
+    }
+
+    #[test]
+    fn the_merge_commit_names_origin_the_way_git_does() {
+        let fixture = MergeFixture::new();
+        fixture.commit_on_branch("work.txt");
+        fixture.commit_upstream("news.txt");
+
+        fixture.merge().unwrap();
+
+        assert_eq!(
+            fixture.head_subject(),
+            "Merge remote-tracking branch 'origin/main' into fix-auth"
+        );
     }
 
     #[test]
