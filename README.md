@@ -50,7 +50,7 @@ Sessions run on Ringleader's own tmux server. It ignores your tmux config, and i
 ## CLI
 
 ```
-ringleader                                   open the TUI
+ringleader
 ringleader list [--json]
 ringleader new --name <n> --repo <r> [--agent <a>] [--base-branch <b>] [--prompt <text>]
 ringleader delete <name> [--force] [--forget]
