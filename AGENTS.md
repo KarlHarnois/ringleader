@@ -329,7 +329,7 @@ viewer exits.
     │   ├── pull_request_feed.rs    # PullRequestFeed, the pull requests of visible rows and their timer
     │   ├── bell.rs                 # Bell, rings on a Working to Waiting edge
     │   ├── shell_runner.rs         # ShellRunner, runs the ephemeral t shell
-    │   ├── blocking_operation.rs   # BlockingOperation, a create, delete, rename, or restart run behind a busy message
+    │   ├── blocking_operation.rs   # BlockingOperation, a create, delete, rename, restart, or merge run behind a busy message
     │   ├── status_report.rs        # StatusReport, the status bar message and how outcomes become one
     │   ├── text_fit.rs             # TextFit, padding and ellipsis truncation
     │   ├── event_loop.rs           # EventLoop
