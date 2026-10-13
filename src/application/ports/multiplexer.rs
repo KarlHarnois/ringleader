@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use crate::domain::{Agent, SessionMetadata, SessionObservation, SessionSize};
 
-pub trait Multiplexer {
+pub trait Multiplexer: Send + Sync {
     fn create_session(&self, spec: &SessionSpec) -> Result<PathBuf, MultiplexerError>;
     fn kill_session(&self, tmux_name: &str) -> Result<(), MultiplexerError>;
     fn pane_pids(&self, tmux_name: &str) -> Result<Vec<u32>, MultiplexerError>;

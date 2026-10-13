@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use super::agent_hooks::AgentHooks;
 use super::creation_plan::CreateRequest;
 use super::delete_impact::{DeleteConfirmation, DeleteImpact};
 use super::delete_outcome::DeleteOutcome;
@@ -21,17 +22,28 @@ pub struct SessionLifecycle {
     renaming: SessionRenaming,
     deletion: SessionDeletion,
     restart: SessionRestart,
+    hooks: Arc<AgentHooks>,
 }
 
 impl SessionLifecycle {
     pub fn new(ports: &ServicePorts) -> Self {
+        let hooks = Arc::new(AgentHooks::new(ports.tmux().multiplexer()));
         Self {
             multiplexer: ports.tmux().multiplexer(),
-            creation: SessionCreation::new(ports),
-            renaming: SessionRenaming::new(ports),
+            creation: SessionCreation::new(ports, Arc::clone(&hooks)),
+            renaming: SessionRenaming::new(ports, Arc::clone(&hooks)),
             deletion: SessionDeletion::new(ports),
-            restart: SessionRestart::new(ports),
+            restart: SessionRestart::new(ports, Arc::clone(&hooks)),
+            hooks,
         }
+    }
+
+    pub fn poll_startup_input(&self) {
+        self.hooks.poll_startup_input();
+    }
+
+    pub fn wait_startup_input(&self, stop: impl Fn() -> bool) {
+        self.hooks.wait_startup_input(stop);
     }
 
     pub fn create(

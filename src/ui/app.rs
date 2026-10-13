@@ -78,6 +78,7 @@ impl App {
 
     pub fn on_tick(&mut self, now: Instant) {
         self.tick = self.tick.wrapping_add(1);
+        self.service.poll_startup_input();
         let outcome = self.home.tick(now, &mut self.service);
         self.status.failure(outcome);
         self.dialogs.poll();
@@ -662,6 +663,54 @@ mod tests {
         assert_eq!(
             AppFixture::status_line(&app, 100),
             " Created new-idea on branch new-idea."
+        );
+    }
+
+    #[test]
+    fn the_busy_message_clears_before_the_startup_input_is_typed() {
+        let first = ServiceFixture::session("dark-mode");
+        let second = ServiceFixture::session("fix-auth");
+        let fixture = ServiceFixture::new()
+            .with_sessions(&[first.clone(), second.clone()])
+            .with_config(ServiceFixture::config_with_input())
+            .with_multiplexer(
+                FakeMultiplexer::new()
+                    .with_live(ServiceFixture::waiting(&first))
+                    .with_live(ServiceFixture::waiting(&second))
+                    .blocking_typing(),
+            );
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, 'n');
+        AppFixture::settle_dialog(&mut app);
+        for character in "new-idea".chars() {
+            AppFixture::press(&mut app, character);
+        }
+
+        let AppRequest::Block(operation) = app.handle_event(&UiHarness::control('s')) else {
+            panic!("expected a blocking create");
+        };
+        app.perform(operation);
+
+        assert_eq!(
+            AppFixture::status_line(&app, 100),
+            " Created new-idea on branch new-idea."
+        );
+        assert!(
+            fixture
+                .multiplexer()
+                .typed_when_ready("ringleader-new-idea")
+                .is_empty()
+        );
+        fixture.multiplexer().release_typing();
+        fixture
+            .multiplexer()
+            .wait_for_typing("ringleader-new-idea", Duration::from_secs(2));
+        app.on_tick(Instant::now());
+        assert_eq!(
+            fixture
+                .multiplexer()
+                .typed_when_ready("ringleader-new-idea"),
+            ["/color"]
         );
     }
 

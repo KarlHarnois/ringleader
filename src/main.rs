@@ -127,7 +127,7 @@ impl CompositionRoot {
         let inside_tmux = self.tmux(&[]).is_inside_client(&CallerProcess::read());
         let binding = self.return_binding(&loaded, inside_tmux);
         let mut service = self.service(config_source, loaded, inside_tmux, binding);
-        Self::exit_with(cli.execute(&mut service, &mut session))
+        Self::exit_with(cli.execute(&mut service, &mut session, &mut lock))
     }
 
     fn start_log(&self, cli: &Cli) -> Result<AppLog, String> {

@@ -25,6 +25,10 @@ impl CliSession {
         }
     }
 
+    pub fn is_signaled(&self) -> bool {
+        self.signals.raised().is_some()
+    }
+
     pub fn wait<T: Send + 'static>(&self, pending: &Pending<T>) -> Result<T, CommandStop> {
         match pending.wait_unless(|| self.signals.raised().is_some()) {
             Some(result) => result.map_err(CommandStop::Failed),

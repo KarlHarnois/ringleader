@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
+use super::Gate;
 use crate::application::ports::{
     AgentLaunch, AttachTarget, Multiplexer, MultiplexerError, SessionSpec,
 };
@@ -10,6 +12,7 @@ use crate::domain::{AgentPane, SessionMetadata, SessionObservation, TmuxAddress}
 pub struct FakeMultiplexer {
     state: Mutex<MultiplexerState>,
     hooks: Mutex<HashMap<&'static str, CallHook>>,
+    typing_gate: Arc<Gate>,
 }
 
 type CallHook = Arc<dyn Fn() + Send + Sync>;
@@ -51,10 +54,12 @@ impl FakeMultiplexer {
         "type_if_ready",
         "ensure_shell_window",
     ];
+    const TYPING_GATE_LIMIT: Duration = Duration::from_secs(5);
 
     pub fn new() -> Self {
         Self {
             hooks: Mutex::new(HashMap::new()),
+            typing_gate: Arc::new(Gate::open()),
             state: Mutex::new(MultiplexerState {
                 socket: PathBuf::from(Self::SOCKET),
                 live: Vec::new(),
@@ -132,6 +137,31 @@ impl FakeMultiplexer {
     pub fn with_exit_unattached(self) -> Self {
         self.edit(|state| state.exit_unattached = true);
         self
+    }
+
+    pub fn with_typing_gate(mut self, gate: Arc<Gate>) -> Self {
+        self.typing_gate = gate;
+        self
+    }
+
+    pub fn blocking_typing(mut self) -> Self {
+        self.typing_gate = Arc::new(Gate::closed());
+        self
+    }
+
+    pub fn release_typing(&self) {
+        self.typing_gate.open_now();
+    }
+
+    pub fn wait_for_typing(&self, tmux_name: &str, limit: Duration) -> bool {
+        let deadline = Instant::now() + limit;
+        while Instant::now() < deadline {
+            if !self.typed_when_ready(tmux_name).is_empty() {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        !self.typed_when_ready(tmux_name).is_empty()
     }
 
     pub fn creating_despite_failure(self) -> Self {
@@ -336,6 +366,7 @@ impl Multiplexer for FakeMultiplexer {
 
     fn type_when_ready(&self, tmux_name: &str, lines: &[String]) -> Result<(), MultiplexerError> {
         self.call("type_when_ready", tmux_name)?;
+        self.typing_gate.wait_up_to(Self::TYPING_GATE_LIMIT);
         self.edit(|state| state.type_lines("type_when_ready", tmux_name, lines));
         Ok(())
     }

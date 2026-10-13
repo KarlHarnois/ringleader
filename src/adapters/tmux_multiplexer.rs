@@ -27,7 +27,7 @@ impl TmuxMultiplexer {
     const EXIT_UNATTACHED_ON: &'static str = "1";
     const MISSING_SESSION: &'static str = "can't find session";
     const BELL: &'static [u8] = b"\x07";
-    const STARTUP_PATIENCE: Duration = Duration::from_secs(10);
+    const STARTUP_PATIENCE: Duration = Duration::from_secs(60);
 
     pub fn new(tmux: TmuxCommand, launcher: LauncherCommand, inside_tmux: bool) -> Self {
         Self {

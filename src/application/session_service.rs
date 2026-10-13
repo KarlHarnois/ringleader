@@ -227,6 +227,14 @@ impl SessionService {
         self.monitor.ring_bell()
     }
 
+    pub fn poll_startup_input(&self) {
+        self.lifecycle.poll_startup_input();
+    }
+
+    pub fn wait_startup_input(&self, stop: impl Fn() -> bool) {
+        self.lifecycle.wait_startup_input(stop);
+    }
+
     fn reconcile(&mut self) -> Result<Reconciliation, ServiceError> {
         let reconciliation = self
             .monitor

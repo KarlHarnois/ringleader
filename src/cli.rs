@@ -198,7 +198,12 @@ impl Cli {
         })
     }
 
-    pub fn execute(&self, service: &mut SessionService, session: &mut CliSession) -> CliExit {
+    pub fn execute(
+        &self,
+        service: &mut SessionService,
+        session: &mut CliSession,
+        lock: &mut dyn Lock,
+    ) -> CliExit {
         if let Some(CliCommand::Doctor(args)) = &self.command {
             return CliExit::Code(Self::doctor(service, session, args));
         }
@@ -220,6 +225,10 @@ impl Cli {
             }
         }
         let result = self.dispatch(service, session);
+        if self.is_mutating() {
+            lock.release();
+        }
+        service.wait_startup_input(|| session.is_signaled());
         session.finish(result)
     }
 
@@ -271,8 +280,27 @@ impl Cli {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+    use std::thread;
+    use std::time::{Duration, Instant};
+
     use super::*;
-    use crate::test_support::{CliHarness, FakeLock, ServiceFixture};
+    use crate::test_support::{CliHarness, FakeLock, FakeMultiplexer, Gate, ServiceFixture};
+
+    struct LockFlowFixture;
+
+    impl LockFlowFixture {
+        fn wait_for(log: &Arc<Mutex<Vec<String>>>, event: &str, limit: Duration) -> bool {
+            let deadline = Instant::now() + limit;
+            while Instant::now() < deadline {
+                if log.lock().unwrap().iter().any(|item| item == event) {
+                    return true;
+                }
+                thread::sleep(Duration::from_millis(5));
+            }
+            false
+        }
+    }
 
     #[test]
     fn a_mutating_command_against_a_held_lock_exits_three_and_names_the_lock() {
@@ -304,6 +332,58 @@ mod tests {
         harness.run(&["delete", "fix-auth"]);
 
         assert_eq!(harness.lock_acquisitions(), ["write"]);
+    }
+
+    #[test]
+    fn new_types_the_startup_input_before_the_command_exits() {
+        let fixture = ServiceFixture::new().with_config(ServiceFixture::config_with_input());
+        let harness = CliHarness::new(fixture);
+
+        let exit = harness.run(&["new", "--name", "Fix Auth", "--repo", "example-project"]);
+
+        assert_eq!(exit, CliExit::Code(0));
+        assert_eq!(
+            harness
+                .fixture()
+                .multiplexer()
+                .typed_when_ready("ringleader-fix-auth"),
+            ["/color"]
+        );
+    }
+
+    #[test]
+    fn the_write_lock_is_released_before_the_startup_input_is_waited_on() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let typing_log = Arc::clone(&log);
+        let gate = Arc::new(Gate::closed());
+        let multiplexer = FakeMultiplexer::new()
+            .with_typing_gate(Arc::clone(&gate))
+            .on_call("type_when_ready", move || {
+                typing_log.lock().unwrap().push("typing".to_string());
+            });
+        let lock = FakeLock::free().recording(Arc::clone(&log));
+        let fixture = ServiceFixture::new()
+            .with_config(ServiceFixture::config_with_input())
+            .with_multiplexer(multiplexer);
+        let typed = fixture.shared_multiplexer();
+        let harness = CliHarness::new(fixture).with_lock(lock);
+
+        let handle = thread::spawn(move || {
+            harness.run(&["new", "--name", "Fix Auth", "--repo", "example-project"])
+        });
+
+        assert!(LockFlowFixture::wait_for(
+            &log,
+            "typing",
+            Duration::from_secs(2)
+        ));
+        assert!(
+            LockFlowFixture::wait_for(&log, "release", Duration::from_secs(1)),
+            "the write lock was still held when the typing wait began"
+        );
+        gate.open_now();
+        assert_eq!(handle.join().unwrap(), CliExit::Code(0));
+        assert_eq!(typed.typed_when_ready("ringleader-fix-auth"), ["/color"]);
     }
 
     struct ParseFixture;

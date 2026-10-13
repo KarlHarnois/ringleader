@@ -99,7 +99,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── rename_request.rs     # RenameRequest, the old and new names and whether the branch stays
     │   ├── branch_availability.rs # BranchAvailability, refuses a branch name that exists or holds other branches, for create and rename
     │   ├── session_restart.rs    # SessionRestart: restart of an Exited or Stopped session
-    │   ├── agent_hooks.rs        # AgentHooks, types an agent's startup and rename input after a start or a rename
+    │   ├── agent_hooks.rs        # AgentHooks, schedules an agent's startup input in the background and types its rename input
     │   ├── worktree_inspection.rs # WorktreeInspection, the worktree checks restart, delete, and doctor share
     │   ├── session_deletion.rs   # SessionDeletion: delete_session steps 5 to 8 and forget
     │   ├── deletion_guards.rs    # DeletionGuards: delete_session steps 2 to 4
@@ -238,6 +238,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
         ├── fake_repo_scanner.rs     # FakeRepoScanner
         ├── fake_host_probe.rs       # FakeHostProbe
         ├── fake_clock.rs            # FakeClock
+        ├── gate.rs                  # Gate: a test gate that blocks a call until it is opened or a deadline passes
         ├── recording_screen_mode.rs # RecordingScreenMode, the screen mode that records each switch
         ├── ui_harness.rs            # UiHarness: scripted input and a TestBackend wrapper for EventLoop tests
         ├── cli_harness.rs           # CliHarness: a Cli run against the fakes with captured output
@@ -267,7 +268,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
 - Blocking TUI operations (create, delete, rename, restart, and the delete measurement) run behind a busy message, and the event loop drops the key and paste events queued while they ran.
 - A dialog's hint line lists only keys whose meaning is Ringleader's own, such as `Enter create`, `Ctrl-S create`, and `Esc cancel`, and the keys that choose from a list, such as `↑ ↓ j k choose`. It never lists text-editing keys like cursor movement, Ctrl-U, or Ctrl-W, because every terminal user already expects them. A new editing key goes into `TextField` with its usual terminal meaning, not into a hint.
 - Logs go to `$XDG_STATE_HOME/ringleader/app.log` through `env_logger`, never to the terminal.
-- `AgentHooks` types an agent's `startup_input` after create and restart, waiting up to 10 seconds for its prompt, and its `rename_input` after a rename only when the agent is at its prompt at that moment. Each later line waits up to 2 seconds for the prompt to come back, after a short pause that lets the agent take the line before it. An agent is at its prompt when its pane is out of copy mode, shows the cursor, and the text before the cursor on its row is a bare prompt marker and a blank, with no letters or digits. Copy mode would take the keys instead of the agent. Claude hides the cursor in its trust and permission dialogs, an agent still starting has drawn no marker, and an unsent draft puts its text before the cursor. A skipped or failed typing is logged and never fails the use case.
+- `AgentHooks` schedules an agent's `startup_input` in the background after create and restart, so the use case returns once the tmux session exists. One typing job runs per session at a time, a second start for the same session is skipped, and the job keeps only its pre-line checks below. The job waits up to 60 seconds for the first prompt, and each later line waits up to 2 seconds for the prompt to come back, after a short pause that lets the agent take the line before it. The TUI polls the job and the CLI releases the write lock and waits for it before exiting. Its `rename_input` is typed after a rename only when the agent is at its prompt at that moment. An agent is at its prompt when its pane is out of copy mode, shows the cursor, and the text before the cursor on its row is a bare prompt marker and a blank, with no letters or digits. Copy mode would take the keys instead of the agent. Claude hides the cursor in its trust and permission dialogs, an agent still starting has drawn no marker, and an unsent draft puts its text before the cursor. A skipped or failed typing is logged and never fails the use case.
 
 ## CLI exit codes
 

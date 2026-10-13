@@ -52,6 +52,10 @@ impl Lock for FileLock {
     fn acquire_for_write(&mut self) -> Result<(), LockError> {
         self.acquire()
     }
+
+    fn release(&mut self) {
+        self.held = None;
+    }
 }
 
 #[cfg(test)]
