@@ -304,6 +304,8 @@ mod tests {
     use std::thread;
     use std::time::{Duration, Instant};
 
+    use signal_hook::consts::SIGINT;
+
     use super::*;
     use crate::test_support::{CliHarness, FakeLock, FakeMultiplexer, Gate, ServiceFixture};
 
@@ -321,9 +323,24 @@ mod tests {
         }
 
         fn wait_for(log: &Arc<Mutex<Vec<String>>>, event: &str, limit: Duration) -> bool {
+            Self::wait_until(limit, || {
+                log.lock().unwrap().iter().any(|item| item == event)
+            })
+        }
+
+        fn wait_for_typing_call(multiplexer: &FakeMultiplexer, limit: Duration) -> bool {
+            Self::wait_until(limit, || {
+                multiplexer
+                    .calls()
+                    .iter()
+                    .any(|call| call.starts_with("type_when_ready"))
+            })
+        }
+
+        fn wait_until(limit: Duration, condition: impl Fn() -> bool) -> bool {
             let deadline = Instant::now() + limit;
             while Instant::now() < deadline {
-                if log.lock().unwrap().iter().any(|item| item == event) {
+                if condition() {
                     return true;
                 }
                 thread::sleep(Duration::from_millis(5));
@@ -401,6 +418,37 @@ mod tests {
 
         assert_eq!(exit, CliExit::Code(0));
         assert!(!harness.stderr().contains("waiting for the agent"));
+    }
+
+    #[test]
+    fn a_signal_ends_the_startup_input_wait() {
+        let fixture = ServiceFixture::new()
+            .with_config(ServiceFixture::config_with_input())
+            .with_multiplexer(FakeMultiplexer::new().blocking_typing());
+        let typing = fixture.shared_multiplexer();
+        let harness = CliHarness::new(fixture);
+        let signals = harness.signals().clone();
+        let started = Instant::now();
+        let handle = thread::spawn(move || {
+            harness.run(&["new", "--name", "Fix Auth", "--repo", "example-project"])
+        });
+        assert!(LockFlowFixture::wait_for_typing_call(
+            &typing,
+            Duration::from_secs(2)
+        ));
+
+        signals.raise(SIGINT);
+        let exit = handle.join().unwrap();
+
+        assert_eq!(
+            exit,
+            CliExit::Interrupted {
+                signal: SIGINT,
+                code: 0
+            }
+        );
+        assert!(started.elapsed() < Duration::from_secs(2));
+        typing.release_typing();
     }
 
     #[test]
