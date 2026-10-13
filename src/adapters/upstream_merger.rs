@@ -91,7 +91,7 @@ impl<'a> UpstreamMerger<'a> {
         }
         let merge = GitInvocation::in_worktree(worktree, "merge")
             .writing()
-            .args(["--no-edit", origin_ref]);
+            .args(["--no-edit", "--no-rerere-autoupdate", origin_ref]);
         match self.git.run_checked(&merge) {
             Ok(_) => Ok(MergeOutcome::Merged),
             Err(failure) => self.conflicts_or(worktree, failure),
@@ -166,6 +166,7 @@ mod tests {
         const BRANCH: &'static str = "fix-auth";
         const SHARED_FILE: &'static str = "shared.txt";
         const EXECUTABLE: u32 = 0o755;
+        const RESOLUTION: &'static str = "both sides kept\n";
 
         fn new() -> Self {
             let origin = GitTestRepo::new();
@@ -285,6 +286,27 @@ mod tests {
         fn conflicting_edits(&self) {
             self.commit_upstream(Self::SHARED_FILE);
             self.commit_on_branch(Self::SHARED_FILE);
+        }
+
+        fn with_rerere_auto_update(self) -> Self {
+            self.origin
+                .git(&self.clone, &["config", "rerere.enabled", "true"]);
+            self.origin
+                .git(&self.clone, &["config", "rerere.autoUpdate", "true"]);
+            self
+        }
+
+        fn record_a_resolution_and_undo_the_merge(&self) {
+            fs::write(self.worktree.join(Self::SHARED_FILE), Self::RESOLUTION).unwrap();
+            self.origin.git(&self.worktree, &["add", Self::SHARED_FILE]);
+            self.origin
+                .git(&self.worktree, &["commit", "-q", "--no-edit"]);
+            self.origin
+                .git(&self.worktree, &["reset", "-q", "--hard", "HEAD~1"]);
+        }
+
+        fn shared_text(&self) -> String {
+            fs::read_to_string(self.worktree.join(Self::SHARED_FILE)).unwrap()
         }
 
         fn keep_our_side_without_committing(&self) {
@@ -419,6 +441,22 @@ mod tests {
         );
         assert!(!fixture.is_merging());
         assert!(fixture.is_clean());
+    }
+
+    #[test]
+    fn a_resolution_rerere_replays_is_still_handed_over_as_a_conflict() {
+        let fixture = MergeFixture::new().with_rerere_auto_update();
+        fixture.conflicting_edits();
+        fixture.merge().unwrap();
+        fixture.record_a_resolution_and_undo_the_merge();
+
+        let merge = fixture.merge().unwrap();
+
+        assert_eq!(
+            MergeFixture::conflicted_paths(&merge),
+            [MergeFixture::SHARED_FILE]
+        );
+        assert_eq!(fixture.shared_text(), MergeFixture::RESOLUTION);
     }
 
     #[test]
