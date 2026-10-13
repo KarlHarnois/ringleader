@@ -132,11 +132,10 @@ impl RegistryAudit {
         if session.has_branch_named_after_it() {
             return;
         }
-        if let Ok(false) = self.workspace.is_branch_published(
-            session.repo_path(),
-            session.branch(),
-            session.base_commit(),
-        ) {
+        if let Ok(false) = self
+            .workspace
+            .is_branch_published(session.repo_path(), session.branch())
+        {
             report.warning(format!(
                 "session {}: branch {} differs from the session name, rename the session to a new name to move its branch",
                 session.name(),

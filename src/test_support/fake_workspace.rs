@@ -468,12 +468,7 @@ impl Workspace for FakeWorkspace {
         }))
     }
 
-    fn is_branch_published(
-        &self,
-        repo: &Path,
-        branch: &str,
-        _base_commit: &str,
-    ) -> Result<bool, WorkspaceError> {
+    fn is_branch_published(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError> {
         self.call("is_branch_published", branch.to_string())?;
         Ok(self.edit(|state| {
             state

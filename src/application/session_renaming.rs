@@ -95,10 +95,7 @@ impl SessionRenaming {
     fn refuse_published(&self, session: &Session) -> Result<(), ServiceError> {
         let branch = session.branch();
         let repo = session.repo_path();
-        if self
-            .workspace
-            .is_branch_published(repo, branch, session.base_commit())?
-        {
+        if self.workspace.is_branch_published(repo, branch)? {
             return Err(ServiceError::Conflict(format!(
                 "branch {branch} has been pushed, refusing to rename it, since the remote branch and any pull request keep the name {branch}; if that remote branch was deleted, run git fetch --all --prune in {} and retry, and if the rename is still refused, run git branch --unset-upstream {branch} there",
                 repo.display()
