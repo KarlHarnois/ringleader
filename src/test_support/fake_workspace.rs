@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use super::CallHooks;
 use crate::application::ports::{
     DirtyState, StartPoint, UnmergedCommits, Workspace, WorkspaceError, WorktreeEntry,
 };
@@ -10,6 +11,7 @@ use crate::domain::{BaseBranch, DiffStat};
 #[derive(Default)]
 pub struct FakeWorkspace {
     state: Mutex<WorkspaceState>,
+    hooks: CallHooks,
 }
 
 #[derive(Default)]
@@ -145,6 +147,11 @@ impl FakeWorkspace {
         self
     }
 
+    pub fn on_call(self, operation: &'static str, hook: impl Fn() + Send + Sync + 'static) -> Self {
+        self.hooks.add(operation, hook);
+        self
+    }
+
     pub fn removing_partially(self) -> Self {
         self.edit(|state| state.partial_removal = true);
         self
@@ -190,6 +197,7 @@ impl FakeWorkspace {
     }
 
     fn call(&self, operation: &'static str, detail: String) -> Result<(), WorkspaceError> {
+        self.hooks.run(operation);
         self.edit(|state| {
             state.calls.push(format!("{operation} {detail}"));
             match state.failures.get(operation) {

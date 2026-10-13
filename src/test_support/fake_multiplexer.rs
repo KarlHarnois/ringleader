@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use super::{Deadline, Gate};
+use super::{CallHooks, Deadline, Gate};
 use crate::application::ports::{
     AgentLaunch, AttachTarget, Multiplexer, MultiplexerError, ServerConfig, ServerState,
     SessionSpec,
@@ -12,11 +12,9 @@ use crate::domain::{AgentPane, ReturnKey, SessionMetadata, SessionObservation, T
 
 pub struct FakeMultiplexer {
     state: Mutex<MultiplexerState>,
-    hooks: Mutex<HashMap<&'static str, CallHook>>,
+    hooks: CallHooks,
     typing_gate: Arc<Gate>,
 }
-
-type CallHook = Arc<dyn Fn() + Send + Sync>;
 
 struct TypedLine {
     method: &'static str,
@@ -61,7 +59,7 @@ impl FakeMultiplexer {
 
     pub fn new() -> Self {
         Self {
-            hooks: Mutex::new(HashMap::new()),
+            hooks: CallHooks::default(),
             typing_gate: Arc::new(Gate::open()),
             state: Mutex::new(MultiplexerState {
                 socket: PathBuf::from(Self::SOCKET),
@@ -127,7 +125,7 @@ impl FakeMultiplexer {
     }
 
     pub fn add_call_hook(&self, operation: &'static str, hook: impl Fn() + Send + Sync + 'static) {
-        self.hooks.lock().unwrap().insert(operation, Arc::new(hook));
+        self.hooks.add(operation, hook);
     }
 
     pub fn with_versions(self, client: &str, server: Option<&str>) -> Self {
@@ -261,10 +259,7 @@ impl FakeMultiplexer {
     }
 
     fn call(&self, operation: &'static str, detail: &str) -> Result<(), MultiplexerError> {
-        let hook = self.hooks.lock().unwrap().get(operation).cloned();
-        if let Some(hook) = hook {
-            hook();
-        }
+        self.hooks.run(operation);
         self.edit(|state| {
             state.calls.push(format!("{operation} {detail}"));
             match state.failures.get(operation) {
@@ -338,8 +333,9 @@ impl Multiplexer for FakeMultiplexer {
     }
 
     fn observe_all(&self) -> Result<Vec<SessionObservation>, MultiplexerError> {
+        let listing = self.edit(|state| state.live.clone());
         self.call("observe_all", "")?;
-        Ok(self.edit(|state| state.live.clone()))
+        Ok(listing)
     }
 
     fn attach(&self, target: &AttachTarget) -> Result<(), MultiplexerError> {

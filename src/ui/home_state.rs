@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 use super::bell::Bell;
 use super::diff_queue::DiffQueue;
 use super::home_view::LayoutTier;
+use super::observation_feed::ObservationFeed;
 use super::preview_feed::PreviewFeed;
 use super::preview_panel::PreviewPanel;
 use super::pull_request_feed::PullRequestFeed;
@@ -11,15 +12,16 @@ use super::session_table::SessionTable;
 use super::status_bar::StatusNote;
 use super::theme::Theme;
 use crate::application::{ServiceError, SessionService, Tool};
+use crate::domain::SessionSummary;
 
 pub struct HomeState {
     sessions: SessionList,
     bell: Bell,
+    observations: ObservationFeed,
     preview: PreviewFeed,
     diffs: DiffQueue,
     pull_requests: PullRequestFeed,
     table_rows: usize,
-    next_observe: Instant,
     tmux_paused_until: Option<Instant>,
 }
 
@@ -30,11 +32,11 @@ impl HomeState {
         Self {
             sessions: SessionList::default(),
             bell,
+            observations: ObservationFeed::new(now),
             preview: PreviewFeed::new(now),
             diffs: DiffQueue::default(),
             pull_requests: PullRequestFeed::default(),
             table_rows: 0,
-            next_observe: now,
             tmux_paused_until: None,
         }
     }
@@ -48,7 +50,8 @@ impl HomeState {
     }
 
     pub fn preview_panel(&self, theme: Theme) -> PreviewPanel<'_> {
-        PreviewPanel::new(self.sessions.selected(), self.preview.capture(), theme)
+        let selected = self.sessions.selected();
+        PreviewPanel::new(selected, self.preview.capture(selected), theme)
     }
 
     pub fn note(&self) -> Option<String> {
@@ -75,44 +78,38 @@ impl HomeState {
         }
     }
 
+    pub fn awaits_results(&self) -> bool {
+        self.observations.awaits_result()
+            || self.preview.awaits_result()
+            || self.diffs.awaits_results()
+    }
+
     pub fn tick(&mut self, now: Instant, service: &mut SessionService) -> Result<(), ServiceError> {
-        let mut observed = Ok(());
-        if now >= self.next_observe && !self.is_tmux_paused() {
-            self.next_observe = now + service.config().intervals().state_poll();
-            observed = self.observe(service);
-        }
-        if !self.is_tmux_paused() {
-            let previewed = self
-                .preview
-                .refresh_if_due(now, service, self.sessions.selected());
-            self.pause_on_failure(previewed);
-        }
+        let polled = self.poll(now, service);
         let visible = self.sessions.visible_managed(self.table_rows);
-        let measured = self.diffs.tick(now, &visible, service);
-        self.sessions.apply_diffs(self.diffs.diffs());
         self.pull_requests.tick(now, &visible, service);
         self.sessions
             .apply_pull_requests(self.pull_requests.pull_requests());
+        polled
+    }
+
+    pub fn poll(&mut self, now: Instant, service: &mut SessionService) -> Result<(), ServiceError> {
+        let observed = self.poll_observations(now, service);
+        self.poll_preview(now, service);
+        let measured = self.poll_diffs(now, service);
         observed.and(measured)
     }
 
     pub fn observe(&mut self, service: &mut SessionService) -> Result<(), ServiceError> {
+        self.observations.drop_in_flight();
         if self.is_tmux_paused() {
             return Ok(());
         }
-        let persist = service.read_only_reason().is_none();
-        let observed = service.observe(persist);
-        if let Err(error) = &observed {
-            self.pause_after(error);
-        }
-        let rows = observed?;
-        self.change_selection(service, |sessions| sessions.show(rows));
-        self.diffs.keep_only(&self.sessions.names());
-        self.sessions.apply_diffs(self.diffs.diffs());
-        self.pull_requests.keep_only(&self.sessions.names());
-        self.sessions
-            .apply_pull_requests(self.pull_requests.pull_requests());
-        self.bell.watch(self.sessions.rows(), service);
+        let persist = Self::persists_observations(service);
+        let rows = service
+            .observe(persist)
+            .inspect_err(|error| self.pause_after(error))?;
+        self.show(rows, service);
         Ok(())
     }
 
@@ -136,18 +133,65 @@ impl HomeState {
         }
     }
 
-    fn refresh_preview(&mut self, service: &SessionService) {
-        if self.is_tmux_paused() {
-            return;
+    fn poll_observations(
+        &mut self,
+        now: Instant,
+        service: &mut SessionService,
+    ) -> Result<(), ServiceError> {
+        let applied = self.apply_observations(service);
+        if !self.is_tmux_paused() {
+            self.observations.start_if_due(now, service);
         }
-        let previewed = self.preview.refresh(service, self.sessions.selected());
-        self.pause_on_failure(previewed);
+        applied
     }
 
-    fn pause_on_failure(&mut self, outcome: Result<(), ServiceError>) {
-        if let Err(error) = outcome {
+    fn apply_observations(&mut self, service: &mut SessionService) -> Result<(), ServiceError> {
+        let Some(finished) = self.observations.collect() else {
+            return Ok(());
+        };
+        let persist = Self::persists_observations(service);
+        let rows = finished
+            .and_then(|observations| service.observe_with(observations, persist))
+            .inspect_err(|error| self.pause_after(error))?;
+        self.show(rows, service);
+        Ok(())
+    }
+
+    fn show(&mut self, rows: Vec<SessionSummary>, service: &SessionService) {
+        self.change_selection(service, |sessions| sessions.show(rows));
+        self.diffs.keep_only(&self.sessions.names());
+        self.sessions.apply_diffs(self.diffs.diffs());
+        self.pull_requests.keep_only(&self.sessions.names());
+        self.sessions
+            .apply_pull_requests(self.pull_requests.pull_requests());
+        self.bell.watch(self.sessions.rows(), service);
+    }
+
+    fn poll_preview(&mut self, now: Instant, service: &SessionService) {
+        if let Err(error) = self.preview.collect(self.sessions.selected()) {
             self.pause_after(&error);
         }
+        if !self.is_tmux_paused() {
+            self.preview
+                .start_if_due(now, service, self.sessions.selected());
+        }
+    }
+
+    fn poll_diffs(&mut self, now: Instant, service: &SessionService) -> Result<(), ServiceError> {
+        let visible = self.sessions.visible_managed(self.table_rows);
+        let measured = self.diffs.tick(now, &visible, service);
+        self.sessions.apply_diffs(self.diffs.diffs());
+        measured
+    }
+
+    fn refresh_preview(&mut self, service: &SessionService) {
+        if !self.is_tmux_paused() {
+            self.preview.refresh(service, self.sessions.selected());
+        }
+    }
+
+    fn persists_observations(service: &SessionService) -> bool {
+        service.read_only_reason().is_none()
     }
 
     fn is_tmux_paused(&self) -> bool {

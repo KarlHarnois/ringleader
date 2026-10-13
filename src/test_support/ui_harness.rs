@@ -26,6 +26,8 @@ pub struct UiHarness {
 impl UiHarness {
     pub const WIDTH: u16 = 100;
     pub const HEIGHT: u16 = 28;
+    const SETTLE_LIMIT: Duration = Duration::from_secs(2);
+    const SETTLE_POLL: Duration = Duration::from_millis(5);
 
     pub fn new() -> Self {
         let mode = RecordingScreenMode::default();
@@ -48,6 +50,15 @@ impl UiHarness {
 
     pub fn app(fixture: &ServiceFixture) -> App {
         App::new(fixture.service(), Box::new(io::sink()), Instant::now())
+    }
+
+    pub fn settle(app: &mut App) {
+        let deadline = Instant::now() + Self::SETTLE_LIMIT;
+        app.on_tick(Instant::now());
+        while app.awaits_results() && Instant::now() < deadline {
+            std::thread::sleep(Self::SETTLE_POLL);
+            app.on_tick(Instant::now());
+        }
     }
 
     pub fn signals(&self) -> &SignalFlags {
@@ -122,13 +133,19 @@ impl ShellRunner for RecordingShells {
 
 pub struct ScriptedInput {
     events: VecDeque<io::Result<Option<Event>>>,
+    timeouts: Vec<Duration>,
 }
 
 impl ScriptedInput {
     pub fn events(events: Vec<Event>) -> Self {
         Self {
             events: events.into_iter().map(|event| Ok(Some(event))).collect(),
+            timeouts: Vec::new(),
         }
+    }
+
+    pub fn timeouts(&self) -> &[Duration] {
+        &self.timeouts
     }
 
     pub fn then_after_a_pause(mut self, events: Vec<Event>) -> Self {
@@ -141,12 +158,14 @@ impl ScriptedInput {
     pub fn failing() -> Self {
         Self {
             events: VecDeque::from([Err(io::Error::other("the terminal hung up"))]),
+            timeouts: Vec::new(),
         }
     }
 }
 
 impl InputSource for ScriptedInput {
     fn next_event(&mut self, timeout: Duration) -> io::Result<Option<Event>> {
+        self.timeouts.push(timeout);
         match self.events.pop_front() {
             Some(event) => event,
             None if timeout.is_zero() => Ok(None),

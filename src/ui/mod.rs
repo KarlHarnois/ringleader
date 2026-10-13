@@ -12,6 +12,7 @@ pub mod home_state;
 pub mod home_view;
 pub mod label_column;
 pub mod legend;
+pub mod observation_feed;
 pub mod preview_feed;
 pub mod preview_panel;
 pub mod preview_text;

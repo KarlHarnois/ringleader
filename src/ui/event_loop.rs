@@ -42,6 +42,7 @@ where
     I: InputSource,
 {
     pub const TICK: Duration = Duration::from_millis(100);
+    pub const RESULT_POLL: Duration = Duration::from_millis(16);
 
     pub fn new(
         terminal: Terminal<B>,
@@ -71,16 +72,11 @@ where
             if self.signals.raised().is_some() {
                 return Ok(());
             }
-            let now = Instant::now();
-            if now >= next_tick {
-                app.on_tick(now);
-                next_tick = now + Self::TICK;
-            }
+            next_tick = Self::advance(app, next_tick);
             if let Err(error) = self.draw(app) {
                 return self.unless_signaled(error);
             }
-            let timeout = next_tick.saturating_duration_since(Instant::now());
-            let event = match self.input.next_event(timeout) {
+            let event = match self.input.next_event(Self::wait_limit(app, next_tick)) {
                 Ok(event) => event,
                 Err(error) => return self.unless_signaled(error),
             };
@@ -95,6 +91,29 @@ where
     #[cfg(test)]
     pub fn backend(&self) -> &B {
         self.terminal.backend()
+    }
+
+    #[cfg(test)]
+    pub fn input(&self) -> &I {
+        &self.input
+    }
+
+    fn advance(app: &mut App, next_tick: Instant) -> Instant {
+        let now = Instant::now();
+        if now < next_tick {
+            app.poll(now);
+            return next_tick;
+        }
+        app.on_tick(now);
+        now + Self::TICK
+    }
+
+    fn wait_limit(app: &App, next_tick: Instant) -> Duration {
+        let until_tick = next_tick.saturating_duration_since(Instant::now());
+        match app.awaits_results() {
+            true => until_tick.min(Self::RESULT_POLL),
+            false => until_tick,
+        }
     }
 
     fn handle(&mut self, app: &mut App, event: &Event) -> io::Result<Flow> {
@@ -177,10 +196,12 @@ mod tests {
     use crossterm::event::KeyCode;
     use signal_hook::consts::SIGHUP;
 
+    use super::EventLoop;
     use crate::application::EphemeralShell;
     use crate::application::ports::AttachTarget;
     use crate::test_support::{
-        FakeMultiplexer, FixtureBackend, RecordingShells, ScriptedInput, ServiceFixture, UiHarness,
+        FakeMultiplexer, FixtureBackend, HeldCalls, RecordingShells, ScriptedInput, ServiceFixture,
+        UiHarness,
     };
 
     struct ShellLoopFixture;
@@ -211,6 +232,29 @@ mod tests {
             .run(&mut app);
 
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn a_loop_awaiting_a_capture_wakes_within_a_frame() {
+        let held = HeldCalls::all();
+        let session = ServiceFixture::session("fix-auth");
+        let fixture = ServiceFixture::new()
+            .with_sessions(std::slice::from_ref(&session))
+            .with_multiplexer(
+                FakeMultiplexer::new()
+                    .with_live(ServiceFixture::waiting(&session))
+                    .on_call("capture_pane", held.hook()),
+            );
+        let harness = UiHarness::new();
+        let mut app = UiHarness::app(&fixture);
+        UiHarness::settle(&mut app);
+        let mut event_loop = harness.event_loop(ScriptedInput::events(Vec::new()));
+
+        event_loop.run(&mut app).unwrap();
+        held.release();
+
+        let frame = EventLoop::<FixtureBackend, ScriptedInput>::RESULT_POLL;
+        assert!(event_loop.input().timeouts()[0] <= frame);
     }
 
     #[test]
@@ -267,6 +311,7 @@ mod tests {
             .with_multiplexer(FakeMultiplexer::new().with_live(ServiceFixture::waiting(&session)));
         let harness = UiHarness::new();
         let mut app = UiHarness::app(&fixture);
+        UiHarness::settle(&mut app);
         let mut event_loop = harness.event_loop(ScriptedInput::events(vec![
             UiHarness::key(KeyCode::Enter),
             UiHarness::character('q'),
@@ -298,6 +343,7 @@ mod tests {
         let fixture = UiHarness::exited_session_fixture("fix-auth");
         let harness = UiHarness::new();
         let mut app = UiHarness::app(&fixture);
+        UiHarness::settle(&mut app);
         let mut event_loop =
             harness.event_loop(ScriptedInput::events(vec![UiHarness::character('s')]));
 
@@ -317,6 +363,7 @@ mod tests {
         let fixture = UiHarness::exited_session_fixture("fix-auth");
         let harness = UiHarness::new();
         let mut app = UiHarness::app(&fixture);
+        UiHarness::settle(&mut app);
         let input =
             ScriptedInput::events(vec![UiHarness::character('s'), UiHarness::character('q')])
                 .then_after_a_pause(vec![UiHarness::character('r')]);
@@ -333,6 +380,7 @@ mod tests {
         let fixture = UiHarness::exited_session_fixture("fix-auth");
         let harness = UiHarness::new();
         let mut app = UiHarness::app(&fixture);
+        UiHarness::settle(&mut app);
         let mut event_loop = harness.event_loop(ScriptedInput::events(vec![
             UiHarness::character('s'),
             crossterm::event::Event::Resize(UiHarness::WIDTH, UiHarness::HEIGHT),
@@ -353,6 +401,7 @@ mod tests {
             .with_multiplexer(FakeMultiplexer::new().with_live(ServiceFixture::waiting(&session)));
         let harness = UiHarness::new();
         let mut app = UiHarness::app(&fixture);
+        UiHarness::settle(&mut app);
         let input = ScriptedInput::events(vec![
             UiHarness::character('d'),
             UiHarness::key(KeyCode::Enter),
@@ -370,6 +419,7 @@ mod tests {
         let fixture = ShellLoopFixture::live();
         let harness = UiHarness::new();
         let mut app = UiHarness::app(&fixture);
+        UiHarness::settle(&mut app);
         let mut event_loop =
             harness.event_loop(ScriptedInput::events(vec![UiHarness::character('t')]));
 
@@ -388,6 +438,7 @@ mod tests {
         let harness = UiHarness::new();
         let shells = RecordingShells::default();
         let mut app = UiHarness::app(&fixture);
+        UiHarness::settle(&mut app);
         let mut event_loop = harness
             .event_loop(ScriptedInput::events(vec![UiHarness::character('t')]))
             .with_shells(Box::new(shells.clone()));
@@ -410,6 +461,7 @@ mod tests {
         let fixture = ShellLoopFixture::stopped();
         let harness = UiHarness::new();
         let mut app = UiHarness::app(&fixture);
+        UiHarness::settle(&mut app);
         let mut event_loop = harness
             .event_loop(ScriptedInput::events(vec![UiHarness::character('t')]))
             .with_shells(Box::new(RecordingShells::failing()));
@@ -426,6 +478,7 @@ mod tests {
         let fixture = ServiceFixture::new().with_sessions(&[session]);
         let harness = UiHarness::new();
         let mut app = UiHarness::app(&fixture);
+        UiHarness::settle(&mut app);
         let mut event_loop = harness.event_loop(ScriptedInput::events(vec![
             UiHarness::key(KeyCode::Down),
             UiHarness::key(KeyCode::Up),

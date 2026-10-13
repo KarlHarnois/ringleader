@@ -1,3 +1,4 @@
+pub mod call_hooks;
 pub mod cli_harness;
 pub mod deadline;
 pub mod fake_clock;
@@ -11,12 +12,14 @@ pub mod fake_session_registry;
 pub mod fake_workspace;
 pub mod gate;
 pub mod git_test_repo;
+pub mod held_calls;
 pub mod log_capture;
 pub mod recording_screen_mode;
 pub mod service_fixture;
 pub mod tmux_test_server;
 pub mod ui_harness;
 
+pub use call_hooks::CallHooks;
 pub use cli_harness::{CapturedWriter, CliHarness};
 pub use deadline::Deadline;
 pub use fake_clock::FakeClock;
@@ -30,6 +33,7 @@ pub use fake_session_registry::FakeSessionRegistry;
 pub use fake_workspace::FakeWorkspace;
 pub use gate::Gate;
 pub use git_test_repo::GitTestRepo;
+pub use held_calls::HeldCalls;
 pub use log_capture::LogCapture;
 pub use recording_screen_mode::RecordingScreenMode;
 pub use service_fixture::ServiceFixture;
