@@ -150,6 +150,7 @@ mod tests {
     use crate::domain::{DiffStat, SessionState, SessionSummary};
     use crate::test_support::ServiceFixture;
     use crate::ui::empty_state::EmptyState;
+    use crate::ui::session_tree::SessionTree;
     use crate::ui::theme::Theme;
 
     struct ViewFixture;
@@ -176,7 +177,12 @@ mod tests {
             terminal
                 .draw(|frame| {
                     HomeView::new(
-                        SessionTable::new(rows, selected.map(SessionSummary::name), 0, Theme),
+                        SessionTable::new(
+                            SessionTree::new(rows),
+                            selected.map(SessionSummary::name),
+                            0,
+                            Theme,
+                        ),
                         PreviewPanel::new(selected, None, Theme),
                         StatusBar::new(Theme),
                     )

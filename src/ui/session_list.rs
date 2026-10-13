@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
+use super::repo_group::RepoGroup;
 use super::session_table::SessionTable;
+use super::session_tree::{SessionTree, TreeLine};
 use super::theme::Theme;
 use crate::domain::{DiffStat, PullRequest, SessionSummary};
 
@@ -16,7 +18,7 @@ impl SessionList {
     }
 
     pub fn table(&self, tick: u64, theme: Theme) -> SessionTable<'_> {
-        SessionTable::new(&self.rows, self.selected_name(), tick, theme)
+        SessionTable::new(self.tree(), self.selection.as_deref(), tick, theme)
     }
 
     pub fn selected_name(&self) -> Option<&str> {
@@ -24,9 +26,10 @@ impl SessionList {
     }
 
     pub fn visible_managed(&self, room: usize) -> Vec<String> {
-        let first = SessionTable::first_visible(self.selected_index().unwrap_or(0), room);
-        let visible = self.rows.iter().skip(first).take(room);
+        let tree = self.tree();
+        let visible = tree.visible(self.selection.as_deref(), room);
         visible
+            .filter_map(TreeLine::row)
             .filter(|row| row.session().is_some())
             .map(|row| row.name().to_string())
             .collect()
@@ -68,9 +71,7 @@ impl SessionList {
     }
 
     pub fn show(&mut self, mut rows: Vec<SessionSummary>) {
-        rows.sort_by(|first, second| {
-            (first.state(), first.name()).cmp(&(second.state(), second.name()))
-        });
+        rows.sort_by_cached_key(|row| (RepoGroup::of(row), row.state(), row.name().to_string()));
         self.rows = rows;
         if self.selected().is_none() {
             self.selection = self.rows.first().map(|row| row.name().to_string());
@@ -92,6 +93,10 @@ impl SessionList {
         }
     }
 
+    fn tree(&self) -> SessionTree<'_> {
+        SessionTree::new(&self.rows)
+    }
+
     fn selected_index(&self) -> Option<usize> {
         let selected = self.selection.as_deref()?;
         self.rows.iter().position(|row| row.name() == selected)
@@ -109,6 +114,11 @@ mod tests {
     impl ListFixture {
         fn row(name: &str, state: SessionState) -> SessionSummary {
             SessionSummary::managed(ServiceFixture::session(name), state, false)
+        }
+
+        fn row_in(name: &str, repo: &str, state: SessionState) -> SessionSummary {
+            let session = ServiceFixture::session_at(name, repo, ServiceFixture::CREATED_AT);
+            SessionSummary::managed(session, state, false)
         }
 
         fn names(list: &SessionList) -> Vec<&str> {
@@ -139,6 +149,22 @@ mod tests {
                 "flaky-test",
                 "mystery"
             ]
+        );
+    }
+
+    #[test]
+    fn rows_sort_by_repo_before_state() {
+        let mut list = SessionList::default();
+
+        list.show(vec![
+            ListFixture::row_in("zeta", "/repos/beta", SessionState::Working),
+            ListFixture::row_in("alpha-one", "/repos/alpha", SessionState::Stopped),
+            ListFixture::row_in("alpha-two", "/repos/alpha", SessionState::Working),
+        ]);
+
+        assert_eq!(
+            ListFixture::names(&list),
+            ["alpha-two", "alpha-one", "zeta"]
         );
     }
 
@@ -188,7 +214,7 @@ mod tests {
         let stranger = ServiceFixture::session("mystery");
         let unmanaged = SessionSummary::unmanaged(crate::domain::UnmanagedSession::new(
             "mystery",
-            ServiceFixture::waiting(&stranger).without_metadata(),
+            ServiceFixture::waiting(&stranger),
         ));
         let mut list = SessionList::default();
         list.show(vec![
@@ -198,6 +224,19 @@ mod tests {
             unmanaged,
         ]);
         list.move_selection(3);
+
+        assert_eq!(list.visible_managed(2), ["c-three"]);
+    }
+
+    #[test]
+    fn heading_lines_count_against_the_room_for_diffs() {
+        let mut list = SessionList::default();
+        list.show(vec![
+            ListFixture::row_in("a-one", "/repos/alpha", SessionState::Waiting),
+            ListFixture::row_in("b-two", "/repos/alpha", SessionState::Waiting),
+            ListFixture::row_in("c-three", "/repos/beta", SessionState::Waiting),
+        ]);
+        list.select("c-three");
 
         assert_eq!(list.visible_managed(2), ["c-three"]);
     }

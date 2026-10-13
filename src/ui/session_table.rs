@@ -6,13 +6,14 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use super::colored_row::ColoredRow;
 use super::empty_state::EmptyState;
 use super::home_view::LayoutTier;
+use super::session_tree::{SessionTree, TreeBranch, TreeLine};
 use super::state_indicator::StateIndicator;
 use super::table_columns::TableColumns;
 use super::theme::Theme;
 use crate::domain::{DiffStat, SessionSummary};
 
 pub struct SessionTable<'a> {
-    rows: &'a [SessionSummary],
+    tree: SessionTree<'a>,
     selection: Option<&'a str>,
     tick: u64,
     theme: Theme,
@@ -22,14 +23,9 @@ pub struct SessionTable<'a> {
 impl<'a> SessionTable<'a> {
     const NO_DIFF: &'static str = "—";
 
-    pub fn new(
-        rows: &'a [SessionSummary],
-        selection: Option<&'a str>,
-        tick: u64,
-        theme: Theme,
-    ) -> Self {
+    pub fn new(tree: SessionTree<'a>, selection: Option<&'a str>, tick: u64, theme: Theme) -> Self {
         Self {
-            rows,
+            tree,
             selection,
             tick,
             theme,
@@ -45,25 +41,24 @@ impl<'a> SessionTable<'a> {
         let block = Block::default().borders(Borders::ALL).title(" Sessions ");
         let inner = block.inner(area);
         frame.render_widget(block, area);
-        let columns = self.columns(usize::from(inner.width));
+        let width = usize::from(inner.width);
+        let columns = self.columns(width);
         let mut lines = Vec::new();
         if self.shows_header() {
-            lines.push(Line::styled(columns.header(), self.theme.emphasis()));
+            lines.push(Line::styled(self.header(&columns), self.theme.emphasis()));
         }
         if !self.has_rows() {
             Self::render_empty(lines, frame, inner);
             return;
         }
         let room = usize::from(inner.height).saturating_sub(lines.len());
-        lines.extend(
-            self.visible_rows(room)
-                .map(|row| self.row_line(row, &columns)),
-        );
+        let visible = self.tree.visible(self.selection, room);
+        lines.extend(visible.map(|line| self.line(line, &columns, width)));
         frame.render_widget(Paragraph::new(lines), inner);
     }
 
     pub fn has_rows(&self) -> bool {
-        !self.rows.is_empty()
+        !self.tree.rows().is_empty()
     }
 
     fn render_empty(header: Vec<Line>, frame: &mut Frame, inner: Rect) {
@@ -78,55 +73,77 @@ impl<'a> SessionTable<'a> {
         self.tier != LayoutTier::Minimal
     }
 
-    fn visible_rows(&self, room: usize) -> impl Iterator<Item = &'a SessionSummary> {
-        let selected = self
-            .selection
-            .and_then(|name| self.rows.iter().position(|row| row.name() == name))
-            .unwrap_or(0);
-        self.rows
-            .iter()
-            .skip(Self::first_visible(selected, room))
-            .take(room)
+    fn header(&self, columns: &TableColumns) -> String {
+        format!("{}{}", " ".repeat(self.branch_width()), columns.header())
     }
 
-    pub fn first_visible(selected: usize, room: usize) -> usize {
-        (selected + 1).saturating_sub(room)
+    fn branch_width(&self) -> usize {
+        if self.tree.is_grouped() {
+            return TreeBranch::WIDTH;
+        }
+        0
     }
 
     fn columns(&self, inner_width: usize) -> TableColumns {
-        let names = self.rows.iter().map(|row| row.name().to_string());
-        let mut columns = TableColumns::new(inner_width, names);
+        let rows = self.tree.rows();
+        let names = rows.iter().map(|row| row.name().to_string());
+        let mut columns = TableColumns::new(inner_width.saturating_sub(self.branch_width()), names);
         if self.shows_header() {
-            columns = columns.with_diff(self.rows.iter().map(Self::diff_text));
+            columns = columns.with_diff(rows.iter().map(Self::diff_text));
             if self.has_pull_requests() {
-                columns = columns.with_pull_request(self.rows.iter().map(Self::pull_request_text));
+                columns = columns.with_pull_request(rows.iter().map(Self::pull_request_text));
             }
         }
         columns.fitted()
     }
 
     fn has_pull_requests(&self) -> bool {
-        self.rows.iter().any(|row| row.pull_request().is_some())
+        self.tree
+            .rows()
+            .iter()
+            .any(|row| row.pull_request().is_some())
     }
 
-    fn row_line(&self, row: &SessionSummary, columns: &TableColumns) -> Line<'static> {
+    fn line(&self, line: &TreeLine, columns: &TableColumns, width: usize) -> Line<'static> {
+        let spans = match line {
+            TreeLine::Heading(heading) => heading.spans(self.tick, &self.theme),
+            TreeLine::Session { row, branch } => self.row_spans(row, *branch, columns),
+        };
+        if self.is_selected(line) {
+            return self.reversed(&spans, width);
+        }
+        Line::from(spans)
+    }
+
+    fn is_selected(&self, line: &TreeLine) -> bool {
+        line.row()
+            .is_some_and(|row| self.selection == Some(row.name()))
+    }
+
+    fn reversed(&self, spans: &[Span], width: usize) -> Line<'static> {
+        let text: String = spans.iter().map(|span| span.content.as_ref()).collect();
+        Line::from(Span::styled(
+            format!("{text:<width$}"),
+            self.theme.selected(),
+        ))
+    }
+
+    fn row_spans(
+        &self,
+        row: &SessionSummary,
+        branch: TreeBranch,
+        columns: &TableColumns,
+    ) -> Vec<Span<'static>> {
         let indicator = StateIndicator::new(row.state(), self.tick);
         let pull_request_text = Self::pull_request_text(row);
         let diff_text = Self::diff_text(row);
         let text = columns.row(row.name(), &pull_request_text, &diff_text);
-        if self.selection == Some(row.name()) {
-            let selected = self.theme.selected();
-            return Line::from(vec![
-                Span::styled(indicator.glyph().to_string(), selected),
-                Span::styled(text, selected),
-            ]);
-        }
-        let mut spans = vec![Span::styled(
-            indicator.glyph().to_string(),
-            indicator.style(&self.theme),
-        )];
+        let mut spans = vec![
+            Span::styled(branch.prefix(), self.theme.dim()),
+            Span::styled(indicator.glyph().to_string(), indicator.style(&self.theme)),
+        ];
         spans.extend(self.colored_cells(&text, row, &pull_request_text, &diff_text));
-        Line::from(spans)
+        spans
     }
 
     fn colored_cells(
@@ -190,6 +207,19 @@ mod tests {
             SessionSummary::managed(ServiceFixture::session(name), state, false)
         }
 
+        fn in_repo(name: &str, repo: &str, state: SessionState) -> SessionSummary {
+            let session = ServiceFixture::session_at(name, repo, ServiceFixture::CREATED_AT);
+            SessionSummary::managed(session, state, false)
+        }
+
+        fn two_repos() -> Vec<SessionSummary> {
+            vec![
+                Self::in_repo("fix-auth", "/repos/alpha", SessionState::Working),
+                Self::in_repo("dark-mode", "/repos/alpha", SessionState::Waiting),
+                Self::in_repo("docs", "/repos/beta", SessionState::Exited),
+            ]
+        }
+
         fn unmanaged() -> SessionSummary {
             let stranger = ServiceFixture::session("mystery");
             SessionSummary::unmanaged(UnmanagedSession::new(
@@ -207,7 +237,8 @@ mod tests {
             let mut terminal = Terminal::new(TestBackend::new(50, height)).unwrap();
             terminal
                 .draw(|frame| {
-                    SessionTable::new(rows, selection, tick, Theme).render(frame, frame.area())
+                    SessionTable::new(SessionTree::new(rows), selection, tick, Theme)
+                        .render(frame, frame.area())
                 })
                 .unwrap();
             terminal
@@ -410,13 +441,49 @@ mod tests {
     }
 
     #[test]
+    fn a_heading_shows_its_number_arrow_count_and_state_counts() {
+        let terminal = TableFixture::render(&TableFixture::two_repos(), None, 0, 8);
+
+        assert!(TableFixture::line(&terminal, 2).starts_with("│1 ▾ alpha (2)  ⠋1 ●1 "));
+        assert!(TableFixture::line(&terminal, 5).starts_with("│2 ▾ beta (1)  ✗1 "));
+    }
+
+    #[test]
+    fn a_heading_dims_its_number_and_count_and_bolds_its_repo() {
+        let terminal = TableFixture::render(&TableFixture::two_repos(), None, 0, 8);
+        let buffer = terminal.backend().buffer();
+
+        assert!(buffer[(1, 2)].modifier.contains(Modifier::DIM));
+        assert!(buffer[(5, 2)].modifier.contains(Modifier::BOLD));
+        assert!(buffer[(11, 2)].modifier.contains(Modifier::DIM));
+        assert_eq!(buffer[(19, 2)].fg, Color::Green);
+    }
+
+    #[test]
+    fn sessions_hang_off_their_heading_on_dim_branches() {
+        let terminal = TableFixture::render(&TableFixture::two_repos(), None, 0, 8);
+        let buffer = terminal.backend().buffer();
+
+        assert!(TableFixture::line(&terminal, 3).starts_with("│  ├─ ⠋ fix-auth"));
+        assert!(TableFixture::line(&terminal, 4).starts_with("│  └─ ● dark-mode"));
+        assert!(buffer[(3, 3)].modifier.contains(Modifier::DIM));
+    }
+
+    #[test]
+    fn the_column_header_is_indented_past_the_branches() {
+        let terminal = TableFixture::render(&TableFixture::two_repos(), None, 0, 8);
+
+        assert!(TableFixture::line(&terminal, 1).starts_with("│       Name "));
+    }
+
+    #[test]
     fn the_minimal_tier_has_no_header() {
         let rows = [TableFixture::managed("fix-auth", SessionState::Waiting)];
         let mut terminal = Terminal::new(TestBackend::new(36, 5)).unwrap();
 
         terminal
             .draw(|frame| {
-                SessionTable::new(&rows, None, 0, Theme)
+                SessionTable::new(SessionTree::new(&rows), None, 0, Theme)
                     .for_tier(LayoutTier::Minimal)
                     .render(frame, frame.area())
             })
@@ -430,7 +497,9 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(64, 10)).unwrap();
 
         terminal
-            .draw(|frame| SessionTable::new(&[], None, 0, Theme).render(frame, frame.area()))
+            .draw(|frame| {
+                SessionTable::new(SessionTree::new(&[]), None, 0, Theme).render(frame, frame.area())
+            })
             .unwrap();
 
         assert!(TableFixture::line(&terminal, 1).starts_with("│  Name"));

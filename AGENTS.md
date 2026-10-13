@@ -299,7 +299,7 @@ viewer exits.
     │   ├── app.rs                  # App
     │   ├── action_gate.rs          # ActionGate, which actions the selected row allows
     │   ├── home_state.rs           # HomeState, the polled rows, selection, and preview
-    │   ├── session_list.rs         # SessionList, sorted rows and name-based selection
+    │   ├── session_list.rs         # SessionList, rows sorted by repo, state, and name, and name-based selection
     │   ├── preview_feed.rs         # PreviewFeed, the preview capture and its timer
     │   ├── diff_queue.rs           # DiffQueue, round-robin diffs of visible rows
     │   ├── pull_request_feed.rs    # PullRequestFeed, the pull requests of visible rows and their timer
@@ -312,7 +312,10 @@ viewer exits.
     │   ├── terminal_guard.rs       # TerminalGuard
     │   ├── home_view.rs            # HomeView
     │   ├── empty_state.rs          # EmptyState, the no-sessions message with the logo above it when it fits
-    │   ├── session_table.rs        # SessionTable, the home screen's session list
+    │   ├── session_table.rs        # SessionTable, the home screen's session list, drawn as a tree of repos
+    │   ├── session_tree.rs         # SessionTree, the sorted rows as repo headings and branch lines, and the scroll rule
+    │   ├── repo_heading.rs         # RepoHeading, a repo's heading line with its number, fold arrow, and state counts
+    │   ├── repo_group.rs           # RepoGroup, the repo a row is listed under, or other
     │   ├── colored_row.rs          # ColoredRow, a row's text split around its coloured cells
     │   ├── state_indicator.rs      # StateIndicator, the glyph and color of a session state
     │   ├── table_columns.rs        # TableColumns, column widths and dropping
