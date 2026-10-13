@@ -1,5 +1,5 @@
 use std::cell::Cell;
-use std::iter::once;
+use std::iter::{once, repeat};
 use std::path::{Path, PathBuf};
 
 use crossterm::event::{KeyCode, KeyEvent};
@@ -134,8 +134,14 @@ impl HelpView {
     }
 
     fn labeled(label: &str, text: &str, width: usize, theme: &Theme) -> Vec<Line<'static>> {
-        let row = format!("{}{text}", Self::label_column(label));
-        TextFit::new(&row).styled_lines(width, theme.base())
+        let label = Self::label_column(label);
+        let label_width = label.chars().count();
+        let wrapped = TextFit::new(text).wrapped(width.saturating_sub(label_width));
+        let indents = once(label).chain(repeat(" ".repeat(label_width)));
+        indents
+            .zip(wrapped)
+            .map(|(indent, line)| Line::styled(format!("{indent}{line}"), theme.base()))
+            .collect()
     }
 
     fn label_column(label: &str) -> String {
@@ -265,6 +271,14 @@ mod tests {
         assert!(screen.lines().nth(3).unwrap().contains("┌ Help "));
         assert!(screen.contains("n            create a session"));
         assert!(screen.contains("q            quit, the sessions keep running"));
+    }
+
+    #[test]
+    fn a_wrapped_key_row_continues_under_its_action() {
+        let rows = HelpFixture::rows(&HelpFixture::help(), HelpFixture::SHORT_WIDTH);
+
+        assert!(rows.contains(&"t            open a shell in the selected session's".to_string()));
+        assert!(rows.contains(&"             worktree".to_string()));
     }
 
     #[test]
