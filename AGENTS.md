@@ -46,10 +46,13 @@ builds them as `apps` so `nix flake check` only evaluates them, and puts them in
 the `metrics` dev shell, which extends the default one. `dryer`, `crapper`, and
 `mutator` write snapshots under `.metrics/`, which is gitignored.
 Run them from the repository root; a scoped run reads `git status` for `--changed`.
+Pass `crapper` the `src` path. A pathless run also walks nested checkouts such as
+`.claude/worktrees`, reruns coverage for each, and scores every copy under the
+same namespaces.
 
 ```sh
 nix develop .#metrics -c dryer --changed       # duplicate candidates; writes .metrics/dry.edn
-nix develop .#metrics -c crapper               # CC plus coverage plus CRAP; writes .metrics/crap.edn
+nix develop .#metrics -c crapper src           # CC plus coverage plus CRAP; writes .metrics/crap.edn
 nix develop .#metrics -c mutator --max-workers N src/<module>.rs
 nix run .#dryer -- --changed                   # the apps also work outside any dev shell
 nix run .#crapper -- --help
