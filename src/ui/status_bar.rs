@@ -6,7 +6,7 @@ use ratatui::widgets::Paragraph;
 
 use super::text_fit::TextFit;
 use super::theme::Theme;
-use crate::domain::{SessionState, SessionSummary};
+use crate::domain::{SessionSummary, UnmanagedSession};
 
 pub struct StatusBar<'a> {
     message: Option<&'a StatusMessage>,
@@ -148,20 +148,7 @@ impl<'a> StatusNote<'a> {
     }
 
     pub fn text(&self) -> Option<String> {
-        let tmux_name = self.row.tmux_name();
-        if let Some(advice) = self
-            .row
-            .unmanaged_session()
-            .and_then(|session| session.advice())
-        {
-            return Some(advice);
-        }
-        if self.row.state() == SessionState::Unmanaged {
-            return Some(format!(
-                "{tmux_name} has no valid Ringleader metadata, so it can only be attached."
-            ));
-        }
-        None
+        self.row.unmanaged_session().map(UnmanagedSession::note)
     }
 }
 
@@ -173,7 +160,7 @@ mod tests {
     use ratatui::backend::TestBackend;
 
     use super::*;
-    use crate::domain::{PairMismatch, UnmanagedSession};
+    use crate::domain::{PairMismatch, SessionObservation, SessionState, TmuxAddress};
     use crate::test_support::{FakeMultiplexer, ServiceFixture};
 
     struct BarFixture;
@@ -298,6 +285,23 @@ mod tests {
         assert_eq!(
             BarFixture::note_for(&row),
             " ringleader-mystery has no valid Ringleader metadata, so it can only be attached."
+        );
+    }
+
+    #[test]
+    fn a_selected_session_without_the_prefix_says_its_name_lacks_it() {
+        let session = ServiceFixture::session("fix-auth");
+        let observation = SessionObservation::new(
+            TmuxAddress::new("fixauth", Path::new(FakeMultiplexer::SOCKET)),
+            ServiceFixture::CREATED_AT,
+        )
+        .with_metadata(session.metadata().clone());
+        let row =
+            SessionSummary::unmanaged(UnmanagedSession::unprefixed(observation, "ringleader-"));
+
+        assert_eq!(
+            BarFixture::note_for(&row),
+            " fixauth lacks the ringleader- prefix of Ringleader's sessions, so it can only be attached."
         );
     }
 

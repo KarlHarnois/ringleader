@@ -15,8 +15,6 @@ pub struct SessionReconciler<'a> {
 }
 
 impl<'a> SessionReconciler<'a> {
-    const EXACT_LABEL: &'static str = "=";
-
     pub fn new(config: &'a Config, host: &'a dyn HostProbe, now: u64) -> Self {
         Self {
             config,
@@ -165,21 +163,21 @@ impl<'a> SessionReconciler<'a> {
                 let row = self.managed_row(adopted.clone(), observation);
                 reconciliation.adopt(adopted, row);
             }
-            None => reconciliation.add_row(SessionSummary::unmanaged(UnmanagedSession::new(
-                &self.unmanaged_label(observation, entries),
-                observation.clone(),
-            ))),
+            None => reconciliation.add_row(SessionSummary::unmanaged(
+                self.unmanaged(observation, entries),
+            )),
         }
     }
 
-    fn unmanaged_label(&self, observation: &SessionObservation, entries: &[Session]) -> String {
-        let tmux_name = observation.tmux_name();
-        self.config
-            .naming()
-            .strip_tmux_prefix(tmux_name)
-            .or_else(|| self.recorded_prefix_label(observation, entries))
-            .map(str::to_string)
-            .unwrap_or_else(|| format!("{}{tmux_name}", Self::EXACT_LABEL))
+    fn unmanaged(&self, observation: &SessionObservation, entries: &[Session]) -> UnmanagedSession {
+        let naming = self.config.naming();
+        let label = naming
+            .strip_tmux_prefix(observation.tmux_name())
+            .or_else(|| self.recorded_prefix_label(observation, entries));
+        match label {
+            Some(label) => UnmanagedSession::new(label, observation.clone()),
+            None => UnmanagedSession::unprefixed(observation.clone(), naming.tmux_prefix()),
+        }
     }
 
     fn recorded_prefix_label<'o>(
@@ -434,6 +432,22 @@ mod tests {
 
         assert_eq!(row.name(), "=work");
         assert_eq!(row.state(), SessionState::Unmanaged);
+    }
+
+    #[test]
+    fn a_session_renamed_by_hand_without_the_prefix_notes_the_missing_prefix() {
+        let session = ServiceFixture::session("fix-auth");
+        let renamed = ObserveFixture::named("fixauth").with_metadata(session.metadata().clone());
+        let fixture =
+            ServiceFixture::new().with_multiplexer(FakeMultiplexer::new().with_live(renamed));
+
+        let row = ObserveFixture::only_row(&fixture);
+
+        assert_eq!(row.name(), "=fixauth");
+        assert_eq!(
+            row.unmanaged_session().unwrap().note(),
+            "fixauth lacks the ringleader- prefix of Ringleader's sessions, so it can only be attached."
+        );
     }
 
     #[test]

@@ -119,14 +119,27 @@ enum SummarySubject {
 pub struct UnmanagedSession {
     label: String,
     observation: SessionObservation,
+    missing_prefix: Option<String>,
     shadowed: Option<(Session, PairMismatch)>,
 }
 
 impl UnmanagedSession {
+    const EXACT_LABEL: &'static str = "=";
+
     pub fn new(label: &str, observation: SessionObservation) -> Self {
         Self {
             label: label.to_string(),
             observation,
+            missing_prefix: None,
+            shadowed: None,
+        }
+    }
+
+    pub fn unprefixed(observation: SessionObservation, prefix: &str) -> Self {
+        Self {
+            label: format!("{}{}", Self::EXACT_LABEL, observation.tmux_name()),
+            observation,
+            missing_prefix: Some(prefix.to_string()),
             shadowed: None,
         }
     }
@@ -139,7 +152,25 @@ impl UnmanagedSession {
         Self {
             label: entry.name().to_string(),
             observation,
+            missing_prefix: None,
             shadowed: Some((entry, mismatch)),
+        }
+    }
+
+    pub fn note(&self) -> String {
+        self.advice().unwrap_or_else(|| {
+            format!(
+                "{} {}, so it can only be attached.",
+                self.observation.tmux_name(),
+                self.attach_only_reason()
+            )
+        })
+    }
+
+    fn attach_only_reason(&self) -> String {
+        match &self.missing_prefix {
+            Some(prefix) => format!("lacks the {prefix} prefix of Ringleader's sessions"),
+            None => PairMismatch::NoValidMetadata.describe(),
         }
     }
 
