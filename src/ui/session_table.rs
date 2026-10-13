@@ -1,14 +1,14 @@
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use super::empty_state::EmptyState;
 use super::home_view::LayoutTier;
+use super::state_indicator::StateIndicator;
 use super::table_columns::TableColumns;
 use super::theme::Theme;
-use crate::domain::{DiffStat, SessionState, SessionSummary};
+use crate::domain::{DiffStat, SessionSummary};
 
 pub struct SessionTable<'a> {
     rows: &'a [SessionSummary],
@@ -162,36 +162,6 @@ impl<'a> SessionTable<'a> {
     }
 }
 
-pub struct StateIndicator {
-    state: SessionState,
-    tick: u64,
-}
-
-impl StateIndicator {
-    const SPINNER: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-
-    pub fn new(state: SessionState, tick: u64) -> Self {
-        Self { state, tick }
-    }
-
-    pub fn glyph(&self) -> char {
-        match self.state {
-            SessionState::Working => {
-                let frame = self.tick % Self::SPINNER.len() as u64;
-                Self::SPINNER[usize::try_from(frame).unwrap_or(0)]
-            }
-            SessionState::Waiting => '●',
-            SessionState::Exited => '✗',
-            SessionState::Stopped => '○',
-            SessionState::Unmanaged => '?',
-        }
-    }
-
-    pub fn style(&self, theme: &Theme) -> Style {
-        theme.state(self.state)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use ratatui::Terminal;
@@ -199,7 +169,7 @@ mod tests {
     use ratatui::style::{Color, Modifier};
 
     use super::*;
-    use crate::domain::{DiffStat, UnmanagedSession};
+    use crate::domain::{DiffStat, SessionState, UnmanagedSession};
     use crate::test_support::ServiceFixture;
 
     struct TableFixture;
