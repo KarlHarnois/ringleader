@@ -277,7 +277,8 @@ viewer exits.
     │   ├── submodule_commits.rs  # SubmoduleCommits, the submodule walk of unmerged_commits
     │   ├── system_clock.rs       # SystemClock, reads `SystemTime`
     │   ├── system_host_probe.rs  # SystemHostProbe
-    │   ├── live_process.rs       # LiveProcess, one /proc entry, whether it is the tmux server of a socket, and signals to it
+    │   ├── live_process.rs       # LiveProcess, one /proc entry, whether it is this user's tmux server of a socket, and signals to it
+    │   ├── tmux_command_line.rs  # TmuxCommandLine, the socket a tmux argv names in its global flags and the process name tmux gives a server it starts
     │   ├── metadata_json.rs      # MetadataJson, the @ringleader_meta JSON each session carries
     │   ├── signal_flags.rs       # SignalFlags, the SIGHUP, SIGINT, SIGTERM, and SIGQUIT flags
     │   ├── durable_file.rs       # DurableFile, synced temp file renamed over the target
