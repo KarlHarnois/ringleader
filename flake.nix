@@ -93,6 +93,7 @@
             mutatorTool
             llvmCoverageEnv
             ;
+          dryerApp = wrapTool "dryer" dryerTool;
           crapperApp = wrapTool "crapper" crapperTool;
           mutatorApp = wrapTool "mutator" mutatorTool;
         };
@@ -130,7 +131,7 @@
         pkgs: tools: {
           dryer = {
             type = "app";
-            program = "${tools.dryerTool}/bin/dryer";
+            program = "${tools.dryerApp}/bin/dryer";
             meta.description = "Find candidate duplicate code";
           };
           crapper = {
