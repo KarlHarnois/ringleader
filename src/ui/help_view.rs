@@ -1,12 +1,13 @@
 use std::cell::Cell;
-use std::iter::{once, repeat};
+use std::iter::once;
 use std::path::{Path, PathBuf};
 
 use crossterm::event::{KeyCode, KeyEvent};
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 
 use super::dialogs::DialogStep;
 use super::dialogs::home_path::HomePath;
+use super::label_column::LabelColumn;
 use super::legend::{Legend, LegendEntry};
 use super::state_indicator::StateIndicator;
 use super::text_fit::TextFit;
@@ -37,8 +38,6 @@ impl HelpView {
     ];
     const RETURN_ACTION: &'static str = "detach from a session and return here";
     const FIRST_SPINNER_TICK: u64 = 0;
-    const LABEL_WIDTH: usize = 11;
-    const LABEL_GAP: &'static str = "  ";
     const CLOSING: &'static str = "↑ ↓ scroll · ? Esc q close";
 
     pub fn new(return_key: &ReturnKey, files: &[(&str, &Path)], home: HomePath) -> Self {
@@ -114,7 +113,7 @@ impl HelpView {
             let indicator = StateIndicator::new(state, Self::FIRST_SPINNER_TICK);
             LegendEntry::new(indicator.glyph(), indicator.style(theme), state.label())
         });
-        Legend::new(Self::label_column("States"), entries.collect())
+        Legend::new("States", entries.collect())
     }
 
     fn diff_legend(theme: &Theme) -> Legend {
@@ -123,7 +122,7 @@ impl HelpView {
             LegendEntry::new("-n", theme.deletions(), "removed lines"),
             LegendEntry::new("?n", theme.base(), "untracked files"),
         ];
-        Legend::new(Self::label_column("Diff"), entries)
+        Legend::new("Diff", entries)
     }
 
     fn files(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
@@ -134,22 +133,12 @@ impl HelpView {
     }
 
     fn labeled(label: &str, text: &str, width: usize, theme: &Theme) -> Vec<Line<'static>> {
-        let label = Self::label_column(label);
-        let label_width = label.chars().count();
-        let wrapped = TextFit::new(text).wrapped(width.saturating_sub(label_width));
-        let indents = once(label).chain(repeat(" ".repeat(label_width)));
-        indents
-            .zip(wrapped)
-            .map(|(indent, line)| Line::styled(format!("{indent}{line}"), theme.base()))
-            .collect()
-    }
-
-    fn label_column(label: &str) -> String {
-        format!(
-            "{label:<width$}{}",
-            Self::LABEL_GAP,
-            width = Self::LABEL_WIDTH
-        )
+        let column = LabelColumn::new(label);
+        let wrapped = TextFit::new(text).wrapped(column.room(width));
+        let rows = wrapped
+            .into_iter()
+            .map(|line| vec![Span::styled(line, theme.base())]);
+        column.lines(rows, theme)
     }
 }
 

@@ -1,30 +1,28 @@
-use std::iter::{once, repeat};
-
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
+use super::label_column::LabelColumn;
 use super::theme::Theme;
 
 pub struct Legend {
-    label: String,
+    column: LabelColumn,
     entries: Vec<LegendEntry>,
 }
 
 impl Legend {
     const GAP: &'static str = "  ";
 
-    pub fn new(label: String, entries: Vec<LegendEntry>) -> Self {
-        Self { label, entries }
+    pub fn new(label: &str, entries: Vec<LegendEntry>) -> Self {
+        Self {
+            column: LabelColumn::new(label),
+            entries,
+        }
     }
 
     pub fn lines(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
-        let label_width = self.label.chars().count();
-        let room = width.saturating_sub(label_width);
-        let labels = once(self.label.clone()).chain(repeat(" ".repeat(label_width)));
-        labels
-            .zip(self.rows(room))
-            .map(|(label, row)| Self::line(label, &row, theme))
-            .collect()
+        let rows = self.rows(self.column.room(width));
+        let spans = rows.iter().map(|row| Self::spans(row, theme));
+        self.column.lines(spans, theme)
     }
 
     fn rows(&self, room: usize) -> Vec<Vec<&LegendEntry>> {
@@ -50,10 +48,9 @@ impl Legend {
         row.iter().map(|entry| entry.width()).sum::<usize>() + gaps
     }
 
-    fn line(label: String, row: &[&LegendEntry], theme: &Theme) -> Line<'static> {
-        let label = Span::styled(label, theme.base());
+    fn spans(row: &[&LegendEntry], theme: &Theme) -> Vec<Span<'static>> {
         let entries: Vec<Vec<Span<'static>>> = row.iter().map(|entry| entry.spans(theme)).collect();
-        Line::from([vec![label], entries.join(&Span::raw(Self::GAP))].concat())
+        entries.join(&Span::raw(Self::GAP))
     }
 }
 
@@ -91,12 +88,12 @@ mod tests {
     struct LegendFixture;
 
     impl LegendFixture {
-        const LABEL: &'static str = "Fruit  ";
+        const LABEL: &'static str = "Fruit";
 
         fn legend() -> Legend {
             let entries = [("A", "apple"), ("B", "banana"), ("C", "cherry")]
                 .map(|(symbol, meaning)| LegendEntry::new(symbol, Theme.base(), meaning));
-            Legend::new(Self::LABEL.to_string(), entries.into())
+            Legend::new(Self::LABEL, entries.into())
         }
 
         fn rows(width: usize) -> Vec<String> {
@@ -117,15 +114,15 @@ mod tests {
     fn a_wide_legend_keeps_every_entry_on_the_label_row() {
         assert_eq!(
             LegendFixture::rows(80),
-            ["Fruit  A apple  B banana  C cherry"]
+            ["Fruit        A apple  B banana  C cherry"]
         );
     }
 
     #[test]
     fn a_narrow_legend_wraps_entries_under_the_label() {
         assert_eq!(
-            LegendFixture::rows(25),
-            ["Fruit  A apple  B banana", "       C cherry"]
+            LegendFixture::rows(31),
+            ["Fruit        A apple  B banana", "             C cherry"]
         );
     }
 
@@ -133,14 +130,18 @@ mod tests {
     fn an_entry_wider_than_the_room_gets_a_row_of_its_own() {
         assert_eq!(
             LegendFixture::rows(10),
-            ["Fruit  A apple", "       B banana", "       C cherry"]
+            [
+                "Fruit        A apple",
+                "             B banana",
+                "             C cherry"
+            ]
         );
     }
 
     #[test]
     fn each_symbol_keeps_its_own_style() {
         let entry = LegendEntry::new("+", Theme.insertions(), "added");
-        let legend = Legend::new(LegendFixture::LABEL.to_string(), vec![entry]);
+        let legend = Legend::new(LegendFixture::LABEL, vec![entry]);
 
         let line = &legend.lines(80, &Theme)[0];
 
