@@ -21,6 +21,10 @@ impl BaseBranch {
         format!("refs/remotes/{}", self.0)
     }
 
+    pub fn candidate_refs(&self) -> [String; 2] {
+        [self.local_ref(), self.remote_tracking_ref()]
+    }
+
     pub fn origin_suggestion(&self) -> String {
         format!("origin/{}", self.0)
     }
@@ -53,6 +57,16 @@ mod tests {
         let base = BaseBranch::new("origin/main").unwrap();
 
         assert_eq!(base.remote_tracking_ref(), "refs/remotes/origin/main");
+    }
+
+    #[test]
+    fn tries_the_local_branch_before_the_remote_tracking_one() {
+        let base = BaseBranch::new("develop").unwrap();
+
+        assert_eq!(
+            base.candidate_refs(),
+            ["refs/heads/develop", "refs/remotes/develop"]
+        );
     }
 
     #[test]

@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use super::base_branch_ladder::BaseBranchLadder;
 use super::git_invocation::GitInvocation;
 use super::git_runner::GitRunner;
 use crate::application::ports::{StartPoint, WorkspaceError};
@@ -10,11 +11,6 @@ pub struct StartPointResolver<'a> {
 }
 
 impl<'a> StartPointResolver<'a> {
-    const ORIGIN_HEAD: &'static str = "refs/remotes/origin/HEAD";
-    const ORIGIN_BRANCH_PREFIX: &'static str = "refs/remotes/origin/";
-    const CONVENTIONAL_DEFAULT_BRANCHES: [&'static str; 2] =
-        ["refs/heads/main", "refs/heads/master"];
-
     pub fn new(git: &'a GitRunner) -> Self {
         Self { git }
     }
@@ -35,8 +31,7 @@ impl<'a> StartPointResolver<'a> {
         repo: &Path,
         base: &BaseBranch,
     ) -> Result<StartPoint, WorkspaceError> {
-        let candidates = [base.local_ref(), base.remote_tracking_ref()];
-        if let Some(sha) = self.first_commit(repo, candidates)? {
+        if let Some(sha) = self.first_commit(repo, base.candidate_refs())? {
             return Ok(StartPoint::Commit(sha));
         }
         let suggestion = base.origin_suggestion();
@@ -51,8 +46,8 @@ impl<'a> StartPointResolver<'a> {
     }
 
     fn resolve_ladder(&self, repo: &Path) -> Result<StartPoint, WorkspaceError> {
-        let candidates = self.ladder_candidates(repo)?;
-        if let Some(sha) = self.first_commit(repo, candidates)? {
+        let ladder = BaseBranchLadder::new(self.existing_origin_default(repo)?);
+        if let Some(sha) = self.first_commit(repo, ladder.candidates())? {
             return Ok(StartPoint::Commit(sha));
         }
         if self.git.resolve(repo, "HEAD")?.is_none() {
@@ -63,35 +58,14 @@ impl<'a> StartPointResolver<'a> {
         })
     }
 
-    fn ladder_candidates(&self, repo: &Path) -> Result<Vec<String>, WorkspaceError> {
-        let mut candidates = self.origin_default_candidates(repo)?;
-        candidates.extend(Self::CONVENTIONAL_DEFAULT_BRANCHES.map(String::from));
-        Ok(candidates)
-    }
-
-    fn origin_default_candidates(&self, repo: &Path) -> Result<Vec<String>, WorkspaceError> {
-        let Some(origin_default) = self.existing_origin_default(repo)? else {
-            return Ok(Vec::new());
-        };
-        let local_default = Self::local_counterpart(&origin_default);
-        Ok(local_default.into_iter().chain([origin_default]).collect())
-    }
-
     fn existing_origin_default(&self, repo: &Path) -> Result<Option<String>, WorkspaceError> {
-        let origin_head =
-            GitInvocation::in_repo(repo, "symbolic-ref").args(["-q", Self::ORIGIN_HEAD]);
+        let origin_head = GitInvocation::in_repo(repo, "symbolic-ref")
+            .args(["-q", BaseBranchLadder::ORIGIN_HEAD]);
         let Some(origin_default) = self.git.resolved_from(&origin_head)? else {
             return Ok(None);
         };
         let exists = self.commit_of(repo, &origin_default)?.is_some();
         Ok(exists.then_some(origin_default))
-    }
-
-    fn local_counterpart(origin_ref: &str) -> Option<String> {
-        origin_ref
-            .strip_prefix(Self::ORIGIN_BRANCH_PREFIX)
-            .and_then(BaseBranch::new)
-            .map(|branch| branch.local_ref())
     }
 
     fn first_commit(
