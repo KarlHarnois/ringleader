@@ -27,6 +27,7 @@ pub enum Dialog {
 impl Dialog {
     const WIDTH: u16 = 76;
     const HEIGHT: u16 = 22;
+    pub const HELP_HEIGHT: u16 = 24;
 
     pub fn open(opening: DialogOpening, service: &SessionService) -> Self {
         match opening {
@@ -66,7 +67,7 @@ impl Dialog {
         ];
         let home = HomePath::new(service.home_directory());
         Self::Help(Box::new(HelpView::new(
-            &service.shown_return_key(),
+            &service.shown_key_bindings(),
             &files,
             &home,
         )))
@@ -117,7 +118,7 @@ impl Dialog {
     }
 
     pub fn render(&self, frame: &mut Frame, theme: &Theme) {
-        let (area, labels) = Self::placement(frame.area());
+        let (area, labels) = self.placement(frame.area());
         let block = Block::default().borders(Borders::ALL).title(self.title());
         let inner = block.inner(area);
         frame.render_widget(Clear, area);
@@ -148,16 +149,23 @@ impl Dialog {
         }
     }
 
-    fn placement(frame: Rect) -> (Rect, DialogLabels) {
+    fn placement(&self, frame: Rect) -> (Rect, DialogLabels) {
         if LayoutTier::for_size(frame.width, frame.height) != LayoutTier::Full {
             let margin = Margin::new(1, 1);
             return (frame.inner(margin), DialogLabels::abbreviated());
         }
         let width = Self::WIDTH.min(frame.width);
-        let height = Self::HEIGHT.min(frame.height.saturating_sub(2));
+        let height = self.height().min(frame.height.saturating_sub(2));
         let x = frame.x + (frame.width - width) / 2;
         let y = frame.y + (frame.height - height) / 2;
         (Rect::new(x, y, width, height), DialogLabels::full())
+    }
+
+    fn height(&self) -> u16 {
+        match self {
+            Self::Help(_) => Self::HELP_HEIGHT,
+            Self::NewSession(_) | Self::Delete(_) | Self::Rename(_) => Self::HEIGHT,
+        }
     }
 }
 

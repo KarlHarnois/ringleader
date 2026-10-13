@@ -1,8 +1,10 @@
+use std::iter::once;
 use std::path::Path;
 
 use super::agent::Agent;
 use super::config_draft::ConfigDraft;
 use super::hot_key::HotKey;
+use super::key_bindings::KeyBindings;
 use super::repo_name::RepoName;
 
 pub struct ConfigChecks<'a> {
@@ -34,7 +36,7 @@ impl<'a> ConfigChecks<'a> {
 
     pub fn failures(mut self) -> Vec<String> {
         self.check_absolute("worktree_root", self.draft.raw_worktree_root());
-        self.check_return_key();
+        self.check_keys();
         self.check_session_size();
         self.check_idle_seconds();
         self.check_scan_depth();
@@ -58,13 +60,52 @@ impl<'a> ConfigChecks<'a> {
         }
     }
 
-    fn check_return_key(&mut self) {
-        let raw = self.draft.raw_return_key();
+    fn check_keys(&mut self) {
+        let settings = self.key_settings();
+        for (setting, raw) in &settings {
+            self.check_key(setting, raw);
+        }
+        self.check_repeated_keys(&settings);
+    }
+
+    fn key_settings(&self) -> Vec<(&'static str, &'a str)> {
+        let draft = self.draft;
+        let listed = |setting: &'static str, keys: &'a [String]| {
+            keys.iter().map(move |key| (setting, key.as_str()))
+        };
+        once((KeyBindings::RETURN_KEY_SETTING, draft.raw_return_key()))
+            .chain(listed(
+                KeyBindings::NEXT_SESSION_SETTING,
+                draft.raw_next_session_keys(),
+            ))
+            .chain(listed(
+                KeyBindings::PREVIOUS_SESSION_SETTING,
+                draft.raw_previous_session_keys(),
+            ))
+            .collect()
+    }
+
+    fn check_key(&mut self, setting: &str, raw: &str) {
         if HotKey::parse(raw).is_none() {
             self.fail(format!(
-                "return_key: `{}` must be a key a terminal can send, such as C-q, M-x, or F12: optional C-, M-, and S- modifiers, then a key name or one printable character other than a quote or \\. After C- the character must be a letter other than i or m, which terminals send as Tab and Enter, or ], ^, or _. S- cannot precede a character, and C- and S- cannot precede Enter, Tab, BTab, Escape, BSpace, or Space, except C-Space",
+                "{setting}: `{}` must be a key a terminal can send, such as C-q, M-x, or F12: optional C-, M-, and S- modifiers, then a key name or one printable character other than a quote or \\. After C- the character must be a letter other than i or m, which terminals send as Tab and Enter, or ], ^, or _. S- cannot precede a character, and C- and S- cannot precede Enter, Tab, BTab, Escape, BSpace, or Space, except C-Space",
                 raw.escape_default()
             ));
+        }
+    }
+
+    fn check_repeated_keys(&mut self, settings: &[(&str, &str)]) {
+        let mut seen: Vec<(&str, HotKey)> = Vec::new();
+        for (setting, raw) in settings {
+            let Some(key) = HotKey::parse(raw) else {
+                continue;
+            };
+            match seen.iter().find(|(_, earlier)| *earlier == key) {
+                Some((earlier_setting, _)) => self.fail(format!(
+                    "{setting}: `{raw}` is already bound in {earlier_setting}, and each key can do only one thing"
+                )),
+                None => seen.push((setting, key)),
+            }
         }
     }
 
@@ -291,7 +332,52 @@ mod tests {
     fn the_return_key_defaults_to_ctrl_q() {
         let config = crate::domain::Config::new(&ChecksFixture::draft()).unwrap();
 
-        assert_eq!(config.return_key().to_string(), "C-q");
+        assert_eq!(config.key_bindings().return_key().to_string(), "C-q");
+    }
+
+    #[test]
+    fn next_and_previous_keys_no_keystroke_reaches_fail_with_their_setting_named() {
+        for key in ["", "C-", "'", "C-}", "S-x", "C-m"] {
+            let next = ChecksFixture::draft().next_session_keys(&[key]);
+            let previous = ChecksFixture::draft().previous_session_keys(&[key]);
+
+            ChecksFixture::fails_on(next, "next_session_keys");
+            ChecksFixture::fails_on(previous, "previous_session_keys");
+        }
+    }
+
+    #[test]
+    fn a_key_bound_twice_fails_with_the_later_setting_named() {
+        for (draft, setting) in [
+            (
+                ChecksFixture::draft().next_session_keys(&["C-q"]),
+                "next_session_keys",
+            ),
+            (
+                ChecksFixture::draft().previous_session_keys(&["C-Q"]),
+                "previous_session_keys",
+            ),
+            (
+                ChecksFixture::draft().previous_session_keys(&["M-Down"]),
+                "previous_session_keys",
+            ),
+            (
+                ChecksFixture::draft().next_session_keys(&["M-j", "M-j"]),
+                "next_session_keys",
+            ),
+        ] {
+            ChecksFixture::fails_on(draft, setting);
+        }
+    }
+
+    #[test]
+    fn empty_session_key_lists_pass() {
+        let none: [&str; 0] = [];
+        let draft = ChecksFixture::draft()
+            .next_session_keys(&none)
+            .previous_session_keys(&none);
+
+        assert!(ChecksFixture::failures(&draft).is_empty());
     }
 
     #[test]

@@ -186,7 +186,8 @@ viewer exits.
     │   ├── config_checks.rs      # ConfigChecks, the checks every config load runs
     │   ├── naming_scheme.rs      # NamingScheme, the worktree root and tmux prefix a session records
     │   ├── pull_request.rs       # PullRequest, its number, state, and opening time
-    │   └── hot_key.rs            # HotKey, a key a terminal can send, such as the return key that detaches from a session back to Ringleader
+    │   ├── hot_key.rs            # HotKey, a key a terminal can send, which every key binding is made of
+    │   └── key_bindings.rs       # KeyBindings, the return key that detaches back to Ringleader and the keys that switch to the next and previous session
     ├── application/
     │   ├── mod.rs
     │   ├── session_service.rs    # SessionService, the facade the UI and CLI call
@@ -230,7 +231,7 @@ viewer exits.
     │   ├── doctor_report.rs      # DoctorReport, the doctor's info, warning, and problem lines
     │   ├── registry_audit.rs     # RegistryAudit, the doctor's checks of each registry entry
     │   ├── orphan_audit.rs       # OrphanAudit, the doctor's search for worktrees and marked branches no session claims
-    │   ├── server_audit.rs       # ServerAudit, the doctor's checks of Ringleader's tmux server and the return key
+    │   ├── server_audit.rs       # ServerAudit, the doctor's checks of Ringleader's tmux server and the key bindings
     │   └── ports/
     │       ├── mod.rs
     │       ├── session_registry.rs   # SessionRegistry trait
@@ -291,9 +292,9 @@ viewer exits.
     │   ├── tmux_agent_input.rs   # TmuxAgentInput, waits for the agent's prompt and types lines into its pane
     │   ├── tmux_listing.rs       # TmuxListing, parses list-panes, list-windows, list-keys, and server rows
     │   ├── tmux_multiplexer.rs   # TmuxMultiplexer
-    │   ├── private_server.rs     # PrivateServer, the private server's config files, return binding check, state, config reapply, and lost socket recovery
-    │   ├── running_config.rs     # RunningConfig, the hash and return key a running server reports
-    │   └── tmux_server_config.rs # TmuxServerConfig, the generated config of the private tmux server, its hash, and the script that reapplies it
+    │   ├── private_server.rs     # PrivateServer, the private server's config files, return binding check, state, config reapply that unbinds the keys the config dropped, and lost socket recovery
+    │   ├── running_config.rs     # RunningConfig, the hash and key bindings a running server reports
+    │   └── tmux_server_config.rs # TmuxServerConfig, the generated config of the private tmux server with its return and session switch bindings, its hash, and the script that reapplies it
     ├── ui/
     │   ├── mod.rs
     │   ├── app.rs                  # App

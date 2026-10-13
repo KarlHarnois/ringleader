@@ -1,4 +1,6 @@
 return_key = "C-q"
+next_session_keys = ["M-n"]
+previous_session_keys = ["M-p", "F7"]
 state_poll_ms = 1000
 preview_refresh_ms = 750
 diff_refresh_ms = 3000

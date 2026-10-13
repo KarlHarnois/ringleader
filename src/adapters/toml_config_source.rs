@@ -23,6 +23,10 @@ impl TomlConfigSource {
 # prefix key, so this is the only way back. Inside your own tmux, it must not be
 # your tmux's prefix or bound in its root table.
 return_key = "C-q"
+# Keys that switch to the next or previous session in name order, wrapping at
+# either end. Inside your own tmux, they must not be bound in its root table.
+next_session_keys = ["M-j", "M-Down"]
+previous_session_keys = ["M-k", "M-Up"]
 state_poll_ms = 1000
 preview_refresh_ms = 750
 diff_refresh_ms = 3000
@@ -205,7 +209,7 @@ impl ConfigSource for TomlConfigSource {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{Agent, SessionName};
+    use crate::domain::{Agent, HotKey, KeyBindings, SessionName};
 
     const FIXTURE: &str = include_str!("../../tests/fixtures/config.toml");
 
@@ -254,6 +258,10 @@ mod tests {
             fs::write(fixture.path(), text).unwrap();
             fixture
         }
+
+        fn names(keys: &[HotKey]) -> Vec<String> {
+            keys.iter().map(HotKey::to_string).collect()
+        }
     }
 
     #[test]
@@ -279,6 +287,32 @@ mod tests {
         assert_eq!(agents, ["claude", "opencode"]);
         assert_eq!(config.repos()[0].name().as_str(), "example-project");
         assert_eq!(config.session_size().width(), 160);
+    }
+
+    #[test]
+    fn the_session_keys_in_a_file_reach_the_config() {
+        let fixture = SourceFixture::with_text(FIXTURE);
+
+        let config = fixture.source().load().unwrap();
+
+        let bindings = config.key_bindings();
+        assert_eq!(SourceFixture::names(bindings.next_session()), ["M-n"]);
+        assert_eq!(
+            SourceFixture::names(bindings.previous_session()),
+            ["M-p", "F7"]
+        );
+    }
+
+    #[test]
+    fn the_first_run_template_loads_the_default_key_bindings() {
+        let fixture = SourceFixture::new();
+
+        fixture.source().write_first_run_template().unwrap();
+
+        assert_eq!(
+            fixture.source().load().unwrap().key_bindings(),
+            &KeyBindings::default()
+        );
     }
 
     #[test]

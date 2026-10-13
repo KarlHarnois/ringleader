@@ -48,9 +48,9 @@ impl Doctor {
     ) -> DoctorReport {
         let mut report = DoctorReport::default();
         let client_version = self.check_tmux_client(&mut report);
-        let valid_return_key = config_error.is_none().then(|| config.return_key());
+        let valid_key_bindings = config_error.is_none().then(|| config.key_bindings());
         self.server_audit
-            .audit(valid_return_key, client_version.as_deref(), &mut report);
+            .audit(valid_key_bindings, client_version.as_deref(), &mut report);
         self.check_git(&mut report);
         let valid_config = match config_error {
             Some(error) => {

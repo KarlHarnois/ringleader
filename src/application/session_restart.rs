@@ -97,7 +97,7 @@ impl SessionRestart {
         let spec = SessionSpec::new(session.tmux_name(), session.metadata().clone(), launch)
             .sized(config.session_size())
             .removing_env_names(&config.agent_env_union())
-            .with_return_key(config.return_key());
+            .with_key_bindings(config.key_bindings());
         let socket = self.multiplexer.create_session(&spec)?;
         let recreated = session.on_socket(&socket);
         let entries = reconciliation.entries_with(session.name().as_str(), recreated.clone());

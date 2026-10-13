@@ -3,14 +3,14 @@ use std::time::Duration;
 
 use super::agent::Agent;
 use super::config_draft::ConfigDraft;
-use super::hot_key::HotKey;
+use super::key_bindings::KeyBindings;
 use super::naming_scheme::NamingScheme;
 use super::repo::Repo;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
     naming: NamingScheme,
-    return_key: HotKey,
+    key_bindings: KeyBindings,
     intervals: RefreshIntervals,
     activity_idle_seconds: u64,
     session_size: SessionSize,
@@ -28,7 +28,11 @@ impl Config {
         }
         Ok(Self {
             naming: draft.naming(),
-            return_key: draft.return_key_value(),
+            key_bindings: KeyBindings::new(
+                draft.return_key_value(),
+                draft.next_session_keys_value(),
+                draft.previous_session_keys_value(),
+            ),
             intervals: draft.intervals(),
             activity_idle_seconds: draft.activity_idle_seconds_value(),
             session_size: draft.session_size_value(),
@@ -42,7 +46,7 @@ impl Config {
     pub fn defaults(worktree_root: &Path) -> Self {
         Self {
             naming: NamingScheme::for_new_sessions(worktree_root),
-            return_key: HotKey::default(),
+            key_bindings: KeyBindings::default(),
             intervals: RefreshIntervals::default(),
             activity_idle_seconds: 3,
             session_size: SessionSize::default(),
@@ -67,8 +71,8 @@ impl Config {
         &self.naming
     }
 
-    pub fn return_key(&self) -> &HotKey {
-        &self.return_key
+    pub fn key_bindings(&self) -> &KeyBindings {
+        &self.key_bindings
     }
 
     pub fn intervals(&self) -> RefreshIntervals {

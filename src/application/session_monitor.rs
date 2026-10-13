@@ -5,7 +5,7 @@ use super::reconciliation::Reconciliation;
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
 use super::session_reconciler::SessionReconciler;
-use crate::domain::{Config, DiffStat, HotKey, Session};
+use crate::domain::{Config, DiffStat, KeyBindings, Session};
 
 pub struct SessionMonitor {
     multiplexer: Arc<dyn Multiplexer>,
@@ -45,8 +45,11 @@ impl SessionMonitor {
         Ok(self.multiplexer.capture_pane(tmux_name)?)
     }
 
-    pub fn server_return_key(&self) -> Option<HotKey> {
-        let running = self.multiplexer.server_config(&HotKey::default()).ok()??;
-        running.return_key().cloned()
+    pub fn server_key_bindings(&self) -> Option<KeyBindings> {
+        let running = self
+            .multiplexer
+            .server_config(&KeyBindings::default())
+            .ok()??;
+        running.key_bindings().cloned()
     }
 }

@@ -13,7 +13,7 @@ use super::tmux_listing::TmuxListing;
 use super::tmux_scripts::TmuxScripts;
 use super::tmux_server_config::TmuxServerConfig;
 use crate::application::ports::{MultiplexerError, ServerConfig, ServerState};
-use crate::domain::HotKey;
+use crate::domain::KeyBindings;
 
 pub struct PrivateServer<'a> {
     tmux: &'a TmuxCommand,
@@ -27,8 +27,8 @@ impl<'a> PrivateServer<'a> {
         Self { tmux }
     }
 
-    pub fn write_files(&self, return_key: &HotKey) -> Result<(), MultiplexerError> {
-        self.write_render(&self.render_for(return_key))
+    pub fn write_files(&self, key_bindings: &KeyBindings) -> Result<(), MultiplexerError> {
+        self.write_render(&self.render_for(key_bindings))
     }
 
     pub fn require_return_binding(&self, launched: &Launched) -> Result<(), MultiplexerError> {
@@ -123,23 +123,23 @@ impl<'a> PrivateServer<'a> {
         Err(TmuxError::failed("display-message", &output).into())
     }
 
-    pub fn config(&self, return_key: &HotKey) -> Result<Option<ServerConfig>, MultiplexerError> {
+    pub fn config(
+        &self,
+        key_bindings: &KeyBindings,
+    ) -> Result<Option<ServerConfig>, MultiplexerError> {
         let Some(running) = self.running_config()? else {
             return Ok(None);
         };
-        let current = running.hash() == self.render_for(return_key).hash();
-        Ok(Some(ServerConfig::new(current, running.return_key())))
+        let current = running.hash() == self.render_for(key_bindings).hash();
+        Ok(Some(ServerConfig::new(current, running.key_bindings())))
     }
 
-    pub fn apply(&self, return_key: &HotKey) -> Result<(), MultiplexerError> {
+    pub fn apply(&self, key_bindings: &KeyBindings) -> Result<(), MultiplexerError> {
         let running = self.running_config()?;
-        let previous_key = running
-            .as_ref()
-            .and_then(RunningConfig::return_key)
-            .filter(|previous| *previous != return_key);
-        let render = self.render_for(return_key);
+        let previous = running.as_ref().and_then(RunningConfig::key_bindings);
+        let render = self.render_for(key_bindings);
         self.write_render(&render)?;
-        let sequence = TmuxServerConfig::reapply_script(previous_key);
+        let sequence = TmuxServerConfig::reapply_script(previous, key_bindings);
         let output = self
             .tmux
             .change_with_input(&sequence, render.render().as_bytes())?;
@@ -149,8 +149,8 @@ impl<'a> PrivateServer<'a> {
         Err(TmuxError::failed("source-file", &output).into())
     }
 
-    fn render_for(&self, return_key: &HotKey) -> TmuxServerConfig {
-        TmuxServerConfig::new(return_key)
+    fn render_for(&self, key_bindings: &KeyBindings) -> TmuxServerConfig {
+        TmuxServerConfig::new(key_bindings)
     }
 
     fn write_render(&self, render: &TmuxServerConfig) -> Result<(), MultiplexerError> {
@@ -168,7 +168,7 @@ impl<'a> PrivateServer<'a> {
     }
 
     fn running_config(&self) -> Result<Option<RunningConfig>, MultiplexerError> {
-        let query = TmuxScripts::server_value(&RunningConfig::format());
+        let query = TmuxScripts::server_values(&RunningConfig::formats());
         let output = self.tmux.query(&query)?;
         if let Some(running) = RunningConfig::read(&output) {
             return Ok(Some(running));
@@ -186,13 +186,20 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     use super::*;
+    use crate::domain::HotKey;
     use crate::test_support::TmuxTestServer;
 
     struct ServerFixture;
 
     impl ServerFixture {
-        fn alt_x() -> HotKey {
-            HotKey::parse("M-x").unwrap()
+        const TABLES: [&'static str; 3] = ["root", "copy-mode", "copy-mode-vi"];
+
+        fn alt_x() -> KeyBindings {
+            KeyBindings::default().with_return_key(HotKey::parse("M-x").unwrap())
+        }
+
+        fn alt_n_and_alt_down() -> KeyBindings {
+            KeyBindings::default().with_next_session(HotKey::parse_valid(["M-n", "M-Down"]))
         }
 
         fn detach_keys(server: &TmuxTestServer) -> Vec<String> {
@@ -200,13 +207,24 @@ mod tests {
         }
 
         fn detach_keys_in(server: &TmuxTestServer, table: &str) -> Vec<String> {
-            server
+            Self::keys_running(server, table, "detach-client")
+        }
+
+        fn keys_running(server: &TmuxTestServer, table: &str, command: &str) -> Vec<String> {
+            let ending = format!(" {command}");
+            let mut keys: Vec<String> = server
                 .text(&["list-keys", "-T", table])
                 .lines()
-                .filter(|line| line.ends_with(" detach-client"))
+                .filter(|line| line.ends_with(&ending))
                 .filter_map(|line| line.split_whitespace().nth(3))
                 .map(str::to_string)
-                .collect()
+                .collect();
+            keys.sort();
+            keys
+        }
+
+        fn option(server: &TmuxTestServer, name: &str) -> String {
+            server.text(&["show-options", "-g", "-v", name])
         }
     }
 
@@ -241,7 +259,7 @@ mod tests {
         let private = PrivateServer::new(&tmux);
 
         assert_eq!(private.state().unwrap(), None);
-        assert_eq!(private.config(&HotKey::default()).unwrap(), None);
+        assert_eq!(private.config(&KeyBindings::default()).unwrap(), None);
     }
 
     #[test]
@@ -310,12 +328,12 @@ mod tests {
         let tmux = server.command();
 
         let running = PrivateServer::new(&tmux)
-            .config(&HotKey::default())
+            .config(&KeyBindings::default())
             .unwrap()
             .unwrap();
 
         assert!(running.is_current());
-        assert_eq!(running.return_key(), Some(&HotKey::default()));
+        assert_eq!(running.key_bindings(), Some(&KeyBindings::default()));
     }
 
     #[test]
@@ -335,8 +353,50 @@ mod tests {
         assert_eq!(ServerFixture::detach_keys_in(&server, "copy-mode"), ["M-x"]);
         assert!(written.contains("bind-key -T root 'M-x' detach-client"));
         assert_eq!(
-            server.text(&["show-options", "-g", "-v", "@ringleader_config"]),
+            ServerFixture::option(&server, "@ringleader_config"),
             TmuxServerConfig::new(&ServerFixture::alt_x()).hash()
+        );
+    }
+
+    #[test]
+    fn applying_a_changed_next_session_key_unbinds_the_old_one_in_every_table() {
+        let server = TmuxTestServer::with_session("holder");
+        let tmux = server.command();
+
+        PrivateServer::new(&tmux)
+            .apply(&ServerFixture::alt_n_and_alt_down())
+            .unwrap();
+
+        for table in ServerFixture::TABLES {
+            let switching = ServerFixture::keys_running(&server, table, "switch-client -n");
+            assert_eq!(switching, ["M-Down", "M-n"], "{table}");
+            assert_eq!(
+                ServerFixture::detach_keys_in(&server, table),
+                ["C-q"],
+                "{table}"
+            );
+        }
+    }
+
+    #[test]
+    fn applying_changed_session_keys_records_the_new_hash_and_options() {
+        let server = TmuxTestServer::with_session("holder");
+        let tmux = server.command();
+        let changed = ServerFixture::alt_n_and_alt_down();
+
+        PrivateServer::new(&tmux).apply(&changed).unwrap();
+
+        assert_eq!(
+            ServerFixture::option(&server, "@ringleader_config"),
+            TmuxServerConfig::new(&changed).hash()
+        );
+        assert_eq!(
+            ServerFixture::option(&server, "@ringleader_next_session_keys"),
+            "M-n M-Down"
+        );
+        assert_eq!(
+            ServerFixture::option(&server, "@ringleader_previous_session_keys"),
+            "M-k M-Up"
         );
     }
 }

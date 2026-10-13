@@ -21,7 +21,7 @@ use super::service_ports::ServicePorts;
 use super::session_access::{SessionAccess, ShellOutcome};
 use super::session_lifecycle::SessionLifecycle;
 use super::session_monitor::SessionMonitor;
-use crate::domain::{Config, DiffStat, HotKey, PullRequest, Repo, Session, SessionSummary};
+use crate::domain::{Config, DiffStat, KeyBindings, PullRequest, Repo, Session, SessionSummary};
 
 pub struct SessionService {
     config: LoadedConfig,
@@ -136,15 +136,15 @@ impl SessionService {
             return Ok(());
         }
         self.lifecycle
-            .sync_server_config(self.config().return_key())
+            .sync_server_config(self.config().key_bindings())
     }
 
-    pub fn shown_return_key(&self) -> HotKey {
-        let configured = self.config().return_key().clone();
+    pub fn shown_key_bindings(&self) -> KeyBindings {
+        let configured = self.config().key_bindings().clone();
         if self.read_only_reason().is_none() {
             return configured;
         }
-        self.monitor.server_return_key().unwrap_or(configured)
+        self.monitor.server_key_bindings().unwrap_or(configured)
     }
 
     pub fn refuse_own_pane(&self) -> Result<(), ServiceError> {
@@ -420,7 +420,8 @@ mod tests {
             })
             .with_multiplexer(FakeMultiplexer::new().with_drifted_config("M-x"));
 
-        assert_eq!(fixture.service().shown_return_key().to_string(), "M-x");
+        let shown = fixture.service().shown_key_bindings();
+        assert_eq!(shown.return_key().to_string(), "M-x");
     }
 
     #[test]

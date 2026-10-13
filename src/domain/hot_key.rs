@@ -7,7 +7,6 @@ pub struct HotKey {
 }
 
 impl HotKey {
-    pub const DEFAULT: &'static str = "C-q";
     const NAMED_KEYS: [&'static str; 30] = [
         "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12", "Escape",
         "Enter", "Tab", "BTab", "Space", "BSpace", "Home", "End", "IC", "DC", "PageUp", "PageDown",
@@ -36,6 +35,13 @@ impl HotKey {
             modifiers,
         };
         key.is_reachable().then_some(key)
+    }
+
+    pub fn parse_valid<T: AsRef<str>>(texts: impl IntoIterator<Item = T>) -> Vec<Self> {
+        texts
+            .into_iter()
+            .filter_map(|text| Self::parse(text.as_ref()))
+            .collect()
     }
 
     pub fn shadows_agent_input(&self) -> bool {
@@ -113,12 +119,6 @@ impl HotKey {
 
     fn has(&self, modifier: Modifier) -> bool {
         self.modifiers.contains(&modifier)
-    }
-}
-
-impl Default for HotKey {
-    fn default() -> Self {
-        Self::parse(Self::DEFAULT).expect("the default return key parses")
     }
 }
 
@@ -211,7 +211,7 @@ mod tests {
     fn an_uppercase_letter_after_ctrl_means_the_same_key_as_the_lowercase_one() {
         let key = HotKey::parse("C-Q").unwrap();
 
-        assert_eq!(key, HotKey::default());
+        assert_eq!(key, HotKey::parse("C-q").unwrap());
     }
 
     #[test]
@@ -252,17 +252,12 @@ mod tests {
     }
 
     #[test]
-    fn the_default_and_other_rare_keys_leave_agent_input_alone() {
-        for text in ["C-q", "M-x", "F12", "M-}"] {
+    fn the_default_keys_and_other_rare_keys_leave_agent_input_alone() {
+        for text in ["C-q", "M-j", "M-Down", "M-k", "M-Up", "M-x", "F12", "M-}"] {
             assert!(
                 !HotKey::parse(text).unwrap().shadows_agent_input(),
                 "{text}"
             );
         }
-    }
-
-    #[test]
-    fn the_default_is_ctrl_q() {
-        assert_eq!(HotKey::default().to_string(), "C-q");
     }
 }

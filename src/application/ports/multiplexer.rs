@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 use super::agent_launch::AgentLaunch;
-use crate::domain::{HotKey, SessionMetadata, SessionObservation, SessionSize};
+use crate::domain::{KeyBindings, SessionMetadata, SessionObservation, SessionSize};
 
 pub trait Multiplexer: Send + Sync {
     fn socket(&self) -> PathBuf;
@@ -32,10 +32,13 @@ pub trait Multiplexer: Send + Sync {
         shell: &str,
     ) -> Result<String, MultiplexerError>;
     fn server_state(&self) -> Result<Option<ServerState>, MultiplexerError>;
-    fn server_config(&self, return_key: &HotKey) -> Result<Option<ServerConfig>, MultiplexerError>;
+    fn server_config(
+        &self,
+        key_bindings: &KeyBindings,
+    ) -> Result<Option<ServerConfig>, MultiplexerError>;
     fn socket_lost(&self) -> bool;
     fn restore_socket(&self) -> Result<bool, MultiplexerError>;
-    fn apply_config(&self, return_key: &HotKey) -> Result<(), MultiplexerError>;
+    fn apply_config(&self, key_bindings: &KeyBindings) -> Result<(), MultiplexerError>;
     fn version(&self) -> Result<String, MultiplexerError>;
 }
 
@@ -46,7 +49,7 @@ pub struct SessionSpec {
     launch: AgentLaunch,
     size: SessionSize,
     removed_env_names: Vec<String>,
-    return_key: HotKey,
+    key_bindings: KeyBindings,
 }
 
 impl SessionSpec {
@@ -57,7 +60,7 @@ impl SessionSpec {
             launch,
             size: SessionSize::default(),
             removed_env_names: Vec::new(),
-            return_key: HotKey::default(),
+            key_bindings: KeyBindings::default(),
         }
     }
 
@@ -72,9 +75,9 @@ impl SessionSpec {
         }
     }
 
-    pub fn with_return_key(self, return_key: &HotKey) -> Self {
+    pub fn with_key_bindings(self, key_bindings: &KeyBindings) -> Self {
         Self {
-            return_key: return_key.clone(),
+            key_bindings: key_bindings.clone(),
             ..self
         }
     }
@@ -103,8 +106,8 @@ impl SessionSpec {
         &self.removed_env_names
     }
 
-    pub fn return_key(&self) -> &HotKey {
-        &self.return_key
+    pub fn key_bindings(&self) -> &KeyBindings {
+        &self.key_bindings
     }
 }
 
@@ -134,14 +137,14 @@ impl ServerState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerConfig {
     current: bool,
-    return_key: Option<HotKey>,
+    key_bindings: Option<KeyBindings>,
 }
 
 impl ServerConfig {
-    pub fn new(current: bool, return_key: Option<&HotKey>) -> Self {
+    pub fn new(current: bool, key_bindings: Option<&KeyBindings>) -> Self {
         Self {
             current,
-            return_key: return_key.cloned(),
+            key_bindings: key_bindings.cloned(),
         }
     }
 
@@ -149,8 +152,8 @@ impl ServerConfig {
         self.current
     }
 
-    pub fn return_key(&self) -> Option<&HotKey> {
-        self.return_key.as_ref()
+    pub fn key_bindings(&self) -> Option<&KeyBindings> {
+        self.key_bindings.as_ref()
     }
 }
 
