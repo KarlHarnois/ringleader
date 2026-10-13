@@ -236,16 +236,14 @@ mod tests {
     }
 
     #[test]
-    fn a_loop_awaiting_a_capture_wakes_within_a_frame() {
+    fn a_loop_awaiting_only_a_capture_wakes_within_a_frame() {
         let held = HeldCalls::all();
-        let session = ServiceFixture::session("fix-auth");
-        let fixture = ServiceFixture::new()
-            .with_sessions(std::slice::from_ref(&session))
-            .with_multiplexer(
-                FakeMultiplexer::new()
-                    .with_live(ServiceFixture::waiting(&session))
-                    .on_call("capture_pane", held.hook()),
-            );
+        let unregistered = ServiceFixture::session("fix-auth");
+        let fixture = ServiceFixture::new().with_multiplexer(
+            FakeMultiplexer::new()
+                .with_live(ServiceFixture::waiting(&unregistered).without_metadata())
+                .on_call("capture_pane", held.hook()),
+        );
         let harness = UiHarness::new();
         let mut app = UiHarness::app(&fixture);
         let mut event_loop = harness.event_loop(ScriptedInput::events(Vec::new()));
