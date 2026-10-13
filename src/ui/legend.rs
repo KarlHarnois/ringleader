@@ -127,6 +127,14 @@ mod tests {
     }
 
     #[test]
+    fn a_row_that_fills_its_room_exactly_stays_on_one_line() {
+        assert_eq!(
+            LegendFixture::rows(30),
+            ["Fruit        A apple  B banana", "             C cherry"]
+        );
+    }
+
+    #[test]
     fn an_entry_wider_than_the_room_gets_a_row_of_its_own() {
         assert_eq!(
             LegendFixture::rows(10),
