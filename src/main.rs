@@ -109,7 +109,7 @@ impl CompositionRoot {
         let log = match &state_ready {
             Ok(()) => self.start_log(cli),
             Err(error) => Err(AppLog::disabled(
-                &state_directory.join(AppLog::FILE_NAME),
+                &AppLog::path_in(&state_directory),
                 &error.to_string(),
             )),
         };
@@ -312,7 +312,8 @@ impl CompositionRoot {
             &self.programs.git().to_string_lossy(),
             &self.paths.state_directory(),
         )
-        .with_tmux_server(self.server.socket(), self.server.config());
+        .with_tmux_server(self.server.socket(), self.server.config())
+        .with_log_file(&AppLog::path_in(&self.paths.state_directory()));
         match self.paths.has_runtime_directory() {
             true => paths,
             false => paths.with_socket_in_state_directory(),

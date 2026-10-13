@@ -219,6 +219,8 @@ mod tests {
     struct AppFixture;
 
     impl AppFixture {
+        const HELP_PAST_THE_END: usize = 50;
+
         fn two_waiting_sessions() -> ServiceFixture {
             let first = ServiceFixture::session("dark-mode");
             let second = ServiceFixture::session("fix-auth");
@@ -287,6 +289,15 @@ mod tests {
 
         fn press(app: &mut App, character: char) {
             app.handle_event(&UiHarness::character(character));
+        }
+
+        fn help_scrolled_past_its_end(app: &mut App, width: u16, height: u16) -> String {
+            Self::press(app, '?');
+            Self::screen(app, width, height);
+            for _ in 0..Self::HELP_PAST_THE_END {
+                Self::press(app, 'j');
+            }
+            Self::screen(app, width, height)
         }
 
         fn request_create(app: &mut App, name: &str) -> AppRequest {
@@ -1003,6 +1014,16 @@ mod tests {
         assert!(opened.contains("┌ Help "));
         assert!(opened.contains("n            create a session"));
         assert!(!app.dialogs.is_open());
+    }
+
+    #[test]
+    fn the_help_shows_the_log_file_of_the_diagnostic_paths() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        let help = AppFixture::help_scrolled_past_its_end(&mut app, 100, 28);
+
+        assert!(help.contains(&format!("Log          {}", ServiceFixture::LOG_FILE)));
     }
 
     #[test]

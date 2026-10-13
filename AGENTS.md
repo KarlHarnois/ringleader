@@ -50,8 +50,6 @@ Dependencies point inward only. An inner layer never imports an outer one.
 - `main.rs` is the composition root and the only production code that imports every layer. The Wiring section says what it builds.
 - `src/test_support/` may import any layer, because it fakes the ports and drives the outer layers under test. Inline `#[cfg(test)]` modules follow their layer's rule, except that any of them may also import `src/test_support/`.
 
-The code breaks the `ui` and `cli` rule in one place today: `AppLog` in `ui/dialogs/dialog.rs`. It is a violation to fix, not precedent to copy.
-
 A new capability that `application`, `ui`, or `cli` needs from outside the process goes through a port, because none of them may import `adapters`. `CompositionRoot` and the types in `adapters` reach the outside directly. Logging needs no port: every layer writes through the `log` macros, and `CompositionRoot` installs `AppLog` behind them. The steps for a port:
 
 1. Define the trait in a new file under `application/ports/`, named after the role, with an error type beside it when any of its methods can fail, and re-export them from `ports/mod.rs`.
@@ -225,7 +223,7 @@ viewer exits.
     │   ├── repo_overrides.rs     # RepoOverrides: the add_repo and remove_repo workers
     │   ├── pending.rs            # Pending, a worker result the TUI polls and the CLI waits on
     │   ├── doctor.rs             # Doctor
-    │   ├── diagnostic_paths.rs   # DiagnosticPaths, the program, state, and private tmux server paths doctor and help report
+    │   ├── diagnostic_paths.rs   # DiagnosticPaths, the program, state, and private tmux server paths doctor and help report, and the log file help shows
     │   ├── tool_version.rs       # ToolVersion, the major and minor numbers of a tmux or git version
     │   ├── doctor_report.rs      # DoctorReport, the doctor's info, warning, and problem lines
     │   ├── registry_audit.rs     # RegistryAudit, the doctor's checks of each registry entry
