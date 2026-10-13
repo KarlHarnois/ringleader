@@ -25,10 +25,10 @@ impl<'a> UpstreamMerger<'a> {
     ) -> Result<UpstreamMerge, WorkspaceError> {
         let branch = self.upstream_branch(worktree, base_branch)?;
         self.fetch(worktree, &branch)?;
-        let commit = self.commit_of(worktree, &branch.origin_ref())?;
-        let upstream = branch.origin_suggestion();
-        let outcome = self.merge_unless_contained(worktree, &upstream, &commit)?;
-        Ok(UpstreamMerge::new(&upstream, outcome))
+        let origin_ref = branch.origin_ref();
+        let commit = self.commit_of(worktree, &origin_ref)?;
+        let outcome = self.merge_unless_contained(worktree, &origin_ref, &commit)?;
+        Ok(UpstreamMerge::new(&branch.origin_suggestion(), outcome))
     }
 
     fn upstream_branch(
@@ -72,7 +72,7 @@ impl<'a> UpstreamMerger<'a> {
     fn merge_unless_contained(
         &self,
         worktree: &Path,
-        upstream: &str,
+        origin_ref: &str,
         commit: &str,
     ) -> Result<MergeOutcome, WorkspaceError> {
         if self.head_contains(worktree, commit)? {
@@ -80,7 +80,7 @@ impl<'a> UpstreamMerger<'a> {
         }
         let merge = GitInvocation::in_worktree(worktree, "merge")
             .writing()
-            .args(["--no-edit", upstream]);
+            .args(["--no-edit", origin_ref]);
         match self.git.run_checked(&merge) {
             Ok(_) => Ok(MergeOutcome::Merged),
             Err(failure) => self.conflicts_or(worktree, failure),
@@ -224,6 +224,12 @@ mod tests {
             fixture
         }
 
+        fn with_local_branch_shadowing_origin(self) -> Self {
+            let shadow = format!("origin/{}", GitTestRepo::BRANCH);
+            self.origin.git(&self.clone, &["branch", &shadow]);
+            self
+        }
+
         fn without_remote(self) -> Self {
             self.origin
                 .git(&self.clone, &["remote", "remove", "origin"]);
@@ -332,6 +338,17 @@ mod tests {
         let merge = fixture.merge().unwrap();
 
         assert_eq!(merge.upstream(), "origin/main");
+        assert!(fixture.has_merged(&upstream_tip));
+    }
+
+    #[test]
+    fn a_local_branch_named_like_the_origin_copy_does_not_shadow_it() {
+        let fixture = MergeFixture::new().with_local_branch_shadowing_origin();
+        fixture.commit_on_branch("work.txt");
+        let upstream_tip = fixture.commit_upstream("news.txt");
+
+        fixture.merge().unwrap();
+
         assert!(fixture.has_merged(&upstream_tip));
     }
 
