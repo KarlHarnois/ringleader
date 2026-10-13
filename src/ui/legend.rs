@@ -119,18 +119,22 @@ mod tests {
     }
 
     #[test]
-    fn a_narrow_legend_wraps_entries_under_the_label() {
+    fn a_row_that_fills_its_room_exactly_stays_on_one_line() {
         assert_eq!(
-            LegendFixture::rows(31),
+            LegendFixture::rows(30),
             ["Fruit        A apple  B banana", "             C cherry"]
         );
     }
 
     #[test]
-    fn a_row_that_fills_its_room_exactly_stays_on_one_line() {
+    fn a_row_one_column_past_its_room_wraps_under_the_label() {
         assert_eq!(
-            LegendFixture::rows(30),
-            ["Fruit        A apple  B banana", "             C cherry"]
+            LegendFixture::rows(29),
+            [
+                "Fruit        A apple",
+                "             B banana",
+                "             C cherry"
+            ]
         );
     }
 
