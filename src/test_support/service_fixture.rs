@@ -208,6 +208,7 @@ impl ServiceFixture {
         Agent::new("claude", "claude")
             .with_env_names(&["ANTHROPIC_API_KEY".to_string()])
             .with_prompt_args(&["{prompt}".to_string()])
+            .with_plan_args(&["--permission-mode".to_string(), "plan".to_string()])
     }
 
     pub fn agent_with_input() -> Agent {
