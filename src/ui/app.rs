@@ -707,6 +707,7 @@ mod tests {
         let mut app = AppFixture::started(&fixture, 100, 28);
         let request = AppFixture::request_create(&mut app, "new-idea");
         AppFixture::perform(&mut app, request);
+        app.on_tick(Instant::now());
 
         app.into_service().wait_startup_input(|| {
             fixture.multiplexer().release_typing();
