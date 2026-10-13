@@ -1,6 +1,7 @@
 use super::CliOutput;
 use crate::adapters::signal_flags::SignalFlags;
-use crate::application::{Pending, ServiceError};
+use crate::application::ports::Lock;
+use crate::application::{Pending, ServiceError, SessionService};
 
 pub struct CliSession {
     output: CliOutput,
@@ -26,12 +27,22 @@ impl CliSession {
     }
 
     pub fn wait<T: Send + 'static>(&self, pending: &Pending<T>) -> Result<T, CommandStop> {
-        match pending.wait_unless(|| self.signals.raised().is_some()) {
+        match pending.wait_unless(|| self.is_signaled()) {
             Some(result) => result.map_err(CommandStop::Failed),
             None => Err(CommandStop::Interrupted(
                 self.signals.raised().unwrap_or_default(),
             )),
         }
+    }
+
+    pub fn wait_for_startup_input(&mut self, service: &SessionService, lock: &mut dyn Lock) {
+        lock.release();
+        if let Some(note) = service.startup_wait_note()
+            && !self.is_signaled()
+        {
+            self.output.note(note);
+        }
+        service.wait_startup_input(|| self.is_signaled());
     }
 
     pub fn finish(&mut self, result: Result<u8, CommandStop>) -> CliExit {
@@ -56,6 +67,10 @@ impl CliSession {
             }
             None => CliExit::Code(code),
         }
+    }
+
+    fn is_signaled(&self) -> bool {
+        self.signals.raised().is_some()
     }
 }
 

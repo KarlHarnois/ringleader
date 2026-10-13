@@ -19,11 +19,11 @@ pub struct SessionCreation {
     host: Arc<dyn HostProbe>,
     registry: Arc<dyn SessionRegistry>,
     clock: Arc<dyn Clock>,
-    hooks: AgentHooks,
+    hooks: Arc<AgentHooks>,
 }
 
 impl SessionCreation {
-    pub fn new(ports: &ServicePorts) -> Self {
+    pub fn new(ports: &ServicePorts, hooks: Arc<AgentHooks>) -> Self {
         Self {
             branches: BranchAvailability::new(ports),
             workspace: ports.repos().workspace(),
@@ -31,7 +31,7 @@ impl SessionCreation {
             host: ports.repos().host(),
             registry: ports.state().registry(),
             clock: ports.state().clock(),
-            hooks: AgentHooks::new(ports),
+            hooks,
         }
     }
 
@@ -171,6 +171,7 @@ impl SessionCreation {
 #[cfg(test)]
 mod tests {
     use std::path::Path;
+    use std::time::{Duration, Instant};
 
     use super::*;
     use crate::application::ports::{MultiplexerError, WorkspaceError, WorktreeEntry};
@@ -340,6 +341,40 @@ mod tests {
 
         CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap();
 
+        assert!(
+            fixture
+                .multiplexer()
+                .wait_for_typing("ringleader-fix-auth", Duration::from_secs(2))
+        );
+        assert_eq!(
+            fixture
+                .multiplexer()
+                .typed_when_ready("ringleader-fix-auth"),
+            ["/color"]
+        );
+    }
+
+    #[test]
+    fn create_returns_before_the_startup_input_is_typed() {
+        let fixture = ServiceFixture::new()
+            .with_config(ServiceFixture::config_with_input())
+            .with_multiplexer(FakeMultiplexer::new().blocking_typing());
+        let mut service = fixture.service();
+        let started = Instant::now();
+
+        service
+            .create_session(&CreateFixture::request("fix-auth"))
+            .unwrap();
+
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(
+            fixture
+                .multiplexer()
+                .typed_when_ready("ringleader-fix-auth")
+                .is_empty()
+        );
+        fixture.multiplexer().release_typing();
+        service.wait_startup_input(|| false);
         assert_eq!(
             fixture
                 .multiplexer()

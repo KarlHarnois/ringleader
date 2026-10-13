@@ -52,6 +52,10 @@ impl Lock for FileLock {
     fn acquire_for_write(&mut self) -> Result<(), LockError> {
         self.acquire()
     }
+
+    fn release(&mut self) {
+        self.held = None;
+    }
 }
 
 #[cfg(test)]
@@ -98,6 +102,18 @@ mod tests {
         let mut first = FileLock::new(&path);
         first.acquire_lifetime().unwrap();
         drop(first);
+
+        assert!(LockFixture::acquired_once_forked_children_exec(&path));
+    }
+
+    #[test]
+    fn a_released_lock_frees_the_path() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("lock");
+        let mut first = FileLock::new(&path);
+        first.acquire_for_write().unwrap();
+
+        first.release();
 
         assert!(LockFixture::acquired_once_forked_children_exec(&path));
     }
