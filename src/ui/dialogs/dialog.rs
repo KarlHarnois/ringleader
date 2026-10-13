@@ -225,7 +225,9 @@ mod tests {
         let new_session = PlacementFixture::render(DialogOpening::NewSession, 100, 28);
 
         assert_eq!(PlacementFixture::symbol(&help, 12, 2), "┌");
+        assert_eq!(PlacementFixture::symbol(&help, 12, 24), "└");
         assert_eq!(PlacementFixture::symbol(&new_session, 12, 3), "┌");
+        assert_eq!(PlacementFixture::symbol(&new_session, 12, 24), "└");
     }
 
     #[test]
