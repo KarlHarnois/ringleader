@@ -118,7 +118,7 @@ impl App {
                 if let Some(name) = select {
                     self.home.select(&name, &self.service);
                 }
-                self.status.info(message);
+                self.status.show(Some(message));
             }
             OperationOutcome::ConfirmDelete {
                 name,
@@ -224,6 +224,7 @@ mod tests {
     use ratatui::backend::TestBackend;
 
     use super::*;
+    use crate::application::DeleteImpact;
     use crate::application::ports::{ConfigError, MultiplexerError, UnmergedCommits};
     use crate::domain::{Config, ConfigDraft, DiffStat, PullRequestState};
     use crate::test_support::{
@@ -909,6 +910,27 @@ mod tests {
             " deleted fix-auth, branch tip {}",
             ServiceFixture::TIP
         )));
+    }
+
+    #[test]
+    fn a_delete_that_leaves_a_stray_session_reports_it_as_an_error() {
+        let recorded = Path::new(ServiceFixture::OTHER_RUNTIME_SOCKET);
+        let session = ServiceFixture::session("fix-auth").on_socket(recorded);
+        let fixture = ServiceFixture::new()
+            .with_sessions(std::slice::from_ref(&session))
+            .with_workspace(ServiceFixture::workspace_for(&[&session]))
+            .with_host(ServiceFixture::host_for(&[&session]).with_tmux_server_on(recorded));
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        app.perform(BlockingOperation::Delete {
+            name: "fix-auth".to_string(),
+            seen: DeleteImpact::default(),
+        });
+
+        assert!(matches!(
+            app.status.message(),
+            Some(StatusMessage::Error(text)) if text.contains("kill-session")
+        ));
     }
 
     #[test]

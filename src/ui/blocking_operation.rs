@@ -1,5 +1,6 @@
+use super::status_bar::StatusMessage;
 use crate::application::{
-    CreateRequest, DeleteConfirmation, DeleteImpact, ServiceError, SessionService,
+    CreateRequest, DeleteConfirmation, DeleteImpact, DeleteOutcome, ServiceError, SessionService,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,9 +77,17 @@ impl BlockingOperation {
         }
     }
 
+    fn deleted(name: &str, outcome: &DeleteOutcome) -> OperationOutcome {
+        let summary = outcome.summary(name);
+        match outcome.stray_session() {
+            Some(warning) => OperationOutcome::done_with_warning(summary, warning),
+            None => OperationOutcome::done(summary, None),
+        }
+    }
+
     fn delete(service: &mut SessionService, name: String, seen: DeleteImpact) -> OperationOutcome {
         match service.delete_session(&name, &DeleteConfirmation::confirmed(seen)) {
-            Ok(outcome) => OperationOutcome::done(outcome.summary(&name), None),
+            Ok(outcome) => Self::deleted(&name, &outcome),
             Err(ServiceError::GuardsChanged { impact, .. }) => OperationOutcome::ConfirmDelete {
                 name,
                 impact: *impact,
@@ -92,7 +101,7 @@ impl BlockingOperation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OperationOutcome {
     Done {
-        message: String,
+        message: StatusMessage,
         select: Option<String>,
     },
     ConfirmDelete {
@@ -105,6 +114,16 @@ pub enum OperationOutcome {
 
 impl OperationOutcome {
     fn done(message: String, select: Option<String>) -> Self {
-        Self::Done { message, select }
+        Self::Done {
+            message: StatusMessage::Info(message),
+            select,
+        }
+    }
+
+    fn done_with_warning(message: String, warning: &str) -> Self {
+        Self::Done {
+            message: StatusMessage::Error(format!("{message}; {warning}")),
+            select: None,
+        }
     }
 }

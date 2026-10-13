@@ -71,6 +71,10 @@ impl DeleteOutcome {
         self.branch
     }
 
+    pub fn stray_session(&self) -> Option<&str> {
+        self.stray_session.as_deref()
+    }
+
     pub fn kept(&self) -> Option<(&Path, &str)> {
         self.kept
             .as_ref()
@@ -78,14 +82,6 @@ impl DeleteOutcome {
     }
 
     pub fn summary(&self, name: &str) -> String {
-        let summary = self.removal_summary(name);
-        match &self.stray_session {
-            Some(warning) => format!("{summary}; {warning}"),
-            None => summary,
-        }
-    }
-
-    fn removal_summary(&self, name: &str) -> String {
         if let Some((worktree, branch)) = self.kept() {
             return format!(
                 "forgot {name}, left the worktree {} and the branch {branch} on disk, run ringleader doctor",

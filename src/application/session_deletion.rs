@@ -313,10 +313,11 @@ mod tests {
 
         let outcome = DeleteFixture::force(&mut fixture.service()).unwrap();
 
-        assert!(outcome.summary("fix-auth").contains(&format!(
+        assert!(outcome.stray_session().unwrap().contains(&format!(
             "tmux -S {} kill-session -t '=ringleader-fix-auth:'",
             recorded.display()
         )));
+        assert!(!outcome.summary("fix-auth").contains("kill-session"));
     }
 
     #[test]

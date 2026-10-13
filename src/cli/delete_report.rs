@@ -21,10 +21,14 @@ impl<'a> DeleteReport<'a> {
         lines
     }
 
-    pub fn warnings(&self, impact: &DeleteImpact) -> Vec<String> {
-        impact
-            .warnings()
-            .iter()
+    pub fn warnings(&self, outcome: &DeleteOutcome) -> Vec<String> {
+        let losses = match outcome.kept() {
+            Some(_) => Vec::new(),
+            None => outcome.impact().warnings(),
+        };
+        losses
+            .into_iter()
+            .chain(outcome.stray_session().map(str::to_string))
             .map(|warning| format!("warning: {warning}"))
             .collect()
     }
