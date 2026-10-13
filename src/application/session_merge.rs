@@ -18,6 +18,8 @@ pub struct SessionMerge {
 impl SessionMerge {
     const RESOLUTION_REQUEST: &'static str = "Resolve each conflict keeping the intent of both sides, run the tests, then commit the merge.";
 
+    const NAMED_CONFLICT_LIMIT: usize = 20;
+
     pub fn new(ports: &ServicePorts) -> Self {
         Self {
             workspace: ports.repos().workspace(),
@@ -95,9 +97,24 @@ impl SessionMerge {
     fn conflict_prompt(upstream: &str, paths: &[String]) -> String {
         format!(
             "Merging {upstream} into this branch stopped on conflicts in {}. {}",
-            paths.join(", "),
+            Self::named_paths(paths),
             Self::RESOLUTION_REQUEST
         )
+    }
+
+    fn named_paths(paths: &[String]) -> String {
+        let named: Vec<&str> = paths
+            .iter()
+            .take(Self::NAMED_CONFLICT_LIMIT)
+            .map(String::as_str)
+            .collect();
+        match paths.len() - named.len() {
+            0 => named.join(", "),
+            unnamed => format!(
+                "{} and {unnamed} more listed by git status",
+                named.join(", ")
+            ),
+        }
     }
 }
 
@@ -246,6 +263,26 @@ mod tests {
                 SessionMerge::RESOLUTION_REQUEST
             )]
         );
+    }
+
+    #[test]
+    fn a_long_conflict_list_names_the_first_paths_and_counts_the_rest() {
+        let paths: Vec<String> = (1..=25)
+            .map(|number| format!("src/file{number}.rs"))
+            .collect();
+        let fixture = MergeFixture::ending(MergeOutcome::Conflicted(paths));
+
+        MergeFixture::merge(&fixture).unwrap();
+
+        let typed = fixture
+            .multiplexer()
+            .typed_if_ready(MergeFixture::TMUX_NAME)
+            .concat();
+        assert!(
+            typed.contains("src/file20.rs and 5 more listed by git status."),
+            "{typed}"
+        );
+        assert!(!typed.contains("src/file21.rs"), "{typed}");
     }
 
     #[test]
