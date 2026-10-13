@@ -52,7 +52,7 @@ Dependencies point inward only. An inner layer never imports an outer one.
 
 The code breaks the `ui` and `cli` rule in four places today: `SignalFlags` in `ui/event_loop.rs`, `cli/cli_session.rs`, and a test in `cli/session_commands.rs`, and `AppLog` in `ui/dialogs/dialog.rs`. They are violations to fix, not precedent to copy.
 
-A new capability that `application`, `ui`, or `cli` needs from outside the process goes through a port, because none of them may import `adapters`. `CompositionRoot` and the types in `adapters` reach the outside directly. The steps for a port:
+A new capability that `application`, `ui`, or `cli` needs from outside the process goes through a port, because none of them may import `adapters`. `CompositionRoot` and the types in `adapters` reach the outside directly. Logging needs no port: every layer writes through the `log` macros, and `CompositionRoot` installs `AppLog` behind them. The steps for a port:
 
 1. Define the trait in a new file under `application/ports/`, named after the role, with an error type beside it when any of its methods can fail, and re-export them from `ports/mod.rs`.
 2. Implement it in `adapters/`, named after the technology and the role.
