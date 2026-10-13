@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 use crate::application::{Pending, SessionService};
@@ -8,6 +8,7 @@ use crate::domain::PullRequest;
 pub struct PullRequestFeed {
     pull_requests: HashMap<String, PullRequest>,
     pending: Option<Pending<HashMap<String, Option<PullRequest>>>>,
+    looked_up: HashSet<String>,
     next_refresh: Option<Instant>,
     refresh_requested: bool,
 }
@@ -23,12 +24,13 @@ impl PullRequestFeed {
 
     pub fn keep_only(&mut self, names: &[String]) {
         self.pull_requests.retain(|name, _| names.contains(name));
+        self.looked_up.retain(|name| names.contains(name));
     }
 
     pub fn tick(&mut self, now: Instant, visible: &[String], service: &SessionService) {
         let next_refresh = now + service.config().intervals().pull_request_refresh();
         self.collect(next_refresh);
-        if self.is_due(now) && !visible.is_empty() {
+        if self.is_due(now, visible) && !visible.is_empty() {
             self.start(next_refresh, visible, service);
         }
     }
@@ -45,14 +47,19 @@ impl PullRequestFeed {
         }
     }
 
-    fn is_due(&self, now: Instant) -> bool {
+    fn is_due(&self, now: Instant, visible: &[String]) -> bool {
         let scheduled = self.refresh_requested || self.next_refresh.is_none_or(|due| now >= due);
-        self.pending.is_none() && scheduled
+        self.pending.is_none() && (scheduled || self.shows_new_rows(visible))
+    }
+
+    fn shows_new_rows(&self, visible: &[String]) -> bool {
+        visible.iter().any(|name| !self.looked_up.contains(name))
     }
 
     fn start(&mut self, next_refresh: Instant, visible: &[String], service: &SessionService) {
         self.next_refresh = Some(next_refresh);
         self.refresh_requested = false;
+        self.looked_up.extend(visible.iter().cloned());
         self.pending = Some(service.find_pull_requests(visible));
     }
 
@@ -83,6 +90,7 @@ mod tests {
 
     impl FeedFixture {
         const NAME: &'static str = "fix-auth";
+        const OTHER: &'static str = "dark-mode";
         const LIMIT: Duration = Duration::from_secs(2);
 
         fn open(number: u64) -> PullRequest {
@@ -100,6 +108,20 @@ mod tests {
                 ))
         }
 
+        fn with_two_pull_requests() -> ServiceFixture {
+            let sessions = [
+                ServiceFixture::session(Self::NAME),
+                ServiceFixture::session(Self::OTHER),
+            ];
+            let repo = Path::new(ServiceFixture::REPO);
+            let fake = FakePullRequests::new()
+                .with_pull_request(repo, sessions[0].branch(), Self::open(142))
+                .with_pull_request(repo, sessions[1].branch(), Self::open(7));
+            ServiceFixture::new()
+                .with_sessions(&sessions)
+                .with_pull_requests(fake)
+        }
+
         fn without_pull_request() -> ServiceFixture {
             ServiceFixture::new().with_sessions(&[ServiceFixture::session(Self::NAME)])
         }
@@ -109,10 +131,19 @@ mod tests {
         }
 
         fn settle(feed: &mut PullRequestFeed, fixture: &ServiceFixture, service: &SessionService) {
+            Self::settle_showing(feed, fixture, service, &Self::visible());
+        }
+
+        fn settle_showing(
+            feed: &mut PullRequestFeed,
+            fixture: &ServiceFixture,
+            service: &SessionService,
+            visible: &[String],
+        ) {
             let recorded = fixture.pull_requests().calls().len();
             let deadline = Instant::now() + Self::LIMIT;
             while Instant::now() < deadline {
-                feed.tick(Instant::now(), &Self::visible(), service);
+                feed.tick(Instant::now(), visible, service);
                 let looked_up = fixture.pull_requests().calls().len() > recorded;
                 if looked_up && feed.pending.is_none() {
                     break;
@@ -177,6 +208,37 @@ mod tests {
         FeedFixture::settle(&mut feed, &fixture, &service);
 
         assert_eq!(fixture.pull_requests().calls().len(), 3);
+    }
+
+    #[test]
+    fn a_row_that_enters_the_view_is_looked_up_before_the_timer() {
+        let fixture = FeedFixture::with_two_pull_requests();
+        let service = fixture.service();
+        let mut feed = PullRequestFeed::default();
+        FeedFixture::settle(&mut feed, &fixture, &service);
+        let both = [
+            FeedFixture::NAME.to_string(),
+            FeedFixture::OTHER.to_string(),
+        ];
+
+        FeedFixture::settle_showing(&mut feed, &fixture, &service, &both);
+
+        assert_eq!(
+            feed.pull_requests().get(FeedFixture::OTHER),
+            Some(&FeedFixture::open(7))
+        );
+    }
+
+    #[test]
+    fn rows_already_looked_up_wait_for_the_timer() {
+        let fixture = FeedFixture::with_pull_request(142);
+        let service = fixture.service();
+        let mut feed = PullRequestFeed::default();
+        FeedFixture::settle(&mut feed, &fixture, &service);
+
+        feed.tick(Instant::now(), &FeedFixture::visible(), &service);
+
+        assert!(feed.pending.is_none());
     }
 
     #[test]
