@@ -71,6 +71,11 @@ impl App {
         self.dialogs.poll();
     }
 
+    pub fn observe(&mut self) {
+        let outcome = self.home.observe(&mut self.service);
+        self.status.failure(outcome);
+    }
+
     pub fn poll(&mut self, now: Instant) {
         let outcome = self.home.poll(now, &mut self.service);
         self.status.failure(outcome);
@@ -193,11 +198,6 @@ impl App {
             Ok(()) => self.status.show(None),
             Err(error) => self.status.error(error),
         }
-    }
-
-    fn observe(&mut self) {
-        let outcome = self.home.observe(&mut self.service);
-        self.status.failure(outcome);
     }
 }
 

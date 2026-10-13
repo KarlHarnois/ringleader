@@ -67,6 +67,7 @@ where
     pub fn run(&mut self, app: &mut App) -> io::Result<()> {
         let size = self.terminal.size().map_err(io::Error::other)?;
         app.resize(size.width, size.height);
+        app.observe();
         let mut next_tick = Instant::now();
         loop {
             if self.signals.raised().is_some() {
@@ -247,7 +248,6 @@ mod tests {
             );
         let harness = UiHarness::new();
         let mut app = UiHarness::app(&fixture);
-        UiHarness::settle(&mut app);
         let mut event_loop = harness.event_loop(ScriptedInput::events(Vec::new()));
 
         event_loop.run(&mut app).unwrap();
@@ -311,7 +311,6 @@ mod tests {
             .with_multiplexer(FakeMultiplexer::new().with_live(ServiceFixture::waiting(&session)));
         let harness = UiHarness::new();
         let mut app = UiHarness::app(&fixture);
-        UiHarness::settle(&mut app);
         let mut event_loop = harness.event_loop(ScriptedInput::events(vec![
             UiHarness::key(KeyCode::Enter),
             UiHarness::character('q'),
@@ -343,7 +342,6 @@ mod tests {
         let fixture = UiHarness::exited_session_fixture("fix-auth");
         let harness = UiHarness::new();
         let mut app = UiHarness::app(&fixture);
-        UiHarness::settle(&mut app);
         let mut event_loop =
             harness.event_loop(ScriptedInput::events(vec![UiHarness::character('s')]));
 
@@ -363,7 +361,6 @@ mod tests {
         let fixture = UiHarness::exited_session_fixture("fix-auth");
         let harness = UiHarness::new();
         let mut app = UiHarness::app(&fixture);
-        UiHarness::settle(&mut app);
         let input =
             ScriptedInput::events(vec![UiHarness::character('s'), UiHarness::character('q')])
                 .then_after_a_pause(vec![UiHarness::character('r')]);
@@ -380,7 +377,6 @@ mod tests {
         let fixture = UiHarness::exited_session_fixture("fix-auth");
         let harness = UiHarness::new();
         let mut app = UiHarness::app(&fixture);
-        UiHarness::settle(&mut app);
         let mut event_loop = harness.event_loop(ScriptedInput::events(vec![
             UiHarness::character('s'),
             crossterm::event::Event::Resize(UiHarness::WIDTH, UiHarness::HEIGHT),
@@ -401,7 +397,6 @@ mod tests {
             .with_multiplexer(FakeMultiplexer::new().with_live(ServiceFixture::waiting(&session)));
         let harness = UiHarness::new();
         let mut app = UiHarness::app(&fixture);
-        UiHarness::settle(&mut app);
         let input = ScriptedInput::events(vec![
             UiHarness::character('d'),
             UiHarness::key(KeyCode::Enter),
@@ -419,7 +414,6 @@ mod tests {
         let fixture = ShellLoopFixture::live();
         let harness = UiHarness::new();
         let mut app = UiHarness::app(&fixture);
-        UiHarness::settle(&mut app);
         let mut event_loop =
             harness.event_loop(ScriptedInput::events(vec![UiHarness::character('t')]));
 
@@ -438,7 +432,6 @@ mod tests {
         let harness = UiHarness::new();
         let shells = RecordingShells::default();
         let mut app = UiHarness::app(&fixture);
-        UiHarness::settle(&mut app);
         let mut event_loop = harness
             .event_loop(ScriptedInput::events(vec![UiHarness::character('t')]))
             .with_shells(Box::new(shells.clone()));
@@ -461,7 +454,6 @@ mod tests {
         let fixture = ShellLoopFixture::stopped();
         let harness = UiHarness::new();
         let mut app = UiHarness::app(&fixture);
-        UiHarness::settle(&mut app);
         let mut event_loop = harness
             .event_loop(ScriptedInput::events(vec![UiHarness::character('t')]))
             .with_shells(Box::new(RecordingShells::failing()));
@@ -478,7 +470,6 @@ mod tests {
         let fixture = ServiceFixture::new().with_sessions(&[session]);
         let harness = UiHarness::new();
         let mut app = UiHarness::app(&fixture);
-        UiHarness::settle(&mut app);
         let mut event_loop = harness.event_loop(ScriptedInput::events(vec![
             UiHarness::key(KeyCode::Down),
             UiHarness::key(KeyCode::Up),
