@@ -462,6 +462,22 @@ mod tests {
     }
 
     #[test]
+    fn a_shown_capture_leaves_the_preview_when_the_selection_moves() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        let held = HeldCalls::all();
+        fixture
+            .multiplexer()
+            .add_call_hook("capture_pane", held.hook());
+
+        AppFixture::press(&mut app, 'j');
+        let screen = AppFixture::screen(&app, 100, 28);
+        held.release();
+
+        assert!(!screen.contains("dark mode output"));
+    }
+
+    #[test]
     fn the_preview_refreshes_on_its_own_timer() {
         let fixture = AppFixture::two_waiting_sessions();
         let start = Instant::now();
