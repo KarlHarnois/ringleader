@@ -340,6 +340,14 @@ mod tests {
             clone
         }
 
+        fn fetch_only_the_default_branch(fixture: &GitTestRepo, clone: &Path) {
+            let refspec = format!(
+                "+refs/heads/{0}:refs/remotes/origin/{0}",
+                GitTestRepo::BRANCH
+            );
+            fixture.git(clone, &["config", "remote.origin.fetch", &refspec]);
+        }
+
         fn commit_ahead(fixture: &GitTestRepo, repo: &Path, branch: &str) {
             let tree = fixture.git(repo, &["rev-parse", "HEAD^{tree}"]);
             let theirs = fixture.git(repo, &["commit-tree", "-p", "HEAD", "-m", "Theirs", &tree]);
@@ -429,6 +437,17 @@ mod tests {
         let clone = WorktreeFixture::clone_with_branch(&origin);
 
         origin.git(&clone, &["push", "-q", "origin", BRANCH]);
+
+        assert!(WorktreeFixture::is_published(&origin, &clone));
+    }
+
+    #[test]
+    fn a_branch_pushed_from_a_clone_that_fetches_only_the_default_branch_is_published() {
+        let origin = GitTestRepo::new();
+        let clone = WorktreeFixture::clone_with_branch(&origin);
+        WorktreeFixture::fetch_only_the_default_branch(&origin, &clone);
+
+        origin.git(&clone, &["push", "-q", "-u", "origin", BRANCH]);
 
         assert!(WorktreeFixture::is_published(&origin, &clone));
     }

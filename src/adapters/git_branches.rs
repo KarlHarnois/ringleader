@@ -12,6 +12,8 @@ pub struct GitBranches<'a> {
 impl<'a> GitBranches<'a> {
     const BRANCH_REFS: &'static str = "refs/heads";
     const REMOTE_REFS: &'static str = "refs/remotes";
+    const LOCAL_REMOTE: &'static str = ".";
+    const GONE_UPSTREAM: &'static str = "gone";
 
     pub fn new(git: &'a GitRunner) -> Self {
         Self { git }
@@ -99,10 +101,11 @@ impl<'a> GitBranches<'a> {
         if !self.has_ref(repo, branch)? {
             return Ok(false);
         }
-        let upstream_ref = self.upstream_ref(repo, branch)?;
+        if self.has_live_upstream(repo, branch)? {
+            return Ok(true);
+        }
         for remote_ref in self.remote_copies(repo, branch)? {
-            let tracked = upstream_ref.as_ref() == Some(&remote_ref);
-            if tracked || self.branch_contains(repo, branch, &remote_ref)? {
+            if self.branch_contains(repo, branch, &remote_ref)? {
                 return Ok(true);
             }
         }
@@ -128,14 +131,30 @@ impl<'a> GitBranches<'a> {
             .collect())
     }
 
-    fn upstream_ref(&self, repo: &Path, branch: &str) -> Result<Option<String>, WorkspaceError> {
+    fn has_live_upstream(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError> {
+        Ok(self.tracks_its_remote_namesake(repo, branch)?
+            && !self.upstream_is_gone(repo, branch)?)
+    }
+
+    fn tracks_its_remote_namesake(
+        &self,
+        repo: &Path,
+        branch: &str,
+    ) -> Result<bool, WorkspaceError> {
         let section = BranchSection::new(branch);
         let merge = self.read_local_config(repo, &section.upstream_merge_key())?;
-        if merge != Some(Self::branch_ref(branch)) {
-            return Ok(None);
-        }
         let remote = self.read_local_config(repo, &section.upstream_remote_key())?;
-        Ok(remote.map(|name| Self::remote_branch_ref(&name, branch)))
+        let on_a_remote = remote.is_some_and(|name| name != Self::LOCAL_REMOTE);
+        Ok(on_a_remote && merge == Some(Self::branch_ref(branch)))
+    }
+
+    fn upstream_is_gone(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError> {
+        let read = GitInvocation::in_repo(repo, "for-each-ref").args([
+            "--format=%(upstream:track,nobracket)",
+            &Self::branch_ref(branch),
+        ]);
+        let tracking = self.git.run_checked(&read)?;
+        Ok(tracking.first_line() == Self::GONE_UPSTREAM)
     }
 
     fn read_local_config(&self, repo: &Path, key: &str) -> Result<Option<String>, WorkspaceError> {
