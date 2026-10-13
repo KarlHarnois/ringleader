@@ -40,8 +40,9 @@ impl HelpView {
         ("q", "quit, the sessions keep running"),
     ];
     const RETURN_ACTION: &'static str = "detach from a session and return here";
-    const NEXT_SESSION_ACTION: &'static str = "switch to the next session while attached";
-    const PREVIOUS_SESSION_ACTION: &'static str = "switch to the previous session while attached";
+    const NEXT_SESSION_ACTION: &'static str = "switch to the next session by name while attached";
+    const PREVIOUS_SESSION_ACTION: &'static str =
+        "switch to the previous session by name while attached";
     const FIRST_SPINNER_TICK: u64 = 0;
     const PULL_REQUEST_SYMBOL: &'static str = "#n";
     const CLOSE_HINT: &'static str = "? Esc q close";
@@ -419,22 +420,22 @@ mod tests {
 
         let text = HelpFixture::text(&HelpFixture::help_for(&bindings));
 
-        assert!(text.contains("Alt-n        switch to the next session while attached"));
-        assert!(text.contains("Alt-p F7     switch to the previous session while attached"));
+        assert!(text.contains("Alt-n        switch to the next session by name while attached"));
+        assert!(
+            text.contains("Alt-p F7     switch to the previous session by name while attached")
+        );
     }
 
     #[test]
     fn the_default_session_key_rows_line_up_with_the_other_keys() {
         let rows = HelpFixture::rows(&HelpFixture::help(), HelpFixture::WIDE_WIDTH);
 
-        assert!(
-            rows.contains(&"Alt-j Alt-↓  switch to the next session while attached".to_string())
-        );
-        assert!(
-            rows.contains(
-                &"Alt-k Alt-↑  switch to the previous session while attached".to_string()
-            )
-        );
+        assert!(rows.contains(
+            &"Alt-j Alt-↓  switch to the next session by name while attached".to_string()
+        ));
+        assert!(rows.contains(
+            &"Alt-k Alt-↑  switch to the previous session by name while attached".to_string()
+        ));
     }
 
     #[test]
