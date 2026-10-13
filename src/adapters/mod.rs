@@ -27,7 +27,7 @@ pub mod process_environment;
 pub mod raw_config;
 pub mod running_config;
 pub mod server_files;
-pub mod signal_flags;
+pub mod signal_hook_interrupts;
 pub mod start_point_resolver;
 pub mod submodule_commits;
 pub mod system_clock;

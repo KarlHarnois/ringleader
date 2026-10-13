@@ -4,6 +4,7 @@ pub mod clock;
 pub mod config_source;
 pub mod dirty_state;
 pub mod host_probe;
+pub mod interrupts;
 pub mod lock;
 pub mod multiplexer;
 pub mod pull_requests;
@@ -18,6 +19,7 @@ pub use clock::Clock;
 pub use config_source::{ConfigError, ConfigSource};
 pub use dirty_state::DirtyState;
 pub use host_probe::{DirectoryAccess, HostProbe, HostProbeError, ProcessInfo};
+pub use interrupts::Interrupts;
 pub use lock::{Lock, LockError};
 pub use multiplexer::{
     AttachTarget, Multiplexer, MultiplexerError, ServerConfig, ServerState, SessionSpec,

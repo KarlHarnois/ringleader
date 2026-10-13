@@ -50,7 +50,7 @@ Dependencies point inward only. An inner layer never imports an outer one.
 - `main.rs` is the composition root and the only production code that imports every layer. The Wiring section says what it builds.
 - `src/test_support/` may import any layer, because it fakes the ports and drives the outer layers under test. Inline `#[cfg(test)]` modules follow their layer's rule, except that any of them may also import `src/test_support/`.
 
-The code breaks the `ui` and `cli` rule in four places today: `SignalFlags` in `ui/event_loop.rs`, `cli/cli_session.rs`, and a test in `cli/session_commands.rs`, and `AppLog` in `ui/dialogs/dialog.rs`. They are violations to fix, not precedent to copy.
+The code breaks the `ui` and `cli` rule in one place today: `AppLog` in `ui/dialogs/dialog.rs`. It is a violation to fix, not precedent to copy.
 
 A new capability that `application`, `ui`, or `cli` needs from outside the process goes through a port, because none of them may import `adapters`. `CompositionRoot` and the types in `adapters` reach the outside directly. Logging needs no port: every layer writes through the `log` macros, and `CompositionRoot` installs `AppLog` behind them. The steps for a port:
 
@@ -245,7 +245,8 @@ viewer exits.
     │       ├── pull_requests.rs      # PullRequests trait
     │       ├── host_probe.rs         # HostProbe trait
     │       ├── clock.rs              # Clock trait
-    │       └── lock.rs               # Lock trait
+    │       ├── lock.rs               # Lock trait
+    │       └── interrupts.rs         # Interrupts trait
     ├── adapters/
     │   ├── mod.rs
     │   ├── agent_launcher.rs     # AgentLauncher, the hidden __exec-agent mode, owns AgentHandoff and the exec seam
@@ -279,7 +280,7 @@ viewer exits.
     │   ├── system_host_probe.rs  # SystemHostProbe
     │   ├── live_process.rs       # LiveProcess, one /proc entry, whether it is the tmux server of a socket, and signals to it
     │   ├── metadata_json.rs      # MetadataJson, the @ringleader_meta JSON each session carries
-    │   ├── signal_flags.rs       # SignalFlags, the SIGHUP, SIGINT, SIGTERM, and SIGQUIT flags
+    │   ├── signal_hook_interrupts.rs # SignalHookInterrupts, the SIGHUP, SIGINT, SIGTERM, and SIGQUIT flags
     │   ├── durable_file.rs       # DurableFile, synced temp file renamed over the target
     │   ├── tmux_command.rs       # TmuxCommand, the private server's `-S` and `-f`, `-u` and `-N`, a child environment without `TMUX` and `TMUX_PANE`, the caller's identity
     │   ├── server_files.rs       # ServerFiles, the private server's socket and generated config, and the 0700 socket directory
@@ -363,7 +364,8 @@ viewer exits.
         ├── recording_screen_mode.rs # RecordingScreenMode, the screen mode that records each switch
         ├── ui_harness.rs            # UiHarness: scripted input and a TestBackend wrapper for EventLoop tests
         ├── cli_harness.rs           # CliHarness: a Cli run against the fakes with captured output
-        └── fake_lock.rs             # FakeLock
+        ├── fake_lock.rs             # FakeLock
+        └── fake_interrupts.rs       # FakeInterrupts
 ```
 
 ## Layout rules

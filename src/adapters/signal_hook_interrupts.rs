@@ -4,12 +4,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use signal_hook::consts::{SIGHUP, SIGINT, SIGQUIT, SIGTERM};
 
+use crate::application::ports::Interrupts;
+
 #[derive(Clone)]
-pub struct SignalFlags {
+pub struct SignalHookInterrupts {
     flags: Vec<(i32, Arc<AtomicBool>)>,
 }
 
-impl SignalFlags {
+impl SignalHookInterrupts {
     const HANDLED: [i32; 4] = [SIGHUP, SIGINT, SIGTERM, SIGQUIT];
 
     pub fn register() -> io::Result<Self> {
@@ -29,18 +31,20 @@ impl SignalFlags {
         }
     }
 
-    pub fn raised(&self) -> Option<i32> {
-        self.flags
-            .iter()
-            .find(|(_, flag)| flag.load(Ordering::SeqCst))
-            .map(|(signal, _)| *signal)
-    }
-
     #[cfg(test)]
     pub fn raise(&self, signal: i32) {
         if let Some((_, flag)) = self.flags.iter().find(|(handled, _)| *handled == signal) {
             flag.store(true, Ordering::SeqCst);
         }
+    }
+}
+
+impl Interrupts for SignalHookInterrupts {
+    fn raised(&self) -> Option<i32> {
+        self.flags
+            .iter()
+            .find(|(_, flag)| flag.load(Ordering::SeqCst))
+            .map(|(signal, _)| *signal)
     }
 }
 
@@ -50,12 +54,12 @@ mod tests {
 
     #[test]
     fn no_flag_is_raised_at_first() {
-        assert_eq!(SignalFlags::unregistered().raised(), None);
+        assert_eq!(SignalHookInterrupts::unregistered().raised(), None);
     }
 
     #[test]
     fn a_raised_flag_names_its_signal() {
-        let flags = SignalFlags::unregistered();
+        let flags = SignalHookInterrupts::unregistered();
 
         flags.raise(SIGHUP);
 

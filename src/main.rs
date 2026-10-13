@@ -29,7 +29,7 @@ use adapters::json_session_registry::JsonSessionRegistry;
 use adapters::null_pull_requests::NullPullRequests;
 use adapters::process_environment::{ProcessEnvironment, ProgramPaths};
 use adapters::server_files::ServerFiles;
-use adapters::signal_flags::SignalFlags;
+use adapters::signal_hook_interrupts::SignalHookInterrupts;
 use adapters::system_clock::SystemClock;
 use adapters::system_host_probe::SystemHostProbe;
 use adapters::tmux_command::TmuxCommand;
@@ -115,10 +115,11 @@ impl CompositionRoot {
         };
         self.handoff().delete_stale();
         let signals = match cli.is_mutating() {
-            true => SignalFlags::register().unwrap_or_else(|_| SignalFlags::unregistered()),
-            false => SignalFlags::unregistered(),
+            true => SignalHookInterrupts::register()
+                .unwrap_or_else(|_| SignalHookInterrupts::unregistered()),
+            false => SignalHookInterrupts::unregistered(),
         };
-        let mut session = CliSession::new(CliOutput::standard(), signals);
+        let mut session = CliSession::new(CliOutput::standard(), Box::new(signals));
         if let Err(message) = &log {
             session.output().error(message);
         }
@@ -212,24 +213,24 @@ impl CompositionRoot {
         .collect();
         let mut app = App::new(service, Box::new(io::stdout()), Instant::now())
             .with_message((!warnings.is_empty()).then(|| warnings.join("; ")));
-        let signals = match SignalFlags::register() {
+        let signals = match SignalHookInterrupts::register() {
             Ok(signals) => signals,
             Err(error) => return Self::fail(&error.to_string()),
         };
         if let Err(error) = Self::run_event_loop(&mut app, signals.clone()) {
             return Self::fail(&error.to_string());
         }
-        let mut session = CliSession::new(CliOutput::standard(), signals);
+        let mut session = CliSession::new(CliOutput::standard(), Box::new(signals));
         session.wait_for_startup_input(&app.into_service(), &mut lock);
         ExitCode::SUCCESS
     }
 
-    fn run_event_loop(app: &mut App, signals: SignalFlags) -> io::Result<()> {
+    fn run_event_loop(app: &mut App, signals: SignalHookInterrupts) -> io::Result<()> {
         let screen = TerminalGuard::enter(Box::new(CrosstermScreenMode))?;
         screen.state().install_panic_hook();
         let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
         Self::clear_alternate_screen_leftovers(&mut terminal)?;
-        EventLoop::new(terminal, CrosstermInput, signals, screen.state()).run(app)
+        EventLoop::new(terminal, CrosstermInput, Box::new(signals), screen.state()).run(app)
     }
 
     fn clear_alternate_screen_leftovers(
