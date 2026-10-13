@@ -471,6 +471,13 @@ mod tests {
             self.server.pane_of(&format!("={tmux_name}:0.0"))
         }
 
+        fn signal(pid: &str, signal: &str) {
+            std::process::Command::new("kill")
+                .args([signal, pid])
+                .status()
+                .unwrap();
+        }
+
         fn on_terminal(&self, terminal: Option<&str>) -> TmuxMultiplexer {
             let base = self.server.environment();
             let environment =
@@ -1202,6 +1209,26 @@ mod tests {
     }
 
     #[test]
+    fn a_stopped_server_that_cannot_restore_its_socket_refuses_the_creation() {
+        let fixture = MultiplexerFixture::with_holder();
+        let first_server = fixture.server.server_pid();
+        MultiplexerFixture::signal(&first_server, "-STOP");
+        fs::remove_file(fixture.server.socket()).unwrap();
+
+        let result = fixture.create("fix-auth");
+
+        MultiplexerFixture::signal(&first_server, "-CONT");
+        let socket_back = fixture.server.wait_for(|| fixture.server.socket().exists());
+        assert!(
+            matches!(result, Err(MultiplexerError::SocketNotRestored { .. })),
+            "{result:?}"
+        );
+        assert!(socket_back);
+        assert_eq!(fixture.server.server_pid(), first_server);
+        assert_eq!(fixture.sessions(), ["holder"]);
+    }
+
+    #[test]
     fn typed_input_reaches_the_agent_pane_at_its_prompt() {
         let fixture = MultiplexerFixture::with_holder();
         let multiplexer = TmuxMultiplexer::new(
@@ -1320,18 +1347,12 @@ mod tests {
             fixture.server.launcher(Vec::new()),
         );
         let pid = fixture.server.server_pid();
-        std::process::Command::new("kill")
-            .args(["-STOP", &pid])
-            .status()
-            .unwrap();
+        MultiplexerFixture::signal(&pid, "-STOP");
         let started = Instant::now();
 
         let result = multiplexer.observe_all();
 
-        std::process::Command::new("kill")
-            .args(["-CONT", &pid])
-            .status()
-            .unwrap();
+        MultiplexerFixture::signal(&pid, "-CONT");
         assert!(matches!(result, Err(MultiplexerError::TimedOut { .. })));
         assert!(started.elapsed() < deadline + Duration::from_secs(3));
     }
