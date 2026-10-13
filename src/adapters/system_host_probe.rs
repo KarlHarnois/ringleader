@@ -38,11 +38,6 @@ impl SystemHostProbe {
         })
     }
 
-    fn user_id() -> u32 {
-        // SAFETY: geteuid takes no arguments, reads no memory of this process, and cannot fail.
-        unsafe { libc::geteuid() }
-    }
-
     fn is_own(&self, process: &LiveProcess) -> bool {
         self.own_lineage.contains(&process.pid()) || process.parent() == std::process::id()
     }
@@ -107,7 +102,7 @@ impl HostProbe for SystemHostProbe {
         let mode = metadata.permissions().mode() & Self::ACCESS_BITS;
         Some(DirectoryAccess::new(
             mode,
-            metadata.uid() == Self::user_id(),
+            metadata.uid() == LiveProcess::current_user(),
         ))
     }
 
