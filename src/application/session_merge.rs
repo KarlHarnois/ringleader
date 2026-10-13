@@ -62,7 +62,7 @@ impl SessionMerge {
             return Ok(());
         }
         Err(ServiceError::Conflict(format!(
-            "the agent of session {} is not at its prompt, answer what it shows before merging",
+            "the agent of session {} is not at its prompt, answer its dialog, send or clear its draft, or leave copy mode before merging",
             session.name()
         )))
     }
@@ -414,7 +414,7 @@ mod tests {
         assert_eq!(
             error,
             ServiceError::Conflict(
-                "the agent of session fix-auth is not at its prompt, answer what it shows before merging"
+                "the agent of session fix-auth is not at its prompt, answer its dialog, send or clear its draft, or leave copy mode before merging"
                     .to_string()
             )
         );
