@@ -1163,6 +1163,48 @@ mod tests {
     }
 
     #[test]
+    fn control_q_closes_every_dialog() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        for opener in ['/', 'n', 'R', '?'] {
+            AppFixture::press(&mut app, opener);
+            let opened = app.dialogs.is_open();
+            app.handle_event(&UiHarness::control('q'));
+
+            assert!(opened, "{opener} opened no dialog");
+            assert!(
+                !app.dialogs.is_open(),
+                "Ctrl-Q left the {opener} dialog open"
+            );
+        }
+    }
+
+    #[test]
+    fn control_q_cancels_the_delete_confirmation() {
+        let fixture = AppFixture::deletable();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        let measure = app.handle_event(&UiHarness::character('d'));
+        AppFixture::perform(&mut app, measure);
+
+        let request = app.handle_event(&UiHarness::control('q'));
+
+        assert_eq!(request, AppRequest::Continue);
+        assert!(!app.dialogs.is_open());
+        assert_eq!(fixture.registry().sessions().len(), 1);
+    }
+
+    #[test]
+    fn control_q_on_the_home_screen_does_not_quit() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        let request = app.handle_event(&UiHarness::control('q'));
+
+        assert_eq!(request, AppRequest::Continue);
+    }
+
+    #[test]
     fn attaching_selects_the_attached_session() {
         let fixture = AppFixture::two_waiting_sessions();
         let mut app = AppFixture::started(&fixture, 100, 28);

@@ -1,6 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::app::AppRequest;
+use super::back_key::BackKey;
 use super::blocking_operation::BlockingOperation;
 use super::dialogs::DialogOpening;
 use crate::application::ports::ConfigError;
@@ -36,6 +37,7 @@ impl<'a> ActionGate<'a> {
 
     pub fn action_for(&self, key: &KeyEvent) -> KeyAction {
         match key.code {
+            _ if BackKey::matches(key) => KeyAction::Ignore,
             KeyCode::Char('q') => KeyAction::Request(AppRequest::Quit),
             KeyCode::Char('r') => KeyAction::Reload,
             KeyCode::Char('?') => KeyAction::Open(DialogOpening::Help),
@@ -314,6 +316,19 @@ mod tests {
             ActionGate::new(None, None).action_for(&key),
             KeyAction::Move(-1)
         );
+    }
+
+    #[test]
+    fn only_a_plain_q_quits() {
+        let gate = ActionGate::new(None, None);
+        let plain_q = KeyEvent::from(KeyCode::Char('q'));
+        let control_q = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL);
+
+        assert_eq!(
+            gate.action_for(&plain_q),
+            KeyAction::Request(AppRequest::Quit)
+        );
+        assert_eq!(gate.action_for(&control_q), KeyAction::Ignore);
     }
 
     #[test]
