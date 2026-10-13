@@ -187,7 +187,8 @@ rewrites or deletes an existing test instead of only adding one, add
 `--mutate-all` to the next step 4 run of each changed file that test covered,
 because a rerun keeps every kill recorded for a function whose text did not
 change. Once the steps pass after any edit, run the Commands again, because none
-of these tools runs `clippy`.
+of these tools runs `clippy`. An edit made to pass that run restarts the steps
+too.
 
 ## Layout
 
