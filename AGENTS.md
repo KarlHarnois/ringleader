@@ -93,7 +93,9 @@ directories under `target/mutation-workers/`, and a mutant that times out counts
 as killed. The default factor of 10 times the warm baseline ends those builds
 early, so every mutant reads as killed before a test runs. Parallel cold builds
 slow each other, so raise the factor before the worker count. Once a
-snapshot exists, a rerun only runs survivors and sites in changed functions.
+snapshot exists, a rerun only runs survivors and sites in changed functions, so a
+kill recorded by a timeout stays. After a run with a smaller factor, rerun that
+file once with `--mutate-all`.
 Never pass `--changed` with a path: it drops the path and mutates every changed
 file in `git status`. `crapper` and `mutator` need `cargo-llvm-cov`
 and the LLVM tools named by `LLVM_COV` and `LLVM_PROFDATA`, which the `metrics`
