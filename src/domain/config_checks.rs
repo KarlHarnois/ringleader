@@ -2,8 +2,8 @@ use std::path::Path;
 
 use super::agent::Agent;
 use super::config_draft::ConfigDraft;
+use super::hot_key::HotKey;
 use super::repo_name::RepoName;
-use super::return_key::ReturnKey;
 
 pub struct ConfigChecks<'a> {
     draft: &'a ConfigDraft,
@@ -60,7 +60,7 @@ impl<'a> ConfigChecks<'a> {
 
     fn check_return_key(&mut self) {
         let raw = self.draft.raw_return_key();
-        if ReturnKey::parse(raw).is_none() {
+        if HotKey::parse(raw).is_none() {
             self.fail(format!(
                 "return_key: `{}` must be a key a terminal can send, such as C-q, M-x, or F12: optional C-, M-, and S- modifiers, then a key name or one printable character other than a quote or \\. After C- the character must be a letter other than i or m, which terminals send as Tab and Enter, or ], ^, or _. S- cannot precede a character, and C- and S- cannot precede Enter, Tab, BTab, Escape, BSpace, or Space, except C-Space",
                 raw.escape_default()

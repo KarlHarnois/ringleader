@@ -3,14 +3,14 @@ use std::time::Duration;
 
 use super::agent::Agent;
 use super::config_draft::ConfigDraft;
+use super::hot_key::HotKey;
 use super::naming_scheme::NamingScheme;
 use super::repo::Repo;
-use super::return_key::ReturnKey;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
     naming: NamingScheme,
-    return_key: ReturnKey,
+    return_key: HotKey,
     intervals: RefreshIntervals,
     activity_idle_seconds: u64,
     session_size: SessionSize,
@@ -42,7 +42,7 @@ impl Config {
     pub fn defaults(worktree_root: &Path) -> Self {
         Self {
             naming: NamingScheme::for_new_sessions(worktree_root),
-            return_key: ReturnKey::default(),
+            return_key: HotKey::default(),
             intervals: RefreshIntervals::default(),
             activity_idle_seconds: 3,
             session_size: SessionSize::default(),
@@ -67,7 +67,7 @@ impl Config {
         &self.naming
     }
 
-    pub fn return_key(&self) -> &ReturnKey {
+    pub fn return_key(&self) -> &HotKey {
         &self.return_key
     }
 

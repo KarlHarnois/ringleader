@@ -1,12 +1,12 @@
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ReturnKey {
+pub struct HotKey {
     modifiers: Vec<Modifier>,
     key: String,
 }
 
-impl ReturnKey {
+impl HotKey {
     pub const DEFAULT: &'static str = "C-q";
     const NAMED_KEYS: [&'static str; 30] = [
         "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12", "Escape",
@@ -116,13 +116,13 @@ impl ReturnKey {
     }
 }
 
-impl Default for ReturnKey {
+impl Default for HotKey {
     fn default() -> Self {
         Self::parse(Self::DEFAULT).expect("the default return key parses")
     }
 }
 
-impl fmt::Display for ReturnKey {
+impl fmt::Display for HotKey {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(&self.tmux_name())
     }
@@ -171,13 +171,13 @@ mod tests {
     impl KeyFixture {
         fn assert_parse(texts: &[&str]) {
             for text in texts {
-                assert!(ReturnKey::parse(text).is_some(), "{text:?} should parse");
+                assert!(HotKey::parse(text).is_some(), "{text:?} should parse");
             }
         }
 
         fn assert_refused(texts: &[&str]) {
             for text in texts {
-                assert!(ReturnKey::parse(text).is_none(), "{text:?} should fail");
+                assert!(HotKey::parse(text).is_none(), "{text:?} should fail");
             }
         }
     }
@@ -209,9 +209,9 @@ mod tests {
 
     #[test]
     fn an_uppercase_letter_after_ctrl_means_the_same_key_as_the_lowercase_one() {
-        let key = ReturnKey::parse("C-Q").unwrap();
+        let key = HotKey::parse("C-Q").unwrap();
 
-        assert_eq!(key, ReturnKey::default());
+        assert_eq!(key, HotKey::default());
     }
 
     #[test]
@@ -229,15 +229,15 @@ mod tests {
 
     #[test]
     fn the_tmux_spelling_is_single_quoted() {
-        let key = ReturnKey::parse("M-}").unwrap();
+        let key = HotKey::parse("M-}").unwrap();
 
         assert_eq!(key.tmux_spelling(), "'M-}'");
     }
 
     #[test]
     fn the_display_form_names_the_modifiers() {
-        let shown = ["C-q", "M-x", "S-F1", "C-Up", "~"]
-            .map(|text| ReturnKey::parse(text).unwrap().display());
+        let shown =
+            ["C-q", "M-x", "S-F1", "C-Up", "~"].map(|text| HotKey::parse(text).unwrap().display());
 
         assert_eq!(shown, ["Ctrl-Q", "Alt-x", "Shift-F1", "Ctrl-Up", "~"]);
     }
@@ -245,7 +245,7 @@ mod tests {
     #[test]
     fn keys_agents_need_and_typed_characters_shadow_agent_input() {
         for text in ["C-c", "C-d", "Enter", "Escape", "~", "x"] {
-            let key = ReturnKey::parse(text).unwrap();
+            let key = HotKey::parse(text).unwrap();
 
             assert!(key.shadows_agent_input(), "{text}");
         }
@@ -255,7 +255,7 @@ mod tests {
     fn the_default_and_other_rare_keys_leave_agent_input_alone() {
         for text in ["C-q", "M-x", "F12", "M-}"] {
             assert!(
-                !ReturnKey::parse(text).unwrap().shadows_agent_input(),
+                !HotKey::parse(text).unwrap().shadows_agent_input(),
                 "{text}"
             );
         }
@@ -263,6 +263,6 @@ mod tests {
 
     #[test]
     fn the_default_is_ctrl_q() {
-        assert_eq!(ReturnKey::default().to_string(), "C-q");
+        assert_eq!(HotKey::default().to_string(), "C-q");
     }
 }

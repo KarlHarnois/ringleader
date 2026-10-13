@@ -5,7 +5,7 @@ use super::doctor_report::DoctorReport;
 use super::ports::{HostProbe, Multiplexer, ServerState};
 use super::service_ports::ServicePorts;
 use super::tool_version::ToolVersion;
-use crate::domain::ReturnKey;
+use crate::domain::HotKey;
 
 pub struct ServerAudit {
     multiplexer: Arc<dyn Multiplexer>,
@@ -26,7 +26,7 @@ impl ServerAudit {
 
     pub fn audit(
         &self,
-        return_key: Option<&ReturnKey>,
+        return_key: Option<&HotKey>,
         client_version: Option<&str>,
         report: &mut DoctorReport,
     ) {
@@ -106,7 +106,7 @@ impl ServerAudit {
         }
     }
 
-    fn check_return_key(&self, return_key: &ReturnKey, report: &mut DoctorReport) {
+    fn check_return_key(&self, return_key: &HotKey, report: &mut DoctorReport) {
         let key = return_key.display();
         if return_key.shadows_agent_input() {
             report.warning(format!(
@@ -120,7 +120,7 @@ impl ServerAudit {
         }
     }
 
-    fn check_drift(&self, return_key: &ReturnKey, report: &mut DoctorReport) {
+    fn check_drift(&self, return_key: &HotKey, report: &mut DoctorReport) {
         let Ok(Some(running)) = self.multiplexer.server_config(return_key) else {
             return;
         };

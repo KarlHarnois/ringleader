@@ -16,7 +16,7 @@ use super::session_deletion::SessionDeletion;
 use super::session_renaming::SessionRenaming;
 use super::session_restart::SessionRestart;
 use super::worktree_containment::WorktreeContainment;
-use crate::domain::{Config, ReturnKey, Session, SessionState};
+use crate::domain::{Config, HotKey, Session, SessionState};
 
 pub struct SessionLifecycle {
     multiplexer: Arc<dyn Multiplexer>,
@@ -76,7 +76,7 @@ impl SessionLifecycle {
         Ok(restored.then(|| Self::RESTORED_SOCKET.to_string()))
     }
 
-    pub fn sync_server_config(&self, return_key: &ReturnKey) -> Result<(), ServiceError> {
+    pub fn sync_server_config(&self, return_key: &HotKey) -> Result<(), ServiceError> {
         match self.multiplexer.server_config(return_key)? {
             Some(running) if !running.is_current() => {
                 Ok(self.multiplexer.apply_config(return_key)?)

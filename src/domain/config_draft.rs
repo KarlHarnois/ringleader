@@ -4,10 +4,10 @@ use std::time::Duration;
 use super::agent::Agent;
 use super::config::{RefreshIntervals, SessionSize};
 use super::config_checks::ConfigChecks;
+use super::hot_key::HotKey;
 use super::naming_scheme::NamingScheme;
 use super::repo::Repo;
 use super::repo_draft::RepoDraft;
-use super::return_key::ReturnKey;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfigDraft {
@@ -29,7 +29,7 @@ impl ConfigDraft {
     pub fn new(default_worktree_root: &Path) -> Self {
         Self {
             worktree_root: default_worktree_root.to_path_buf(),
-            return_key: ReturnKey::DEFAULT.to_string(),
+            return_key: HotKey::DEFAULT.to_string(),
             state_poll_ms: 1000,
             preview_refresh_ms: 750,
             diff_refresh_ms: 3000,
@@ -165,8 +165,8 @@ impl ConfigDraft {
         )
     }
 
-    pub(super) fn return_key_value(&self) -> ReturnKey {
-        ReturnKey::parse(&self.return_key).unwrap_or_default()
+    pub(super) fn return_key_value(&self) -> HotKey {
+        HotKey::parse(&self.return_key).unwrap_or_default()
     }
 
     pub(super) fn activity_idle_seconds_value(&self) -> u64 {

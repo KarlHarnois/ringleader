@@ -1,10 +1,10 @@
 use super::tmux_output::TmuxOutput;
 use super::tmux_server_config::TmuxServerConfig;
-use crate::domain::ReturnKey;
+use crate::domain::HotKey;
 
 pub struct RunningConfig {
     hash: String,
-    return_key: Option<ReturnKey>,
+    return_key: Option<HotKey>,
 }
 
 impl RunningConfig {
@@ -24,7 +24,7 @@ impl RunningConfig {
         let (hash, return_key) = values.split_once(' ').unwrap_or((values, ""));
         Some(Self {
             hash: hash.to_string(),
-            return_key: ReturnKey::parse(return_key),
+            return_key: HotKey::parse(return_key),
         })
     }
 
@@ -32,7 +32,7 @@ impl RunningConfig {
         &self.hash
     }
 
-    pub fn return_key(&self) -> Option<&ReturnKey> {
+    pub fn return_key(&self) -> Option<&HotKey> {
         self.return_key.as_ref()
     }
 }

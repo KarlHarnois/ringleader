@@ -12,7 +12,7 @@ use super::legend::{Legend, LegendEntry};
 use super::state_indicator::StateIndicator;
 use super::text_fit::TextFit;
 use super::theme::Theme;
-use crate::domain::{PullRequestState, ReturnKey, SessionState};
+use crate::domain::{HotKey, PullRequestState, SessionState};
 
 pub struct HelpView {
     return_key: String,
@@ -44,7 +44,7 @@ impl HelpView {
     const CLOSE_HINT: &'static str = "? Esc q close";
     const SCROLL_HINT: &'static str = "↑ ↓ scroll · ";
 
-    pub fn new(return_key: &ReturnKey, files: &[(&str, &Path)], home: &HomePath) -> Self {
+    pub fn new(return_key: &HotKey, files: &[(&str, &Path)], home: &HomePath) -> Self {
         let files = files
             .iter()
             .map(|(label, path)| (label.to_string(), home.shown(path)))
@@ -193,10 +193,10 @@ mod tests {
         const PAST_THE_END: usize = 50;
 
         fn help() -> HelpView {
-            Self::help_for(&ReturnKey::default())
+            Self::help_for(&HotKey::default())
         }
 
-        fn help_for(return_key: &ReturnKey) -> HelpView {
+        fn help_for(return_key: &HotKey) -> HelpView {
             HelpView::new(
                 return_key,
                 &[
@@ -355,14 +355,14 @@ mod tests {
 
     #[test]
     fn the_help_lists_the_configured_return_key() {
-        let text = HelpFixture::text(&HelpFixture::help_for(&ReturnKey::parse("M-x").unwrap()));
+        let text = HelpFixture::text(&HelpFixture::help_for(&HotKey::parse("M-x").unwrap()));
 
         assert!(text.contains("Alt-x        detach from a session and return here"));
     }
 
     #[test]
     fn a_long_return_key_shows_in_full_with_a_gap_before_its_action() {
-        let long_key = ReturnKey::parse("C-M-S-F12").unwrap();
+        let long_key = HotKey::parse("C-M-S-F12").unwrap();
 
         let text = HelpFixture::text(&HelpFixture::help_for(&long_key));
 

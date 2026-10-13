@@ -13,7 +13,7 @@ use super::tmux_listing::TmuxListing;
 use super::tmux_scripts::TmuxScripts;
 use super::tmux_server_config::TmuxServerConfig;
 use crate::application::ports::{MultiplexerError, ServerConfig, ServerState};
-use crate::domain::ReturnKey;
+use crate::domain::HotKey;
 
 pub struct PrivateServer<'a> {
     tmux: &'a TmuxCommand,
@@ -27,7 +27,7 @@ impl<'a> PrivateServer<'a> {
         Self { tmux }
     }
 
-    pub fn write_files(&self, return_key: &ReturnKey) -> Result<(), MultiplexerError> {
+    pub fn write_files(&self, return_key: &HotKey) -> Result<(), MultiplexerError> {
         self.write_render(&self.render_for(return_key))
     }
 
@@ -123,7 +123,7 @@ impl<'a> PrivateServer<'a> {
         Err(TmuxError::failed("display-message", &output).into())
     }
 
-    pub fn config(&self, return_key: &ReturnKey) -> Result<Option<ServerConfig>, MultiplexerError> {
+    pub fn config(&self, return_key: &HotKey) -> Result<Option<ServerConfig>, MultiplexerError> {
         let Some(running) = self.running_config()? else {
             return Ok(None);
         };
@@ -131,7 +131,7 @@ impl<'a> PrivateServer<'a> {
         Ok(Some(ServerConfig::new(current, running.return_key())))
     }
 
-    pub fn apply(&self, return_key: &ReturnKey) -> Result<(), MultiplexerError> {
+    pub fn apply(&self, return_key: &HotKey) -> Result<(), MultiplexerError> {
         let running = self.running_config()?;
         let previous_key = running
             .as_ref()
@@ -149,7 +149,7 @@ impl<'a> PrivateServer<'a> {
         Err(TmuxError::failed("source-file", &output).into())
     }
 
-    fn render_for(&self, return_key: &ReturnKey) -> TmuxServerConfig {
+    fn render_for(&self, return_key: &HotKey) -> TmuxServerConfig {
         TmuxServerConfig::new(return_key)
     }
 
@@ -191,8 +191,8 @@ mod tests {
     struct ServerFixture;
 
     impl ServerFixture {
-        fn alt_x() -> ReturnKey {
-            ReturnKey::parse("M-x").unwrap()
+        fn alt_x() -> HotKey {
+            HotKey::parse("M-x").unwrap()
         }
 
         fn detach_keys(server: &TmuxTestServer) -> Vec<String> {
@@ -241,7 +241,7 @@ mod tests {
         let private = PrivateServer::new(&tmux);
 
         assert_eq!(private.state().unwrap(), None);
-        assert_eq!(private.config(&ReturnKey::default()).unwrap(), None);
+        assert_eq!(private.config(&HotKey::default()).unwrap(), None);
     }
 
     #[test]
@@ -310,12 +310,12 @@ mod tests {
         let tmux = server.command();
 
         let running = PrivateServer::new(&tmux)
-            .config(&ReturnKey::default())
+            .config(&HotKey::default())
             .unwrap()
             .unwrap();
 
         assert!(running.is_current());
-        assert_eq!(running.return_key(), Some(&ReturnKey::default()));
+        assert_eq!(running.return_key(), Some(&HotKey::default()));
     }
 
     #[test]

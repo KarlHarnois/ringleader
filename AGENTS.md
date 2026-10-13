@@ -186,7 +186,7 @@ viewer exits.
     │   ├── config_checks.rs      # ConfigChecks, the checks every config load runs
     │   ├── naming_scheme.rs      # NamingScheme, the worktree root and tmux prefix a session records
     │   ├── pull_request.rs       # PullRequest, its number, state, and opening time
-    │   └── return_key.rs         # ReturnKey, the key that detaches from a session back to Ringleader
+    │   └── hot_key.rs            # HotKey, a key a terminal can send, such as the return key that detaches from a session back to Ringleader
     ├── application/
     │   ├── mod.rs
     │   ├── session_service.rs    # SessionService, the facade the UI and CLI call

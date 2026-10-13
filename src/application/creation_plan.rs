@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use super::ports::{AgentLaunch, SessionSpec, StartPoint};
 use crate::domain::{
-    Agent, BaseBranch, Config, InvalidName, NamingScheme, Registration, Repo, ReturnKey, Session,
+    Agent, BaseBranch, Config, HotKey, InvalidName, NamingScheme, Registration, Repo, Session,
     SessionMetadata, SessionName, SessionRepo, SessionSize, SessionWorktree, TmuxAddress,
 };
 
@@ -74,7 +74,7 @@ pub struct CreationPlan {
     argv: Vec<String>,
     removed_env_names: Vec<String>,
     size: SessionSize,
-    return_key: ReturnKey,
+    return_key: HotKey,
 }
 
 impl CreationPlan {

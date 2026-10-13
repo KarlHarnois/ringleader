@@ -15,7 +15,7 @@ use crate::application::ports::{
     AgentLaunch, AttachTarget, Multiplexer, MultiplexerError, ServerConfig, ServerState,
     SessionSpec,
 };
-use crate::domain::{ReturnKey, SessionMetadata, SessionObservation};
+use crate::domain::{HotKey, SessionMetadata, SessionObservation};
 
 pub struct TmuxMultiplexer {
     tmux: TmuxCommand,
@@ -318,10 +318,7 @@ impl Multiplexer for TmuxMultiplexer {
         PrivateServer::new(&self.tmux).state()
     }
 
-    fn server_config(
-        &self,
-        return_key: &ReturnKey,
-    ) -> Result<Option<ServerConfig>, MultiplexerError> {
+    fn server_config(&self, return_key: &HotKey) -> Result<Option<ServerConfig>, MultiplexerError> {
         PrivateServer::new(&self.tmux).config(return_key)
     }
 
@@ -333,7 +330,7 @@ impl Multiplexer for TmuxMultiplexer {
         PrivateServer::new(&self.tmux).restore_socket()
     }
 
-    fn apply_config(&self, return_key: &ReturnKey) -> Result<(), MultiplexerError> {
+    fn apply_config(&self, return_key: &HotKey) -> Result<(), MultiplexerError> {
         PrivateServer::new(&self.tmux).apply(return_key)
     }
 
@@ -370,7 +367,7 @@ mod tests {
     use crate::adapters::Deadlines;
     use crate::adapters::process_environment::ProcessEnvironment;
     use crate::adapters::tmux_sequence::TmuxSequence;
-    use crate::domain::{RepoName, ReturnKey, SessionRepo, SessionWorktree};
+    use crate::domain::{HotKey, RepoName, SessionRepo, SessionWorktree};
     use crate::test_support::TmuxTestServer;
 
     const HOOKED: &str = "run-shell \"echo hooked; exit 1\"";
@@ -519,7 +516,7 @@ mod tests {
             multiplexer.server_state().unwrap();
             multiplexer.version().unwrap();
             multiplexer
-                .apply_config(&ReturnKey::parse("M-x").unwrap())
+                .apply_config(&HotKey::parse("M-x").unwrap())
                 .unwrap();
             let agent = fixture.tagged_panes("ringleader-fix-auth").pop().unwrap();
             fixture

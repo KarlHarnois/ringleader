@@ -1,8 +1,8 @@
 use super::tmux_sequence::TmuxSequence;
-use crate::domain::ReturnKey;
+use crate::domain::HotKey;
 
 pub struct TmuxServerConfig {
-    return_key: ReturnKey,
+    return_key: HotKey,
 }
 
 impl TmuxServerConfig {
@@ -32,13 +32,13 @@ impl TmuxServerConfig {
     const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
     const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 
-    pub fn new(return_key: &ReturnKey) -> Self {
+    pub fn new(return_key: &HotKey) -> Self {
         Self {
             return_key: return_key.clone(),
         }
     }
 
-    pub fn reapply_script(previous_key: Option<&ReturnKey>) -> TmuxSequence {
+    pub fn reapply_script(previous_key: Option<&HotKey>) -> TmuxSequence {
         let unbound = previous_key.map_or_else(TmuxSequence::new, Self::unbinding);
         unbound.command(["source-file", "-"])
     }
@@ -81,7 +81,7 @@ impl TmuxServerConfig {
         })
     }
 
-    fn unbinding(key: &ReturnKey) -> TmuxSequence {
+    fn unbinding(key: &HotKey) -> TmuxSequence {
         let key = key.to_string();
         Self::RETURN_TABLES
             .iter()
@@ -123,13 +123,13 @@ mod tests {
 
     impl ConfigFixture {
         fn render(key: &str) -> String {
-            TmuxServerConfig::new(&ReturnKey::parse(key).unwrap()).render()
+            TmuxServerConfig::new(&HotKey::parse(key).unwrap()).render()
         }
 
         fn binding(key: &str) -> String {
             format!(
                 "bind-key -T root {} detach-client\n",
-                ReturnKey::parse(key).unwrap().tmux_spelling()
+                HotKey::parse(key).unwrap().tmux_spelling()
             )
         }
 
@@ -214,7 +214,7 @@ mod tests {
 
     #[test]
     fn the_default_render_matches_the_golden_fixture() {
-        let render = TmuxServerConfig::new(&ReturnKey::default()).render();
+        let render = TmuxServerConfig::new(&HotKey::default()).render();
 
         assert_eq!(render, GOLDEN);
     }
@@ -248,7 +248,7 @@ mod tests {
     fn sourcing_the_render_again_on_a_running_server_succeeds() {
         let server = TmuxTestServer::with_session("holder");
 
-        let sourced = server.source(&ConfigFixture::render(ReturnKey::DEFAULT));
+        let sourced = server.source(&ConfigFixture::render(HotKey::DEFAULT));
 
         assert!(sourced.status.success(), "{sourced:?}");
     }
@@ -288,7 +288,7 @@ mod tests {
             .flat_map(|byte| {
                 ["", "C-", "M-"].map(|modifier| format!("{modifier}{}", char::from(byte)))
             })
-            .filter_map(|key| ReturnKey::parse(&key))
+            .filter_map(|key| HotKey::parse(&key))
             .map(|key| key.to_string())
             .collect();
 
@@ -392,7 +392,7 @@ mod tests {
         let config = server.directory().join("conf[1]").join("tmux.conf");
         let files = ServerFiles::new(server.socket(), &config);
         files
-            .prepare(&ConfigFixture::render(ReturnKey::DEFAULT))
+            .prepare(&ConfigFixture::render(HotKey::DEFAULT))
             .unwrap();
         let tmux = TmuxCommand::new(OsStr::new("tmux"), &files, &server.environment());
 
