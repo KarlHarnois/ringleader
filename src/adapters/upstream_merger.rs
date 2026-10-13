@@ -384,6 +384,12 @@ mod tests {
             tip
         }
 
+        fn point_origin_head_at(&self, branch: &str) {
+            self.origin.git(&self.clone, &["fetch", "-q", "origin"]);
+            self.origin
+                .git(&self.clone, &["remote", "set-head", "origin", branch]);
+        }
+
         fn without_origin_head(self) -> Self {
             self.origin
                 .git(&self.clone, &["remote", "set-head", "origin", "-d"]);
@@ -585,6 +591,18 @@ mod tests {
         let base = BaseBranch::new("origin/develop").unwrap();
 
         let merge = fixture.merge_from(Some(&base)).unwrap();
+
+        assert_eq!(merge.upstream(), "origin/develop");
+        assert!(fixture.has_merged(&develop_tip));
+    }
+
+    #[test]
+    fn origin_head_picks_the_default_branch_over_main() {
+        let fixture = MergeFixture::new();
+        let develop_tip = fixture.upstream_branch("develop");
+        fixture.point_origin_head_at("develop");
+
+        let merge = fixture.merge().unwrap();
 
         assert_eq!(merge.upstream(), "origin/develop");
         assert!(fixture.has_merged(&develop_tip));
