@@ -240,15 +240,18 @@ mod tests {
             ])
         }
 
-        fn waiting_sessions(previews: &[(&str, &str)]) -> ServiceFixture {
-            let sessions: Vec<Session> = previews
+        fn waiting_sessions(names_and_previews: &[(&str, &str)]) -> ServiceFixture {
+            let sessions: Vec<Session> = names_and_previews
                 .iter()
                 .map(|(name, _)| ServiceFixture::session(name))
                 .collect();
+            let previews = names_and_previews.iter().map(|(_, preview)| *preview);
             let multiplexer = sessions
                 .iter()
                 .zip(previews)
-                .fold(FakeMultiplexer::new(), Self::with_waiting);
+                .fold(FakeMultiplexer::new(), |multiplexer, (session, preview)| {
+                    Self::with_waiting(multiplexer, session, preview)
+                });
             ServiceFixture::new()
                 .with_sessions(&sessions)
                 .with_multiplexer(multiplexer)
@@ -256,7 +259,8 @@ mod tests {
 
         fn with_waiting(
             multiplexer: FakeMultiplexer,
-            (session, (_, preview)): (&Session, &(&str, &str)),
+            session: &Session,
+            preview: &str,
         ) -> FakeMultiplexer {
             multiplexer
                 .with_live(ServiceFixture::waiting(session))
