@@ -122,7 +122,7 @@ The one exception is a driving adapter's own channel to the user: the terminal f
     │   ├── creation_plan.rs      # CreationPlan and CreateRequest
     │   ├── use_checks.rs         # UseChecks, the checks a create or a restart runs before acting
     │   ├── session_renaming.rs   # SessionRenaming: rename_session with its branch rollback
-    │   ├── branch_renaming.rs    # BranchRenaming, moves a session's branch to its new name, back when the rename fails, and drops the upstream left on the old name once the rename is recorded
+    │   ├── branch_renaming.rs    # BranchRenaming, moves a session's branch to its new name, back when the rename fails, and drops the upstream left on the old name once the rename is kept
     │   ├── rename_request.rs     # RenameRequest, the old and new names
     │   ├── branch_availability.rs # BranchAvailability, refuses a branch name that exists or holds other branches, for create and rename
     │   ├── session_restart.rs    # SessionRestart: restart of an Exited or Stopped session

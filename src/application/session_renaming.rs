@@ -148,6 +148,7 @@ impl SessionRenaming {
         };
         let error = ServiceError::from(error);
         if row.is_live() {
+            renaming.drop_stale_upstream();
             return Err(error.adding_context(
                 "tmux already carries the new name, the next TUI run or mutating session command records it",
             ));
@@ -196,6 +197,12 @@ mod tests {
                 },
             );
             fixture
+        }
+
+        fn live_with_failing_saves(name: &str) -> ServiceFixture {
+            let session = ServiceFixture::session(name);
+            Self::live(&[name])
+                .with_registry(FakeSessionRegistry::with_sessions(vec![session]).failing_saves())
         }
 
         fn unmarked(name: &str) -> ServiceFixture {
@@ -572,9 +579,7 @@ mod tests {
 
     #[test]
     fn a_live_rename_whose_registry_write_fails_keeps_the_new_names() {
-        let session = ServiceFixture::session("fix-auth");
-        let fixture = RenameFixture::live(&["fix-auth"])
-            .with_registry(FakeSessionRegistry::with_sessions(vec![session]).failing_saves());
+        let fixture = RenameFixture::live_with_failing_saves("fix-auth");
 
         let error = fixture
             .service()
@@ -583,6 +588,24 @@ mod tests {
 
         assert!(error.to_string().contains("records it"));
         assert_eq!(fixture.multiplexer().live_names(), ["ringleader-fix-login"]);
+    }
+
+    #[test]
+    fn a_kept_live_rename_whose_registry_write_fails_drops_the_stale_upstream() {
+        let fixture = RenameFixture::live_with_failing_saves("fix-auth");
+
+        fixture
+            .service()
+            .rename_session("fix-auth", "fix-login")
+            .unwrap_err();
+
+        assert!(
+            fixture
+                .workspace()
+                .state_changing_calls()
+                .iter()
+                .any(|call| call.starts_with("drop_stale_upstream"))
+        );
     }
 
     #[test]
