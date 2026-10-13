@@ -210,7 +210,7 @@ impl Agent {
             .collect()
     }
 
-    fn supports(&self, mode: AgentMode) -> bool {
+    pub fn supports(&self, mode: AgentMode) -> bool {
         match mode {
             AgentMode::Build => true,
             AgentMode::Plan => !self.plan_args.is_empty(),

@@ -864,6 +864,30 @@ mod tests {
     }
 
     #[test]
+    fn plan_mode_warns_before_create_when_the_agent_has_no_plan_args() {
+        let agent = Agent::new("example-agent", "sh");
+        let fixture = DialogFixture::launched_in_repo()
+            .with_config(ServiceFixture::config().with_agents(vec![agent]));
+        let (mut dialog, service) = DialogFixture::opened(&fixture);
+
+        DialogFixture::press(&mut dialog, &service, KeyCode::BackTab);
+
+        assert!(
+            DialogFixture::text(&dialog).contains("Mode      plan · this agent has no plan_args\n")
+        );
+    }
+
+    #[test]
+    fn build_mode_never_warns_about_plan_args() {
+        let agent = Agent::new("example-agent", "sh");
+        let fixture = DialogFixture::launched_in_repo()
+            .with_config(ServiceFixture::config().with_agents(vec![agent]));
+        let (dialog, _service) = DialogFixture::opened(&fixture);
+
+        assert!(DialogFixture::text(&dialog).contains("Mode      build\n"));
+    }
+
+    #[test]
     fn plan_mode_for_an_agent_without_plan_args_is_refused() {
         let agent = Agent::new("example-agent", "sh");
         let fixture = DialogFixture::launched_in_repo()

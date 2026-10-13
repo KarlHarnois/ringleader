@@ -1,7 +1,7 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use super::agent_picker::AgentPicker;
@@ -29,6 +29,7 @@ impl<'a> NewSessionView<'a> {
     const CURSOR: char = '█';
     const NAME_ROWS: usize = 1;
     const MODE_LABEL: &'static str = "Mode";
+    const UNSUPPORTED_MODE_MARK: &'static str = " · this agent has no plan_args";
 
     pub fn new(
         name: &'a TextField,
@@ -66,7 +67,7 @@ impl<'a> NewSessionView<'a> {
         let [upper_area, mode_area, prompt_area, error_area, hints_area] =
             layout.areas(upper.len());
         self.render_upper(frame, upper_area, upper);
-        frame.render_widget(Paragraph::new(self.mode_lines(labels)), mode_area);
+        frame.render_widget(Paragraph::new(self.mode_lines(labels, theme)), mode_area);
         self.prompt
             .render(frame, prompt_area, labels, self.prompt_style(theme));
         frame.render_widget(Paragraph::new(errors), error_area);
@@ -105,8 +106,18 @@ impl<'a> NewSessionView<'a> {
         lines
     }
 
-    fn mode_lines(&self, labels: DialogLabels) -> Vec<Line<'static>> {
-        labels.labeled(Self::MODE_LABEL, vec![Line::from(self.mode.name())])
+    fn mode_lines(&self, labels: DialogLabels, theme: &Theme) -> Vec<Line<'static>> {
+        let mut mode_line = Line::from(self.mode.name());
+        if self.selected_agent_lacks_the_mode() {
+            mode_line.push_span(Span::styled(Self::UNSUPPORTED_MODE_MARK, theme.warning()));
+        }
+        labels.labeled(Self::MODE_LABEL, vec![mode_line])
+    }
+
+    fn selected_agent_lacks_the_mode(&self) -> bool {
+        self.agents
+            .selected()
+            .is_ok_and(|agent| !agent.supports(self.mode))
     }
 
     fn render_upper(&self, frame: &mut Frame, area: Rect, lines: Vec<Line<'static>>) {
