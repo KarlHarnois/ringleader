@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::io::Write;
 
-use crate::application::{ServiceError, SessionService};
+use crate::application::SessionService;
 use crate::domain::{SessionState, SessionSummary};
 
 pub struct Bell {
@@ -19,25 +19,20 @@ impl Bell {
         }
     }
 
-    pub fn watch(
-        &mut self,
-        rows: &[SessionSummary],
-        service: &SessionService,
-    ) -> Result<(), ServiceError> {
+    pub fn watch(&mut self, rows: &[SessionSummary], service: &SessionService) {
         let finished_working = rows.iter().any(|row| self.finished_working(row));
         self.previous = rows
             .iter()
             .map(|row| (row.name().to_string(), row.state()))
             .collect();
-        if !finished_working || !service.config().bell_on_waiting() {
-            return Ok(());
+        if finished_working && service.config().bell_on_waiting() {
+            self.ring();
         }
-        if service.is_inside_tmux() {
-            return service.ring_bell();
-        }
+    }
+
+    fn ring(&mut self) {
         let _ = self.sink.write_all(Self::BEL);
         let _ = self.sink.flush();
-        Ok(())
     }
 
     fn finished_working(&self, row: &SessionSummary) -> bool {
@@ -76,14 +71,14 @@ mod tests {
             let writer = CapturedWriter::default();
             let mut bell = Bell::new(Box::new(writer.clone()));
             let service = fixture.service();
-            bell.watch(&[previous], &service).unwrap();
-            bell.watch(&[current], &service).unwrap();
+            bell.watch(&[previous], &service);
+            bell.watch(&[current], &service);
             writer.text()
         }
     }
 
     #[test]
-    fn working_to_waiting_rings_the_terminal_outside_tmux() {
+    fn working_to_waiting_rings_the_terminal() {
         let fixture = BellFixture::ringing(ServiceFixture::new());
 
         let rung = BellFixture::rings(
@@ -141,24 +136,9 @@ mod tests {
         bell.watch(
             &[BellFixture::row(SessionState::Waiting, false)],
             &fixture.service(),
-        )
-        .unwrap();
-
-        assert_eq!(writer.text(), "");
-    }
-
-    #[test]
-    fn inside_tmux_the_bell_rings_every_client_through_tmux() {
-        let fixture = BellFixture::ringing(ServiceFixture::new().inside_tmux());
-
-        let rung = BellFixture::rings(
-            &fixture,
-            BellFixture::row(SessionState::Working, false),
-            BellFixture::row(SessionState::Waiting, false),
         );
 
-        assert_eq!(rung, "");
-        assert_eq!(fixture.multiplexer().bells(), 1);
+        assert_eq!(writer.text(), "");
     }
 
     #[test]
@@ -167,10 +147,7 @@ mod tests {
         let mut bell = Bell::new(Box::new(CapturedWriter::broken_pipe()));
         let service = fixture.service();
 
-        bell.watch(&[BellFixture::row(SessionState::Working, false)], &service)
-            .unwrap();
-        let rung = bell.watch(&[BellFixture::row(SessionState::Waiting, false)], &service);
-
-        assert!(rung.is_ok());
+        bell.watch(&[BellFixture::row(SessionState::Working, false)], &service);
+        bell.watch(&[BellFixture::row(SessionState::Waiting, false)], &service);
     }
 }

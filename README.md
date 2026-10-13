@@ -36,7 +36,13 @@ While the repository is private, `git+https` authenticates through your git cred
 
 Run `ringleader` with no arguments in a directory that holds your repos. It opens the TUI and writes a commented config to `~/.config/ringleader/config.toml`, with Claude Code and opencode as agents. Press `n` to create a session, pick a repo and an agent, and optionally give an initial prompt.
 
-Ctrl-Q returns from a session to the TUI. Outside tmux it detaches the client, and inside tmux it switches back to the TUI's pane. Open extra shells with `t` instead of splitting the agent window.
+Sessions run on Ringleader's own tmux server, so they do not show in your own `tmux ls`. The return key, Ctrl-Q unless `return_key` in the config names another, detaches from any session back to the TUI. A changed `return_key` takes effect after `r` in the TUI, or at the next `ringleader new` or `restart`. Sessions have no prefix key, the mouse is on, and each keeps 25,000 lines of scrollback. Inside your own tmux a session opens nested, so your tmux must not use the return key as its prefix or bind it in its root table. Open extra shells with `t` instead of splitting the agent window, because output in a split pane counts as agent activity.
+
+To inspect the sessions with tmux itself, run `tmux -S "$XDG_RUNTIME_DIR/ringleader/tmux/tmux.sock" ls`. Without `XDG_RUNTIME_DIR`, the socket is under `~/.local/state/ringleader/tmux/`. The help screen (`?`) shows the path. Logging out of your last session can remove that socket while the server keeps running. Ringleader recreates it when it starts, when you press `r` in the TUI, and before it starts a session.
+
+Ringleader owns the configuration of its tmux server, as it owns the rest of its interface. Your own `~/.tmux.conf` never loads there, and Ringleader reads no other tmux file.
+
+Set `bell_on_waiting = true` to ring the terminal bell when an agent finishes working and waits for input. It stays quiet for an agent whose window a client is showing, and for an agent that exits. The TUI is suspended while you are attached to a session, so the bell rings only while the TUI shows.
 
 ## Agent environment
 
@@ -58,9 +64,9 @@ prompt_args = ["{prompt}"]
 | `d` | delete the selected session |
 | `R` | rename the selected session |
 | `Enter` | attach to the selected session |
-| `t` | open a shell in the session's worktree |
+| `t` | open a shell in the selected session's worktree |
 | `s` | restart an exited or stopped session |
-| `r` | reload the config and the registry |
+| `r` | reload the config and the registry and refresh diffs |
 | `↑` `↓` `j` `k` `h` `l` | move the selection |
 | `?` | help |
 | `q` | quit, the sessions keep running |

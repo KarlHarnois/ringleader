@@ -96,7 +96,8 @@ impl SessionRestart {
     ) -> Result<Session, ServiceError> {
         let spec = SessionSpec::new(session.tmux_name(), session.metadata().clone(), launch)
             .sized(config.session_size())
-            .removing_env_names(&config.agent_env_union());
+            .removing_env_names(&config.agent_env_union())
+            .with_return_key(config.return_key());
         let socket = self.multiplexer.create_session(&spec)?;
         let recreated = session.on_socket(&socket);
         let entries = reconciliation.entries_with(session.name().as_str(), recreated.clone());
@@ -415,36 +416,51 @@ mod tests {
     }
 
     #[test]
-    fn a_stopped_session_live_on_another_socket_refuses_restart() {
-        let session = RestartFixture::session();
-        let fixture = RestartFixture::stopped().with_multiplexer(
-            FakeMultiplexer::new().with_session_on_socket(
-                session.socket_path(),
-                session.tmux_name(),
-                session.worktree_path(),
-            ),
-        );
+    fn a_stopped_session_refuses_restart_while_its_agent_runs_under_the_private_server() {
+        let fixture = RestartFixture::stopped().with_host(ServiceFixture::with_worktree_agent(
+            &RestartFixture::session(),
+        ));
 
         let error = RestartFixture::restart(&fixture).unwrap_err();
 
-        assert!(error.to_string().contains(FakeMultiplexer::SOCKET));
+        assert_eq!(error.exit_code(), 3);
+        assert!(
+            error
+                .to_string()
+                .contains("Ringleader's tmux server still runs processes in its worktree")
+        );
+        assert!(fixture.multiplexer().state_changing_calls().is_empty());
     }
 
     #[test]
-    fn a_stopped_entry_renamed_by_hand_on_its_socket_refuses_restart() {
-        let session = RestartFixture::session();
-        let fixture = RestartFixture::stopped().with_multiplexer(
-            FakeMultiplexer::new().with_session_on_socket(
-                session.socket_path(),
-                "my-own-name",
-                session.worktree_path(),
-            ),
-        );
+    fn a_stopped_session_refuses_restart_while_its_agent_runs_on_its_recorded_server() {
+        let recorded = Path::new("/home/example/.local/state/ringleader/tmux/tmux.sock");
+        let session = RestartFixture::session().on_socket(recorded);
+        let host = ServiceFixture::with_worktree_process(&session)
+            .serving(ServiceFixture::WORKTREE_PROCESS, recorded);
+        let fixture = RestartFixture::stopped()
+            .with_sessions(std::slice::from_ref(&session))
+            .with_host(host);
 
-        assert_eq!(
-            RestartFixture::restart(&fixture).unwrap_err().exit_code(),
-            3
+        let error = RestartFixture::restart(&fixture).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains(&format!("tmux -S {} kill-session", recorded.display()))
         );
+        assert!(fixture.multiplexer().state_changing_calls().is_empty());
+    }
+
+    #[test]
+    fn an_editor_open_in_a_stopped_worktree_does_not_block_restart() {
+        let fixture = RestartFixture::stopped().with_host(ServiceFixture::with_worktree_process(
+            &RestartFixture::session(),
+        ));
+
+        RestartFixture::restart(&fixture).unwrap();
+
+        assert_eq!(fixture.multiplexer().launches().len(), 1);
     }
 
     #[test]

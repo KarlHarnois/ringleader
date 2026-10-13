@@ -125,13 +125,13 @@
           nativeBuildInputs = [ pkgs.makeWrapper ];
           doCheck = true;
           nativeCheckInputs = [
-            pkgs.git
+            pkgs.gitMinimal
             pkgs.tmux
           ];
           postInstall = ''
             wrapProgram $out/bin/ringleader \
               --set-default RINGLEADER_TMUX ${pkgs.tmux}/bin/tmux \
-              --set-default RINGLEADER_GIT ${pkgs.git}/bin/git
+              --set-default RINGLEADER_GIT ${pkgs.gitMinimal}/bin/git
           '';
           meta = {
             description = "A tmux session manager for Claude and opencode";

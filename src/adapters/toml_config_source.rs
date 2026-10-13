@@ -19,12 +19,18 @@ impl TomlConfigSource {
     pub const TEMPLATE: &'static str = r#"# Absolute or ~/ paths only. Environment variables are not expanded.
 # Defaults to $XDG_DATA_HOME/ringleader/worktrees.
 # worktree_root = "~/.local/share/ringleader/worktrees"
-tmux_prefix = "ringleader-"
+# The key that detaches from a session back to Ringleader. Sessions have no
+# prefix key, so this is the only way back. Inside your own tmux, it must not be
+# your tmux's prefix or bound in its root table.
+return_key = "C-q"
 state_poll_ms = 1000
 preview_refresh_ms = 750
 diff_refresh_ms = 3000
 activity_idle_seconds = 3
 session_size = "200x50"
+# Ring the terminal bell when an agent finishes working and waits for input.
+# It stays quiet for an agent whose window a client is showing. It rings only
+# while the Ringleader TUI shows, never while you are attached to a session.
 bell_on_waiting = false
 scan_depth = 3
 
@@ -275,7 +281,7 @@ mod tests {
 
     #[test]
     fn a_config_without_agents_loads_with_no_agents() {
-        let fixture = SourceFixture::with_text("tmux_prefix = \"ringleader-\"\n");
+        let fixture = SourceFixture::with_text("return_key = \"C-q\"\n");
 
         assert!(fixture.source().load().unwrap().agents().is_empty());
     }
@@ -296,12 +302,21 @@ mod tests {
 
     #[test]
     fn unparsable_text_is_a_parse_error() {
-        let fixture = SourceFixture::with_text("tmux_prefix = ");
+        let fixture = SourceFixture::with_text("branch_prefix = ");
 
         assert!(matches!(
             fixture.source().load(),
             Err(ConfigError::Parse { .. })
         ));
+    }
+
+    #[test]
+    fn an_old_tmux_prefix_line_loads_and_changes_nothing() {
+        let fixture = SourceFixture::with_text("tmux_prefix = \"agents-\"\n");
+
+        let config = fixture.source().load().unwrap();
+
+        assert_eq!(config.naming().tmux_prefix(), "ringleader-");
     }
 
     #[test]
@@ -487,7 +502,7 @@ mod tests {
 
     #[test]
     fn an_unparsable_config_is_never_rewritten() {
-        let fixture = SourceFixture::with_text("tmux_prefix = ");
+        let fixture = SourceFixture::with_text("branch_prefix = ");
 
         assert!(
             fixture
@@ -497,7 +512,7 @@ mod tests {
         );
         assert_eq!(
             fs::read_to_string(fixture.path()).unwrap(),
-            "tmux_prefix = "
+            "branch_prefix = "
         );
     }
 

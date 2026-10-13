@@ -83,12 +83,12 @@ impl From<WorkspaceError> for ServiceError {
 impl From<MultiplexerError> for ServiceError {
     fn from(error: MultiplexerError) -> Self {
         let message = error.to_string();
-        match error {
-            MultiplexerError::TimedOut { .. } => ServiceError::TimedOut {
+        match error.is_timeout() {
+            true => ServiceError::TimedOut {
                 tool: Tool::Tmux,
                 message,
             },
-            _ => ServiceError::Failed(message),
+            false => ServiceError::Failed(message),
         }
     }
 }

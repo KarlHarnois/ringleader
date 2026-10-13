@@ -136,7 +136,7 @@ impl Launched {
     }
 
     pub fn done_values(&self) -> Vec<&str> {
-        self.done.splitn(3, ' ').collect()
+        self.done.splitn(2, ' ').collect()
     }
 }
 

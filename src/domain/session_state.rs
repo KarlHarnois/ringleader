@@ -8,6 +8,14 @@ pub enum SessionState {
 }
 
 impl SessionState {
+    pub const ALL: [SessionState; 5] = [
+        SessionState::Working,
+        SessionState::Waiting,
+        SessionState::Exited,
+        SessionState::Stopped,
+        SessionState::Unmanaged,
+    ];
+
     pub fn is_bell_edge(previous: SessionState, current: SessionState) -> bool {
         previous == SessionState::Working && current == SessionState::Waiting
     }
@@ -32,11 +40,9 @@ mod tests {
     use super::SessionState::*;
     use super::*;
 
-    const ALL_STATES: [SessionState; 5] = [Working, Waiting, Exited, Stopped, Unmanaged];
-
     #[test]
     fn only_working_and_waiting_run_the_agent() {
-        let running: Vec<SessionState> = ALL_STATES
+        let running: Vec<SessionState> = SessionState::ALL
             .into_iter()
             .filter(|state| state.runs_agent())
             .collect();
@@ -51,8 +57,8 @@ mod tests {
 
     #[test]
     fn no_other_transition_is_the_bell_edge() {
-        for previous in ALL_STATES {
-            for current in ALL_STATES {
+        for previous in SessionState::ALL {
+            for current in SessionState::ALL {
                 let is_working_to_waiting = previous == Working && current == Waiting;
                 if !is_working_to_waiting {
                     assert!(!SessionState::is_bell_edge(previous, current));
@@ -63,7 +69,10 @@ mod tests {
 
     #[test]
     fn labels_are_stable_lowercase_strings() {
-        let labels: Vec<&str> = ALL_STATES.iter().map(|state| state.label()).collect();
+        let labels: Vec<&str> = SessionState::ALL
+            .iter()
+            .map(|state| state.label())
+            .collect();
 
         assert_eq!(
             labels,
@@ -77,6 +86,6 @@ mod tests {
 
         states.sort();
 
-        assert_eq!(states, ALL_STATES);
+        assert_eq!(states, SessionState::ALL);
     }
 }

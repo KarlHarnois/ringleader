@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
 
-use crate::application::ports::{HostProbe, HostProbeError, ProcessInfo};
+use crate::application::ports::{DirectoryAccess, HostProbe, HostProbeError, ProcessInfo};
 
 #[derive(Default)]
 pub struct FakeHostProbe {
@@ -16,6 +16,7 @@ struct HostState {
     directories: HashSet<PathBuf>,
     files: HashSet<PathBuf>,
     canonical: HashMap<PathBuf, PathBuf>,
+    access: HashMap<PathBuf, DirectoryAccess>,
     processes: Vec<FakeProcess>,
     terminated: Vec<u32>,
 }
@@ -26,6 +27,7 @@ struct FakeProcess {
     cwd: PathBuf,
     session: u32,
     survives_sigterm: bool,
+    server_socket: Option<PathBuf>,
 }
 
 impl FakeHostProbe {
@@ -67,6 +69,15 @@ impl FakeHostProbe {
         self
     }
 
+    pub fn with_directory_access(self, path: &Path, access: DirectoryAccess) -> Self {
+        self.state
+            .lock()
+            .unwrap()
+            .access
+            .insert(path.to_path_buf(), access);
+        self
+    }
+
     pub fn with_process(self, pid: u32, command: &str, cwd: &Path, session: u32) -> Self {
         self.add_process(pid, command, cwd, session, false);
         self
@@ -74,6 +85,19 @@ impl FakeHostProbe {
 
     pub fn with_stubborn_process(self, pid: u32, command: &str, cwd: &Path, session: u32) -> Self {
         self.add_process(pid, command, cwd, session, true);
+        self
+    }
+
+    pub fn serving(self, pid: u32, socket: &Path) -> Self {
+        let mut state = self.state.lock().unwrap();
+        for process in state
+            .processes
+            .iter_mut()
+            .filter(|process| process.info.pid() == pid)
+        {
+            process.server_socket = Some(socket.to_path_buf());
+        }
+        drop(state);
         self
     }
 
@@ -94,6 +118,7 @@ impl FakeHostProbe {
             cwd: cwd.to_path_buf(),
             session,
             survives_sigterm: survives,
+            server_socket: None,
         });
     }
 
@@ -136,6 +161,10 @@ impl HostProbe for FakeHostProbe {
             .unwrap_or_else(|| path.to_path_buf()))
     }
 
+    fn directory_access(&self, path: &Path) -> Option<DirectoryAccess> {
+        self.state.lock().unwrap().access.get(path).copied()
+    }
+
     fn processes_in(&self, path: &Path, excluded_sessions: &[u32]) -> Vec<ProcessInfo> {
         let state = self.state.lock().unwrap();
         state
@@ -143,6 +172,17 @@ impl HostProbe for FakeHostProbe {
             .iter()
             .filter(|process| process.cwd.starts_with(path))
             .filter(|process| !excluded_sessions.contains(&process.session))
+            .map(|process| process.info.clone())
+            .collect()
+    }
+
+    fn processes_under_server(&self, path: &Path, socket: &Path) -> Vec<ProcessInfo> {
+        let state = self.state.lock().unwrap();
+        state
+            .processes
+            .iter()
+            .filter(|process| process.cwd.starts_with(path))
+            .filter(|process| process.server_socket.as_deref() == Some(socket))
             .map(|process| process.info.clone())
             .collect()
     }
