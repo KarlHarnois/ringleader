@@ -16,6 +16,7 @@ pub struct ConfigDraft {
     state_poll_ms: u64,
     preview_refresh_ms: u64,
     diff_refresh_ms: u64,
+    pull_request_refresh_ms: u64,
     activity_idle_seconds: i64,
     session_size: String,
     bell_on_waiting: bool,
@@ -32,6 +33,7 @@ impl ConfigDraft {
             state_poll_ms: 1000,
             preview_refresh_ms: 750,
             diff_refresh_ms: 3000,
+            pull_request_refresh_ms: 30000,
             activity_idle_seconds: 3,
             session_size: "200x50".to_string(),
             bell_on_waiting: false,
@@ -72,6 +74,13 @@ impl ConfigDraft {
     pub fn diff_refresh_ms(self, diff_refresh_ms: u64) -> Self {
         Self {
             diff_refresh_ms,
+            ..self
+        }
+    }
+
+    pub fn pull_request_refresh_ms(self, pull_request_refresh_ms: u64) -> Self {
+        Self {
+            pull_request_refresh_ms,
             ..self
         }
     }
@@ -152,6 +161,7 @@ impl ConfigDraft {
             Duration::from_millis(self.state_poll_ms),
             Duration::from_millis(self.preview_refresh_ms),
             Duration::from_millis(self.diff_refresh_ms),
+            Duration::from_millis(self.pull_request_refresh_ms),
         )
     }
 

@@ -158,14 +158,21 @@ pub struct RefreshIntervals {
     state_poll: Duration,
     preview_refresh: Duration,
     diff_refresh: Duration,
+    pull_request_refresh: Duration,
 }
 
 impl RefreshIntervals {
-    pub fn new(state_poll: Duration, preview_refresh: Duration, diff_refresh: Duration) -> Self {
+    pub fn new(
+        state_poll: Duration,
+        preview_refresh: Duration,
+        diff_refresh: Duration,
+        pull_request_refresh: Duration,
+    ) -> Self {
         Self {
             state_poll,
             preview_refresh,
             diff_refresh,
+            pull_request_refresh,
         }
     }
 
@@ -180,6 +187,10 @@ impl RefreshIntervals {
     pub fn diff_refresh(&self) -> Duration {
         self.diff_refresh
     }
+
+    pub fn pull_request_refresh(&self) -> Duration {
+        self.pull_request_refresh
+    }
 }
 
 impl Default for RefreshIntervals {
@@ -188,6 +199,7 @@ impl Default for RefreshIntervals {
             Duration::from_millis(1000),
             Duration::from_millis(750),
             Duration::from_millis(3000),
+            Duration::from_millis(30000),
         )
     }
 }

@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::{
-    FakeClock, FakeConfigSource, FakeHostProbe, FakeMultiplexer, FakeRepoScanner,
+    FakeClock, FakeConfigSource, FakeHostProbe, FakeMultiplexer, FakePullRequests, FakeRepoScanner,
     FakeSessionRegistry, FakeWorkspace,
 };
 use crate::application::ports::{ConfigError, WorktreeEntry};
@@ -22,6 +22,7 @@ pub struct ServiceFixture {
     config_source: Arc<FakeConfigSource>,
     scanner: Arc<FakeRepoScanner>,
     host: Arc<FakeHostProbe>,
+    pull_requests: Arc<FakePullRequests>,
     clock: Arc<FakeClock>,
     config_error: Option<ConfigError>,
     launch_directory: PathBuf,
@@ -52,6 +53,7 @@ impl ServiceFixture {
             config_source: Arc::new(FakeConfigSource::with_config(Self::config())),
             scanner: Arc::new(FakeRepoScanner::finding(vec![Self::repo()])),
             host: Arc::new(Self::host_for(&[])),
+            pull_requests: Arc::new(FakePullRequests::new()),
             clock: Arc::new(FakeClock::at(Self::NOW)),
             config_error: None,
             launch_directory: PathBuf::from(Self::REPO),
@@ -118,6 +120,13 @@ impl ServiceFixture {
         }
     }
 
+    pub fn with_pull_requests(self, pull_requests: FakePullRequests) -> Self {
+        Self {
+            pull_requests: Arc::new(pull_requests),
+            ..self
+        }
+    }
+
     pub fn without_home(self) -> Self {
         Self { home: None, ..self }
     }
@@ -177,6 +186,10 @@ impl ServiceFixture {
 
     pub fn host(&self) -> &FakeHostProbe {
         &self.host
+    }
+
+    pub fn pull_requests(&self) -> &FakePullRequests {
+        &self.pull_requests
     }
 
     pub fn repo() -> Repo {
@@ -317,6 +330,7 @@ impl ServiceFixture {
                 self.workspace.clone(),
                 self.scanner.clone(),
                 self.host.clone(),
+                Some(self.pull_requests.clone()),
             ),
             TmuxPorts::new(self.multiplexer.clone()),
         )

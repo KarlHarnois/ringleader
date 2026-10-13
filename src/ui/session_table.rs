@@ -8,7 +8,7 @@ use super::empty_state::EmptyState;
 use super::home_view::LayoutTier;
 use super::table_columns::TableColumns;
 use super::theme::Theme;
-use crate::domain::{DiffStat, SessionState, SessionSummary};
+use crate::domain::{SessionState, SessionSummary};
 
 pub struct SessionTable<'a> {
     rows: &'a [SessionSummary],
@@ -99,14 +99,27 @@ impl<'a> SessionTable<'a> {
             columns = columns
                 .with_branch(self.rows.iter().map(Self::branch_text))
                 .with_diff(self.rows.iter().map(Self::diff_text));
+            if self.has_pull_requests() {
+                columns = columns.with_pull_request(self.rows.iter().map(Self::pull_request_text));
+            }
         }
         columns.fitted()
     }
 
+    fn has_pull_requests(&self) -> bool {
+        self.rows.iter().any(|row| row.pull_request().is_some())
+    }
+
     fn row_line(&self, row: &SessionSummary, columns: &TableColumns) -> Line<'static> {
         let indicator = StateIndicator::new(row.state(), self.tick);
+        let pull_request_text = Self::pull_request_text(row);
         let diff_text = Self::diff_text(row);
-        let text = columns.row(row.name(), &Self::branch_text(row), &diff_text);
+        let text = columns.row(
+            row.name(),
+            &Self::branch_text(row),
+            &pull_request_text,
+            &diff_text,
+        );
         if self.selection == Some(row.name()) {
             let selected = self.theme.selected();
             return Line::from(vec![
@@ -118,40 +131,72 @@ impl<'a> SessionTable<'a> {
             indicator.glyph().to_string(),
             indicator.style(&self.theme),
         )];
-        spans.extend(self.colored_diff(text, &diff_text, row.diff()));
+        spans.extend(self.colored_cells(text, row, &pull_request_text, &diff_text));
         Line::from(spans)
     }
 
-    fn colored_diff(
+    fn colored_cells(
         &self,
         text: String,
+        row: &SessionSummary,
+        pull_request_text: &str,
         diff_text: &str,
-        diff: Option<DiffStat>,
     ) -> Vec<Span<'static>> {
-        let (Some(diff), Some(start)) = (
-            diff,
-            text.rfind(diff_text).filter(|_| !diff_text.is_empty()),
-        ) else {
-            return vec![Span::styled(text, self.theme.base())];
-        };
-        let (before, rest) = text.split_at(start);
-        let after = &rest[diff_text.len()..];
-        let untracked = diff.untracked_marker().map(|marker| format!(" {marker}"));
-        vec![
-            Span::styled(before.to_string(), self.theme.base()),
-            Span::styled(format!("+{}", diff.insertions()), self.theme.insertions()),
-            Span::styled(format!(" -{}", diff.deletions()), self.theme.deletions()),
-            Span::styled(
-                format!("{}{after}", untracked.unwrap_or_default()),
+        let mut spans = Vec::new();
+        let mut remaining = text.as_str();
+        if let Some(pull_request) = row.pull_request().filter(|_| !pull_request_text.is_empty())
+            && let Some(start) = remaining.find(pull_request_text)
+        {
+            let (before, rest) = remaining.split_at(start);
+            spans.push(Span::styled(before.to_string(), self.theme.base()));
+            spans.push(Span::styled(
+                pull_request_text.to_string(),
+                self.theme.pull_request(pull_request.state()),
+            ));
+            remaining = &rest[pull_request_text.len()..];
+        }
+        if let Some(diff) = row.diff().filter(|_| !diff_text.is_empty())
+            && let Some(start) = remaining.rfind(diff_text)
+        {
+            let (before, rest) = remaining.split_at(start);
+            let untracked = diff.untracked_marker().map(|marker| format!(" {marker}"));
+            spans.push(Span::styled(before.to_string(), self.theme.base()));
+            spans.push(Span::styled(
+                format!("+{}", diff.insertions()),
+                self.theme.insertions(),
+            ));
+            spans.push(Span::styled(
+                format!(" -{}", diff.deletions()),
+                self.theme.deletions(),
+            ));
+            spans.push(Span::styled(
+                format!(
+                    "{}{}",
+                    untracked.unwrap_or_default(),
+                    &rest[diff_text.len()..]
+                ),
                 self.theme.base(),
-            ),
-        ]
+            ));
+            remaining = "";
+        }
+        if !remaining.is_empty() {
+            spans.push(Span::styled(remaining.to_string(), self.theme.base()));
+        }
+        spans
     }
 
     fn branch_text(row: &SessionSummary) -> String {
         row.metadata()
             .map(|metadata| metadata.branch().to_string())
             .unwrap_or_default()
+    }
+
+    fn pull_request_text(row: &SessionSummary) -> String {
+        if row.session().is_none() {
+            return String::new();
+        }
+        row.pull_request()
+            .map_or(String::new(), |pull_request| pull_request.to_string())
     }
 
     fn diff_text(row: &SessionSummary) -> String {
@@ -199,7 +244,7 @@ mod tests {
     use ratatui::style::{Color, Modifier};
 
     use super::*;
-    use crate::domain::{DiffStat, UnmanagedSession};
+    use crate::domain::{DiffStat, PullRequest, PullRequestState, UnmanagedSession};
     use crate::test_support::ServiceFixture;
 
     struct TableFixture;
@@ -341,6 +386,35 @@ mod tests {
         assert!(!line.contains("?0"));
         assert_eq!(buffer[(plus, 2)].fg, Color::Green);
         assert_eq!(buffer[(minus, 2)].fg, Color::Red);
+    }
+
+    #[test]
+    fn a_row_with_a_pull_request_shows_its_number_in_the_state_colour() {
+        let row = TableFixture::managed("fix-auth", SessionState::Waiting)
+            .with_pull_request(PullRequest::new(142, PullRequestState::Open));
+
+        let terminal = TableFixture::render(&[row], None, 0, 6);
+        let line = TableFixture::line(&terminal, 2);
+        let byte = line.find("#142").unwrap();
+        let column = u16::try_from(line[..byte].chars().count()).unwrap();
+        let buffer = terminal.backend().buffer();
+
+        assert!(line.contains("#142"));
+        assert_eq!(buffer[(column, 2)].fg, Color::Green);
+    }
+
+    #[test]
+    fn a_merged_pull_request_shows_in_magenta() {
+        let row = TableFixture::managed("fix-auth", SessionState::Waiting)
+            .with_pull_request(PullRequest::new(9, PullRequestState::Merged));
+
+        let terminal = TableFixture::render(&[row], None, 0, 6);
+        let line = TableFixture::line(&terminal, 2);
+        let byte = line.find("#9").unwrap();
+        let column = u16::try_from(line[..byte].chars().count()).unwrap();
+        let buffer = terminal.backend().buffer();
+
+        assert_eq!(buffer[(column, 2)].fg, Color::Magenta);
     }
 
     #[test]

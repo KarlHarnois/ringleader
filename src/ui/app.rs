@@ -156,7 +156,7 @@ impl App {
     fn reload(&mut self) {
         let outcome = self.service.reload();
         let restored = self.service.restore_server_socket();
-        self.home.refresh_now();
+        self.home.refresh_now(&mut self.service);
         self.observe();
         let reloaded = match &restored {
             Ok(Some(note)) => format!("{} Also {note}.", Self::RELOADED),
@@ -208,8 +208,8 @@ mod tests {
 
     use super::*;
     use crate::application::ports::{ConfigError, MultiplexerError, UnmergedCommits};
-    use crate::domain::{Config, ConfigDraft, DiffStat};
-    use crate::test_support::{FakeMultiplexer, ServiceFixture, UiHarness};
+    use crate::domain::{Config, ConfigDraft, DiffStat, PullRequest, PullRequestState};
+    use crate::test_support::{FakeMultiplexer, FakePullRequests, ServiceFixture, UiHarness};
 
     struct AppFixture;
 
@@ -858,6 +858,32 @@ mod tests {
 
         assert!(measured.contains("+0 -0 ?3"));
         assert!(AppFixture::screen(&app, 100, 28).contains("+0 -0 ?3"));
+    }
+
+    #[test]
+    fn a_session_with_a_pull_request_shows_its_number() {
+        let session = ServiceFixture::session("fix-auth");
+        let fixture = ServiceFixture::new()
+            .with_sessions(std::slice::from_ref(&session))
+            .with_multiplexer(FakeMultiplexer::new().with_live(ServiceFixture::waiting(&session)))
+            .with_pull_requests(FakePullRequests::new().with_pull_request(
+                Path::new(ServiceFixture::REPO),
+                session.branch(),
+                PullRequest::new(142, PullRequestState::Open),
+            ));
+        let start = Instant::now();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        for step in 1..=200 {
+            app.on_tick(start + Duration::from_millis(step * 5));
+            if AppFixture::screen(&app, 100, 28).contains("#142") {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+
+        assert_eq!(fixture.pull_requests().calls().len(), 1);
+        assert!(AppFixture::screen(&app, 100, 28).contains("#142"));
     }
 
     #[test]

@@ -83,6 +83,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── config_draft.rs       # ConfigDraft, the raw config values the Config constructor checks
     │   ├── config_checks.rs      # ConfigChecks, the checks every config load runs
     │   ├── naming_scheme.rs      # NamingScheme, the worktree root and tmux prefix a session records
+    │   ├── pull_request.rs       # PullRequest, its number and state
     │   └── return_key.rs         # ReturnKey, the key that detaches from a session back to Ringleader
     ├── application/
     │   ├── mod.rs
@@ -113,6 +114,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── reconciliation.rs     # Reconciliation, the reconciled entries and rows
     │   ├── session_access.rs     # SessionAccess: attach and open_shell, and the refusal from a pane of the private server
     │   ├── repo_catalog.rs       # RepoCatalog: discover, find, add, and remove repos
+    │   ├── pull_request_catalog.rs # PullRequestCatalog, the polled pull requests of visible sessions
     │   ├── repo_merge.rs         # RepoMerge, joins configured and scanned repos, configured entries winning
     │   ├── home_repo_search.rs   # HomeRepoSearch, the repos under home the repo search offers
     │   ├── default_repo.rs       # DefaultRepo, the launch repo or the newest session's repo
@@ -137,6 +139,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │       ├── agent_launch.rs       # AgentLaunch, the argv, environment, and worktree an agent starts with
     │       ├── config_source.rs      # ConfigSource trait
     │       ├── repo_scanner.rs       # RepoScanner trait
+    │       ├── pull_requests.rs      # PullRequests trait
     │       ├── host_probe.rs         # HostProbe trait
     │       ├── clock.rs              # Clock trait
     │       └── lock.rs               # Lock trait
@@ -154,6 +157,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── config_file_writer.rs # ConfigFileWriter, the read-only checks and mode-keeping config write
     │   ├── json_session_registry.rs # JsonSessionRegistry
     │   ├── file_lock.rs          # FileLock
+    │   ├── gh_pull_requests.rs   # GhPullRequests, looks up a branch's pull request through the gh CLI
     │   ├── bounded_command.rs    # BoundedCommand, runs git and tmux children in a new session with a deadline
     │   ├── command_output.rs     # CommandOutput, a finished child's status and output
     │   ├── host_path.rs          # HostPath, lenient canonicalization and directory listing
@@ -238,6 +242,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
         ├── fake_multiplexer.rs      # FakeMultiplexer
         ├── fake_config_source.rs    # FakeConfigSource
         ├── fake_repo_scanner.rs     # FakeRepoScanner
+        ├── fake_pull_requests.rs    # FakePullRequests
         ├── fake_host_probe.rs       # FakeHostProbe
         ├── fake_clock.rs            # FakeClock
         ├── recording_screen_mode.rs # RecordingScreenMode, the screen mode that records each switch

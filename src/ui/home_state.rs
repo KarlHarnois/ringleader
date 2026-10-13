@@ -60,9 +60,10 @@ impl HomeState {
         self.refresh_preview(service);
     }
 
-    pub fn refresh_now(&mut self) {
+    pub fn refresh_now(&mut self, service: &mut SessionService) {
         self.tmux_paused_until = None;
         self.diffs.refresh_soon();
+        service.refresh_pull_requests();
     }
 
     pub fn pause_after(&mut self, error: &ServiceError) {
@@ -86,6 +87,8 @@ impl HomeState {
         let visible = self.sessions.visible_managed(self.table_rows);
         let measured = self.diffs.tick(now, &visible, service);
         self.sessions.apply_diffs(self.diffs.diffs());
+        let pull_requests = service.poll_pull_requests(now, &visible).clone();
+        self.sessions.apply_pull_requests(&pull_requests);
         observed.and(measured)
     }
 
@@ -102,6 +105,10 @@ impl HomeState {
         self.change_selection(service, |sessions| sessions.show(rows));
         self.diffs.keep_only(&self.sessions.names());
         self.sessions.apply_diffs(self.diffs.diffs());
+        let names = self.sessions.names();
+        service.prune_pull_requests(&names);
+        let pull_requests = service.pull_requests().clone();
+        self.sessions.apply_pull_requests(&pull_requests);
         self.bell.watch(self.sessions.rows(), service);
         Ok(())
     }

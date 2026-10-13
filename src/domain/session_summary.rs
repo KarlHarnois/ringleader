@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use super::diff_stat::DiffStat;
+use super::pull_request::PullRequest;
 use super::session::Session;
 use super::session_metadata::SessionMetadata;
 use super::session_observation::SessionObservation;
@@ -12,6 +13,7 @@ pub struct SessionSummary {
     state: SessionState,
     attached: bool,
     diff: Option<DiffStat>,
+    pull_request: Option<PullRequest>,
 }
 
 impl SessionSummary {
@@ -21,6 +23,7 @@ impl SessionSummary {
             state,
             attached,
             diff: None,
+            pull_request: None,
         }
     }
 
@@ -31,6 +34,7 @@ impl SessionSummary {
             state: SessionState::Unmanaged,
             attached,
             diff: None,
+            pull_request: None,
         }
     }
 
@@ -40,6 +44,17 @@ impl SessionSummary {
             SummarySubject::Unmanaged(_) => None,
         };
         Self { diff, ..self }
+    }
+
+    pub fn with_pull_request(self, pull_request: PullRequest) -> Self {
+        let pull_request = match self.subject {
+            SummarySubject::Managed(_) => Some(pull_request),
+            SummarySubject::Unmanaged(_) => None,
+        };
+        Self {
+            pull_request,
+            ..self
+        }
     }
 
     pub fn name(&self) -> &str {
@@ -87,6 +102,10 @@ impl SessionSummary {
 
     pub fn diff(&self) -> Option<DiffStat> {
         self.diff
+    }
+
+    pub fn pull_request(&self) -> Option<PullRequest> {
+        self.pull_request
     }
 }
 
@@ -179,6 +198,18 @@ mod tests {
         let summary = summary.with_diff(DiffStat::default());
 
         assert_eq!(summary.diff(), None);
+    }
+
+    #[test]
+    fn an_unmanaged_summary_never_carries_a_pull_request() {
+        let tmux = TmuxAddress::new("ringleader-mystery", Path::new("/tmp/tmux-1000/default"));
+        let observation = SessionObservation::new(tmux, 1_700_000_000);
+        let summary = SessionSummary::unmanaged(UnmanagedSession::new("mystery", observation));
+
+        let summary =
+            summary.with_pull_request(PullRequest::new(1, crate::domain::PullRequestState::Open));
+
+        assert_eq!(summary.pull_request(), None);
     }
 
     #[test]

@@ -23,6 +23,7 @@ use adapters::agent_launcher::{AgentLauncher, LauncherCommand, ProcessExec};
 use adapters::app_log::AppLog;
 use adapters::directory_repo_scanner::DirectoryRepoScanner;
 use adapters::file_lock::FileLock;
+use adapters::gh_pull_requests::GhPullRequests;
 use adapters::git_runner::GitRunner;
 use adapters::json_session_registry::JsonSessionRegistry;
 use adapters::process_environment::{ProcessEnvironment, ProgramPaths};
@@ -35,7 +36,7 @@ use adapters::tmux_multiplexer::TmuxMultiplexer;
 use adapters::toml_config_source::TomlConfigSource;
 use adapters::xdg_paths::XdgPaths;
 use adapters::{BoundedCommand, Deadlines, GitWorkspace};
-use application::ports::{ConfigSource, Lock, LockError};
+use application::ports::{ConfigSource, HostProbe, Lock, LockError, PullRequests};
 use application::{
     CorruptRegistry, DiagnosticPaths, LoadedConfig, RepoPorts, ServiceContext, ServiceError,
     ServicePorts, SessionService, StatePorts, TmuxPorts,
@@ -273,6 +274,11 @@ impl CompositionRoot {
             Arc::new(config_source),
             clock,
         );
+        let host = Arc::new(SystemHostProbe::new(&self.environment));
+        let pull_requests: Option<Arc<dyn PullRequests>> =
+            host.resolve_command("gh").map(|program| {
+                Arc::new(GhPullRequests::new(program.as_os_str(), bounded)) as Arc<dyn PullRequests>
+            });
         let repos = RepoPorts::new(
             Arc::new(GitWorkspace::new(self.programs.git(), bounded)),
             Arc::new(DirectoryRepoScanner::new(
@@ -280,7 +286,8 @@ impl CompositionRoot {
                 DirectoryRepoScanner::VISIT_CAP,
                 Path::new(DirectoryRepoScanner::MOUNT_TABLE),
             )),
-            Arc::new(SystemHostProbe::new(&self.environment)),
+            host,
+            pull_requests,
         );
         let tmux_ports = TmuxPorts::new(Arc::new(TmuxMultiplexer::new(tmux, self.launcher())));
         let context = ServiceContext::new(loaded, &self.launch_directory)

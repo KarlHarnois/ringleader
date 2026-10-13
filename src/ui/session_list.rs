@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use super::session_table::SessionTable;
 use super::theme::Theme;
-use crate::domain::{DiffStat, SessionSummary};
+use crate::domain::{DiffStat, PullRequest, SessionSummary};
 
 #[derive(Debug, Default)]
 pub struct SessionList {
@@ -42,6 +42,17 @@ impl SessionList {
             .into_iter()
             .map(|row| match diffs.get(row.name()) {
                 Some(diff) => row.with_diff(*diff),
+                None => row,
+            })
+            .collect();
+    }
+
+    pub fn apply_pull_requests(&mut self, pull_requests: &HashMap<String, PullRequest>) {
+        let rows = std::mem::take(&mut self.rows);
+        self.rows = rows
+            .into_iter()
+            .map(|row| match pull_requests.get(row.name()) {
+                Some(pull_request) => row.with_pull_request(*pull_request),
                 None => row,
             })
             .collect();

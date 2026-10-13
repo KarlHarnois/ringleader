@@ -109,6 +109,7 @@ pub enum CallKind {
     GitDiff,
     GitRead,
     GitWrite,
+    GhQuery,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -118,6 +119,7 @@ pub struct Deadlines {
     git_diff: Duration,
     git_read: Duration,
     git_write: Duration,
+    gh_query: Duration,
 }
 
 impl Deadlines {
@@ -128,6 +130,7 @@ impl Deadlines {
             git_diff: Duration::from_secs(5),
             git_read: Duration::from_secs(60),
             git_write: Duration::from_secs(300),
+            gh_query: Duration::from_secs(20),
         }
     }
 
@@ -139,6 +142,7 @@ impl Deadlines {
             git_diff: deadline,
             git_read: deadline,
             git_write: deadline,
+            gh_query: deadline,
         }
     }
 
@@ -149,6 +153,7 @@ impl Deadlines {
             CallKind::GitDiff => self.git_diff,
             CallKind::GitRead => self.git_read,
             CallKind::GitWrite => self.git_write,
+            CallKind::GhQuery => self.gh_query,
         }
     }
 }

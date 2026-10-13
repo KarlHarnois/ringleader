@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Instant;
 
 use super::creation_plan::CreateRequest;
 use super::delete_impact::{DeleteConfirmation, DeleteImpact};
@@ -9,6 +11,7 @@ use super::doctor::Doctor;
 use super::doctor_report::DoctorReport;
 use super::pending::Pending;
 use super::ports::{ConfigError, ConfigSource, RegistryError, SessionRegistry};
+use super::pull_request_catalog::PullRequestCatalog;
 use super::reconciliation::Reconciliation;
 use super::rename_request::RenameRequest;
 use super::repo_catalog::{RepoCatalog, RepoDiscovery};
@@ -19,7 +22,7 @@ use super::service_ports::ServicePorts;
 use super::session_access::{SessionAccess, ShellOutcome};
 use super::session_lifecycle::SessionLifecycle;
 use super::session_monitor::SessionMonitor;
-use crate::domain::{Config, DiffStat, Repo, ReturnKey, Session, SessionSummary};
+use crate::domain::{Config, DiffStat, PullRequest, Repo, ReturnKey, Session, SessionSummary};
 
 pub struct SessionService {
     config: LoadedConfig,
@@ -30,6 +33,7 @@ pub struct SessionService {
     lifecycle: SessionLifecycle,
     access: SessionAccess,
     catalog: RepoCatalog,
+    pull_request_catalog: PullRequestCatalog,
     doctor: Doctor,
     paths: DiagnosticPaths,
 }
@@ -41,6 +45,7 @@ impl SessionService {
             lifecycle: SessionLifecycle::new(&ports, context.launch_directory()),
             access: SessionAccess::new(&ports, context.shell()),
             catalog: RepoCatalog::new(&ports, &context),
+            pull_request_catalog: PullRequestCatalog::new(ports.repos().pull_requests()),
             doctor: Doctor::new(&ports, context.diagnostics().clone()),
             paths: context.diagnostics().clone(),
             config: context.into_config(),
@@ -173,6 +178,31 @@ impl SessionService {
 
     pub fn preview(&self, tmux_name: &str) -> Result<String, ServiceError> {
         self.monitor.preview(tmux_name)
+    }
+
+    pub fn poll_pull_requests(
+        &mut self,
+        now: Instant,
+        names: &[String],
+    ) -> &HashMap<String, PullRequest> {
+        let visible: Vec<Session> = names
+            .iter()
+            .filter_map(|name| self.entry(name).cloned())
+            .collect();
+        let interval = self.config().intervals().pull_request_refresh();
+        self.pull_request_catalog.poll(now, interval, &visible)
+    }
+
+    pub fn pull_requests(&self) -> &HashMap<String, PullRequest> {
+        self.pull_request_catalog.snapshot()
+    }
+
+    pub fn prune_pull_requests(&mut self, names: &[String]) {
+        self.pull_request_catalog.keep_only(names);
+    }
+
+    pub fn refresh_pull_requests(&mut self) {
+        self.pull_request_catalog.refresh_soon();
     }
 
     pub fn create_session(&mut self, request: &CreateRequest) -> Result<Session, ServiceError> {
