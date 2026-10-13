@@ -72,7 +72,7 @@ impl BoundedCommand {
     fn wait_until(child: &mut Child, deadline: Instant) -> Option<ExitStatus> {
         match Self::block_until_exit(child, deadline) {
             Ok(()) => child.try_wait().ok().flatten(),
-            Err(_) => Self::check_until(child, deadline),
+            Err(error) => Self::check_without_pidfd(child, deadline, &error),
         }
     }
 
@@ -106,6 +106,19 @@ impl BoundedCommand {
         let remaining = deadline.saturating_duration_since(Instant::now());
         let rounded_up = remaining.as_micros().div_ceil(Self::MICROS_PER_MILLI);
         libc::c_int::try_from(rounded_up).unwrap_or(libc::c_int::MAX)
+    }
+
+    fn check_without_pidfd(
+        child: &mut Child,
+        deadline: Instant,
+        error: &io::Error,
+    ) -> Option<ExitStatus> {
+        log::debug!(
+            "could not wait on a pidfd for child {}, checking it every {}ms: {error}",
+            child.id(),
+            Self::POLL_INTERVAL.as_millis()
+        );
+        Self::check_until(child, deadline)
     }
 
     fn check_until(child: &mut Child, deadline: Instant) -> Option<ExitStatus> {
@@ -264,6 +277,17 @@ mod tests {
 
         assert!(output.succeeded());
         assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn an_exited_child_is_seen_through_its_pidfd() {
+        let mut child = ChildFixture::shell("exit 0").spawn().unwrap();
+
+        let waited =
+            BoundedCommand::block_until_exit(&child, Instant::now() + Duration::from_secs(5));
+
+        assert!(waited.is_ok());
+        assert!(child.try_wait().unwrap().is_some());
     }
 
     #[test]
