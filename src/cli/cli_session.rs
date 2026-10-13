@@ -26,12 +26,8 @@ impl CliSession {
         }
     }
 
-    pub fn is_signaled(&self) -> bool {
-        self.signals.raised().is_some()
-    }
-
     pub fn wait<T: Send + 'static>(&self, pending: &Pending<T>) -> Result<T, CommandStop> {
-        match pending.wait_unless(|| self.signals.raised().is_some()) {
+        match pending.wait_unless(|| self.is_signaled()) {
             Some(result) => result.map_err(CommandStop::Failed),
             None => Err(CommandStop::Interrupted(
                 self.signals.raised().unwrap_or_default(),
@@ -71,6 +67,10 @@ impl CliSession {
             }
             None => CliExit::Code(code),
         }
+    }
+
+    fn is_signaled(&self) -> bool {
+        self.signals.raised().is_some()
     }
 }
 
