@@ -7,12 +7,14 @@ use super::reconciliation::ManagedRow;
 use super::repo_merge::RepoMerge;
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
+use super::worktree_inspection::WorktreeInspection;
 use crate::domain::{Config, Session, SessionName, SessionState};
 
 pub struct SessionMerge {
     workspace: Arc<dyn Workspace>,
     multiplexer: Arc<dyn Multiplexer>,
     host: Arc<dyn HostProbe>,
+    inspection: WorktreeInspection,
 }
 
 impl SessionMerge {
@@ -25,6 +27,7 @@ impl SessionMerge {
             workspace: ports.repos().workspace(),
             multiplexer: ports.tmux().multiplexer(),
             host: ports.repos().host(),
+            inspection: WorktreeInspection::new(ports),
         }
     }
 
@@ -33,6 +36,7 @@ impl SessionMerge {
         Self::refuse_unless_waiting(row)?;
         self.refuse_unless_at_prompt(session)?;
         self.refuse_unclean_worktree(session)?;
+        self.refuse_off_its_branch(session)?;
         let base_branch =
             RepoMerge::new(self.host.as_ref()).base_branch_of(session, config.repos());
         let merge = self
@@ -78,6 +82,19 @@ impl SessionMerge {
             )));
         }
         Ok(())
+    }
+
+    fn refuse_off_its_branch(&self, session: &Session) -> Result<(), ServiceError> {
+        let entry = self.inspection.listed_entry(session)?;
+        let checked_out = entry.as_ref().and_then(|entry| entry.branch());
+        if checked_out == Some(session.branch()) {
+            return Ok(());
+        }
+        Err(ServiceError::Conflict(format!(
+            "the worktree of session {} is not on its branch {}, finish any rebase or bisect and check the branch out before merging",
+            session.name(),
+            session.branch()
+        )))
     }
 
     fn hand_off_conflicts(&self, session: &Session, merge: &UpstreamMerge) -> ConflictHandoff {
@@ -175,7 +192,7 @@ mod tests {
     use std::path::Path;
 
     use super::*;
-    use crate::application::ports::{DirtyState, WorkspaceError};
+    use crate::application::ports::{DirtyState, WorkspaceError, WorktreeEntry};
     use crate::domain::{BaseBranch, Repo, RepoName, SessionObservation};
     use crate::test_support::{FakeMultiplexer, FakeWorkspace, ServiceFixture};
 
@@ -417,6 +434,28 @@ mod tests {
             error,
             ServiceError::Conflict(
                 "session fix-auth has uncommitted changes, commit or stash them before merging"
+                    .to_string()
+            )
+        );
+        assert!(!MergeFixture::merged_upstream(&fixture));
+    }
+
+    #[test]
+    fn a_worktree_off_its_branch_is_refused_before_git_merges() {
+        let worktree = MergeFixture::session().worktree_path().to_path_buf();
+        let repo = Path::new(ServiceFixture::REPO);
+        let detached = FakeWorkspace::default().with_worktree(
+            repo,
+            WorktreeEntry::new(&worktree).at_head(ServiceFixture::TIP),
+        );
+        let fixture = MergeFixture::waiting().with_workspace(detached);
+
+        let error = MergeFixture::merge(&fixture).unwrap_err();
+
+        assert_eq!(
+            error,
+            ServiceError::Conflict(
+                "the worktree of session fix-auth is not on its branch fix-auth, finish any rebase or bisect and check the branch out before merging"
                     .to_string()
             )
         );
