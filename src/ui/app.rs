@@ -142,7 +142,7 @@ impl App {
         self.status.show(None);
         let selected = self.home.sessions().selected();
         let gate = ActionGate::new(selected, self.service.read_only_reason());
-        match self.key_sequence.action_for(key, &gate) {
+        match self.key_sequence.handle_key(key, &gate) {
             KeyAction::Request(request) => return self.request(request),
             KeyAction::Move(offset) => self.home.move_selection(offset, &self.service),
             KeyAction::SelectFirst => self.home.select_first(&self.service),

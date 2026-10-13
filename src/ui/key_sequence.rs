@@ -8,7 +8,7 @@ pub struct KeySequence {
 }
 
 impl KeySequence {
-    pub fn action_for(&mut self, key: &KeyEvent, gate: &ActionGate) -> KeyAction {
+    pub fn handle_key(&mut self, key: &KeyEvent, gate: &ActionGate) -> KeyAction {
         let pending_g = std::mem::take(&mut self.pending_g);
         match key.code {
             KeyCode::Char('g') if pending_g => KeyAction::SelectFirst,
@@ -34,7 +34,7 @@ mod tests {
             characters
                 .chars()
                 .map(|character| KeyEvent::from(KeyCode::Char(character)))
-                .map(|key| sequence.action_for(&key, &gate))
+                .map(|key| sequence.handle_key(&key, &gate))
                 .collect()
         }
     }
