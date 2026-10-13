@@ -36,13 +36,6 @@ impl HelpView {
         ("q", "quit, the sessions keep running"),
     ];
     const RETURN_ACTION: &'static str = "detach from a session and return here";
-    const STATES: [SessionState; 5] = [
-        SessionState::Working,
-        SessionState::Waiting,
-        SessionState::Exited,
-        SessionState::Stopped,
-        SessionState::Unmanaged,
-    ];
     const FIRST_SPINNER_TICK: u64 = 0;
     const LABEL_WIDTH: usize = 13;
     const CLOSING: &'static str = "↑ ↓ scroll · ? Esc q close";
@@ -116,7 +109,7 @@ impl HelpView {
     }
 
     fn state_legend(theme: &Theme) -> Legend {
-        let entries = Self::STATES.iter().map(|&state| {
+        let entries = SessionState::ALL.iter().map(|&state| {
             let indicator = StateIndicator::new(state, Self::FIRST_SPINNER_TICK);
             LegendEntry::new(indicator.glyph(), indicator.style(theme), state.label())
         });
