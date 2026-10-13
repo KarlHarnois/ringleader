@@ -10,6 +10,7 @@ use super::blocking_operation::{BlockingOperation, OperationOutcome};
 use super::dialogs::{Dialog, DialogSlot, DialogStep};
 use super::home_state::HomeState;
 use super::home_view::HomeView;
+use super::key_sequence::KeySequence;
 use super::status_bar::{StatusBar, StatusMessage};
 use super::status_report::StatusReport;
 use super::theme::Theme;
@@ -18,6 +19,7 @@ use crate::application::{EphemeralShell, ServiceError, SessionService, ShellOutc
 pub struct App {
     service: SessionService,
     home: HomeState,
+    key_sequence: KeySequence,
     dialogs: DialogSlot,
     status: StatusReport,
     tick: u64,
@@ -32,6 +34,7 @@ impl App {
         Self {
             service,
             home: HomeState::new(now, Bell::new(bell_sink)),
+            key_sequence: KeySequence::default(),
             dialogs: DialogSlot::default(),
             status: StatusReport::default(),
             tick: 0,
@@ -140,10 +143,14 @@ impl App {
 
     fn handle_key(&mut self, key: &KeyEvent) -> AppRequest {
         self.status.show(None);
-        let selected = self.home.sessions().selected();
-        match ActionGate::new(selected, self.service.read_only_reason()).action_for(key) {
+        let gate = Self::gate(&self.home, &self.service);
+        match self.key_sequence.handle_key(key, &gate) {
             KeyAction::Request(request) => return self.request(request),
             KeyAction::Move(offset) => self.home.move_selection(offset, &self.service),
+            KeyAction::SelectFirst => self.home.select_first(&self.service),
+            KeyAction::SelectLast => self.home.select_last(&self.service),
+            KeyAction::Fold => self.home.toggle_fold(&self.service),
+            KeyAction::JumpToRepo(number) => self.home.jump_to_repo(number, &self.service),
             KeyAction::Open(opening) => {
                 self.dialogs.open(Dialog::open(opening, &self.service));
             }
@@ -156,6 +163,15 @@ impl App {
             KeyAction::Ignore => {}
         }
         AppRequest::Continue
+    }
+
+    fn gate<'a>(home: &'a HomeState, service: &'a SessionService) -> ActionGate<'a> {
+        let sessions = home.sessions();
+        let config_error = service.read_only_reason();
+        if sessions.heading_selected() {
+            return ActionGate::on_heading(config_error);
+        }
+        ActionGate::new(sessions.selected(), config_error)
     }
 
     fn request(&mut self, request: AppRequest) -> AppRequest {
@@ -220,23 +236,64 @@ mod tests {
 
     use super::*;
     use crate::application::ports::{ConfigError, MultiplexerError, UnmergedCommits};
-    use crate::domain::{Config, ConfigDraft, DiffStat, PullRequestState};
+    use crate::domain::{Config, ConfigDraft, DiffStat, PullRequestState, Session};
     use crate::test_support::{FakeMultiplexer, FakePullRequests, ServiceFixture, UiHarness};
 
     struct AppFixture;
 
     impl AppFixture {
         fn two_waiting_sessions() -> ServiceFixture {
-            let first = ServiceFixture::session("dark-mode");
-            let second = ServiceFixture::session("fix-auth");
+            Self::waiting_sessions(&[
+                ("dark-mode", "dark mode output"),
+                ("fix-auth", "fix auth output"),
+            ])
+        }
+
+        fn three_waiting_sessions() -> ServiceFixture {
+            Self::waiting_sessions(&[
+                ("dark-mode", "dark mode output"),
+                ("fix-auth", "fix auth output"),
+                ("spike-tui", "spike tui output"),
+            ])
+        }
+
+        fn waiting_sessions(names_and_previews: &[(&str, &str)]) -> ServiceFixture {
+            let sessions: Vec<Session> = names_and_previews
+                .iter()
+                .map(|(name, _)| ServiceFixture::session(name))
+                .collect();
+            let previews = names_and_previews.iter().map(|(_, preview)| *preview);
+            let multiplexer = sessions
+                .iter()
+                .zip(previews)
+                .fold(FakeMultiplexer::new(), |multiplexer, (session, preview)| {
+                    Self::with_waiting(multiplexer, session, preview)
+                });
             ServiceFixture::new()
-                .with_sessions(&[first.clone(), second.clone()])
+                .with_sessions(&sessions)
+                .with_multiplexer(multiplexer)
+        }
+
+        fn with_waiting(
+            multiplexer: FakeMultiplexer,
+            session: &Session,
+            preview: &str,
+        ) -> FakeMultiplexer {
+            multiplexer
+                .with_live(ServiceFixture::waiting(session))
+                .with_capture(session.tmux_name(), preview)
+        }
+
+        fn two_repos() -> ServiceFixture {
+            let docs =
+                ServiceFixture::session_at("docs", "/repos/alpha", ServiceFixture::CREATED_AT);
+            let fix_auth = ServiceFixture::session("fix-auth");
+            ServiceFixture::new()
+                .with_sessions(&[docs.clone(), fix_auth.clone()])
                 .with_multiplexer(
                     FakeMultiplexer::new()
-                        .with_live(ServiceFixture::waiting(&first))
-                        .with_live(ServiceFixture::waiting(&second))
-                        .with_capture("ringleader-dark-mode", "dark mode output")
-                        .with_capture("ringleader-fix-auth", "fix auth output"),
+                        .with_live(ServiceFixture::waiting(&docs))
+                        .with_live(ServiceFixture::waiting(&fix_auth)),
                 )
         }
 
@@ -438,6 +495,63 @@ mod tests {
         assert_eq!(after_h.as_deref(), Some("dark-mode"));
         assert_eq!(after_right.as_deref(), Some("fix-auth"));
         assert_eq!(AppFixture::selected(&app).as_deref(), Some("dark-mode"));
+    }
+
+    #[test]
+    fn capital_g_selects_the_last_session() {
+        let fixture = AppFixture::three_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press(&mut app, 'G');
+
+        assert_eq!(AppFixture::selected(&app).as_deref(), Some("spike-tui"));
+        assert_eq!(
+            AppFixture::captures(&fixture).last().unwrap(),
+            "capture_pane ringleader-spike-tui"
+        );
+    }
+
+    #[test]
+    fn gg_selects_the_first_session() {
+        let fixture = AppFixture::three_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, 'G');
+
+        AppFixture::press(&mut app, 'g');
+        AppFixture::press(&mut app, 'g');
+
+        assert_eq!(AppFixture::selected(&app).as_deref(), Some("dark-mode"));
+        assert_eq!(
+            AppFixture::captures(&fixture).last().unwrap(),
+            "capture_pane ringleader-dark-mode"
+        );
+    }
+
+    #[test]
+    fn space_folds_the_selected_repo() {
+        let fixture = AppFixture::two_repos();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press(&mut app, ' ');
+
+        let screen = AppFixture::screen(&app, 100, 28);
+        assert!(screen.contains("1 ▸ alpha (1)"));
+        assert!(!screen.contains("docs"));
+        assert!(screen.contains("fix-auth"));
+    }
+
+    #[test]
+    fn a_digit_jumps_to_that_repo_and_previews_its_first_session() {
+        let fixture = AppFixture::two_repos();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press(&mut app, '2');
+
+        assert_eq!(AppFixture::selected(&app).as_deref(), Some("fix-auth"));
+        assert_eq!(
+            AppFixture::captures(&fixture).last().unwrap(),
+            "capture_pane ringleader-fix-auth"
+        );
     }
 
     #[test]
