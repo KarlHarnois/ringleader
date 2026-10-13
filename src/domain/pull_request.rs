@@ -39,6 +39,24 @@ pub enum PullRequestState {
     Closed,
 }
 
+impl PullRequestState {
+    pub const ALL: [PullRequestState; 4] = [
+        PullRequestState::Open,
+        PullRequestState::Draft,
+        PullRequestState::Merged,
+        PullRequestState::Closed,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            PullRequestState::Open => "open",
+            PullRequestState::Draft => "draft",
+            PullRequestState::Merged => "merged",
+            PullRequestState::Closed => "closed",
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -81,5 +99,15 @@ mod tests {
             PullRequest::new(7, PullRequestState::Open, PullRequestFixture::OPENED_AT);
 
         assert!(!pull_request.opened_since(PullRequestFixture::OPENED_AT + 1));
+    }
+
+    #[test]
+    fn labels_are_stable_lowercase_strings() {
+        let labels: Vec<&str> = PullRequestState::ALL
+            .iter()
+            .map(|state| state.label())
+            .collect();
+
+        assert_eq!(labels, ["open", "draft", "merged", "closed"]);
     }
 }
