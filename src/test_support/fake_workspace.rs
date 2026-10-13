@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use crate::application::ports::{
-    DirtyState, StartPoint, UnmergedCommits, Workspace, WorkspaceError, WorktreeEntry,
+    DiffBase, DirtyState, StartPoint, UnmergedCommits, Workspace, WorkspaceError, WorktreeEntry,
 };
 use crate::domain::{BaseBranch, DiffStat};
 
@@ -503,7 +503,7 @@ impl Workspace for FakeWorkspace {
         Ok(self.edit(|state| state.next_unmerged(repo, branch, worktree)))
     }
 
-    fn diff_stat(&self, worktree: &Path, _base_commit: &str) -> Result<DiffStat, WorkspaceError> {
+    fn diff_stat(&self, worktree: &Path, _base: &DiffBase) -> Result<DiffStat, WorkspaceError> {
         self.call("diff_stat", worktree.display().to_string())?;
         Ok(self.edit(|state| state.diffs.get(worktree).copied().unwrap_or_default()))
     }

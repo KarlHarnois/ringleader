@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
+use super::diff_base::DiffBase;
 use super::dirty_state::DirtyState;
 use super::unmerged_commits::UnmergedCommits;
 use crate::domain::{BaseBranch, DiffStat};
@@ -53,7 +54,7 @@ pub trait Workspace: Send + Sync {
         branch: &str,
         worktree: &Path,
     ) -> Result<UnmergedCommits, WorkspaceError>;
-    fn diff_stat(&self, worktree: &Path, base_commit: &str) -> Result<DiffStat, WorkspaceError>;
+    fn diff_stat(&self, worktree: &Path, base: &DiffBase) -> Result<DiffStat, WorkspaceError>;
     fn validate_repo(&self, path: &Path) -> Result<PathBuf, WorkspaceError>;
     fn version(&self) -> Result<String, WorkspaceError>;
 }
@@ -65,10 +66,19 @@ pub enum StartPoint {
 }
 
 impl StartPoint {
+    const ORPHAN_BASE_COMMIT: &'static str = "";
+
+    pub fn from_base_commit(base_commit: &str) -> Self {
+        match base_commit {
+            Self::ORPHAN_BASE_COMMIT => StartPoint::Orphan,
+            sha => StartPoint::Commit(sha.to_string()),
+        }
+    }
+
     pub fn base_commit(&self) -> &str {
         match self {
             StartPoint::Commit(sha) => sha,
-            StartPoint::Orphan => "",
+            StartPoint::Orphan => Self::ORPHAN_BASE_COMMIT,
         }
     }
 }

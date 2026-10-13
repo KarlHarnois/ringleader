@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use super::ports::{Clock, HostProbe, Multiplexer, Workspace};
+use super::ports::{Clock, DiffBase, HostProbe, Multiplexer, Workspace};
 use super::reconciliation::Reconciliation;
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
@@ -36,9 +36,8 @@ impl SessionMonitor {
     }
 
     pub fn diff_stat(&self, session: &Session) -> Result<DiffStat, ServiceError> {
-        Ok(self
-            .workspace
-            .diff_stat(session.worktree_path(), session.base_commit())?)
+        let base = DiffBase::new(session.base_commit(), None);
+        Ok(self.workspace.diff_stat(session.worktree_path(), &base)?)
     }
 
     pub fn preview(&self, tmux_name: &str) -> Result<String, ServiceError> {
