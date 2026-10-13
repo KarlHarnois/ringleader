@@ -379,6 +379,23 @@ mod tests {
     }
 
     #[test]
+    fn dropping_alt_up_and_alt_down_gives_emacs_copy_mode_its_halfpage_keys_back() {
+        let server = TmuxTestServer::with_session("holder");
+        let tmux = server.command();
+        let without_arrows = KeyBindings::default()
+            .with_next_session(HotKey::parse_valid(["M-j"]))
+            .with_previous_session(HotKey::parse_valid(["M-k"]));
+
+        PrivateServer::new(&tmux).apply(&without_arrows).unwrap();
+
+        let halfpage = |action: &str| {
+            ServerFixture::keys_running(&server, "copy-mode", &format!("send-keys -X {action}"))
+        };
+        assert_eq!(halfpage("halfpage-up"), ["M-Up"]);
+        assert_eq!(halfpage("halfpage-down"), ["M-Down"]);
+    }
+
+    #[test]
     fn applying_changed_session_keys_records_the_new_hash_and_options() {
         let server = TmuxTestServer::with_session("holder");
         let tmux = server.command();

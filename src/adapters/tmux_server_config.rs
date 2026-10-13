@@ -31,6 +31,9 @@ impl TmuxServerConfig {
     const NEXT_SESSION: &'static str = "switch-client -n";
     const PREVIOUS_SESSION: &'static str = "switch-client -p";
     const RETURN: &'static str = "detach-client";
+    const EMACS_COPY_MODE: &'static str = "copy-mode";
+    const EMACS_COPY_MODE_DEFAULTS: [(&'static str, &'static str); 2] =
+        [("M-Up", "halfpage-up"), ("M-Down", "halfpage-down")];
 
     pub const RETURN_KEY_OPTION: &'static str = "@ringleader_return_key";
     pub const NEXT_SESSION_KEYS_OPTION: &'static str = "@ringleader_next_session_keys";
@@ -50,8 +53,8 @@ impl TmuxServerConfig {
             .into_iter()
             .flat_map(KeyBindings::all)
             .filter(|key| !current.binds(key));
-        let unbound = dropped.fold(TmuxSequence::new(), Self::unbinding);
-        unbound.command(["source-file", "-"])
+        let released = dropped.fold(TmuxSequence::new(), Self::released);
+        released.command(["source-file", "-"])
     }
 
     pub fn render(&self) -> String {
@@ -108,13 +111,32 @@ impl TmuxServerConfig {
         })
     }
 
-    fn unbinding(sequence: TmuxSequence, key: &HotKey) -> TmuxSequence {
-        let key = key.to_string();
-        Self::BINDING_TABLES
+    fn released(sequence: TmuxSequence, key: &HotKey) -> TmuxSequence {
+        let name = key.to_string();
+        let unbound = Self::BINDING_TABLES
             .iter()
             .fold(sequence, |sequence, table| {
-                sequence.command(["unbind-key", "-q", "-T", table, &key])
-            })
+                sequence.command(["unbind-key", "-q", "-T", table, &name])
+            });
+        Self::with_emacs_copy_mode_default(unbound, &name)
+    }
+
+    fn with_emacs_copy_mode_default(sequence: TmuxSequence, name: &str) -> TmuxSequence {
+        let default = Self::EMACS_COPY_MODE_DEFAULTS
+            .iter()
+            .find(|(key, _)| *key == name);
+        let Some((_, action)) = default else {
+            return sequence;
+        };
+        sequence.command([
+            "bind-key",
+            "-T",
+            Self::EMACS_COPY_MODE,
+            name,
+            "send-keys",
+            "-X",
+            action,
+        ])
     }
 
     fn bindings(&self) -> Vec<String> {
