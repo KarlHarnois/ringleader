@@ -1,6 +1,6 @@
 use std::cell::Cell;
 use std::iter::once;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::text::{Line, Span};
@@ -16,8 +16,7 @@ use crate::domain::{ReturnKey, SessionState};
 
 pub struct HelpView {
     return_key: String,
-    files: Vec<(String, PathBuf)>,
-    home: HomePath,
+    files: Vec<(String, String)>,
     scroll: usize,
     max_scroll: Cell<usize>,
 }
@@ -41,15 +40,14 @@ impl HelpView {
     const CLOSE_HINT: &'static str = "? Esc q close";
     const SCROLL_HINT: &'static str = "↑ ↓ scroll · ";
 
-    pub fn new(return_key: &ReturnKey, files: &[(&str, &Path)], home: HomePath) -> Self {
+    pub fn new(return_key: &ReturnKey, files: &[(&str, &Path)], home: &HomePath) -> Self {
         let files = files
             .iter()
-            .map(|(label, path)| (label.to_string(), path.to_path_buf()))
+            .map(|(label, path)| (label.to_string(), home.shown(path)))
             .collect();
         Self {
             return_key: return_key.display(),
             files,
-            home,
             scroll: 0,
             max_scroll: Cell::new(0),
         }
@@ -141,7 +139,7 @@ impl HelpView {
     fn files(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
         self.files
             .iter()
-            .flat_map(|(label, path)| Self::labeled(label, &self.home.shown(path), width, theme))
+            .flat_map(|(label, shown_path)| Self::labeled(label, shown_path, width, theme))
             .collect()
     }
 
@@ -201,7 +199,7 @@ mod tests {
                         Path::new("/home/example/.local/state/ringleader/tmux.conf"),
                     ),
                 ],
-                HomePath::new(Some(Path::new(Self::HOME))),
+                &HomePath::new(Some(Path::new(Self::HOME))),
             )
         }
 

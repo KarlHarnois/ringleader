@@ -68,7 +68,7 @@ impl Dialog {
         Self::Help(Box::new(HelpView::new(
             &service.shown_return_key(),
             &files,
-            home,
+            &home,
         )))
     }
 
