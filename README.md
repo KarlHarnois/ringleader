@@ -19,40 +19,24 @@ Linux only.
 ## Install
 
 ```sh
-nix run git+https://github.com/KarlHarnois/ringleader
-nix profile add git+https://github.com/KarlHarnois/ringleader
+nix run github:KarlHarnois/ringleader
+nix profile add github:KarlHarnois/ringleader
 ```
 
 As a flake input:
 
 ```nix
-inputs.ringleader.url = "git+https://github.com/KarlHarnois/ringleader";
+inputs.ringleader.url = "github:KarlHarnois/ringleader";
 # then use inputs.ringleader.packages.${system}.default
 ```
 
-While the repository is private, `git+https` authenticates through your git credential helper, and `git+ssh://git@github.com/KarlHarnois/ringleader` works with an SSH key registered on GitHub. The `github:KarlHarnois/ringleader` form needs a GitHub token in the `access-tokens` setting of `nix.conf` and otherwise fails with `HTTP error 404`. Nix older than 2.30 spells `nix profile add` as `nix profile install`.
+Nix older than 2.30 spells `nix profile add` as `nix profile install`.
 
 ## First run
 
-Run `ringleader` with no arguments in a directory that holds your repos. It opens the TUI and writes a commented config to `~/.config/ringleader/config.toml`, with Claude Code and opencode as agents. Press `n` to create a session, pick a repo and an agent, and optionally give an initial prompt.
+Run `ringleader` in a directory that holds your repos. It opens the TUI and writes a commented config to `~/.config/ringleader/config.toml`, with Claude Code and opencode as agents. Its comments show how to pass variables to an agent, for example to run Claude Code under a second account. Press `n` to create a session, then pick a repo, an agent, and optionally an initial prompt. Ctrl-Q detaches from a session back to the TUI, and `?` opens the help.
 
-Sessions run on Ringleader's own tmux server, so they do not show in your own `tmux ls`. The return key, Ctrl-Q unless `return_key` in the config names another, detaches from any session back to the TUI. A changed `return_key` takes effect after `r` in the TUI, or at the next `ringleader new` or `restart`. Sessions have no prefix key, the mouse is on, and each keeps 25,000 lines of scrollback. Inside your own tmux a session opens nested, so your tmux must not use the return key as its prefix or bind it in its root table. Open extra shells with `t` instead of splitting the agent window.
-
-To inspect the sessions with tmux itself, run `tmux -S "$XDG_RUNTIME_DIR/ringleader/tmux/tmux.sock" ls`. Without `XDG_RUNTIME_DIR`, the socket is under `~/.local/state/ringleader/tmux/`. The help screen (`?`) shows the path. Logging out of your last session can remove that socket while the server keeps running. Ringleader recreates it when it starts, when you press `r` in the TUI, and before it starts a session.
-
-Ringleader owns the configuration of its tmux server, as it owns the rest of its interface. Your own `~/.tmux.conf` never loads there, and Ringleader reads no other tmux file.
-
-## Agent environment
-
-An agent starts with a fixed baseline of variables such as `PATH` and `HOME`. Its `env` list copies more variables from the environment Ringleader runs in, and its `set_env` table sets fixed values. A `set_env` value is used as written, except that a leading `~/` expands to your home. Variables such as `$HOME` are not expanded. The values sit in plain text in the config, so pass secrets through `env` instead. To run Claude Code under two accounts, add one agent per account and pick it when you create a session:
-
-```toml
-[[agents]]
-name = "claude-work"
-command = "claude"
-set_env = { CLAUDE_CONFIG_DIR = "~/.claude-work" }
-prompt_args = ["{prompt}"]
-```
+Sessions run on Ringleader's own tmux server. It ignores your `~/.tmux.conf`, and its sessions do not show in your `tmux ls`.
 
 ## Keys
 
