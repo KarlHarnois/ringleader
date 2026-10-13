@@ -380,6 +380,8 @@ mod tests {
     }
 
     impl MultiplexerFixture {
+        const PROMPT_CHECK_LIMIT: Duration = Duration::from_secs(5);
+
         fn new() -> Self {
             Self {
                 server: TmuxTestServer::new(),
@@ -1256,7 +1258,7 @@ mod tests {
             .type_if_ready("ringleader-fix-auth", &["/rename fix-auth".to_string()]);
 
         assert!(typed.is_err());
-        assert!(started.elapsed() < TmuxMultiplexer::STARTUP_PATIENCE);
+        assert!(started.elapsed() < MultiplexerFixture::PROMPT_CHECK_LIMIT);
     }
 
     #[test]
