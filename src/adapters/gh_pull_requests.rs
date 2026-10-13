@@ -8,6 +8,7 @@ use serde::Deserialize;
 use super::bounded_command::{BoundedCommand, Call, CallKind, CommandError};
 use super::command_output::CommandOutput;
 use super::gh_query::GhQuery;
+use super::git_invocation::GitInvocation;
 use crate::application::ports::{PullRequestError, PullRequests};
 use crate::domain::{PullRequest, PullRequestState};
 
@@ -18,6 +19,7 @@ pub struct GhPullRequests {
 
 impl GhPullRequests {
     const SUBCOMMAND: &'static str = "api graphql";
+    const REPOSITORY_OVERRIDE: &'static str = "GH_REPO";
 
     pub fn new(program: &OsStr, bounded: BoundedCommand) -> Self {
         Self {
@@ -30,10 +32,14 @@ impl GhPullRequests {
         let mut command = Command::new(program);
         command
             .current_dir(repo)
+            .env_remove(Self::REPOSITORY_OVERRIDE)
             .env("GH_PROMPT_DISABLED", "1")
             .env("NO_COLOR", "1")
             .args(["api", "graphql", "-F", "owner={owner}", "-F", "name={repo}"])
             .args(query.arguments());
+        for name in GitInvocation::REPOSITORY_LOCAL_VARIABLES {
+            command.env_remove(name);
+        }
         command
     }
 
@@ -431,6 +437,22 @@ printf '{"viewer":"octocat","owner":"example-org","branches":{%s}}' "$listing"
         );
         assert_eq!(command.get_current_dir(), Some(Path::new("/repos/example")));
         assert_eq!(prompt, Some(OsStr::new("1")));
+    }
+
+    #[test]
+    fn the_command_ignores_inherited_repository_overrides() {
+        let query = GhQuery::new(&ParseFixture::branches());
+        let command =
+            GhPullRequests::command(OsStr::new("gh"), Path::new("/repos/example"), &query);
+        let removed: Vec<&OsStr> = command
+            .get_envs()
+            .filter(|(_, value)| value.is_none())
+            .map(|(name, _)| name)
+            .collect();
+
+        assert!(removed.contains(&OsStr::new("GH_REPO")));
+        assert!(removed.contains(&OsStr::new("GIT_DIR")));
+        assert!(removed.contains(&OsStr::new("GIT_WORK_TREE")));
     }
 
     #[test]
