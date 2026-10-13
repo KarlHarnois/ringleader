@@ -59,6 +59,7 @@ impl AgentHooks {
                 return;
             };
             if job.wait_unless(&stop).is_none() {
+                self.log_abandoned();
                 return;
             }
         }
@@ -83,6 +84,12 @@ impl AgentHooks {
             Self::locked(&startup).finish(&name);
             Ok(())
         })
+    }
+
+    fn log_abandoned(&self) {
+        for tmux_name in self.jobs().running() {
+            log::info!("skipped typing into {tmux_name}: stopped waiting for its prompt");
+        }
     }
 
     fn jobs(&self) -> MutexGuard<'_, StartupJobs> {
@@ -116,6 +123,10 @@ impl StartupJobs {
 
     fn finish(&mut self, tmux_name: &str) {
         self.in_flight.remove(tmux_name);
+    }
+
+    fn running(&self) -> impl Iterator<Item = &str> {
+        self.in_flight.iter().map(String::as_str)
     }
 
     fn has_unawaited(&self) -> bool {

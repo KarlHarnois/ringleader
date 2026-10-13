@@ -41,7 +41,9 @@ impl CliSession {
 
     pub fn wait_for_startup_input(&mut self, service: &SessionService, lock: &mut dyn Lock) {
         lock.release();
-        if let Some(note) = service.startup_wait_note() {
+        if let Some(note) = service.startup_wait_note()
+            && !self.is_signaled()
+        {
             self.output.note(note);
         }
         service.wait_startup_input(|| self.is_signaled());

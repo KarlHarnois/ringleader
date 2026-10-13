@@ -297,6 +297,7 @@ mod tests {
     use signal_hook::consts::SIGINT;
 
     use super::*;
+    use crate::adapters::signal_flags::SignalFlags;
     use crate::test_support::{CliHarness, FakeLock, FakeMultiplexer, Gate, ServiceFixture};
 
     struct LockFlowFixture;
@@ -438,6 +439,25 @@ mod tests {
             }
         );
         assert!(started.elapsed() < Duration::from_secs(2));
+        typing.release_typing();
+    }
+
+    #[test]
+    fn a_signal_during_the_command_skips_the_wait_note() {
+        let signals = SignalFlags::unregistered();
+        let raised = signals.clone();
+        let multiplexer = FakeMultiplexer::new()
+            .blocking_typing()
+            .on_call("create_session", move || raised.raise(SIGINT));
+        let fixture = ServiceFixture::new()
+            .with_config(ServiceFixture::config_with_input())
+            .with_multiplexer(multiplexer);
+        let typing = fixture.shared_multiplexer();
+        let harness = CliHarness::new(fixture).with_signals(signals);
+
+        harness.run(&["new", "--name", "Fix Auth", "--repo", "example-project"]);
+
+        assert!(!harness.stderr().contains("waiting for the agent"));
         typing.release_typing();
     }
 
