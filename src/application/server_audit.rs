@@ -78,7 +78,7 @@ impl ServerAudit {
     fn check_state(&self, client_version: Option<&str>, report: &mut DoctorReport) {
         let socket = self.paths.tmux_socket().display();
         match self.multiplexer.server_state() {
-            Ok(Some(state)) => Self::report_running(&state, client_version, report),
+            Ok(Some(state)) => self.report_running(&state, client_version, report),
             Ok(None) if self.multiplexer.socket_lost() => report.warning(format!(
                 "Ringleader's tmux server runs without its socket {socket}, which was likely removed while it ran. Run ringleader again, or press r in a running TUI, to recreate it, and do not end its sessions"
             )),
@@ -91,7 +91,7 @@ impl ServerAudit {
         }
     }
 
-    fn report_running(state: &ServerState, client: Option<&str>, report: &mut DoctorReport) {
+    fn report_running(&self, state: &ServerState, client: Option<&str>, report: &mut DoctorReport) {
         let version = state.version();
         ToolVersion::new(version).audit("tmux server", Self::MINIMUM_TMUX, report);
         let sessions = match state.sessions() {
@@ -101,7 +101,8 @@ impl ServerAudit {
         report.info(format!("Ringleader's tmux server holds {sessions}"));
         if let Some(client) = client.filter(|client| *client != version) {
             report.warning(format!(
-                "Ringleader's tmux server runs tmux {version} but the client is tmux {client}, so the server predates a tmux upgrade; once its sessions are idle, end it with kill-server so the next session starts a new one"
+                "Ringleader's tmux server runs tmux {version} but the client is tmux {client}; once its sessions are idle, end it with tmux -S {} kill-server so the next session starts a server on the client's version",
+                self.paths.tmux_socket().display()
             ));
         }
     }
@@ -291,15 +292,31 @@ mod tests {
     }
 
     #[test]
-    fn a_server_older_than_its_client_is_a_warning() {
+    fn a_server_older_than_its_client_is_ended_by_its_own_socket() {
         let fixture = ServiceFixture::new()
             .with_multiplexer(FakeMultiplexer::new().with_versions("3.6a", Some("3.5a")));
 
         assert!(AuditFixture::line_with(
             &fixture,
             "warning:",
-            "predates a tmux upgrade"
+            &format!(
+                "runs tmux 3.5a but the client is tmux 3.6a; once its sessions are idle, end it with tmux -S {} kill-server",
+                FakeMultiplexer::SOCKET
+            )
         ));
+    }
+
+    #[test]
+    fn a_client_older_than_its_server_is_a_warning_that_blames_no_upgrade() {
+        let fixture = ServiceFixture::new()
+            .with_multiplexer(FakeMultiplexer::new().with_versions("3.5a", Some("3.6a")));
+
+        assert!(AuditFixture::line_with(
+            &fixture,
+            "warning:",
+            "runs tmux 3.6a but the client is tmux 3.5a"
+        ));
+        assert!(!AuditFixture::line_with(&fixture, "warning:", "upgrade"));
     }
 
     #[test]
