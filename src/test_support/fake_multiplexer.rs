@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use super::Gate;
+use super::{Deadline, Gate};
 use crate::application::ports::{
     AgentLaunch, AttachTarget, Multiplexer, MultiplexerError, ServerConfig, ServerState,
     SessionSpec,
@@ -171,14 +171,7 @@ impl FakeMultiplexer {
     }
 
     pub fn wait_for_typing(&self, tmux_name: &str, limit: Duration) -> bool {
-        let deadline = Instant::now() + limit;
-        while Instant::now() < deadline {
-            if !self.typed_when_ready(tmux_name).is_empty() {
-                return true;
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        !self.typed_when_ready(tmux_name).is_empty()
+        Deadline::after(limit).wait_until(|| !self.typed_when_ready(tmux_name).is_empty())
     }
 
     pub fn creating_despite_failure(self) -> Self {

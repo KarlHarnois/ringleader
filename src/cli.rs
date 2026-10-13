@@ -298,7 +298,9 @@ mod tests {
 
     use super::*;
     use crate::adapters::signal_flags::SignalFlags;
-    use crate::test_support::{CliHarness, FakeLock, FakeMultiplexer, Gate, ServiceFixture};
+    use crate::test_support::{
+        CliHarness, Deadline, FakeLock, FakeMultiplexer, Gate, ServiceFixture,
+    };
 
     struct LockFlowFixture;
 
@@ -314,29 +316,17 @@ mod tests {
         }
 
         fn wait_for(log: &Arc<Mutex<Vec<String>>>, event: &str, limit: Duration) -> bool {
-            Self::wait_until(limit, || {
-                log.lock().unwrap().iter().any(|item| item == event)
-            })
+            Deadline::after(limit)
+                .wait_until(|| log.lock().unwrap().iter().any(|item| item == event))
         }
 
         fn wait_for_typing_call(multiplexer: &FakeMultiplexer, limit: Duration) -> bool {
-            Self::wait_until(limit, || {
+            Deadline::after(limit).wait_until(|| {
                 multiplexer
                     .calls()
                     .iter()
                     .any(|call| call.starts_with("type_when_ready"))
             })
-        }
-
-        fn wait_until(limit: Duration, condition: impl Fn() -> bool) -> bool {
-            let deadline = Instant::now() + limit;
-            while Instant::now() < deadline {
-                if condition() {
-                    return true;
-                }
-                thread::sleep(Duration::from_millis(5));
-            }
-            false
         }
     }
 

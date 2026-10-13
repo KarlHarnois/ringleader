@@ -148,7 +148,7 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use super::*;
-    use crate::test_support::{FakeMultiplexer, ServiceFixture};
+    use crate::test_support::{Deadline, FakeMultiplexer, ServiceFixture};
 
     struct HooksFixture;
 
@@ -180,14 +180,7 @@ mod tests {
         }
 
         fn wait_for_note_to_clear(hooks: &AgentHooks) -> bool {
-            let deadline = Instant::now() + Self::WAIT_LIMIT;
-            while Instant::now() < deadline {
-                if hooks.startup_wait_note().is_none() {
-                    return true;
-                }
-                std::thread::sleep(Duration::from_millis(5));
-            }
-            false
+            Deadline::after(Self::WAIT_LIMIT).wait_until(|| hooks.startup_wait_note().is_none())
         }
     }
 

@@ -241,6 +241,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
         ├── fake_host_probe.rs       # FakeHostProbe
         ├── fake_clock.rs            # FakeClock
         ├── gate.rs                  # Gate: a test gate that blocks a call until it is opened or a deadline passes
+        ├── deadline.rs              # Deadline: polls a condition until it holds or a time limit passes
         ├── recording_screen_mode.rs # RecordingScreenMode, the screen mode that records each switch
         ├── ui_harness.rs            # UiHarness: scripted input and a TestBackend wrapper for EventLoop tests
         ├── cli_harness.rs           # CliHarness: a Cli run against the fakes with captured output
