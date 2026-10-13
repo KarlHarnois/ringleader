@@ -825,13 +825,15 @@ mod tests {
 
     #[test]
     fn tab_never_stops_on_the_mode_row() {
-        let (mut dialog, service) =
-            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
+        let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
+        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
+        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
+        let on_the_agent = DialogFixture::hints(&dialog);
 
-        DialogFixture::type_text(&mut dialog, &service, "fix the tests");
-        let step = DialogFixture::create(&mut dialog, &service);
+        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
 
-        assert_eq!(DialogFixture::submitted(step).prompt(), "fix the tests");
+        assert_eq!(on_the_agent, DialogFixture::AGENT_HINTS);
+        assert_eq!(DialogFixture::hints(&dialog), DialogFixture::PROMPT_HINTS);
     }
 
     #[test]
