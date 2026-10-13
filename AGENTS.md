@@ -181,12 +181,13 @@ its sites step 4 still reports as uncovered.
 Run `nix develop -c cargo fmt` after any edit during these steps, then restart
 them from step 1, an edit to tests included, because `crapper` is the only
 coverage check for a function with no mutation sites. After an edit to tests
-only, skip step 3 and run step 4 only for the changed files the edited tests
-cover. When an edit rewrites or deletes an existing test instead of only adding
-one, add `--mutate-all` to the next step 4 run of each changed file that test
-covered, because a rerun keeps every kill recorded for a function whose text did
-not change. Once the steps pass after any edit, run the Commands again, because
-none of these tools runs `clippy`.
+only, keep the step 3 and step 4 results that passed since the last production
+edit, and rerun step 4 for the changed files the edited tests cover. When an edit
+rewrites or deletes an existing test instead of only adding one, add
+`--mutate-all` to the next step 4 run of each changed file that test covered,
+because a rerun keeps every kill recorded for a function whose text did not
+change. Once the steps pass after any edit, run the Commands again, because none
+of these tools runs `clippy`.
 
 ## Layout
 
