@@ -177,8 +177,8 @@ pub enum MultiplexerError {
         "Ringleader's tmux server runs without its socket {socket}, and recreating it failed: {detail}"
     )]
     SocketNotRestored { socket: String, detail: String },
-    #[error("cannot prepare the tmux server files: {detail}")]
-    ServerFiles { detail: String },
+    #[error("cannot prepare {path} for Ringleader's tmux server: {detail}")]
+    ServerFiles { path: PathBuf, detail: String },
     #[error("cannot find the agent pane of tmux session {tmux_name}")]
     NoAgentPane { tmux_name: String },
     #[error("the agent in tmux session {tmux_name} is not at its prompt")]

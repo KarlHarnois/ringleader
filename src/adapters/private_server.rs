@@ -54,12 +54,7 @@ impl<'a> PrivateServer<'a> {
         if servers.is_empty() {
             return Ok(false);
         }
-        self.tmux
-            .server()
-            .prepare_socket_directory()
-            .map_err(|error| MultiplexerError::ServerFiles {
-                detail: error.to_string(),
-            })?;
+        self.tmux.server().prepare_socket_directory()?;
         let failures: Vec<String> = servers
             .iter()
             .filter_map(|server| {
@@ -154,12 +149,7 @@ impl<'a> PrivateServer<'a> {
     }
 
     fn write_render(&self, render: &TmuxServerConfig) -> Result<(), MultiplexerError> {
-        self.tmux
-            .server()
-            .prepare(&render.render())
-            .map_err(|error| MultiplexerError::ServerFiles {
-                detail: error.to_string(),
-            })
+        self.tmux.server().prepare(&render.render())
     }
 
     fn binds_return_key(&self) -> Result<bool, MultiplexerError> {
