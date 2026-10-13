@@ -247,6 +247,22 @@ impl ServiceFixture {
         )
     }
 
+    pub fn session_with_agent(name: &str, agent: &str) -> Session {
+        let session = Self::session(name);
+        let recorded = session.metadata();
+        let metadata = SessionMetadata::new(
+            SessionRepo::new(recorded.repo_name().clone(), recorded.repo_path()),
+            SessionWorktree::new(
+                recorded.worktree_path(),
+                recorded.branch(),
+                recorded.base_commit(),
+            ),
+            agent,
+        );
+        let tmux = TmuxAddress::new(session.tmux_name(), session.socket_path());
+        session.rekeyed(session.name().clone(), metadata, tmux)
+    }
+
     pub fn session_at(name: &str, repo_path: &str, created_at: u64) -> Session {
         let name = SessionName::new(name).unwrap();
         let naming = Self::naming();
