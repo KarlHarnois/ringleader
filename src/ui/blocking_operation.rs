@@ -24,10 +24,7 @@ impl BlockingOperation {
 
     pub fn run(self, service: &mut SessionService) -> OperationOutcome {
         match self {
-            Self::Restart(name) => match service.restart_session(&name) {
-                Ok(()) => OperationOutcome::done(format!("Restarted {name}."), Some(name)),
-                Err(error) => OperationOutcome::Failed(error),
-            },
+            Self::Restart(name) => Self::restart(service, name),
             Self::Create(request) => match service.create_session(&request) {
                 Ok(session) => OperationOutcome::done(
                     format!("Created {} on branch {}.", session.name(), session.branch()),
@@ -37,13 +34,24 @@ impl BlockingOperation {
             },
             Self::MeasureDelete(name) => Self::measure(service, name),
             Self::Delete { name, seen } => Self::delete(service, name, seen),
-            Self::Rename { old, new } => match service.rename_session(&old, &new) {
-                Ok(session) => OperationOutcome::done(
-                    format!("Renamed {old} to {}.", session.name()),
-                    Some(session.name().to_string()),
-                ),
-                Err(error) => OperationOutcome::Failed(error),
-            },
+            Self::Rename { old, new } => Self::rename(service, &old, &new),
+        }
+    }
+
+    fn restart(service: &mut SessionService, name: String) -> OperationOutcome {
+        match service.restart_session(&name) {
+            Ok(()) => OperationOutcome::done(format!("Restarted {name}."), Some(name)),
+            Err(error) => OperationOutcome::Failed(error),
+        }
+    }
+
+    fn rename(service: &mut SessionService, old: &str, new: &str) -> OperationOutcome {
+        match service.rename_session(old, new) {
+            Ok(session) => OperationOutcome::done(
+                format!("Renamed {old} to {}.", session.name()),
+                Some(session.name().to_string()),
+            ),
+            Err(error) => OperationOutcome::Failed(error),
         }
     }
 

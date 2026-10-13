@@ -3,6 +3,7 @@ use std::path::Path;
 use super::agent::Agent;
 use super::config_draft::ConfigDraft;
 use super::repo_name::RepoName;
+use super::return_key::ReturnKey;
 
 pub struct ConfigChecks<'a> {
     draft: &'a ConfigDraft,
@@ -32,8 +33,8 @@ impl<'a> ConfigChecks<'a> {
     }
 
     pub fn failures(mut self) -> Vec<String> {
-        self.check_prefix("tmux_prefix", self.draft.raw_tmux_prefix(), '-');
         self.check_absolute("worktree_root", self.draft.raw_worktree_root());
+        self.check_return_key();
         self.check_session_size();
         self.check_idle_seconds();
         self.check_scan_depth();
@@ -46,22 +47,6 @@ impl<'a> ConfigChecks<'a> {
         self.failures.push(failure);
     }
 
-    fn check_prefix(&mut self, key: &str, prefix: &str, ending: char) {
-        let body = prefix.strip_suffix(ending).unwrap_or("");
-        let starts_well = body
-            .chars()
-            .next()
-            .is_some_and(|first| first.is_ascii_lowercase() || first.is_ascii_digit());
-        let body_well_formed = body.chars().all(|character| {
-            character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'
-        });
-        if !(starts_well && body_well_formed) {
-            self.fail(format!(
-                "{key}: `{prefix}` must start with a lowercase letter or digit, use only a-z, 0-9, and -, and end with `{ending}`"
-            ));
-        }
-    }
-
     fn check_absolute(&mut self, key: &str, path: &Path) {
         let text = path.to_string_lossy();
         if text.starts_with('$') {
@@ -70,6 +55,16 @@ impl<'a> ConfigChecks<'a> {
             ));
         } else if !path.is_absolute() {
             self.fail(format!("{key}: `{text}` is not an absolute path"));
+        }
+    }
+
+    fn check_return_key(&mut self) {
+        let raw = self.draft.raw_return_key();
+        if ReturnKey::parse(raw).is_none() {
+            self.fail(format!(
+                "return_key: `{}` must be a key a terminal can send, such as C-q, M-x, or F12: optional C-, M-, and S- modifiers, then a key name or one printable character other than a quote or \\. After C- the character must be a letter other than i or m, which terminals send as Tab and Enter, or ], ^, or _. S- cannot precede a character, and C- and S- cannot precede Enter, Tab, BTab, Escape, BSpace, or Space, except C-Space",
+                raw.escape_default()
+            ));
         }
     }
 
@@ -272,13 +267,31 @@ mod tests {
     }
 
     #[test]
-    fn a_tmux_prefix_of_two_dashes_fails() {
-        ChecksFixture::fails_on(ChecksFixture::draft().tmux_prefix("--"), "tmux_prefix");
+    fn return_keys_a_terminal_can_send_pass() {
+        for key in ["C-q", "M-x", "F12", "~", "}", "M-}"] {
+            let draft = ChecksFixture::draft().return_key(key);
+
+            assert!(
+                ChecksFixture::failures(&draft).is_empty(),
+                "{key} should pass"
+            );
+        }
     }
 
     #[test]
-    fn a_tmux_prefix_starting_with_a_dash_fails() {
-        ChecksFixture::fails_on(ChecksFixture::draft().tmux_prefix("-x-"), "tmux_prefix");
+    fn return_keys_no_keystroke_reaches_fail_with_their_key_named() {
+        for key in [
+            "", "C-", "'", "\\", " ", "\n", "C-}", "C-1", "S-x", "C-Enter", "C-m",
+        ] {
+            ChecksFixture::fails_on(ChecksFixture::draft().return_key(key), "return_key");
+        }
+    }
+
+    #[test]
+    fn the_return_key_defaults_to_ctrl_q() {
+        let config = crate::domain::Config::new(&ChecksFixture::draft()).unwrap();
+
+        assert_eq!(config.return_key().to_string(), "C-q");
     }
 
     #[test]
@@ -438,7 +451,7 @@ mod tests {
 
     #[test]
     fn two_bad_values_are_both_reported() {
-        let draft = ChecksFixture::draft().tmux_prefix("--").session_size("0x0");
+        let draft = ChecksFixture::draft().return_key("C-").session_size("0x0");
 
         assert_eq!(ChecksFixture::failures(&draft).len(), 2);
     }

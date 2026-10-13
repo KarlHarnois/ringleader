@@ -580,22 +580,22 @@ mod tests {
     }
 
     #[test]
-    fn rename_refuses_a_stopped_session_live_on_another_socket() {
+    fn rename_refuses_a_stopped_session_while_its_agent_runs_under_the_private_server() {
         let session = ServiceFixture::session("fix-auth");
-        let fixture = RenameFixture::stopped("fix-auth").with_multiplexer(
-            FakeMultiplexer::new().with_session_on_socket(
-                session.socket_path(),
-                session.tmux_name(),
-                session.worktree_path(),
-            ),
-        );
+        let fixture = RenameFixture::stopped("fix-auth")
+            .with_host(ServiceFixture::with_worktree_agent(&session));
 
         let error = fixture
             .service()
             .rename_session("fix-auth", "fix-login")
             .unwrap_err();
 
-        assert!(error.to_string().contains(FakeMultiplexer::SOCKET));
+        assert_eq!(error.exit_code(), 3);
+        assert!(
+            error
+                .to_string()
+                .contains("Ringleader's tmux server still runs processes in its worktree")
+        );
         assert!(fixture.workspace().state_changing_calls().is_empty());
     }
 

@@ -5,6 +5,7 @@ use super::diagnostic_paths::DiagnosticPaths;
 use super::doctor_report::DoctorReport;
 use super::ports::{Clock, ConfigError, HostProbe, Multiplexer, SessionRegistry, Workspace};
 use super::registry_audit::RegistryAudit;
+use super::server_audit::ServerAudit;
 use super::service_ports::ServicePorts;
 use super::session_reconciler::SessionReconciler;
 use super::tool_version::ToolVersion;
@@ -13,6 +14,7 @@ use crate::domain::{Agent, Config};
 
 pub struct Doctor {
     audit: RegistryAudit,
+    server_audit: ServerAudit,
     workspace: Arc<dyn Workspace>,
     multiplexer: Arc<dyn Multiplexer>,
     host: Arc<dyn HostProbe>,
@@ -22,13 +24,13 @@ pub struct Doctor {
 }
 
 impl Doctor {
-    const MINIMUM_TMUX: (u32, u32) = (3, 2);
     const MINIMUM_GIT: (u32, u32) = (2, 42);
     const NIX_STORE: &'static str = "/nix/store";
 
     pub fn new(ports: &ServicePorts, paths: DiagnosticPaths) -> Self {
         Self {
             audit: RegistryAudit::new(ports),
+            server_audit: ServerAudit::new(ports, &paths),
             workspace: ports.repos().workspace(),
             multiplexer: ports.tmux().multiplexer(),
             host: ports.repos().host(),
@@ -45,7 +47,10 @@ impl Doctor {
         config_path: &Path,
     ) -> DoctorReport {
         let mut report = DoctorReport::default();
-        self.check_tmux(&mut report);
+        let client_version = self.check_tmux_client(&mut report);
+        let valid_return_key = config_error.is_none().then(|| config.return_key());
+        self.server_audit
+            .audit(valid_return_key, client_version.as_deref(), &mut report);
         self.check_git(&mut report);
         let valid_config = match config_error {
             Some(error) => {
@@ -63,22 +68,18 @@ impl Doctor {
         report
     }
 
-    fn check_tmux(&self, report: &mut DoctorReport) {
+    fn check_tmux_client(&self, report: &mut DoctorReport) -> Option<String> {
         let program = self.paths.tmux_program();
         report.info(format!("tmux program: {program}"));
         match self.multiplexer.version() {
-            Ok(version) => Self::check_version("tmux client", &version, Self::MINIMUM_TMUX, report),
-            Err(error) => report.problem(format!("tmux {program} is not usable: {error}")),
-        }
-        match self.multiplexer.server_version() {
-            Ok(Some(version)) => {
-                Self::check_version("tmux server", &version, Self::MINIMUM_TMUX, report)
+            Ok(version) => {
+                ToolVersion::new(&version).audit("tmux client", ServerAudit::MINIMUM_TMUX, report);
+                Some(version)
             }
-            Ok(None) => report.info("no tmux server is running"),
-            Err(error) => report.problem(format!("cannot read the tmux server version: {error}")),
-        }
-        if let Ok(Some(true)) = self.multiplexer.server_exit_unattached() {
-            report.problem("the running tmux server has exit-unattached on, so creating a session fails; turn it off");
+            Err(error) => {
+                report.problem(format!("tmux {program} is not usable: {error}"));
+                None
+            }
         }
     }
 
@@ -86,18 +87,8 @@ impl Doctor {
         let program = self.paths.git_program();
         report.info(format!("git program: {program}"));
         match self.workspace.version() {
-            Ok(version) => Self::check_version("git", &version, Self::MINIMUM_GIT, report),
+            Ok(version) => ToolVersion::new(&version).audit("git", Self::MINIMUM_GIT, report),
             Err(error) => report.problem(format!("git {program} is not usable: {error}")),
-        }
-    }
-
-    fn check_version(label: &str, version: &str, minimum: (u32, u32), report: &mut DoctorReport) {
-        match ToolVersion::new(version).numbers() {
-            Some(found) if found >= minimum => report.info(format!("{label} {version}")),
-            _ => report.problem(format!(
-                "{label} {version} is older than {}.{}",
-                minimum.0, minimum.1
-            )),
         }
     }
 
@@ -280,14 +271,6 @@ mod tests {
         ));
 
         assert!(DoctorFixture::has_problem(&fixture, "is not usable"));
-    }
-
-    #[test]
-    fn a_server_with_exit_unattached_on_is_a_problem() {
-        let fixture = DoctorFixture::healthy()
-            .with_multiplexer(FakeMultiplexer::new().with_exit_unattached());
-
-        assert!(DoctorFixture::has_problem(&fixture, "exit-unattached"));
     }
 
     #[test]
@@ -506,16 +489,23 @@ mod tests {
     }
 
     #[test]
-    fn a_changed_naming_is_a_warning_about_ctrl_q() {
-        let config = ServiceFixture::config().with_naming(crate::domain::NamingScheme::new(
-            Path::new(ServiceFixture::WORKTREE_ROOT),
-            "rl-",
-        ));
-        let fixture = DoctorFixture::healthy().with_config(config);
+    fn an_entry_under_another_worktree_root_is_a_warning() {
+        let session = DoctorFixture::session();
+        let naming = crate::domain::NamingScheme::for_new_sessions(Path::new("/elsewhere"));
+        let recorded = Session::new(
+            session.name().clone(),
+            session.metadata().clone(),
+            crate::domain::Registration::new(
+                crate::domain::TmuxAddress::new(session.tmux_name(), session.socket_path()),
+                naming,
+                ServiceFixture::CREATED_AT,
+            ),
+        );
+        let fixture = DoctorFixture::healthy().with_sessions(&[recorded]);
 
         assert!(DoctorFixture::has_warning(
             &fixture,
-            "Ctrl-Q does not return"
+            "worktree_root /elsewhere, which differs from the config"
         ));
     }
 
@@ -552,20 +542,30 @@ mod tests {
     }
 
     #[test]
-    fn a_stopped_entry_live_on_its_recorded_socket_names_the_socket() {
-        let session = DoctorFixture::session();
-        let fixture = DoctorFixture::healthy().with_multiplexer(
-            FakeMultiplexer::new().with_session_on_socket(
-                session.socket_path(),
-                session.tmux_name(),
-                session.worktree_path(),
-            ),
-        );
-
-        assert!(DoctorFixture::has_problem(
-            &fixture,
-            FakeMultiplexer::SOCKET
+    fn an_agent_of_a_private_server_whose_socket_is_gone_gets_the_socket_fix() {
+        let fixture = DoctorFixture::healthy().with_host(ServiceFixture::with_worktree_agent(
+            &DoctorFixture::session(),
         ));
+
+        assert!(DoctorFixture::has_warning(&fixture, "send SIGUSR1"));
+    }
+
+    #[test]
+    fn an_agent_of_a_private_server_still_on_its_socket_gets_no_socket_fix() {
+        let host = ServiceFixture::with_worktree_agent(&DoctorFixture::session())
+            .with_file(Path::new(FakeMultiplexer::SOCKET));
+        let fixture = DoctorFixture::healthy().with_host(host);
+
+        assert!(!DoctorFixture::has_warning(&fixture, "send SIGUSR1"));
+    }
+
+    #[test]
+    fn an_editor_open_in_a_stopped_worktree_gets_no_socket_fix() {
+        let fixture = DoctorFixture::healthy().with_host(ServiceFixture::with_worktree_process(
+            &DoctorFixture::session(),
+        ));
+
+        assert!(!DoctorFixture::has_warning(&fixture, "send SIGUSR1"));
     }
 
     #[test]

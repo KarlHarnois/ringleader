@@ -102,11 +102,7 @@ impl SessionDeletion {
             return Err(ServiceError::Conflict(format!(
                 "processes still run in {}: {}; kept the worktree, the branch, and the session, which is now stopped",
                 session.worktree_path().display(),
-                remaining
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join(", ")
+                ProcessInfo::listed(&remaining)
             )));
         }
         self.refuse_new_commits(session, measurement)
@@ -630,6 +626,30 @@ mod tests {
     }
 
     #[test]
+    fn forget_works_while_ringleader_runs_inside_the_worktree() {
+        let worktree = DeleteFixture::session().worktree_path().join("src");
+        let fixture = DeleteFixture::live_fixture().launched_in(&worktree);
+
+        fixture
+            .service()
+            .delete_session("fix-auth", &DeleteConfirmation::force().forgetting())
+            .unwrap();
+
+        assert!(fixture.registry().sessions().is_empty());
+        assert!(fixture.workspace().state_changing_calls().is_empty());
+    }
+
+    #[test]
+    fn measuring_a_delete_refuses_while_ringleader_runs_inside_the_worktree() {
+        let worktree = DeleteFixture::session().worktree_path().join("src");
+        let fixture = DeleteFixture::live_fixture().launched_in(&worktree);
+
+        let error = fixture.service().delete_impact("fix-auth").unwrap_err();
+
+        assert_eq!(error.exit_code(), 3);
+    }
+
+    #[test]
     fn a_worktree_git_does_not_list_refuses_before_measuring() {
         let session = DeleteFixture::session();
         let fixture =
@@ -716,6 +736,22 @@ mod tests {
         let error = DeleteFixture::force(&mut fixture.service()).unwrap_err();
 
         assert_eq!(error.exit_code(), 3);
+        assert!(fixture.multiplexer().state_changing_calls().is_empty());
+    }
+
+    #[test]
+    fn delete_refuses_while_ringleader_runs_inside_the_worktree() {
+        let worktree = DeleteFixture::session().worktree_path().join("src");
+        let fixture = DeleteFixture::live_fixture().launched_in(&worktree);
+
+        let error = DeleteFixture::force(&mut fixture.service()).unwrap_err();
+
+        assert_eq!(error.exit_code(), 3);
+        assert!(
+            error
+                .to_string()
+                .contains("delete it from another directory")
+        );
         assert!(fixture.multiplexer().state_changing_calls().is_empty());
     }
 
@@ -810,36 +846,14 @@ mod tests {
     }
 
     #[test]
-    fn a_stopped_session_live_on_another_socket_refuses_delete() {
+    fn processes_in_a_stopped_worktree_are_counted_instead_of_refusing_the_delete() {
         let session = DeleteFixture::session();
-        let fixture = DeleteFixture::stopped_fixture().with_multiplexer(
-            FakeMultiplexer::new().with_session_on_socket(
-                session.socket_path(),
-                session.tmux_name(),
-                session.worktree_path(),
-            ),
-        );
+        let fixture = DeleteFixture::stopped_fixture()
+            .with_host(ServiceFixture::with_worktree_process(&session));
 
-        let error = DeleteFixture::force(&mut fixture.service()).unwrap_err();
+        let impact = fixture.service().delete_impact("fix-auth").unwrap();
 
-        assert!(error.to_string().contains(FakeMultiplexer::SOCKET));
-        DeleteFixture::assert_everything_kept(&fixture);
-    }
-
-    #[test]
-    fn a_stopped_entry_whose_session_was_renamed_by_hand_on_its_socket_refuses_delete() {
-        let session = DeleteFixture::session();
-        let fixture = DeleteFixture::stopped_fixture().with_multiplexer(
-            FakeMultiplexer::new().with_session_on_socket(
-                session.socket_path(),
-                "renamed-by-hand",
-                session.worktree_path(),
-            ),
-        );
-
-        let error = DeleteFixture::force(&mut fixture.service()).unwrap_err();
-
-        assert_eq!(error.exit_code(), 3);
+        assert_eq!(impact.processes().len(), 1);
     }
 
     #[test]

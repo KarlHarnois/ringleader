@@ -164,6 +164,10 @@ impl Cli {
         self.command.is_none()
     }
 
+    pub fn is_doctor(&self) -> bool {
+        matches!(self.command, Some(CliCommand::Doctor(_)))
+    }
+
     pub fn is_mutating(&self) -> bool {
         matches!(
             self.command,
@@ -204,6 +208,7 @@ impl Cli {
             session.output().error(&error.to_string());
             return CliExit::Code(Self::FAILURE_EXIT);
         }
+        Self::restore_server_socket(service, session);
         let recovery = if self.is_mutating() {
             CorruptRegistry::MoveAside
         } else {
@@ -219,6 +224,14 @@ impl Cli {
         }
         let result = self.dispatch(service, session);
         session.finish(result)
+    }
+
+    fn restore_server_socket(service: &SessionService, session: &mut CliSession) {
+        match service.restore_server_socket() {
+            Ok(Some(note)) => session.output().note(&note),
+            Ok(None) => {}
+            Err(error) => session.output().error(&error.to_string()),
+        }
     }
 
     fn doctor(service: &SessionService, session: &mut CliSession, args: &JsonArgs) -> u8 {
