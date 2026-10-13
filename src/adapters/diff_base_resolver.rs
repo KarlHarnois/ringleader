@@ -570,6 +570,16 @@ mod tests {
     }
 
     #[test]
+    fn a_session_branch_named_like_the_origin_default_still_counts_its_commits() {
+        let repo = DiffBaseFixture::repo_with_only("master");
+        let fixture = DiffBaseFixture::started_on_branch(repo, "main");
+        fixture.point_origin_at(&fixture.recorded);
+        fixture.commit_in_session("session.md");
+
+        assert_eq!(fixture.diff().files(), 1);
+    }
+
+    #[test]
     fn an_unrelated_history_measures_from_the_recorded_commit() {
         let fixture = DiffBaseFixture::started();
         fixture.replace_session_history("unrelated.md");
