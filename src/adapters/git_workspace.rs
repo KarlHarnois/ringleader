@@ -499,13 +499,12 @@ mod tests {
     }
 
     #[test]
-    fn a_branch_pushed_to_two_remotes_is_published() {
+    fn a_branch_pushed_only_to_a_second_remote_is_published() {
         let origin = GitTestRepo::new();
         let clone = WorktreeFixture::clone_with_work(&origin);
         let fork = origin.path().to_string_lossy().into_owned();
         origin.git(&clone, &["remote", "add", "fork", &fork]);
 
-        origin.git(&clone, &["push", "-q", "origin", BRANCH]);
         origin.git(&clone, &["push", "-q", "fork", BRANCH]);
 
         assert!(WorktreeFixture::is_published(&origin, &clone));
