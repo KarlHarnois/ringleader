@@ -107,15 +107,10 @@ impl<'a> SessionCommands<'a> {
     pub fn rename(&mut self, args: &RenameArgs) -> Result<u8, CommandStop> {
         self.service.observe(true)?;
         self.session.stop_if_signaled()?;
-        let renamed = self
-            .service
-            .rename_session(&args.old, &args.new, args.keep_branch)?;
-        self.session.output().line(&format!(
-            "renamed {} to {}, branch {}",
-            args.old,
-            renamed.name(),
-            renamed.branch()
-        ));
+        let renamed = self.service.rename_session(&args.old, &args.new)?;
+        self.session
+            .output()
+            .line(&format!("renamed {} to {}", args.old, renamed.name()));
         Ok(0)
     }
 
@@ -541,17 +536,14 @@ mod tests {
     }
 
     #[test]
-    fn rename_prints_the_new_name_and_branch() {
+    fn rename_prints_the_new_name() {
         let harness = CliHarness::new(CommandFixture::live());
 
         assert_eq!(
             harness.run(&["rename", "fix-auth", "fix-login"]),
             CliExit::Code(0)
         );
-        assert_eq!(
-            harness.stdout(),
-            "renamed fix-auth to fix-login, branch fix-login\n"
-        );
+        assert_eq!(harness.stdout(), "renamed fix-auth to fix-login\n");
     }
 
     #[test]

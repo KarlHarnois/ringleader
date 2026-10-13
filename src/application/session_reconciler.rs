@@ -415,7 +415,7 @@ mod tests {
 
         let error = fixture
             .service()
-            .rename_session("mystery", "riddle", false)
+            .rename_session("mystery", "riddle")
             .unwrap_err();
 
         assert!(
@@ -670,9 +670,7 @@ mod tests {
                     .with_live(ServiceFixture::waiting(&session).without_metadata()),
             );
         let mut service = fixture.service();
-        let refused = service
-            .rename_session("fix-auth", "other", false)
-            .unwrap_err();
+        let refused = service.rename_session("fix-auth", "other").unwrap_err();
 
         fixture.multiplexer().end_session("ringleader-fix-auth");
         let rows = service.observe(true).unwrap();

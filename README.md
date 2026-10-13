@@ -39,7 +39,7 @@ ringleader list [--json]
 ringleader new --name <n> --repo <r> [--agent <a>] [--base-branch <b>] [--prompt <text>]
 ringleader delete <name> [--force] [--forget]
 ringleader attach <name>
-ringleader rename <old> <new> [--keep-branch]
+ringleader rename <old> <new>
 ringleader restart <name>
 ringleader repo add <path> [--name <n>] [--base-branch <b>]
 ringleader repo remove <name>

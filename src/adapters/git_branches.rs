@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use super::branch_section::BranchSection;
 use super::git_invocation::GitInvocation;
 use super::git_runner::GitRunner;
 use crate::application::ports::{BranchMarker, WorkspaceError};
@@ -10,6 +11,9 @@ pub struct GitBranches<'a> {
 
 impl<'a> GitBranches<'a> {
     const BRANCH_REFS: &'static str = "refs/heads";
+    const REMOTE_REFS: &'static str = "refs/remotes";
+    const LOCAL_REMOTE: &'static str = ".";
+    const GONE_UPSTREAM: &'static str = "gone";
 
     pub fn new(git: &'a GitRunner) -> Self {
         Self { git }
@@ -66,6 +70,22 @@ impl<'a> GitBranches<'a> {
         self.git.run_checked(&rename).map(drop)
     }
 
+    pub fn drop_stale_upstream(
+        &self,
+        location: &Path,
+        old: &str,
+        new: &str,
+    ) -> Result<(), WorkspaceError> {
+        let merge_key = BranchSection::new(new).upstream_merge_key();
+        if self.read_local_config(location, &merge_key)? != Some(Self::branch_ref(old)) {
+            return Ok(());
+        }
+        let unset = GitInvocation::in_worktree(location, "branch")
+            .writing()
+            .args(["--unset-upstream", new]);
+        self.git.run_checked(&unset).map(drop)
+    }
+
     pub fn mark_managed(&self, repo: &Path, branch: &str) -> Result<(), WorkspaceError> {
         let key = BranchMarker::new(branch).key();
         let mark = GitInvocation::in_repo(repo, "config").writing().args([
@@ -77,10 +97,8 @@ impl<'a> GitBranches<'a> {
     }
 
     pub fn is_managed(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError> {
-        let key = BranchMarker::new(branch).key();
-        let read = GitInvocation::in_repo(repo, "config").args(["--local", "--get", &key]);
-        let value = self.git.lookup(&read)?;
-        Ok(value.is_some_and(|found| found.first_line() == BranchMarker::VALUE))
+        let value = self.read_local_config(repo, &BranchMarker::new(branch).key())?;
+        Ok(value.as_deref() == Some(BranchMarker::VALUE))
     }
 
     pub fn list_managed(&self, repo: &Path) -> Result<Vec<String>, WorkspaceError> {
@@ -93,6 +111,21 @@ impl<'a> GitBranches<'a> {
             .into_iter()
             .filter(|branch| existing.contains(branch))
             .collect())
+    }
+
+    pub fn is_published(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError> {
+        if !self.has_ref(repo, branch)? {
+            return Ok(false);
+        }
+        if self.has_live_upstream(repo, branch)? {
+            return Ok(true);
+        }
+        for remote_ref in self.remote_copies(repo, branch)? {
+            if self.holds_work_pushed_from(repo, branch, &remote_ref)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     fn list_marked(&self, repo: &Path) -> Result<Vec<String>, WorkspaceError> {
@@ -114,8 +147,98 @@ impl<'a> GitBranches<'a> {
             .collect())
     }
 
+    fn has_live_upstream(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError> {
+        Ok(self.tracks_its_remote_namesake(repo, branch)?
+            && !self.upstream_is_gone(repo, branch)?)
+    }
+
+    fn tracks_its_remote_namesake(
+        &self,
+        repo: &Path,
+        branch: &str,
+    ) -> Result<bool, WorkspaceError> {
+        let section = BranchSection::new(branch);
+        let merge = self.read_local_config(repo, &section.upstream_merge_key())?;
+        let remote = self.read_local_config(repo, &section.upstream_remote_key())?;
+        let on_a_remote = remote.is_some_and(|name| name != Self::LOCAL_REMOTE);
+        Ok(on_a_remote && merge == Some(Self::branch_ref(branch)))
+    }
+
+    fn upstream_is_gone(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError> {
+        let read = GitInvocation::in_repo(repo, "for-each-ref").args([
+            "--format=%(upstream:track,nobracket)",
+            &Self::branch_ref(branch),
+        ]);
+        let tracking = self.git.run_checked(&read)?;
+        Ok(tracking.first_line() == Self::GONE_UPSTREAM)
+    }
+
+    fn read_local_config(&self, repo: &Path, key: &str) -> Result<Option<String>, WorkspaceError> {
+        let read = GitInvocation::in_repo(repo, "config").args(["--local", "--get", key]);
+        let value = self.git.lookup(&read)?;
+        Ok(value.map(|found| found.first_line().to_string()))
+    }
+
+    fn remote_copies(&self, repo: &Path, branch: &str) -> Result<Vec<String>, WorkspaceError> {
+        let remotes = self
+            .git
+            .run_checked(&GitInvocation::in_repo(repo, "remote"))?;
+        let mut copies = Vec::new();
+        for remote in remotes.lines() {
+            let remote_ref = Self::remote_branch_ref(remote, branch);
+            if self.git.resolve(repo, &remote_ref)?.is_some() {
+                copies.push(remote_ref);
+            }
+        }
+        Ok(copies)
+    }
+
+    fn holds_work_pushed_from(
+        &self,
+        repo: &Path,
+        branch: &str,
+        remote_ref: &str,
+    ) -> Result<bool, WorkspaceError> {
+        let shared = self.merge_bases(repo, &Self::branch_ref(branch), remote_ref)?;
+        if shared.is_empty() {
+            return Ok(false);
+        }
+        self.is_ahead_of_the_default_branches(repo, &shared)
+    }
+
+    fn merge_bases(
+        &self,
+        repo: &Path,
+        local_ref: &str,
+        remote_ref: &str,
+    ) -> Result<Vec<String>, WorkspaceError> {
+        let find =
+            GitInvocation::in_repo(repo, "merge-base").args(["--all", local_ref, remote_ref]);
+        let found = self.git.lookup(&find)?;
+        Ok(found
+            .map(|bases| bases.lines().into_iter().map(str::to_string).collect())
+            .unwrap_or_default())
+    }
+
+    fn is_ahead_of_the_default_branches(
+        &self,
+        repo: &Path,
+        commits: &[String],
+    ) -> Result<bool, WorkspaceError> {
+        let default_branches = format!("--glob={}/*/HEAD", Self::REMOTE_REFS);
+        let list = GitInvocation::in_repo(repo, "rev-list")
+            .arg("-n1")
+            .args(commits)
+            .args(["--not", &default_branches]);
+        Ok(!self.git.run_checked(&list)?.first_line().is_empty())
+    }
+
     fn branch_ref(branch: &str) -> String {
         format!("{}/{branch}", Self::BRANCH_REFS)
+    }
+
+    fn remote_branch_ref(remote: &str, branch: &str) -> String {
+        format!("{}/{remote}/{branch}", Self::REMOTE_REFS)
     }
 
     fn list_existing(&self, repo: &Path) -> Result<Vec<String>, WorkspaceError> {
@@ -129,33 +252,5 @@ impl<'a> GitBranches<'a> {
             .filter_map(|branch| branch.strip_prefix('/'))
             .map(str::to_string)
             .collect())
-    }
-}
-
-struct BranchSection<'a> {
-    branch: &'a str,
-}
-
-impl<'a> BranchSection<'a> {
-    const REGEX_SPECIAL: &'static str = "\\.^$*+?()[]{}|";
-
-    fn new(branch: &'a str) -> Self {
-        Self { branch }
-    }
-
-    fn name(&self) -> String {
-        format!("branch.{}", self.branch)
-    }
-
-    fn key_pattern(&self) -> String {
-        let escaped: String = self
-            .name()
-            .chars()
-            .flat_map(|character| {
-                let escape = Self::REGEX_SPECIAL.contains(character).then_some('\\');
-                escape.into_iter().chain([character])
-            })
-            .collect();
-        format!("^{escaped}\\.")
     }
 }
