@@ -10,6 +10,7 @@ pub mod event_loop;
 pub mod help_view;
 pub mod home_state;
 pub mod home_view;
+pub mod key_sequence;
 pub mod label_column;
 pub mod legend;
 pub mod list_selection;

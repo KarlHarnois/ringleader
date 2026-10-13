@@ -124,6 +124,14 @@ impl HomeState {
         self.change_selection(service, |sessions| sessions.move_selection(offset));
     }
 
+    pub fn select_first(&mut self, service: &SessionService) {
+        self.change_selection(service, SessionList::select_first);
+    }
+
+    pub fn select_last(&mut self, service: &SessionService) {
+        self.change_selection(service, SessionList::select_last);
+    }
+
     pub fn toggle_fold(&mut self, service: &SessionService) {
         self.change_selection(service, SessionList::toggle_fold);
     }

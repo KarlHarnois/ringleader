@@ -100,6 +100,14 @@ impl SessionList {
         }
     }
 
+    pub fn select_first(&mut self) {
+        self.selection = self.tree().lines().first().map(TreeLine::selection);
+    }
+
+    pub fn select_last(&mut self) {
+        self.selection = self.tree().lines().last().map(TreeLine::selection);
+    }
+
     pub fn toggle_fold(&mut self) {
         let Some(ListSelection::Repo(group)) = &self.selection else {
             return;
@@ -190,6 +198,16 @@ mod tests {
 
         fn names(list: &SessionList) -> Vec<&str> {
             list.rows().iter().map(SessionSummary::name).collect()
+        }
+
+        fn three_waiting_rows() -> SessionList {
+            let mut list = SessionList::default();
+            list.show(vec![
+                Self::row("dark-mode", SessionState::Waiting),
+                Self::row("fix-auth", SessionState::Waiting),
+                Self::row("spike-tui", SessionState::Waiting),
+            ]);
+            list
         }
     }
 
@@ -463,5 +481,54 @@ mod tests {
 
         assert_eq!(at_top.as_deref(), Some("dark-mode"));
         assert_eq!(list.selected_name(), Some("fix-auth"));
+    }
+
+    #[test]
+    fn select_last_picks_the_bottom_row() {
+        let mut list = ListFixture::three_waiting_rows();
+
+        list.select_last();
+
+        assert_eq!(list.selected_name(), Some("spike-tui"));
+    }
+
+    #[test]
+    fn select_first_picks_the_top_row_after_a_move() {
+        let mut list = ListFixture::three_waiting_rows();
+        list.move_selection(2);
+
+        list.select_first();
+
+        assert_eq!(list.selected_name(), Some("dark-mode"));
+    }
+
+    #[test]
+    fn select_first_picks_the_first_heading_of_a_grouped_list() {
+        let mut list = ListFixture::showing(ListFixture::two_repos());
+        list.select("c-three");
+
+        list.select_first();
+        list.toggle_fold();
+
+        assert_eq!(list.visible_managed(10), ["c-three"]);
+    }
+
+    #[test]
+    fn select_last_picks_the_last_session_of_a_grouped_list() {
+        let mut list = ListFixture::showing(ListFixture::two_repos());
+
+        list.select_last();
+
+        assert_eq!(list.selected_name(), Some("c-three"));
+    }
+
+    #[test]
+    fn jumping_on_an_empty_list_selects_nothing() {
+        let mut list = SessionList::default();
+
+        list.select_last();
+        list.select_first();
+
+        assert_eq!(list.selected_name(), None);
     }
 }

@@ -41,6 +41,7 @@ impl<'a> ActionGate<'a> {
             KeyCode::Char('?') => KeyAction::Open(DialogOpening::Help),
             KeyCode::Down | KeyCode::Right | KeyCode::Char('j' | 'l') => KeyAction::Move(1),
             KeyCode::Up | KeyCode::Left | KeyCode::Char('k' | 'h') => KeyAction::Move(-1),
+            KeyCode::Char('G') => KeyAction::SelectLast,
             KeyCode::Char('n') => KeyAction::from(
                 self.writable()
                     .map(|()| KeyAction::Open(DialogOpening::NewSession)),
@@ -138,6 +139,8 @@ impl<'a> ActionGate<'a> {
 pub enum KeyAction {
     Request(AppRequest),
     Move(isize),
+    SelectFirst,
+    SelectLast,
     Fold,
     JumpToRepo(usize),
     Open(DialogOpening),
@@ -297,6 +300,16 @@ mod tests {
         assert_eq!(action(KeyCode::Right), KeyAction::Move(1));
         assert_eq!(action(KeyCode::Char('h')), KeyAction::Move(-1));
         assert_eq!(action(KeyCode::Left), KeyAction::Move(-1));
+    }
+
+    #[test]
+    fn capital_g_selects_the_last_session() {
+        let key = KeyEvent::from(KeyCode::Char('G'));
+
+        assert_eq!(
+            ActionGate::new(None, None).action_for(&key),
+            KeyAction::SelectLast
+        );
     }
 
     #[test]
