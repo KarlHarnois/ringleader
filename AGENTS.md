@@ -35,7 +35,7 @@ nix build .#
 nix flake check
 ```
 
-These are the commands `.github/workflows/ci.yml` runs. A change is done when all of them pass.
+These are the commands `.github/workflows/ci.yml` runs. All of them run on pushes to `master` and on merge-queue runs, and the first three also run on pull requests. A change is done when all of them pass.
 
 ## Architecture
 
