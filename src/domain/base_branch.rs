@@ -28,6 +28,10 @@ impl BaseBranch {
     pub fn origin_suggestion(&self) -> String {
         format!("origin/{}", self.0)
     }
+
+    pub fn origin_ref(&self) -> String {
+        format!("refs/remotes/{}", self.origin_suggestion())
+    }
 }
 
 impl fmt::Display for BaseBranch {
@@ -74,5 +78,12 @@ mod tests {
         let base = BaseBranch::new("develop").unwrap();
 
         assert_eq!(base.origin_suggestion(), "origin/develop");
+    }
+
+    #[test]
+    fn names_the_ref_of_the_origin_copy() {
+        let base = BaseBranch::new("develop").unwrap();
+
+        assert_eq!(base.origin_ref(), "refs/remotes/origin/develop");
     }
 }

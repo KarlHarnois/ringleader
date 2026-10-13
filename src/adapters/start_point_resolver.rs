@@ -34,14 +34,12 @@ impl<'a> StartPointResolver<'a> {
         if let Some(sha) = self.first_commit(repo, base.candidate_refs())? {
             return Ok(StartPoint::Commit(sha));
         }
-        let suggestion = base.origin_suggestion();
-        let origin_ref = format!("refs/remotes/{suggestion}");
-        let origin_exists = self.commit_of(repo, &origin_ref)?.is_some();
+        let origin_exists = self.commit_of(repo, &base.origin_ref())?.is_some();
         Err(WorkspaceError::BaseBranchNotFound {
             base: base.to_string(),
             local_ref: base.local_ref(),
             remote_ref: base.remote_tracking_ref(),
-            suggestion: origin_exists.then_some(suggestion),
+            suggestion: origin_exists.then(|| base.origin_suggestion()),
         })
     }
 

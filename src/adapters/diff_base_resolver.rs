@@ -66,11 +66,20 @@ impl<'a> DiffBaseResolver<'a> {
         base_branch: Option<&BaseBranch>,
     ) -> Result<Vec<String>, WorkspaceError> {
         let branch_refs = match base_branch {
-            Some(branch) => branch.candidate_refs().to_vec(),
+            Some(branch) => Self::configured_refs(branch),
             None => self.origin_ladder(worktree)?.candidates(),
         };
         let lower_bound = iter::once(recorded.to_string());
         Ok(lower_bound.chain(branch_refs).collect())
+    }
+
+    fn configured_refs(branch: &BaseBranch) -> Vec<String> {
+        let origin_copy = branch.origin_ref();
+        branch
+            .candidate_refs()
+            .into_iter()
+            .chain([origin_copy])
+            .collect()
     }
 
     fn origin_ladder(&self, worktree: &Path) -> Result<BaseBranchLadder, WorkspaceError> {
@@ -199,12 +208,23 @@ mod tests {
         }
 
         fn commit_only_on_origin(&self, file: &str) {
+            let fetched = self.commit_beside_the_checked_out_branch(file);
+            self.point_origin_at(&fetched);
+        }
+
+        fn commit_only_on_the_origin_copy_of(&self, branch: &str, file: &str) {
+            let fetched = self.commit_beside_the_checked_out_branch(file);
+            let origin_copy = BaseBranch::new(branch).unwrap().origin_ref();
+            self.repo
+                .git(self.repo.path(), &["update-ref", &origin_copy, &fetched]);
+        }
+
+        fn commit_beside_the_checked_out_branch(&self, file: &str) -> String {
             let repo = self.repo.path();
             self.repo.git(repo, &["checkout", "-q", "--detach"]);
-            let fetched = self.repo.commit(repo, file);
-            self.repo
-                .git(repo, &["checkout", "-q", GitTestRepo::BRANCH]);
-            self.point_origin_at(&fetched);
+            let commit = self.repo.commit(repo, file);
+            self.repo.git(repo, &["checkout", "-q", "-"]);
+            commit
         }
 
         fn merge_on_origin(&self, tip: &str) {
@@ -299,6 +319,16 @@ mod tests {
         fixture.commit_in_session("session.md");
         fixture.advance_the_checked_out_branch("news.md");
         fixture.merge_into_session("develop");
+
+        assert_eq!(fixture.diff_with_configured("develop").files(), 1);
+    }
+
+    #[test]
+    fn merging_the_origin_copy_of_a_stale_configured_branch_counts_only_the_session_changes() {
+        let fixture = DiffBaseFixture::started_in(DiffBaseFixture::repo_on_new_branch("develop"));
+        fixture.commit_in_session("session.md");
+        fixture.commit_only_on_the_origin_copy_of("develop", "news.md");
+        fixture.merge_into_session("origin/develop");
 
         assert_eq!(fixture.diff_with_configured("develop").files(), 1);
     }
