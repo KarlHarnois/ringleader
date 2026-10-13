@@ -64,10 +64,12 @@ The one exception is a driving adapter's own channel to the user: the terminal f
 
 ## Metrics
 
-Local, on-demand code-health tools. They are never part of CI. Do not add them to
-`checks`, to the default dev shell, or to `.github/workflows/ci.yml`. The flake
+Local, on-demand code-health tools. CI never builds or runs them. Do not add them
+to `checks`, to the default dev shell, or to `.github/workflows/ci.yml`. The flake
 builds them as `apps` so `nix flake check` only evaluates them, and puts them in
-the `metrics` dev shell, which extends the default one. `dryer`, `crapper`, and
+the `metrics` dev shell, which extends the default one. That evaluation still
+downloads the four upstream inputs, so if one can no longer be fetched, CI's
+flake check fails until its input is repinned or removed. `dryer`, `crapper`, and
 `mutator` write snapshots under `.metrics/`, which is gitignored.
 Run them from the repository root, and pass `dryer` and `crapper` the `src` path.
 A pathless run also walks nested checkouts such as `.claude/worktrees` and scores
