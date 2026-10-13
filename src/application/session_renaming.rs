@@ -42,22 +42,34 @@ impl SessionRenaming {
         config: &Config,
     ) -> Result<Session, ServiceError> {
         let renamed = row.session().renamed(SessionName::new(request.new_name())?);
-        Self::refuse_taken_name(&renamed, reconciliation)?;
         let mut renaming = BranchRenaming::new(
             self.workspace.as_ref(),
             self.host.as_ref(),
             row.session(),
             &renamed,
         );
-        if renaming.changes_branch() {
-            self.refuse_branch_change(row.session(), &renamed)?;
-        }
+        self.refuse_unmovable_branch(&renaming, row.session())?;
+        Self::refuse_taken_name(&renamed, reconciliation)?;
+        self.refuse_taken_branch(&renaming, row.session(), &renamed)?;
         renaming.apply()?;
         let recorded = self.record_rename(row, &renamed, reconciliation, &mut renaming);
         renaming.drop_stale_upstream();
         recorded?;
         self.tell_agent_its_name(row, &renamed, config);
         Ok(renamed)
+    }
+
+    fn refuse_unmovable_branch(
+        &self,
+        renaming: &BranchRenaming,
+        session: &Session,
+    ) -> Result<(), ServiceError> {
+        if !renaming.changes_branch() {
+            return Ok(());
+        }
+        self.refuse_published(session)?;
+        self.ownership
+            .refuse_unmarked(session, BranchMutation::Rename)
     }
 
     fn refuse_taken_name(
@@ -77,16 +89,17 @@ impl SessionRenaming {
         Ok(())
     }
 
-    fn refuse_branch_change(
+    fn refuse_taken_branch(
         &self,
+        renaming: &BranchRenaming,
         session: &Session,
         renamed: &Session,
     ) -> Result<(), ServiceError> {
-        self.refuse_published(session)?;
+        if !renaming.changes_branch() {
+            return Ok(());
+        }
         self.branches
-            .refuse_taken(session.repo_path(), renamed.branch())?;
-        self.ownership
-            .refuse_unmarked(session, BranchMutation::Rename)
+            .refuse_taken(session.repo_path(), renamed.branch())
     }
 
     fn refuse_published(&self, session: &Session) -> Result<(), ServiceError> {
@@ -425,6 +438,46 @@ mod tests {
                 .to_string()
                 .contains("branch fix-auth has been pushed")
         );
+    }
+
+    #[test]
+    fn a_pushed_branch_onto_another_sessions_name_is_refused_as_pushed() {
+        let session = ServiceFixture::session("fix-auth");
+        let other = ServiceFixture::session("fix-login");
+        let repo = Path::new(ServiceFixture::REPO);
+        let fixture = RenameFixture::live(&["fix-auth", "fix-login"]).with_workspace(
+            ServiceFixture::workspace_for(&[&session, &other])
+                .with_published_branch(repo, session.branch()),
+        );
+
+        let error = fixture
+            .service()
+            .rename_session("fix-auth", "fix-login")
+            .unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("branch fix-auth has been pushed")
+        );
+    }
+
+    #[test]
+    fn an_unmarked_branch_onto_a_taken_name_is_refused_for_its_marker() {
+        let session = ServiceFixture::session("fix-auth");
+        let repo = Path::new(ServiceFixture::REPO);
+        let fixture = RenameFixture::stopped("fix-auth").with_workspace(
+            ServiceFixture::workspace_for(&[&session])
+                .without_marker(repo, session.branch())
+                .with_branch(repo, "fix-login", ServiceFixture::TIP),
+        );
+
+        let error = fixture
+            .service()
+            .rename_session("fix-auth", "fix-login")
+            .unwrap_err();
+
+        assert!(error.to_string().contains("has no Ringleader marker"));
     }
 
     #[test]
