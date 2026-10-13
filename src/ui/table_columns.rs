@@ -66,7 +66,7 @@ impl TableColumns {
             .with_agent(Self::AGENT_TITLE)
             .with_pull_request(Self::PULL_REQUEST_TITLE)
             .with_diff(Self::DIFF_TITLE);
-        format!(" {}", self.row(&titles))
+        format!("{}{}", " ".repeat(Self::INDICATOR_WIDTH), self.row(&titles))
     }
 
     pub fn row(&self, cells: &RowCells) -> String {
