@@ -12,7 +12,7 @@
 /_/ |_/___/_/ |_/\____/_____/_____/_/  |_/_____/_____/_/ |_|
 ```
 
-A tmux session manager for Claude and opencode. Each session gets its own git worktree, branch, and tmux session. A terminal UI lists the sessions with their state, their diff, and a live preview of the agent.
+A tmux session manager for Claude and opencode. Each session runs an agent in its own git worktree and branch. A terminal UI lists the sessions with their state, their diff, and a live preview of the agent.
 
 Linux only.
 
