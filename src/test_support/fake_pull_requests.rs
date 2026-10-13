@@ -36,6 +36,10 @@ impl FakePullRequests {
         self.state.lock().unwrap().failure = true;
     }
 
+    pub fn recover(&self) {
+        self.state.lock().unwrap().failure = false;
+    }
+
     pub fn failing_repo(self, repo: &Path) -> Self {
         self.state
             .lock()

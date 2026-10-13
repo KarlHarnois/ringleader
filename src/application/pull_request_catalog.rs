@@ -1,49 +1,67 @@
-use std::collections::{BTreeMap, HashMap};
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use super::pending::Pending;
-use super::ports::PullRequests;
+use super::ports::{PullRequestError, PullRequests};
 use crate::domain::{PullRequest, Session};
 
+#[derive(Clone)]
 pub struct PullRequestCatalog {
     pull_requests: Arc<dyn PullRequests>,
+    failing_repos: Arc<Mutex<HashSet<PathBuf>>>,
 }
 
 impl PullRequestCatalog {
     pub fn new(pull_requests: Arc<dyn PullRequests>) -> Self {
-        Self { pull_requests }
+        Self {
+            pull_requests,
+            failing_repos: Arc::default(),
+        }
     }
 
     pub fn find(&self, sessions: &[&Session]) -> Pending<HashMap<String, Option<PullRequest>>> {
-        let port = Arc::clone(&self.pull_requests);
+        let catalog = self.clone();
         let queries: Vec<PullRequestQuery> = sessions
             .iter()
             .map(|session| PullRequestQuery::of(session))
             .collect();
-        Pending::start(move || Ok(Self::fetch(port, queries)))
+        Pending::start(move || Ok(catalog.fetch(queries)))
     }
 
-    fn fetch(
-        port: Arc<dyn PullRequests>,
-        queries: Vec<PullRequestQuery>,
-    ) -> HashMap<String, Option<PullRequest>> {
+    #[cfg(test)]
+    fn is_failing(&self, repo: &Path) -> bool {
+        self.failing_repos().contains(repo)
+    }
+
+    fn fetch(&self, queries: Vec<PullRequestQuery>) -> HashMap<String, Option<PullRequest>> {
         let mut found = HashMap::new();
         for (repo, group) in Self::by_repo(queries) {
             let branches: Vec<String> = group.iter().map(|query| query.branch.clone()).collect();
-            match port.lookup(&repo, &branches) {
+            match self.pull_requests.lookup(&repo, &branches) {
                 Ok(listed) => {
-                    found.extend(group.into_iter().filter_map(|query| query.answer(&listed)))
+                    self.failing_repos().remove(&repo);
+                    found.extend(group.into_iter().filter_map(|query| query.answer(&listed)));
                 }
-                Err(error) => {
-                    log::warn!(
-                        "could not look up the pull requests in {}: {error}",
-                        repo.display()
-                    )
-                }
+                Err(error) => self.warn_once(&repo, &error),
             }
         }
         found
+    }
+
+    fn warn_once(&self, repo: &Path, error: &PullRequestError) {
+        if self.failing_repos().insert(repo.to_path_buf()) {
+            log::warn!(
+                "could not look up the pull requests in {}: {error}",
+                repo.display()
+            );
+        }
+    }
+
+    fn failing_repos(&self) -> MutexGuard<'_, HashSet<PathBuf>> {
+        self.failing_repos
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
     }
 
     fn by_repo(queries: Vec<PullRequestQuery>) -> BTreeMap<PathBuf, Vec<PullRequestQuery>> {
@@ -109,8 +127,18 @@ mod tests {
             fake: Arc<FakePullRequests>,
             sessions: &[&Session],
         ) -> HashMap<String, Option<PullRequest>> {
-            let pending = PullRequestCatalog::new(fake).find(sessions);
-            pending.wait_unless(|| false).unwrap().unwrap()
+            Self::settle(&PullRequestCatalog::new(fake), sessions)
+        }
+
+        fn settle(
+            catalog: &PullRequestCatalog,
+            sessions: &[&Session],
+        ) -> HashMap<String, Option<PullRequest>> {
+            catalog
+                .find(sessions)
+                .wait_unless(|| false)
+                .unwrap()
+                .unwrap()
         }
     }
 
@@ -191,5 +219,31 @@ mod tests {
             Some(&Some(CatalogFixture::open(142)))
         );
         assert_eq!(found.get("local"), None);
+    }
+
+    #[test]
+    fn a_failed_lookup_marks_its_repo_as_failing() {
+        let session = ServiceFixture::session("fix-auth");
+        let fake = Arc::new(FakePullRequests::new());
+        fake.fail();
+        let catalog = PullRequestCatalog::new(fake);
+
+        CatalogFixture::settle(&catalog, &[&session]);
+
+        assert!(catalog.is_failing(Path::new(ServiceFixture::REPO)));
+    }
+
+    #[test]
+    fn a_successful_lookup_clears_the_failure_of_its_repo() {
+        let session = ServiceFixture::session("fix-auth");
+        let fake = Arc::new(FakePullRequests::new());
+        fake.fail();
+        let catalog = PullRequestCatalog::new(fake.clone());
+        CatalogFixture::settle(&catalog, &[&session]);
+
+        fake.recover();
+        CatalogFixture::settle(&catalog, &[&session]);
+
+        assert!(!catalog.is_failing(Path::new(ServiceFixture::REPO)));
     }
 }
