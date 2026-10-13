@@ -204,22 +204,20 @@ impl<'a> GitBranches<'a> {
         remote_ref: &str,
     ) -> Result<bool, WorkspaceError> {
         Ok(self.branch_contains(repo, branch, remote_ref)?
-            && self.has_unmerged_commits(repo, branch, remote_ref)?)
+            && self.is_ahead_of_the_default_branches(repo, remote_ref)?)
     }
 
-    fn has_unmerged_commits(
+    fn is_ahead_of_the_default_branches(
         &self,
         repo: &Path,
-        branch: &str,
         remote_ref: &str,
     ) -> Result<bool, WorkspaceError> {
-        let other_remote_branches = format!("--exclude=*/{branch}");
+        let default_branches = format!("--glob={}/*/HEAD", Self::REMOTE_REFS);
         let list = GitInvocation::in_repo(repo, "rev-list").args([
             "-n1",
             remote_ref,
             "--not",
-            &other_remote_branches,
-            "--remotes",
+            &default_branches,
         ]);
         Ok(!self.git.run_checked(&list)?.first_line().is_empty())
     }

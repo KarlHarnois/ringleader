@@ -476,6 +476,18 @@ mod tests {
     }
 
     #[test]
+    fn a_pushed_branch_is_published_while_another_remote_branch_holds_its_commits() {
+        let origin = GitTestRepo::new();
+        let clone = WorktreeFixture::clone_with_work(&origin);
+        origin.git(&clone, &["push", "-q", "origin", BRANCH]);
+
+        let stacked = format!("{BRANCH}:refs/heads/stacked");
+        origin.git(&clone, &["push", "-q", "origin", &stacked]);
+
+        assert!(WorktreeFixture::is_published(&origin, &clone));
+    }
+
+    #[test]
     fn a_merged_remote_branch_of_the_same_name_does_not_publish_it() {
         let origin = GitTestRepo::new();
         WorktreeFixture::merge_into_the_default_branch(&origin, BRANCH);
