@@ -61,6 +61,8 @@ pub struct LegendEntry {
 }
 
 impl LegendEntry {
+    const SYMBOL_GAP: &'static str = " ";
+
     pub fn new(symbol: impl ToString, style: Style, meaning: &'static str) -> Self {
         Self {
             symbol: symbol.to_string(),
@@ -72,12 +74,15 @@ impl LegendEntry {
     fn spans(&self, theme: &Theme) -> Vec<Span<'static>> {
         vec![
             Span::styled(self.symbol.clone(), self.style),
-            Span::styled(format!(" {}", self.meaning), theme.base()),
+            Span::styled(
+                format!("{}{}", Self::SYMBOL_GAP, self.meaning),
+                theme.base(),
+            ),
         ]
     }
 
     fn width(&self) -> usize {
-        self.symbol.chars().count() + 1 + self.meaning.chars().count()
+        self.symbol.chars().count() + Self::SYMBOL_GAP.len() + self.meaning.chars().count()
     }
 }
 
