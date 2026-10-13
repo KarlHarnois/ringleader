@@ -143,10 +143,14 @@ impl GhEntry {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
     use std::os::unix::process::ExitStatusExt;
+    use std::path::PathBuf;
     use std::process::ExitStatus;
 
     use super::*;
+    use crate::adapters::bounded_command::Deadlines;
 
     struct ParseFixture;
 
@@ -161,6 +165,18 @@ mod tests {
                 stdout.as_bytes().to_vec(),
                 Vec::new(),
             )
+        }
+
+        fn adapter(directory: &tempfile::TempDir, body: &str) -> GhPullRequests {
+            let path = Self::executable(directory, body);
+            GhPullRequests::new(path.as_os_str(), BoundedCommand::new(Deadlines::standard()))
+        }
+
+        fn executable(directory: &tempfile::TempDir, body: &str) -> PathBuf {
+            let path = directory.path().join("fake-gh");
+            fs::write(&path, body).unwrap();
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+            path
         }
     }
 
@@ -261,5 +277,77 @@ mod tests {
         });
 
         assert!(matches!(mapped, PullRequestError::Failed { .. }));
+    }
+
+    #[test]
+    fn the_command_asks_gh_for_one_branch_across_every_state() {
+        let command =
+            GhPullRequests::command(OsStr::new("gh"), Path::new("/repos/example"), "fix-auth");
+        let args: Vec<String> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        let prompt = command
+            .get_envs()
+            .find(|(name, _)| *name == "GH_PROMPT_DISABLED")
+            .and_then(|(_, value)| value);
+
+        assert_eq!(
+            args,
+            [
+                "pr",
+                "list",
+                "--head",
+                "fix-auth",
+                "--state",
+                "all",
+                "--limit",
+                "1",
+                "--json",
+                "number,state,isDraft"
+            ]
+        );
+        assert_eq!(command.get_current_dir(), Some(Path::new("/repos/example")));
+        assert_eq!(prompt, Some(OsStr::new("1")));
+    }
+
+    #[test]
+    fn lookup_reads_one_pull_request_per_branch() {
+        let directory = tempfile::tempdir().unwrap();
+        let adapter = ParseFixture::adapter(
+            &directory,
+            "#!/bin/sh\n\
+             branch=\"\"\n\
+             while [ $# -gt 0 ]; do\n\
+               if [ \"$1\" = \"--head\" ]; then branch=\"$2\"; shift; fi\n\
+               shift\n\
+             done\n\
+             case \"$branch\" in\n\
+               fix-auth) printf '[{\"number\":42,\"state\":\"OPEN\",\"isDraft\":false}]' ;;\n\
+               *) printf '[]' ;;\n\
+             esac\n",
+        );
+        let branches = ["fix-auth".to_string(), "dark-mode".to_string()];
+
+        let found = adapter.lookup(directory.path(), &branches);
+
+        assert_eq!(
+            found.get("fix-auth"),
+            Some(&Ok(Some(PullRequest::new(42, PullRequestState::Open))))
+        );
+        assert_eq!(found.get("dark-mode"), Some(&Ok(None)));
+    }
+
+    #[test]
+    fn lookup_reports_a_failed_branch_as_an_error() {
+        let directory = tempfile::tempdir().unwrap();
+        let adapter = ParseFixture::adapter(&directory, "#!/bin/sh\nexit 1\n");
+
+        let found = adapter.lookup(directory.path(), &["fix-auth".to_string()]);
+
+        assert!(matches!(
+            found.get("fix-auth"),
+            Some(Err(PullRequestError::Failed { .. }))
+        ));
     }
 }
