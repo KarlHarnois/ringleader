@@ -220,6 +220,7 @@ mod tests {
 
     impl AppFixture {
         const HELP_PAST_THE_END: usize = 50;
+        const LOG_FILE_OUTSIDE_THE_STATE_DIRECTORY: &'static str = "/logs/ringleader/app.log";
 
         fn two_waiting_sessions() -> ServiceFixture {
             let first = ServiceFixture::session("dark-mode");
@@ -233,6 +234,12 @@ mod tests {
                         .with_capture("ringleader-dark-mode", "dark mode output")
                         .with_capture("ringleader-fix-auth", "fix auth output"),
                 )
+        }
+
+        fn log_file_outside_the_state_directory() -> ServiceFixture {
+            let log_file = Path::new(Self::LOG_FILE_OUTSIDE_THE_STATE_DIRECTORY);
+            ServiceFixture::new()
+                .with_diagnostics(ServiceFixture::diagnostics().with_log_file(log_file))
         }
 
         fn blocked_startup_input() -> ServiceFixture {
@@ -1018,12 +1025,15 @@ mod tests {
 
     #[test]
     fn the_help_shows_the_log_file_of_the_diagnostic_paths() {
-        let fixture = AppFixture::two_waiting_sessions();
+        let fixture = AppFixture::log_file_outside_the_state_directory();
         let mut app = AppFixture::started(&fixture, 100, 28);
 
         let help = AppFixture::help_scrolled_past_its_end(&mut app, 100, 28);
 
-        assert!(help.contains(&format!("Log          {}", ServiceFixture::LOG_FILE)));
+        assert!(help.contains(&format!(
+            "Log          {}",
+            AppFixture::LOG_FILE_OUTSIDE_THE_STATE_DIRECTORY
+        )));
     }
 
     #[test]
