@@ -147,6 +147,17 @@ mod tests {
     }
 
     #[test]
+    fn the_row_under_the_cursor_is_highlighted() {
+        let mut list = ListFixture::holding(&[4, 2]);
+        ListFixture::press(&mut list, KeyCode::Down, KeyModifiers::NONE);
+
+        let lines = list.lines(2, &Theme, |index| index.to_string());
+
+        assert_eq!(lines[0].style, Theme.base());
+        assert_eq!(lines[1].style, Theme.selected());
+    }
+
+    #[test]
     fn no_matches_select_nothing() {
         assert_eq!(ListFixture::holding(&[]).selected(), None);
     }
