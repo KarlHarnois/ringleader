@@ -170,6 +170,8 @@ mod tests {
 
     impl HelpFixture {
         const HOME: &'static str = "/home/example";
+        const WIDE_WIDTH: usize = 70;
+        const EVERY_ROW_HEIGHT: usize = 200;
         const SHORT_WIDTH: usize = 56;
         const SHORT_HEIGHT: usize = 8;
         const PAST_THE_END: usize = 50;
@@ -217,8 +219,12 @@ mod tests {
                 .join("\n")
         }
 
+        fn page(help: &HelpView, width: usize) -> Vec<Line<'static>> {
+            help.lines(width, Self::EVERY_ROW_HEIGHT, &Theme)
+        }
+
         fn rows(help: &HelpView, width: usize) -> Vec<String> {
-            help.lines(width, 200, &Theme)
+            Self::page(help, width)
                 .iter()
                 .map(|line| {
                     line.spans
@@ -230,11 +236,11 @@ mod tests {
         }
 
         fn text(help: &HelpView) -> String {
-            Self::rows(help, 70).join(" ")
+            Self::rows(help, Self::WIDE_WIDTH).join(" ")
         }
 
         fn span_style(symbol: &str) -> Style {
-            let lines = Self::help().lines(70, 200, &Theme);
+            let lines = Self::page(&Self::help(), Self::WIDE_WIDTH);
             let span = lines
                 .iter()
                 .flat_map(|line| line.spans.iter())
@@ -396,10 +402,10 @@ mod tests {
     #[test]
     fn a_short_terminal_scrolls_the_help() {
         let mut help = HelpFixture::help();
-        let top = help.lines(56, 8, &Theme);
+        let top = HelpFixture::short_page(&help);
 
         HelpFixture::press(&mut help, KeyCode::Down);
-        let scrolled = help.lines(56, 8, &Theme);
+        let scrolled = HelpFixture::short_page(&help);
 
         assert_eq!(top[0].spans[0].content, "Keys");
         assert_eq!(scrolled[0], top[1]);
