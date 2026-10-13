@@ -118,7 +118,7 @@ impl Dialog {
     }
 
     pub fn render(&self, frame: &mut Frame, theme: &Theme) {
-        let (area, labels) = Self::placement(frame.area(), self.height());
+        let (area, labels) = Self::placement(frame.area(), self.preferred_height());
         let block = Block::default().borders(Borders::ALL).title(self.title());
         let inner = block.inner(area);
         frame.render_widget(Clear, area);
@@ -149,7 +149,7 @@ impl Dialog {
         }
     }
 
-    fn height(&self) -> u16 {
+    fn preferred_height(&self) -> u16 {
         match self {
             Self::Help(_) => Self::HELP_HEIGHT,
             Self::NewSession(_) | Self::Delete(_) | Self::Rename(_) => Self::HEIGHT,
