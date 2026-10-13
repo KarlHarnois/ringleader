@@ -16,6 +16,7 @@ pub mod preview_text;
 pub mod session_list;
 pub mod session_table;
 pub mod shell_runner;
+pub mod state_indicator;
 pub mod status_bar;
 pub mod status_report;
 pub mod table_columns;

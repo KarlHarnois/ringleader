@@ -8,7 +8,7 @@ use ratatui::text::Line;
 use super::dialogs::DialogStep;
 use super::dialogs::home_path::HomePath;
 use super::legend::{Legend, LegendEntry};
-use super::session_table::StateIndicator;
+use super::state_indicator::StateIndicator;
 use super::text_fit::TextFit;
 use super::theme::Theme;
 use crate::domain::{ReturnKey, SessionState};

@@ -201,6 +201,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── home_view.rs            # HomeView
     │   ├── empty_state.rs          # EmptyState, the no-sessions message with the logo above it when it fits
     │   ├── session_table.rs        # SessionTable, the home screen's session list
+    │   ├── state_indicator.rs      # StateIndicator, the glyph and color of a session state
     │   ├── table_columns.rs        # TableColumns, column widths and dropping
     │   ├── preview_panel.rs        # PreviewPanel, the Full tier's preview
     │   ├── preview_text.rs         # PreviewText, the captured rows that fit the preview
