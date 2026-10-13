@@ -3,3 +3,5 @@
 /result-*
 /.direnv
 /.claude/worktrees
+/.metrics
+/.uml-viewer

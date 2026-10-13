@@ -38,6 +38,55 @@ nix flake check
 
 These are the commands `.github/workflows/ci.yml` runs. A change is done when all of them pass.
 
+## Metrics
+
+Local, on-demand code-health tools. They are never part of CI. Do not add them to
+`checks` or to `.github/workflows/ci.yml`. The flake builds them as `apps` so
+`nix flake check` only evaluates them, and puts them in the dev shell. `dryer`,
+`crapper`, and `mutator` write snapshots under `.metrics/`, which is gitignored.
+Run them from the repository root; a scoped run reads `git status` for `--changed`.
+
+```sh
+nix develop -c dryer --changed                 # duplicate candidates; writes .metrics/dry.edn
+nix develop -c crapper                          # CC plus coverage plus CRAP; writes .metrics/crap.edn
+nix develop -c mutator --changed --max-workers N src/<module>.rs
+nix run .#dryer -- --changed                    # the apps also work outside the dev shell
+nix run .#crapper -- --help
+nix run .#mutator -- --help
+```
+
+`mutator` runs every covered mutant and many tests start real tmux servers. Never
+run it whole-repo. Name one module or file, cap `--max-workers`, and use
+`--changed` for differential reruns. `crapper` needs `cargo-llvm-cov`, which the
+dev shell provides. This crate is bin-only, so a scoped `mutator` test command is
+`--test-command "cargo test --bin ringleader <module::path>"`.
+
+uml-viewer reads `.metrics/crap.edn` and `.metrics/mutate/`. It ignores
+`.metrics/dry.edn`, so `dryer` output stays a text report and never reaches the
+diagram. It needs a display and downloads Maven dependencies on first run. Write
+the policy to the gitignored `.uml-viewer/ringleader.policy.edn`:
+
+```edn
+{:title "Ringleader"
+ :sources [{:lang :rust :root "src" :prefix "ringleader"}]
+ :hierarchical true
+ :out ".uml-viewer/ringleader.edn"}
+```
+
+Leave the policy-level `:prefix` unset. The overlay joins a `crate::module::Type`
+snapshot to the module class through the class id's crate path, and stripping the
+crate name from the id breaks that join. `$UML_VIEWER_DEPS`, set by the dev shell,
+points the Clojure CLI at the `uml-viewer` flake input. Generate the IR, then open
+the viewer:
+
+```sh
+clojure -Sdeps "$UML_VIEWER_DEPS" -M:ir .uml-viewer/ringleader.policy.edn
+clojure -Sdeps "$UML_VIEWER_DEPS" -M:run .uml-viewer/ringleader.edn
+```
+
+Run the viewer directly. Do not use the upstream `./uml` script, which spawns its
+Grok companion in tmux.
+
 ## Layout
 
 ```
