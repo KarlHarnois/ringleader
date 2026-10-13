@@ -25,6 +25,7 @@ pub trait Multiplexer: Send + Sync {
     fn respawn_agent(&self, tmux_name: &str, launch: &AgentLaunch) -> Result<(), MultiplexerError>;
     fn type_when_ready(&self, tmux_name: &str, lines: &[String]) -> Result<(), MultiplexerError>;
     fn type_if_ready(&self, tmux_name: &str, lines: &[String]) -> Result<(), MultiplexerError>;
+    fn agent_at_prompt(&self, tmux_name: &str) -> Result<bool, MultiplexerError>;
     fn ensure_shell_window(
         &self,
         tmux_name: &str,

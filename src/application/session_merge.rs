@@ -29,6 +29,7 @@ impl SessionMerge {
     pub fn merge(&self, row: &ManagedRow, config: &Config) -> Result<MergeReport, ServiceError> {
         let session = row.session();
         Self::refuse_unless_waiting(row)?;
+        self.refuse_unless_at_prompt(session)?;
         self.refuse_unclean_worktree(session)?;
         let base_branch =
             RepoMerge::new(self.host.as_ref()).base_branch_of(session, config.repos());
@@ -47,6 +48,16 @@ impl SessionMerge {
             "session {} is {}, merge only runs while its agent waits at its prompt",
             row.session().name(),
             row.state().label()
+        )))
+    }
+
+    fn refuse_unless_at_prompt(&self, session: &Session) -> Result<(), ServiceError> {
+        if self.multiplexer.agent_at_prompt(session.tmux_name())? {
+            return Ok(());
+        }
+        Err(ServiceError::Conflict(format!(
+            "the agent of session {} is not at its prompt, answer what it shows before merging",
+            session.name()
         )))
     }
 
@@ -275,7 +286,7 @@ mod tests {
     }
 
     #[test]
-    fn an_agent_away_from_its_prompt_is_reported() {
+    fn an_agent_that_leaves_its_prompt_during_the_merge_is_reported() {
         let fixture = MergeFixture::with_failing_tmux(MergeFixture::conflicted(), "type_if_ready");
 
         let report = MergeFixture::merge(&fixture).unwrap();
@@ -333,6 +344,26 @@ mod tests {
         let error = MergeFixture::merge(&fixture).unwrap_err();
 
         assert!(matches!(error, ServiceError::Conflict(_)), "{error:?}");
+        assert!(!MergeFixture::merged_upstream(&fixture));
+    }
+
+    #[test]
+    fn an_agent_away_from_its_prompt_is_refused_before_git_runs() {
+        let fixture = MergeFixture::stopped().with_multiplexer(
+            FakeMultiplexer::new()
+                .with_live(ServiceFixture::waiting(&MergeFixture::session()))
+                .with_agent_away_from_prompt(MergeFixture::TMUX_NAME),
+        );
+
+        let error = MergeFixture::merge(&fixture).unwrap_err();
+
+        assert_eq!(
+            error,
+            ServiceError::Conflict(
+                "the agent of session fix-auth is not at its prompt, answer what it shows before merging"
+                    .to_string()
+            )
+        );
         assert!(!MergeFixture::merged_upstream(&fixture));
     }
 

@@ -38,6 +38,11 @@ impl<'a> TmuxAgentInput<'a> {
         Ok(())
     }
 
+    pub fn is_ready(&self, pane: &str) -> Result<bool, TmuxError> {
+        let cursor = self.cursor(pane)?;
+        self.is_at_prompt(pane, &cursor)
+    }
+
     fn type_at_prompt(&self, pane: &str, line: &str, patience: Duration) -> Result<(), InputError> {
         self.wait_for_prompt(pane, patience)?;
         Ok(self.type_line(pane, line)?)

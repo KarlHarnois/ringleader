@@ -44,6 +44,7 @@ struct MultiplexerState {
     config_current: bool,
     server_return_key: Option<ReturnKey>,
     socket_lost: bool,
+    away_from_prompt: Vec<String>,
 }
 
 impl FakeMultiplexer {
@@ -83,6 +84,7 @@ impl FakeMultiplexer {
                 config_current: true,
                 server_return_key: Some(ReturnKey::default()),
                 socket_lost: false,
+                away_from_prompt: Vec::new(),
             }),
         }
     }
@@ -113,6 +115,11 @@ impl FakeMultiplexer {
                 .captures
                 .insert(tmux_name.to_string(), text.to_string())
         });
+        self
+    }
+
+    pub fn with_agent_away_from_prompt(self, tmux_name: &str) -> Self {
+        self.edit(|state| state.away_from_prompt.push(tmux_name.to_string()));
         self
     }
 
@@ -390,6 +397,11 @@ impl Multiplexer for FakeMultiplexer {
         self.call("type_if_ready", tmux_name)?;
         self.edit(|state| state.type_lines("type_if_ready", tmux_name, lines));
         Ok(())
+    }
+
+    fn agent_at_prompt(&self, tmux_name: &str) -> Result<bool, MultiplexerError> {
+        self.call("agent_at_prompt", tmux_name)?;
+        Ok(self.edit(|state| !state.away_from_prompt.iter().any(|name| name == tmux_name)))
     }
 
     fn ensure_shell_window(
