@@ -144,11 +144,11 @@ viewer exits.
 
 A change under `src/` is not done until these pass, after the Commands above. Run
 them one at a time and never alongside another command, because the tests start
-real tmux servers and share `target/`. Changed functions are the ones the
-change's diff adds or edits. Changed files are the files under `src/`, outside
-`src/test_support/`, that `git status` shows. Expect about a minute for `crapper`
-and two to three minutes per changed file for `mutator`, mostly the cold worker
-build.
+real tmux servers and share `target/`. Changed functions are the production
+functions the change's diff adds or edits, outside `#[cfg(test)]` code and
+`src/test_support/`. Changed files are the files that hold them. Expect about a
+minute for `crapper` and two to three minutes per changed file for `mutator`,
+mostly the cold worker build.
 
 1. `nix develop .#metrics -c crapper src`. Every changed function scores 8 or
    less. Reduce its complexity or add tests until it does. Leave the scores of
@@ -162,9 +162,10 @@ build.
    about any file over 50 sites and offer to split it.
 4. `nix develop .#metrics -c mutator --reuse-coverage --max-workers 2 --timeout-factor 60 <file>`
    for each changed file. The first run reuses the coverage step 1 wrote. Add or
-   strengthen tests until the file has no survivors and no uncovered sites. Exit
-   code 3 means a mutant survived. Uncovered sites still exit 0, so read the
-   `Uncovered` column.
+   strengthen tests until every changed function's row reads 0 under `Survived`
+   and `Uncovered`. Leave the rows of functions the change did not touch. Read
+   the rows, not the exit code: 3 means a mutant survived anywhere in the file,
+   and uncovered sites still exit 0.
 
 An edit to production code during these steps restarts them from step 1. An
 edit to tests only reruns step 4 for that file without `--reuse-coverage`,
