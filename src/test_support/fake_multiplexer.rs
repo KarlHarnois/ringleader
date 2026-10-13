@@ -432,7 +432,8 @@ impl Multiplexer for FakeMultiplexer {
     }
 
     fn apply_config(&self, key_bindings: &KeyBindings) -> Result<(), MultiplexerError> {
-        self.call("apply_config", &key_bindings.return_key().to_string())?;
+        let keys: Vec<String> = key_bindings.all().map(HotKey::to_string).collect();
+        self.call("apply_config", &keys.join(" "))?;
         self.edit(|state| {
             state.config_current = true;
             state.server_key_bindings = Some(key_bindings.clone());

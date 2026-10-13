@@ -368,8 +368,9 @@ mod tests {
     }
 
     #[test]
-    fn a_drifted_server_config_is_reapplied_with_the_configured_key() {
+    fn a_drifted_server_config_is_reapplied_with_the_configured_keys() {
         let fixture = ServiceFixture::new()
+            .with_config(ServiceFixture::config_with_alt_n())
             .with_multiplexer(FakeMultiplexer::new().with_drifted_config("C-q"));
 
         fixture.service().reapply_server_config().unwrap();
@@ -378,7 +379,7 @@ mod tests {
             fixture
                 .multiplexer()
                 .calls()
-                .contains(&"apply_config C-q".to_string())
+                .contains(&"apply_config C-q M-n M-k M-Up".to_string())
         );
     }
 

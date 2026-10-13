@@ -67,6 +67,14 @@ impl Config {
         Self { repos, ..self }
     }
 
+    #[cfg(test)]
+    pub fn with_key_bindings(self, key_bindings: KeyBindings) -> Self {
+        Self {
+            key_bindings,
+            ..self
+        }
+    }
+
     pub fn naming(&self) -> &NamingScheme {
         &self.naming
     }

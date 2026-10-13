@@ -316,6 +316,16 @@ mod tests {
     }
 
     #[test]
+    fn a_recreated_session_carries_the_configured_key_bindings() {
+        let fixture = RestartFixture::stopped().with_config(ServiceFixture::config_with_alt_n());
+
+        RestartFixture::restart(&fixture).unwrap();
+
+        let spec = fixture.multiplexer().specs().pop().unwrap();
+        assert_eq!(spec.key_bindings(), &ServiceFixture::alt_n_bindings());
+    }
+
+    #[test]
     fn a_running_session_refuses_restart() {
         let session = RestartFixture::session();
         let fixture = RestartFixture::stopped().with_multiplexer(FakeMultiplexer::new().with_live(
