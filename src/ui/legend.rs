@@ -39,12 +39,12 @@ impl Legend {
     }
 
     fn overflows(row: &[&LegendEntry], entry: &LegendEntry, room: usize) -> bool {
-        let widened = Self::width(row) + Self::GAP.len() + entry.width();
+        let widened = Self::width(row) + Self::GAP.chars().count() + entry.width();
         !row.is_empty() && widened > room
     }
 
     fn width(row: &[&LegendEntry]) -> usize {
-        let gaps = Self::GAP.len() * row.len().saturating_sub(1);
+        let gaps = Self::GAP.chars().count() * row.len().saturating_sub(1);
         row.iter().map(|entry| entry.width()).sum::<usize>() + gaps
     }
 
@@ -82,7 +82,9 @@ impl LegendEntry {
     }
 
     fn width(&self) -> usize {
-        self.symbol.chars().count() + Self::SYMBOL_GAP.len() + self.meaning.chars().count()
+        self.symbol.chars().count()
+            + Self::SYMBOL_GAP.chars().count()
+            + self.meaning.chars().count()
     }
 }
 
