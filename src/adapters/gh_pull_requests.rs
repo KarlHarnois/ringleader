@@ -143,6 +143,9 @@ impl GhEntry {
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::process::ExitStatusExt;
+    use std::process::ExitStatus;
+
     use super::*;
 
     struct ParseFixture;
@@ -150,6 +153,14 @@ mod tests {
     impl ParseFixture {
         fn pull_request(json: &str) -> Option<PullRequest> {
             GhListing::parse(json).unwrap().first()
+        }
+
+        fn output(code: i32, stdout: &str) -> CommandOutput {
+            CommandOutput::new(
+                ExitStatus::from_raw(code << 8),
+                stdout.as_bytes().to_vec(),
+                Vec::new(),
+            )
         }
     }
 
@@ -200,5 +211,55 @@ mod tests {
     #[test]
     fn unreadable_json_is_a_parse_error() {
         assert!(GhListing::parse("not json").is_err());
+    }
+
+    #[test]
+    fn a_successful_empty_listing_is_no_pull_request() {
+        let output = ParseFixture::output(0, "[]");
+
+        assert_eq!(GhPullRequests::pull_request(&output).unwrap(), None);
+    }
+
+    #[test]
+    fn a_successful_listing_parses_the_pull_request() {
+        let output = ParseFixture::output(0, r#"[{"number":7,"state":"OPEN","isDraft":false}]"#);
+
+        assert_eq!(
+            GhPullRequests::pull_request(&output).unwrap(),
+            Some(PullRequest::new(7, PullRequestState::Open))
+        );
+    }
+
+    #[test]
+    fn a_failed_call_is_an_error_not_a_missing_pull_request() {
+        let output = ParseFixture::output(1, "");
+
+        assert!(matches!(
+            GhPullRequests::pull_request(&output),
+            Err(PullRequestError::Failed { .. })
+        ));
+    }
+
+    #[test]
+    fn a_timeout_maps_to_a_timeout_error() {
+        let mapped = GhPullRequests::error(CommandError::TimedOut {
+            subcommand: "gh pr list".to_string(),
+            seconds: 20,
+        });
+
+        assert!(matches!(
+            mapped,
+            PullRequestError::TimedOut { seconds: 20, .. }
+        ));
+    }
+
+    #[test]
+    fn a_spawn_failure_maps_to_a_failure() {
+        let mapped = GhPullRequests::error(CommandError::Spawn {
+            subcommand: "gh pr list".to_string(),
+            detail: "not found".to_string(),
+        });
+
+        assert!(matches!(mapped, PullRequestError::Failed { .. }));
     }
 }
