@@ -26,6 +26,7 @@ use adapters::file_lock::FileLock;
 use adapters::gh_pull_requests::GhPullRequests;
 use adapters::git_runner::GitRunner;
 use adapters::json_session_registry::JsonSessionRegistry;
+use adapters::null_pull_requests::NullPullRequests;
 use adapters::process_environment::{ProcessEnvironment, ProgramPaths};
 use adapters::server_files::ServerFiles;
 use adapters::signal_flags::SignalFlags;
@@ -275,10 +276,7 @@ impl CompositionRoot {
             clock,
         );
         let host = Arc::new(SystemHostProbe::new(&self.environment));
-        let pull_requests: Option<Arc<dyn PullRequests>> =
-            host.resolve_command("gh").map(|program| {
-                Arc::new(GhPullRequests::new(program.as_os_str(), bounded)) as Arc<dyn PullRequests>
-            });
+        let pull_requests = Self::pull_requests(&host, bounded);
         let repos = RepoPorts::new(
             Arc::new(GitWorkspace::new(self.programs.git(), bounded)),
             Arc::new(DirectoryRepoScanner::new(
@@ -295,6 +293,13 @@ impl CompositionRoot {
             .with_diagnostics(self.diagnostics())
             .with_shell(&self.shell());
         SessionService::new(ServicePorts::new(state, repos, tmux_ports), context)
+    }
+
+    fn pull_requests(host: &SystemHostProbe, bounded: BoundedCommand) -> Arc<dyn PullRequests> {
+        match host.resolve_command("gh") {
+            Some(program) => Arc::new(GhPullRequests::new(program.as_os_str(), bounded)),
+            None => Arc::new(NullPullRequests),
+        }
     }
 
     fn diagnostics(&self) -> DiagnosticPaths {

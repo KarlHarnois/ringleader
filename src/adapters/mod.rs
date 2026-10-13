@@ -18,6 +18,7 @@ pub mod json_session_registry;
 pub mod live_process;
 pub mod metadata_json;
 pub mod mount_table;
+pub mod null_pull_requests;
 pub mod private_server;
 pub mod process_environment;
 pub mod raw_config;

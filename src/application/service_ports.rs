@@ -65,7 +65,7 @@ pub struct RepoPorts {
     workspace: Arc<dyn Workspace>,
     scanner: Arc<dyn RepoScanner>,
     host: Arc<dyn HostProbe>,
-    pull_requests: Option<Arc<dyn PullRequests>>,
+    pull_requests: Arc<dyn PullRequests>,
 }
 
 impl RepoPorts {
@@ -73,7 +73,7 @@ impl RepoPorts {
         workspace: Arc<dyn Workspace>,
         scanner: Arc<dyn RepoScanner>,
         host: Arc<dyn HostProbe>,
-        pull_requests: Option<Arc<dyn PullRequests>>,
+        pull_requests: Arc<dyn PullRequests>,
     ) -> Self {
         Self {
             workspace,
@@ -95,8 +95,8 @@ impl RepoPorts {
         Arc::clone(&self.host)
     }
 
-    pub fn pull_requests(&self) -> Option<Arc<dyn PullRequests>> {
-        self.pull_requests.clone()
+    pub fn pull_requests(&self) -> Arc<dyn PullRequests> {
+        Arc::clone(&self.pull_requests)
     }
 }
 

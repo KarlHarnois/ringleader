@@ -58,7 +58,7 @@ A new capability that `application`, `ui`, or `cli` needs from outside the proce
 2. Implement it in `adapters/`, named after the technology and the role.
 3. Add a hand-written fake in `src/test_support/`. Wire the fake of a port the use cases need into `ServiceFixture`, and the fake of any other port into `CliHarness` or `UiHarness`.
 4. Inject the port as a trait object. A port the use cases need joins a bundle in `ServicePorts` as an `Arc<dyn Trait>`. Any other port, like `Lock`, is handed by `CompositionRoot` to the type that uses it.
-5. Build the adapter in `CompositionRoot` and pass it in.
+5. Build the adapter in `CompositionRoot` and pass it in. When the host can lack the technology behind the port, pass a null adapter that does nothing instead, like `NullPullRequests` without `gh`, so a port is never an `Option`.
 
 The one exception is a driving adapter's own channel to the user: the terminal for the TUI, including the shell it runs there, and the standard streams for the CLI. That I/O stays in `ui` or `cli`, behind a trait beside its real implementation or a std `Read` or `Write`, with its fake in `src/test_support/`. The TUI owns `InputSource`, `ScreenMode`, and `ShellRunner` this way, and the CLI writes through the `Write` streams `CliOutput` holds. A test seam inside `adapters`, like `AgentLauncher`'s `ExecSeam`, has the same shape with its fake in the adapter's own tests.
 
@@ -183,6 +183,7 @@ The one exception is a driving adapter's own channel to the user: the terminal f
     │   ├── json_session_registry.rs # JsonSessionRegistry
     │   ├── file_lock.rs          # FileLock
     │   ├── gh_pull_requests.rs   # GhPullRequests, looks up a branch's pull request through the gh CLI
+    │   ├── null_pull_requests.rs # NullPullRequests, finds no pull request on a host without gh
     │   ├── bounded_command.rs    # BoundedCommand, runs git and tmux children in a new session with a deadline
     │   ├── command_output.rs     # CommandOutput, a finished child's status and output
     │   ├── host_path.rs          # HostPath, lenient canonicalization and directory listing

@@ -8,7 +8,7 @@ use super::ports::PullRequests;
 use crate::domain::{PullRequest, Session};
 
 pub struct PullRequestCatalog {
-    pull_requests: Option<Arc<dyn PullRequests>>,
+    pull_requests: Arc<dyn PullRequests>,
     cached: HashMap<String, PullRequest>,
     pending: Option<Pending<HashMap<String, Option<PullRequest>>>>,
     next_refresh: Option<Instant>,
@@ -16,7 +16,7 @@ pub struct PullRequestCatalog {
 }
 
 impl PullRequestCatalog {
-    pub fn new(pull_requests: Option<Arc<dyn PullRequests>>) -> Self {
+    pub fn new(pull_requests: Arc<dyn PullRequests>) -> Self {
         Self {
             pull_requests,
             cached: HashMap::new(),
@@ -34,7 +34,7 @@ impl PullRequestCatalog {
     ) -> &HashMap<String, PullRequest> {
         self.collect(now, interval);
         let due = self.refresh_requested || self.next_refresh.is_none_or(|due| now >= due);
-        if self.pull_requests.is_some() && self.pending.is_none() && !visible.is_empty() && due {
+        if self.pending.is_none() && !visible.is_empty() && due {
             self.start(now, interval, visible);
         }
         &self.cached
@@ -70,9 +70,7 @@ impl PullRequestCatalog {
     }
 
     fn start(&mut self, now: Instant, interval: Duration, visible: &[&Session]) {
-        let Some(port) = self.pull_requests.clone() else {
-            return;
-        };
+        let port = Arc::clone(&self.pull_requests);
         let queries: Vec<PullRequestQuery> = visible
             .iter()
             .map(|session| PullRequestQuery::of(session))
@@ -188,7 +186,7 @@ mod tests {
     fn a_refresh_caches_the_pull_request_of_a_visible_session() {
         let session = ServiceFixture::session("fix-auth");
         let fake = CatalogFixture::cached(&session, 142);
-        let mut catalog = PullRequestCatalog::new(Some(fake.clone()));
+        let mut catalog = PullRequestCatalog::new(fake.clone());
 
         let found = CatalogFixture::settle(&mut catalog, fake.as_ref(), &[&session]);
 
@@ -199,19 +197,9 @@ mod tests {
     fn a_branch_without_a_pull_request_is_left_out_of_the_cache() {
         let session = ServiceFixture::session("fix-auth");
         let fake = Arc::new(FakePullRequests::new());
-        let mut catalog = PullRequestCatalog::new(Some(fake.clone()));
+        let mut catalog = PullRequestCatalog::new(fake.clone());
 
         let found = CatalogFixture::settle(&mut catalog, fake.as_ref(), &[&session]);
-
-        assert!(found.is_empty());
-    }
-
-    #[test]
-    fn no_capability_means_no_lookups_and_no_rows() {
-        let session = ServiceFixture::session("fix-auth");
-        let mut catalog = PullRequestCatalog::new(None);
-
-        let found = catalog.poll(Instant::now(), CatalogFixture::INTERVAL, &[&session]);
 
         assert!(found.is_empty());
     }
@@ -220,7 +208,7 @@ mod tests {
     fn a_failing_lookup_keeps_the_previous_cache() {
         let session = ServiceFixture::session("fix-auth");
         let fake = CatalogFixture::cached(&session, 142);
-        let mut catalog = PullRequestCatalog::new(Some(fake.clone()));
+        let mut catalog = PullRequestCatalog::new(fake.clone());
         CatalogFixture::settle(&mut catalog, fake.as_ref(), &[&session]);
         let recorded = fake.calls().len();
 
@@ -255,7 +243,7 @@ mod tests {
                 )
                 .failing_repo(Path::new("/repos/local-only")),
         );
-        let mut catalog = PullRequestCatalog::new(Some(fake.clone()));
+        let mut catalog = PullRequestCatalog::new(fake.clone());
         let sessions = [&reachable, &unreachable];
 
         let found = CatalogFixture::settle(&mut catalog, fake.as_ref(), &sessions);
@@ -268,7 +256,7 @@ mod tests {
     fn a_refresh_requested_during_a_fetch_runs_as_soon_as_it_finishes() {
         let session = ServiceFixture::session("fix-auth");
         let fake = CatalogFixture::cached(&session, 142);
-        let mut catalog = PullRequestCatalog::new(Some(fake.clone()));
+        let mut catalog = PullRequestCatalog::new(fake.clone());
         let sessions = [&session];
         CatalogFixture::settle(&mut catalog, fake.as_ref(), &sessions);
 
@@ -284,7 +272,7 @@ mod tests {
     fn pruning_drops_the_pull_requests_of_vanished_sessions() {
         let session = ServiceFixture::session("fix-auth");
         let fake = CatalogFixture::cached(&session, 142);
-        let mut catalog = PullRequestCatalog::new(Some(fake.clone()));
+        let mut catalog = PullRequestCatalog::new(fake.clone());
         CatalogFixture::settle(&mut catalog, fake.as_ref(), &[&session]);
 
         catalog.keep_only(&["other".to_string()]);

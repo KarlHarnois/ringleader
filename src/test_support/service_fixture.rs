@@ -330,7 +330,7 @@ impl ServiceFixture {
                 self.workspace.clone(),
                 self.scanner.clone(),
                 self.host.clone(),
-                Some(self.pull_requests.clone()),
+                self.pull_requests.clone(),
             ),
             TmuxPorts::new(self.multiplexer.clone()),
         )
