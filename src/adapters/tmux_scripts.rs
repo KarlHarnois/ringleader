@@ -1,8 +1,9 @@
 use std::ffi::OsString;
 use std::path::Path;
 
+use super::metadata_json::MetadataJson;
 use super::tmux_launch::TmuxLaunch;
-use super::tmux_listing::{MetadataJson, TmuxListing};
+use super::tmux_listing::TmuxListing;
 use super::tmux_sequence::TmuxSequence;
 use crate::application::ports::{AgentLaunch, SessionSpec};
 use crate::domain::SessionMetadata;
@@ -44,7 +45,7 @@ impl TmuxScripts {
                 "-p",
                 "-t",
                 &target,
-                "ringleader-done #{pane_id} #{exit-unattached} #{socket_path}",
+                "ringleader-done #{pane_id} #{socket_path}",
             ])
     }
 
@@ -150,6 +151,14 @@ impl TmuxScripts {
         TmuxSequence::new().command(["display-message", "-p", "-t", pane, format])
     }
 
+    pub fn server_state() -> TmuxSequence {
+        Self::server_value(TmuxListing::SERVER_FORMAT).command([
+            "list-sessions",
+            "-F",
+            TmuxListing::SESSION_FORMAT,
+        ])
+    }
+
     pub fn server_value(format: &str) -> TmuxSequence {
         TmuxSequence::new().command(["display-message", "-p", format])
     }
@@ -170,18 +179,12 @@ impl TmuxScripts {
         TmuxSequence::new().command(["capture-pane", "-e", "-p", "-t", pane])
     }
 
-    pub fn switch_client(target: &str) -> TmuxSequence {
-        TmuxSequence::new()
-            .command(["switch-client", "-t", target])
-            .command(["display-message", "-p", TmuxLaunch::DONE_LABEL])
+    pub fn root_keys() -> TmuxSequence {
+        TmuxSequence::new().command(["list-keys", "-T", "root"])
     }
 
     pub fn attach_session(target: &str) -> TmuxSequence {
         TmuxSequence::new().command(["attach-session", "-t", target])
-    }
-
-    pub fn clients() -> TmuxSequence {
-        TmuxSequence::new().command(["list-clients", "-F", TmuxListing::CLIENT_FORMAT])
     }
 
     fn metadata_option(target: &str, metadata: &SessionMetadata) -> Vec<OsString> {

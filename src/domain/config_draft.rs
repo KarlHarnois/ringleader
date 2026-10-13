@@ -7,11 +7,12 @@ use super::config_checks::ConfigChecks;
 use super::naming_scheme::NamingScheme;
 use super::repo::Repo;
 use super::repo_draft::RepoDraft;
+use super::return_key::ReturnKey;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfigDraft {
     worktree_root: PathBuf,
-    tmux_prefix: String,
+    return_key: String,
     state_poll_ms: u64,
     preview_refresh_ms: u64,
     diff_refresh_ms: u64,
@@ -27,7 +28,7 @@ impl ConfigDraft {
     pub fn new(default_worktree_root: &Path) -> Self {
         Self {
             worktree_root: default_worktree_root.to_path_buf(),
-            tmux_prefix: "ringleader-".to_string(),
+            return_key: ReturnKey::DEFAULT.to_string(),
             state_poll_ms: 1000,
             preview_refresh_ms: 750,
             diff_refresh_ms: 3000,
@@ -47,9 +48,9 @@ impl ConfigDraft {
         }
     }
 
-    pub fn tmux_prefix(self, tmux_prefix: &str) -> Self {
+    pub fn return_key(self, return_key: &str) -> Self {
         Self {
-            tmux_prefix: tmux_prefix.to_string(),
+            return_key: return_key.to_string(),
             ..self
         }
     }
@@ -118,8 +119,8 @@ impl ConfigDraft {
         &self.worktree_root
     }
 
-    pub(super) fn raw_tmux_prefix(&self) -> &str {
-        &self.tmux_prefix
+    pub(super) fn raw_return_key(&self) -> &str {
+        &self.return_key
     }
 
     pub(super) fn raw_activity_idle_seconds(&self) -> i64 {
@@ -143,7 +144,7 @@ impl ConfigDraft {
     }
 
     pub(super) fn naming(&self) -> NamingScheme {
-        NamingScheme::new(&self.worktree_root, &self.tmux_prefix)
+        NamingScheme::for_new_sessions(&self.worktree_root)
     }
 
     pub(super) fn intervals(&self) -> RefreshIntervals {
@@ -152,6 +153,10 @@ impl ConfigDraft {
             Duration::from_millis(self.preview_refresh_ms),
             Duration::from_millis(self.diff_refresh_ms),
         )
+    }
+
+    pub(super) fn return_key_value(&self) -> ReturnKey {
+        ReturnKey::parse(&self.return_key).unwrap_or_default()
     }
 
     pub(super) fn activity_idle_seconds_value(&self) -> u64 {
