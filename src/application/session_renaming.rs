@@ -43,7 +43,7 @@ impl SessionRenaming {
     ) -> Result<Session, ServiceError> {
         let renamed = row.session().renamed(SessionName::new(request.new_name())?);
         Self::refuse_taken_name(&renamed, reconciliation)?;
-        let renaming = BranchRenaming::new(
+        let mut renaming = BranchRenaming::new(
             self.workspace.as_ref(),
             self.host.as_ref(),
             row.session(),
@@ -53,12 +53,9 @@ impl SessionRenaming {
             self.refuse_branch_change(row.session(), &renamed)?;
         }
         renaming.apply()?;
-        if row.is_live() {
-            self.rename_tmux_session(row, &renamed, &renaming)?;
-        }
-        let entries = reconciliation.entries_with(row.session().name().as_str(), renamed.clone());
-        self.persist_rename(row, &entries, &renaming)?;
+        let recorded = self.record_rename(row, &renamed, reconciliation, &mut renaming);
         renaming.drop_stale_upstream();
+        recorded?;
         self.tell_agent_its_name(row, &renamed, config);
         Ok(renamed)
     }
@@ -104,11 +101,25 @@ impl SessionRenaming {
         Ok(())
     }
 
+    fn record_rename(
+        &self,
+        row: &ManagedRow,
+        renamed: &Session,
+        reconciliation: &Reconciliation,
+        renaming: &mut BranchRenaming,
+    ) -> Result<(), ServiceError> {
+        if row.is_live() {
+            self.rename_tmux_session(row, renamed, renaming)?;
+        }
+        let entries = reconciliation.entries_with(row.session().name().as_str(), renamed.clone());
+        self.persist_rename(row, &entries, renaming)
+    }
+
     fn rename_tmux_session(
         &self,
         row: &ManagedRow,
         renamed: &Session,
-        renaming: &BranchRenaming,
+        renaming: &mut BranchRenaming,
     ) -> Result<(), ServiceError> {
         let old = row.session().tmux_name();
         match self
@@ -138,14 +149,13 @@ impl SessionRenaming {
         &self,
         row: &ManagedRow,
         entries: &[Session],
-        renaming: &BranchRenaming,
+        renaming: &mut BranchRenaming,
     ) -> Result<(), ServiceError> {
         let Err(error) = self.registry.save(entries) else {
             return Ok(());
         };
         let error = ServiceError::from(error);
         if row.is_live() {
-            renaming.drop_stale_upstream();
             return Err(error.adding_context(
                 "tmux already carries the new name, the next TUI run or mutating session command records it",
             ));
@@ -196,6 +206,18 @@ mod tests {
             fixture
         }
 
+        fn live_with_timed_out_tmux_rename(name: &str) -> ServiceFixture {
+            let fixture = Self::live(&[name]);
+            fixture.multiplexer().fail(
+                "rename_session",
+                MultiplexerError::TimedOut {
+                    subcommand: "rename-session".to_string(),
+                    seconds: 10,
+                },
+            );
+            fixture
+        }
+
         fn live_with_failing_saves(name: &str) -> ServiceFixture {
             let session = ServiceFixture::session(name);
             Self::live(&[name])
@@ -217,6 +239,14 @@ mod tests {
                 ServiceFixture::workspace_for(&[&session])
                     .with_published_branch(repo, session.branch()),
             )
+        }
+
+        fn dropped_the_stale_upstream(fixture: &ServiceFixture) -> bool {
+            fixture
+                .workspace()
+                .state_changing_calls()
+                .iter()
+                .any(|call| call.starts_with("drop_stale_upstream"))
         }
 
         fn on_branch(name: &str, branch: &str) -> ServiceFixture {
@@ -492,13 +522,7 @@ mod tests {
             .rename_session("fix-auth", "fix-login")
             .unwrap_err();
 
-        assert!(
-            fixture
-                .workspace()
-                .calls()
-                .iter()
-                .all(|call| !call.starts_with("drop_stale_upstream"))
-        );
+        assert!(!RenameFixture::dropped_the_stale_upstream(&fixture));
     }
 
     #[test]
@@ -518,14 +542,7 @@ mod tests {
 
     #[test]
     fn a_timed_out_tmux_rename_keeps_the_renamed_branch_and_persists_nothing() {
-        let fixture = RenameFixture::live(&["fix-auth"]);
-        fixture.multiplexer().fail(
-            "rename_session",
-            MultiplexerError::TimedOut {
-                subcommand: "rename-session".to_string(),
-                seconds: 10,
-            },
-        );
+        let fixture = RenameFixture::live_with_timed_out_tmux_rename("fix-auth");
 
         fixture
             .service()
@@ -538,6 +555,18 @@ mod tests {
                 .has_branch(Path::new(ServiceFixture::REPO), "fix-login")
         );
         assert_eq!(fixture.registry().save_count(), 0);
+    }
+
+    #[test]
+    fn a_timed_out_tmux_rename_drops_the_stale_upstream() {
+        let fixture = RenameFixture::live_with_timed_out_tmux_rename("fix-auth");
+
+        fixture
+            .service()
+            .rename_session("fix-auth", "fix-login")
+            .unwrap_err();
+
+        assert!(RenameFixture::dropped_the_stale_upstream(&fixture));
     }
 
     #[test]
@@ -596,13 +625,7 @@ mod tests {
             .rename_session("fix-auth", "fix-login")
             .unwrap_err();
 
-        assert!(
-            fixture
-                .workspace()
-                .state_changing_calls()
-                .iter()
-                .any(|call| call.starts_with("drop_stale_upstream"))
-        );
+        assert!(RenameFixture::dropped_the_stale_upstream(&fixture));
     }
 
     #[test]

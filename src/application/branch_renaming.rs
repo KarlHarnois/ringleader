@@ -9,6 +9,7 @@ pub struct BranchRenaming<'a> {
     location: PathBuf,
     old: &'a str,
     new: &'a str,
+    moved_back: bool,
 }
 
 impl<'a> BranchRenaming<'a> {
@@ -29,6 +30,7 @@ impl<'a> BranchRenaming<'a> {
             location: location.to_path_buf(),
             old: session.branch(),
             new: renamed.branch(),
+            moved_back: false,
         }
     }
 
@@ -46,7 +48,7 @@ impl<'a> BranchRenaming<'a> {
     }
 
     pub fn drop_stale_upstream(&self) {
-        if !self.changes_branch() {
+        if !self.holds_new_name() {
             return;
         }
         if let Err(error) = self
@@ -62,7 +64,7 @@ impl<'a> BranchRenaming<'a> {
         }
     }
 
-    pub fn roll_back(&self, error: ServiceError) -> ServiceError {
+    pub fn roll_back(&mut self, error: ServiceError) -> ServiceError {
         if !self.changes_branch() {
             return error;
         }
@@ -70,11 +72,18 @@ impl<'a> BranchRenaming<'a> {
             .workspace
             .rename_branch(&self.location, self.new, self.old)
         {
-            Ok(()) => error,
+            Ok(()) => {
+                self.moved_back = true;
+                error
+            }
             Err(rollback) => error.adding_context(&format!(
                 "renaming the branch back also failed ({rollback}), git now holds {}",
                 self.new
             )),
         }
+    }
+
+    fn holds_new_name(&self) -> bool {
+        self.changes_branch() && !self.moved_back
     }
 }
