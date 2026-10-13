@@ -287,6 +287,14 @@ mod tests {
             client.exits_with_notice_within(DETACH_LIMIT)
         }
 
+        fn reapply_words(previous: &KeyBindings, current: &KeyBindings) -> Vec<String> {
+            TmuxServerConfig::reapply_script(Some(previous), current)
+                .argv()
+                .iter()
+                .map(|word| word.to_string_lossy().into_owned())
+                .collect()
+        }
+
         fn option(server: &TmuxTestServer, name: &str) -> String {
             server.text(&["show-options", "-g", "-q", "-v", name])
         }
@@ -297,6 +305,31 @@ mod tests {
         let render = TmuxServerConfig::new(&KeyBindings::default()).render();
 
         assert_eq!(render, GOLDEN);
+    }
+
+    #[test]
+    fn the_reapply_unbinds_a_dropped_key_in_every_table_before_sourcing() {
+        let changed =
+            KeyBindings::default().with_next_session(HotKey::parse_valid(["M-n", "M-Down"]));
+
+        let words = ConfigFixture::reapply_words(&KeyBindings::default(), &changed);
+
+        assert_eq!(
+            words.join(" "),
+            "unbind-key -q -T root M-j ; unbind-key -q -T copy-mode M-j ; \
+             unbind-key -q -T copy-mode-vi M-j ; source-file -"
+        );
+    }
+
+    #[test]
+    fn the_reapply_never_unbinds_a_key_that_stays_bound_under_any_setting() {
+        let swapped = KeyBindings::default()
+            .with_next_session(HotKey::parse_valid(["M-k", "M-Down"]))
+            .with_previous_session(HotKey::parse_valid(["M-j", "M-Up"]));
+
+        let words = ConfigFixture::reapply_words(&KeyBindings::default(), &swapped);
+
+        assert_eq!(words, ["source-file", "-"]);
     }
 
     #[test]
