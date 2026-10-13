@@ -29,7 +29,6 @@ impl<'a> NewSessionView<'a> {
     const CURSOR: char = '█';
     const NAME_ROWS: usize = 1;
     const MODE_LABEL: &'static str = "Mode";
-    const MODE_ROWS: usize = 1;
 
     pub fn new(
         name: &'a TextField,
@@ -64,8 +63,10 @@ impl<'a> NewSessionView<'a> {
         let errors = self.error_lines(usize::from(area.width), theme);
         let layout = self.layout(area, labels, errors.len(), theme);
         let upper = self.upper_lines(labels.field_width(area), layout.repo_room(), labels, theme);
-        let [upper_area, prompt_area, error_area, hints_area] = layout.areas(upper.len());
+        let [upper_area, mode_area, prompt_area, error_area, hints_area] =
+            layout.areas(upper.len());
         self.render_upper(frame, upper_area, upper);
+        frame.render_widget(Paragraph::new(self.mode_lines(labels)), mode_area);
         self.prompt
             .render(frame, prompt_area, labels, self.prompt_style(theme));
         frame.render_widget(Paragraph::new(errors), error_area);
@@ -80,8 +81,7 @@ impl<'a> NewSessionView<'a> {
         theme: &Theme,
     ) -> NewSessionLayout {
         let field_width = labels.field_width(area);
-        let fixed_rows =
-            Self::NAME_ROWS + self.agents.height(self.agents_expanded()) + Self::MODE_ROWS;
+        let fixed_rows = Self::NAME_ROWS + self.agents.height(self.agents_expanded());
         NewSessionLayout::new(area, error_rows)
             .with_upper_rows(fixed_rows, self.repos.fewest_rows(field_width, theme))
             .with_prompt_rows(self.prompt.rows(field_width))
@@ -99,12 +99,14 @@ impl<'a> NewSessionView<'a> {
         let repo_style = self.focus_style(NewSessionField::Repo, theme);
         let repo_lines = self.repos.lines(field_width, repo_room, repo_style, theme);
         let agent_lines = self.agents.lines(self.agents_expanded(), theme);
-        let mode_line = Line::from(self.mode.name());
         let mut lines = labels.labeled(NewSessionField::Name.label(), vec![name_line]);
         lines.extend(labels.labeled(NewSessionField::Repo.label(), repo_lines));
         lines.extend(labels.labeled(NewSessionField::Agent.label(), agent_lines));
-        lines.extend(labels.labeled(Self::MODE_LABEL, vec![mode_line]));
         lines
+    }
+
+    fn mode_lines(&self, labels: DialogLabels) -> Vec<Line<'static>> {
+        labels.labeled(Self::MODE_LABEL, vec![Line::from(self.mode.name())])
     }
 
     fn render_upper(&self, frame: &mut Frame, area: Rect, lines: Vec<Line<'static>>) {
@@ -115,8 +117,8 @@ impl<'a> NewSessionView<'a> {
     }
 
     fn rows_through_focus(&self, upper_rows: usize) -> usize {
-        let rows_from_agents = self.agents.height(self.agents_expanded()) + Self::MODE_ROWS;
-        let rows_above_agents = upper_rows.saturating_sub(rows_from_agents);
+        let agent_rows = self.agents.height(self.agents_expanded());
+        let rows_above_agents = upper_rows.saturating_sub(agent_rows);
         match self.focus {
             NewSessionField::Name => Self::NAME_ROWS,
             NewSessionField::Repo => rows_above_agents,

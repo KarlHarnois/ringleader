@@ -1168,7 +1168,9 @@ mod tests {
         }
 
         let shown = DialogFixture::text_at(&dialog, DialogFixture::COMPACT_HEIGHT);
-        assert!(shown.contains("agent-4 · no prompt\n          agent-5 · no prompt\nPrompt"));
+        assert!(shown.contains(
+            "agent-4 · no prompt\n          agent-5 · no prompt\nMode      build\nPrompt"
+        ));
         assert!(shown.ends_with(DialogFixture::AGENT_HINTS));
     }
 
@@ -1188,13 +1190,13 @@ mod tests {
             DialogFixture::opened(&DialogFixture::launched_among_gateways());
         DialogFixture::search(&mut dialog, &service, "gate");
         DialogFixture::settle(&mut dialog, |text| text.contains("20/20 repos under ~"));
-        let rows_without_the_name = 6;
+        let rows_without_the_name = 7;
 
         dialog.fail(DialogFixture::worktree_error(1));
 
         let shown = DialogFixture::text_at(&dialog, rows_without_the_name);
         assert!(shown.starts_with("Repo      Find: gate█\n"));
-        assert!(shown.contains("~/work/gateway-01\nPrompt"));
+        assert!(shown.contains("~/work/gateway-01\nMode      build\nPrompt"));
     }
 
     #[test]
@@ -1274,19 +1276,31 @@ mod tests {
     }
 
     #[test]
+    fn a_dialog_too_short_for_every_field_keeps_the_mode_above_the_prompt() {
+        let (mut dialog, service) =
+            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
+        let rows_for_three_fields = 5;
+
+        DialogFixture::press(&mut dialog, &service, KeyCode::BackTab);
+
+        let shown = DialogFixture::text_at(&dialog, rows_for_three_fields);
+        assert!(shown.contains("Mode      plan\nPrompt"));
+    }
+
+    #[test]
     fn a_dialog_too_short_for_every_field_keeps_the_prompt_the_error_and_the_hints() {
         let (mut dialog, _service) =
             DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
         dialog.paste(DialogFixture::SEVEN_LINES);
         let error = DialogFixture::worktree_error(3);
-        let rows_for_all_but_the_agent = 6;
+        let rows_for_all_but_the_agent = 7;
 
         dialog.fail(error.clone());
 
         let shown = DialogFixture::text_at(&dialog, rows_for_all_but_the_agent);
-        assert!(
-            shown.starts_with("Name      fix-auth\nRepo      example-project\nPrompt    seven\n")
-        );
+        assert!(shown.starts_with(
+            "Name      fix-auth\nRepo      example-project\nMode      build\nPrompt    seven\n"
+        ));
         assert!(shown.replace('\n', " ").contains(&error));
         assert!(shown.ends_with(DialogFixture::PROMPT_HINTS));
     }
