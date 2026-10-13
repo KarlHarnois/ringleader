@@ -45,21 +45,20 @@ impl AgentHooks {
     }
 
     pub fn poll_startup_input(&self) {
-        let mut jobs = self.jobs();
-        jobs.pending.retain(|pending| pending.poll().is_none());
+        self.jobs().drop_finished();
     }
 
     pub fn startup_wait_note(&self) -> Option<&'static str> {
-        let queued = !self.jobs().pending.is_empty();
+        let queued = self.jobs().has_unawaited();
         queued.then_some(Self::STARTUP_WAIT_NOTE)
     }
 
     pub fn wait_startup_input(&self, stop: impl Fn() -> bool) {
         loop {
-            let Some(pending) = self.jobs().pending.pop() else {
+            let Some(job) = self.jobs().take_next() else {
                 return;
             };
-            if pending.wait_unless(&stop).is_none() {
+            if job.wait_unless(&stop).is_none() {
                 return;
             }
         }
@@ -67,27 +66,31 @@ impl AgentHooks {
 
     fn queue_startup(&self, tmux_name: &str, lines: Vec<String>) {
         let mut jobs = self.jobs();
-        if !jobs.in_flight.insert(tmux_name.to_string()) {
+        if jobs.is_running(tmux_name) {
             return;
         }
+        let job = self.start_typing(tmux_name, lines);
+        jobs.track(tmux_name, job);
+    }
+
+    fn start_typing(&self, tmux_name: &str, lines: Vec<String>) -> Pending<()> {
         let multiplexer = Arc::clone(&self.multiplexer);
         let startup = Arc::clone(&self.startup);
         let name = tmux_name.to_string();
-        let pending = Pending::start(move || {
+        Pending::start(move || {
             let typed = multiplexer.type_when_ready(&name, &lines);
             Self::log_skipped(&name, typed);
-            startup
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .in_flight
-                .remove(&name);
+            Self::locked(&startup).finish(&name);
             Ok(())
-        });
-        jobs.pending.push(pending);
+        })
     }
 
     fn jobs(&self) -> MutexGuard<'_, StartupJobs> {
-        self.startup.lock().unwrap_or_else(PoisonError::into_inner)
+        Self::locked(&self.startup)
+    }
+
+    fn locked(startup: &Mutex<StartupJobs>) -> MutexGuard<'_, StartupJobs> {
+        startup.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     fn log_skipped(tmux_name: &str, typed: Result<(), MultiplexerError>) {
@@ -98,6 +101,33 @@ impl AgentHooks {
             }
             Err(error) => log::warn!("could not type into {tmux_name}: {error}"),
         }
+    }
+}
+
+impl StartupJobs {
+    fn is_running(&self, tmux_name: &str) -> bool {
+        self.in_flight.contains(tmux_name)
+    }
+
+    fn track(&mut self, tmux_name: &str, job: Pending<()>) {
+        self.in_flight.insert(tmux_name.to_string());
+        self.pending.push(job);
+    }
+
+    fn finish(&mut self, tmux_name: &str) {
+        self.in_flight.remove(tmux_name);
+    }
+
+    fn has_unawaited(&self) -> bool {
+        !self.pending.is_empty()
+    }
+
+    fn drop_finished(&mut self) {
+        self.pending.retain(|job| job.poll().is_none());
+    }
+
+    fn take_next(&mut self) -> Option<Pending<()>> {
+        self.pending.pop()
     }
 }
 
