@@ -147,7 +147,7 @@ mod tests {
     use ratatui::backend::TestBackend;
 
     use super::*;
-    use crate::domain::{SessionState, SessionSummary};
+    use crate::domain::{DiffStat, SessionState, SessionSummary};
     use crate::test_support::ServiceFixture;
     use crate::ui::empty_state::EmptyState;
     use crate::ui::theme::Theme;
@@ -161,6 +161,13 @@ mod tests {
                 SessionState::Waiting,
                 false,
             )]
+        }
+
+        fn rows_with_a_diff() -> Vec<SessionSummary> {
+            Self::rows()
+                .into_iter()
+                .map(|row| row.with_diff(DiffStat::from_changes([], 2)))
+                .collect()
         }
 
         fn render(rows: &[SessionSummary], width: u16, height: u16) -> String {
@@ -222,15 +229,15 @@ mod tests {
         let screen = ViewFixture::render(&ViewFixture::rows(), 60, 12);
 
         assert!(!screen.contains("Preview"));
-        assert!(screen.contains("Branch"));
+        assert!(screen.contains("Diff"));
     }
 
     #[test]
     fn the_minimal_tier_keeps_only_state_and_name() {
-        let screen = ViewFixture::render(&ViewFixture::rows(), 36, 8);
+        let screen = ViewFixture::render(&ViewFixture::rows_with_a_diff(), 36, 8);
 
         assert!(screen.contains("● fix-auth"));
-        assert!(!screen.contains("Branch"));
+        assert!(!screen.contains("?2"));
         assert!(!screen.contains("Name"));
     }
 

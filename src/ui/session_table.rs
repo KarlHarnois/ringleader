@@ -97,9 +97,7 @@ impl<'a> SessionTable<'a> {
         let names = self.rows.iter().map(|row| row.name().to_string());
         let mut columns = TableColumns::new(inner_width, names);
         if self.shows_header() {
-            columns = columns
-                .with_branch(self.rows.iter().map(Self::branch_text))
-                .with_diff(self.rows.iter().map(Self::diff_text));
+            columns = columns.with_diff(self.rows.iter().map(Self::diff_text));
             if self.has_pull_requests() {
                 columns = columns.with_pull_request(self.rows.iter().map(Self::pull_request_text));
             }
@@ -115,12 +113,7 @@ impl<'a> SessionTable<'a> {
         let indicator = StateIndicator::new(row.state(), self.tick);
         let pull_request_text = Self::pull_request_text(row);
         let diff_text = Self::diff_text(row);
-        let text = columns.row(
-            row.name(),
-            &Self::branch_text(row),
-            &pull_request_text,
-            &diff_text,
-        );
+        let text = columns.row(row.name(), &pull_request_text, &diff_text);
         if self.selection == Some(row.name()) {
             let selected = self.theme.selected();
             return Line::from(vec![
@@ -165,12 +158,6 @@ impl<'a> SessionTable<'a> {
                 .map(|marker| Span::styled(format!(" {marker}"), self.theme.base())),
         );
         spans
-    }
-
-    fn branch_text(row: &SessionSummary) -> String {
-        row.metadata()
-            .map(|metadata| metadata.branch().to_string())
-            .unwrap_or_default()
     }
 
     fn pull_request_text(row: &SessionSummary) -> String {
