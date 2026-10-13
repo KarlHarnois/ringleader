@@ -162,13 +162,12 @@ mod tests {
 
     use super::*;
     use crate::ui::dialogs::Dialog;
+    use crate::ui::home_view::LayoutTier;
 
     struct HelpFixture;
 
     impl HelpFixture {
         const HOME: &'static str = "/home/example";
-        const FULL_WIDTH: u16 = 80;
-        const FULL_HEIGHT: u16 = 24;
         const SHORT_WIDTH: usize = 56;
         const SHORT_HEIGHT: usize = 8;
         const PAST_THE_END: usize = 50;
@@ -283,11 +282,9 @@ mod tests {
 
     #[test]
     fn the_whole_help_fits_the_smallest_full_size_dialog() {
-        let screen = HelpFixture::screen(
-            HelpFixture::help(),
-            HelpFixture::FULL_WIDTH,
-            HelpFixture::FULL_HEIGHT,
-        );
+        let (width, height) = LayoutTier::smallest_full_size();
+
+        let screen = HelpFixture::screen(HelpFixture::help(), width, height);
 
         assert!(screen.contains("Keys"));
         assert!(screen.contains("tmux config  ~/.local/state/ringleader/tmux.conf"));
