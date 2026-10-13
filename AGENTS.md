@@ -236,6 +236,7 @@ viewer exits.
     │       ├── mod.rs
     │       ├── session_registry.rs   # SessionRegistry trait
     │       ├── workspace.rs          # Workspace trait
+    │       ├── diff_base.rs          # DiffBase, the recorded commit and configured base branch a session diff measures from
     │       ├── branch_marker.rs      # BranchMarker, the git config entry that marks a branch Ringleader created
     │       ├── dirty_state.rs        # DirtyState, the uncommitted files and nested repos of a worktree
     │       ├── unmerged_commits.rs   # UnmergedCommits, commits on no other ref with the tip and HEAD
@@ -274,7 +275,9 @@ viewer exits.
     │   ├── git_porcelain.rs      # GitPorcelain, parses git's machine-readable output
     │   ├── git_branches.rs       # GitBranches: compare-and-swap delete, rename, the managed-branch marker, and whether a branch has been pushed
     │   ├── branch_section.rs     # BranchSection, the git config section and upstream keys of one branch
-    │   ├── start_point_resolver.rs # StartPointResolver, the base branch ladder
+    │   ├── start_point_resolver.rs # StartPointResolver, the commit a new worktree starts from
+    │   ├── base_branch_ladder.rs # BaseBranchLadder, the origin default, main, and master refs tried when no base branch is set
+    │   ├── diff_base_resolver.rs # DiffBaseResolver, the merge base of a worktree's HEAD with its base branch, which its diff measures from
     │   ├── submodule_commits.rs  # SubmoduleCommits, the submodule walk of unmerged_commits
     │   ├── system_clock.rs       # SystemClock, reads `SystemTime`
     │   ├── system_host_probe.rs  # SystemHostProbe
@@ -301,8 +304,10 @@ viewer exits.
     │   ├── mod.rs
     │   ├── app.rs                  # App
     │   ├── action_gate.rs          # ActionGate, which actions the selected row allows
+    │   ├── key_sequence.rs         # KeySequence, the g that waits for a second g to make gg
     │   ├── home_state.rs           # HomeState, the polled rows, selection, and preview
-    │   ├── session_list.rs         # SessionList, sorted rows and name-based selection
+    │   ├── session_list.rs         # SessionList, rows sorted by repo, state, and name, the selected session or heading, and the folded repos
+    │   ├── list_selection.rs       # ListSelection, the selected session or repo heading
     │   ├── preview_feed.rs         # PreviewFeed, the preview capture and its timer
     │   ├── diff_queue.rs           # DiffQueue, round-robin diffs of visible rows
     │   ├── pull_request_feed.rs    # PullRequestFeed, the pull requests of visible rows and their timer
@@ -315,10 +320,13 @@ viewer exits.
     │   ├── terminal_guard.rs       # TerminalGuard
     │   ├── home_view.rs            # HomeView
     │   ├── empty_state.rs          # EmptyState, the no-sessions message with the logo above it when it fits
-    │   ├── session_table.rs        # SessionTable, the home screen's session list
+    │   ├── session_table.rs        # SessionTable, the home screen's session list, drawn as a tree of repos
+    │   ├── session_tree.rs         # SessionTree, the sorted rows as repo headings and branch lines, and the scroll rule
+    │   ├── repo_heading.rs         # RepoHeading, a repo's heading line with its number, fold arrow, and state counts
+    │   ├── repo_group.rs           # RepoGroup, the repo a row is listed under, or other
     │   ├── colored_row.rs          # ColoredRow, a row's text split around its coloured cells
     │   ├── state_indicator.rs      # StateIndicator, the glyph and color of a session state
-    │   ├── table_columns.rs        # TableColumns, column widths and dropping
+    │   ├── table_columns.rs        # TableColumns, column widths and dropping, and RowCells, the cell texts of one row
     │   ├── preview_panel.rs        # PreviewPanel, the Full tier's preview
     │   ├── preview_text.rs         # PreviewText, the captured rows that fit the preview
     │   ├── help_view.rs            # HelpView
