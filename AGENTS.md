@@ -50,15 +50,17 @@ Run them from the repository root; a scoped run reads `git status` for `--change
 ```sh
 nix develop .#metrics -c dryer --changed       # duplicate candidates; writes .metrics/dry.edn
 nix develop .#metrics -c crapper               # CC plus coverage plus CRAP; writes .metrics/crap.edn
-nix develop .#metrics -c mutator --changed --max-workers N src/<module>.rs
+nix develop .#metrics -c mutator --max-workers N src/<module>.rs
 nix run .#dryer -- --changed                   # the apps also work outside any dev shell
 nix run .#crapper -- --help
 nix run .#mutator -- --help
 ```
 
 `mutator` runs every covered mutant and many tests start real tmux servers. Never
-run it whole-repo. Name one module or file, cap `--max-workers`, and use
-`--changed` for differential reruns. `crapper` and `mutator` need `cargo-llvm-cov`
+run it whole-repo. Name one module or file and cap `--max-workers`. Once a
+snapshot exists, a rerun only runs survivors and sites in changed functions.
+Never pass `--changed` with a path: it drops the path and mutates every changed
+file in `git status`. `crapper` and `mutator` need `cargo-llvm-cov`
 and the LLVM tools named by `LLVM_COV` and `LLVM_PROFDATA`, which the `metrics`
 shell and the apps set. Without them every function scores 0% coverage and the
 run still exits 0. This crate is bin-only, so a scoped `mutator` test command is
