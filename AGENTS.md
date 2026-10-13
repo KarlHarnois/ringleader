@@ -315,6 +315,7 @@ viewer exits.
     │   ├── mod.rs
     │   ├── app.rs                  # App
     │   ├── action_gate.rs          # ActionGate, which actions the selected row allows
+    │   ├── back_key.rs             # BackKey, Ctrl-Q, which closes any dialog and never quits
     │   ├── key_sequence.rs         # KeySequence, the g that waits for a second g to make gg
     │   ├── home_state.rs           # HomeState, the polled rows, selection, and preview
     │   ├── session_list.rs         # SessionList, rows sorted by repo, state, and name, the selected session or heading, and the folded repos
@@ -360,12 +361,16 @@ viewer exits.
     │       ├── chosen_repo.rs           # ChosenRepo, the default repo until the search picks another
     │       ├── repo_finder.rs           # RepoFinder, the fuzzy search over the repos under home
     │       ├── repo_filter.rs           # RepoFilter, ranks repo paths against a fuzzy query
+    │       ├── fuzzy_ranker.rs          # FuzzyRanker, ranks names or paths against a fuzzy query
+    │       ├── match_list.rs            # MatchList, the ranked matches of a fuzzy search and the cursor over them
     │       ├── repo_scan.rs             # RepoScan, one home search and its result
+    │       ├── search_query.rs          # SearchQuery, a finder's typed query shown after its prompt
     │       ├── typed_repo_check.rs      # TypedRepoCheck, the git check of a typed repo path
     │       ├── home_path.rs             # HomePath, a path shown from ~ when it is under home
     │       ├── agent_picker.rs          # AgentPicker, the n dialog's agent list
     │       ├── delete_session_dialog.rs # DeleteSessionDialog
-    │       └── rename_session_dialog.rs # RenameSessionDialog
+    │       ├── rename_session_dialog.rs # RenameSessionDialog
+    │       └── session_finder.rs        # SessionFinder, the / and Ctrl-K search over session names that attaches to the pick
     └── test_support/               # #[cfg(test)] doubles and fixtures shared by unit tests
         ├── mod.rs
         ├── tmux_test_server.rs      # TmuxTestServer: private socket, generated config, control-mode clients, kill-server on drop
