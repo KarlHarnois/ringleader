@@ -71,12 +71,8 @@ impl App {
         self.dialogs.poll();
     }
 
-    pub fn startup_wait_note(&self) -> Option<&'static str> {
-        self.service.startup_wait_note()
-    }
-
-    pub fn wait_startup_input(&self, stop: impl Fn() -> bool) {
-        self.service.wait_startup_input(stop);
+    pub fn into_service(self) -> SessionService {
+        self.service
     }
 
     pub fn attach(&mut self, name: &str) {
@@ -706,13 +702,13 @@ mod tests {
     }
 
     #[test]
-    fn a_stopped_app_waits_for_the_startup_input_it_queued() {
+    fn a_stopped_app_hands_back_its_queued_startup_input() {
         let fixture = AppFixture::blocked_startup_input();
         let mut app = AppFixture::started(&fixture, 100, 28);
         let request = AppFixture::request_create(&mut app, "new-idea");
         AppFixture::perform(&mut app, request);
 
-        app.wait_startup_input(|| {
+        app.into_service().wait_startup_input(|| {
             fixture.multiplexer().release_typing();
             false
         });

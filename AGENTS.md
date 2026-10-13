@@ -58,7 +58,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     ├── cli.rs              # Cli struct, clap definitions, dispatch
     ├── cli/
     │   ├── cli_output.rs         # CliOutput, writeln! output that stops at a broken pipe
-    │   ├── cli_session.rs        # CliSession, signal checks, worker waits, and the exit of one command
+    │   ├── cli_session.rs        # CliSession, signal checks, worker waits, the startup input wait the CLI and TUI end with, and the exit of one command
     │   ├── session_commands.rs   # SessionCommands: list, new, delete, attach, rename, restart
     │   ├── list_report.rs        # ListReport, the list text and JSON
     │   ├── repo_argument.rs      # RepoArgument, the --repo name or path resolution

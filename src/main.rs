@@ -217,8 +217,8 @@ impl CompositionRoot {
         if let Err(error) = Self::run_event_loop(&mut app, signals.clone()) {
             return Self::fail(&error.to_string());
         }
-        lock.release();
-        Self::wait_for_startup_input(&app, &signals);
+        let mut session = CliSession::new(CliOutput::standard(), signals);
+        session.wait_for_startup_input(&app.into_service(), &mut lock);
         ExitCode::SUCCESS
     }
 
@@ -228,13 +228,6 @@ impl CompositionRoot {
         let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
         Self::clear_alternate_screen_leftovers(&mut terminal)?;
         EventLoop::new(terminal, CrosstermInput, signals, screen.state()).run(app)
-    }
-
-    fn wait_for_startup_input(app: &App, signals: &SignalFlags) {
-        if let Some(note) = app.startup_wait_note() {
-            let _ = writeln!(io::stderr(), "{note}");
-        }
-        app.wait_startup_input(|| signals.raised().is_some());
     }
 
     fn clear_alternate_screen_leftovers(

@@ -230,10 +230,7 @@ impl Cli {
             }
         }
         let result = self.dispatch(service, session);
-        if self.is_mutating() {
-            lock.release();
-        }
-        Self::wait_for_startup_input(service, session);
+        session.wait_for_startup_input(service, lock);
         session.finish(result)
     }
 
@@ -243,13 +240,6 @@ impl Cli {
             Ok(None) => {}
             Err(error) => session.output().error(&error.to_string()),
         }
-    }
-
-    fn wait_for_startup_input(service: &SessionService, session: &mut CliSession) {
-        if let Some(note) = service.startup_wait_note() {
-            session.output().note(note);
-        }
-        service.wait_startup_input(|| session.is_signaled());
     }
 
     fn doctor(service: &SessionService, session: &mut CliSession, args: &JsonArgs) -> u8 {

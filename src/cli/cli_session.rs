@@ -1,6 +1,7 @@
 use super::CliOutput;
 use crate::adapters::signal_flags::SignalFlags;
-use crate::application::{Pending, ServiceError};
+use crate::application::ports::Lock;
+use crate::application::{Pending, ServiceError, SessionService};
 
 pub struct CliSession {
     output: CliOutput,
@@ -36,6 +37,14 @@ impl CliSession {
                 self.signals.raised().unwrap_or_default(),
             )),
         }
+    }
+
+    pub fn wait_for_startup_input(&mut self, service: &SessionService, lock: &mut dyn Lock) {
+        lock.release();
+        if let Some(note) = service.startup_wait_note() {
+            self.output.note(note);
+        }
+        service.wait_startup_input(|| self.is_signaled());
     }
 
     pub fn finish(&mut self, result: Result<u8, CommandStop>) -> CliExit {
