@@ -340,6 +340,20 @@ mod tests {
             clone
         }
 
+        fn clone_with_work(origin: &GitTestRepo) -> PathBuf {
+            let clone = Self::clone_with_branch(origin);
+            origin.commit(&origin.sibling("wt"), "work.txt");
+            clone
+        }
+
+        fn merge_into_the_default_branch(fixture: &GitTestRepo, branch: &str) {
+            let repo = fixture.path();
+            fixture.git(repo, &["checkout", "-q", "-b", branch]);
+            fixture.commit(repo, "merged.md");
+            fixture.git(repo, &["checkout", "-q", GitTestRepo::BRANCH]);
+            fixture.git(repo, &["merge", "-q", "--no-ff", "-m", "Merge", branch]);
+        }
+
         fn clone_with_pruned_upstream(origin: &GitTestRepo) -> PathBuf {
             let clone = Self::clone_with_branch(origin);
             origin.git(&clone, &["push", "-q", "-u", "origin", BRANCH]);
@@ -441,11 +455,34 @@ mod tests {
     #[test]
     fn a_pushed_branch_is_published() {
         let origin = GitTestRepo::new();
-        let clone = WorktreeFixture::clone_with_branch(&origin);
+        let clone = WorktreeFixture::clone_with_work(&origin);
 
         origin.git(&clone, &["push", "-q", "origin", BRANCH]);
 
         assert!(WorktreeFixture::is_published(&origin, &clone));
+    }
+
+    #[test]
+    fn a_branch_pushed_to_two_remotes_is_published() {
+        let origin = GitTestRepo::new();
+        let clone = WorktreeFixture::clone_with_work(&origin);
+        let fork = origin.path().to_string_lossy().into_owned();
+        origin.git(&clone, &["remote", "add", "fork", &fork]);
+
+        origin.git(&clone, &["push", "-q", "origin", BRANCH]);
+        origin.git(&clone, &["push", "-q", "fork", BRANCH]);
+
+        assert!(WorktreeFixture::is_published(&origin, &clone));
+    }
+
+    #[test]
+    fn a_merged_remote_branch_of_the_same_name_does_not_publish_it() {
+        let origin = GitTestRepo::new();
+        WorktreeFixture::merge_into_the_default_branch(&origin, BRANCH);
+
+        let clone = WorktreeFixture::clone_with_branch(&origin);
+
+        assert!(!WorktreeFixture::is_published(&origin, &clone));
     }
 
     #[test]
@@ -505,9 +542,8 @@ mod tests {
     #[test]
     fn a_rewritten_branch_that_tracks_its_pushed_copy_is_published() {
         let origin = GitTestRepo::new();
-        let clone = WorktreeFixture::clone_with_branch(&origin);
+        let clone = WorktreeFixture::clone_with_work(&origin);
         let worktree = origin.sibling("wt");
-        origin.commit(&worktree, "work.txt");
         origin.git(&worktree, &["push", "-q", "-u", "origin", BRANCH]);
 
         origin.git(&worktree, &["commit", "-q", "--amend", "-m", "Rewritten"]);

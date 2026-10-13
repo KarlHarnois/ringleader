@@ -109,7 +109,7 @@ impl<'a> GitBranches<'a> {
             return Ok(true);
         }
         for remote_ref in self.remote_copies(repo, branch)? {
-            if self.branch_contains(repo, branch, &remote_ref)? {
+            if self.holds_work_pushed_from(repo, branch, &remote_ref)? {
                 return Ok(true);
             }
         }
@@ -195,6 +195,33 @@ impl<'a> GitBranches<'a> {
             }
         }
         Ok(copies)
+    }
+
+    fn holds_work_pushed_from(
+        &self,
+        repo: &Path,
+        branch: &str,
+        remote_ref: &str,
+    ) -> Result<bool, WorkspaceError> {
+        Ok(self.branch_contains(repo, branch, remote_ref)?
+            && self.has_unmerged_commits(repo, branch, remote_ref)?)
+    }
+
+    fn has_unmerged_commits(
+        &self,
+        repo: &Path,
+        branch: &str,
+        remote_ref: &str,
+    ) -> Result<bool, WorkspaceError> {
+        let other_remote_branches = format!("--exclude=*/{branch}");
+        let list = GitInvocation::in_repo(repo, "rev-list").args([
+            "-n1",
+            remote_ref,
+            "--not",
+            &other_remote_branches,
+            "--remotes",
+        ]);
+        Ok(!self.git.run_checked(&list)?.first_line().is_empty())
     }
 
     fn branch_contains(
