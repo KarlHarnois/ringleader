@@ -648,13 +648,8 @@ mod tests {
     fn n_then_ctrl_s_creates_the_session_selects_it_and_closes_the_dialog() {
         let fixture = AppFixture::two_waiting_sessions();
         let mut app = AppFixture::started(&fixture, 100, 28);
-        AppFixture::press(&mut app, 'n');
-        AppFixture::settle_dialog(&mut app);
-        for character in "new-idea".chars() {
-            AppFixture::press(&mut app, character);
-        }
 
-        let request = app.handle_event(&UiHarness::control('s'));
+        let request = AppFixture::request_create(&mut app, "new-idea");
         let busy = AppFixture::status_line(&app, 100);
         let AppRequest::Block(operation) = request else {
             panic!("expected a blocking create, got {request:?}");
@@ -726,16 +721,9 @@ mod tests {
     fn a_failed_create_keeps_the_dialog_open_with_the_error() {
         let fixture = AppFixture::two_waiting_sessions();
         let mut app = AppFixture::started(&fixture, 100, 28);
-        AppFixture::press(&mut app, 'n');
-        AppFixture::settle_dialog(&mut app);
-        for character in "fix-auth".chars() {
-            AppFixture::press(&mut app, character);
-        }
+        let request = AppFixture::request_create(&mut app, "fix-auth");
 
-        let AppRequest::Block(operation) = app.handle_event(&UiHarness::control('s')) else {
-            panic!("expected a blocking create");
-        };
-        app.perform(operation);
+        AppFixture::perform(&mut app, request);
 
         assert!(app.dialogs.is_open());
         assert!(AppFixture::screen(&app, 100, 28).contains("fix-auth"));
