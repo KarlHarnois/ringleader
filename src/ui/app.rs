@@ -65,9 +65,14 @@ impl App {
 
     pub fn on_tick(&mut self, now: Instant) {
         self.tick = self.tick.wrapping_add(1);
+        self.service.poll_startup_input();
         let outcome = self.home.tick(now, &mut self.service);
         self.status.failure(outcome);
         self.dialogs.poll();
+    }
+
+    pub fn into_service(self) -> SessionService {
+        self.service
     }
 
     pub fn attach(&mut self, name: &str) {
@@ -228,6 +233,20 @@ mod tests {
                 )
         }
 
+        fn blocked_startup_input() -> ServiceFixture {
+            let first = ServiceFixture::session("dark-mode");
+            let second = ServiceFixture::session("fix-auth");
+            ServiceFixture::new()
+                .with_sessions(&[first.clone(), second.clone()])
+                .with_config(ServiceFixture::config_with_input())
+                .with_multiplexer(
+                    FakeMultiplexer::new()
+                        .with_live(ServiceFixture::waiting(&first))
+                        .with_live(ServiceFixture::waiting(&second))
+                        .blocking_typing(),
+                )
+        }
+
         fn started(fixture: &ServiceFixture, width: u16, height: u16) -> App {
             let mut app = UiHarness::app(fixture);
             app.resize(width, height);
@@ -268,6 +287,15 @@ mod tests {
 
         fn press(app: &mut App, character: char) {
             app.handle_event(&UiHarness::character(character));
+        }
+
+        fn request_create(app: &mut App, name: &str) -> AppRequest {
+            Self::press(app, 'n');
+            Self::settle_dialog(app);
+            for character in name.chars() {
+                Self::press(app, character);
+            }
+            app.handle_event(&UiHarness::control('s'))
         }
 
         fn settle_dialog(app: &mut App) {
@@ -620,13 +648,8 @@ mod tests {
     fn n_then_ctrl_s_creates_the_session_selects_it_and_closes_the_dialog() {
         let fixture = AppFixture::two_waiting_sessions();
         let mut app = AppFixture::started(&fixture, 100, 28);
-        AppFixture::press(&mut app, 'n');
-        AppFixture::settle_dialog(&mut app);
-        for character in "new-idea".chars() {
-            AppFixture::press(&mut app, character);
-        }
 
-        let request = app.handle_event(&UiHarness::control('s'));
+        let request = AppFixture::request_create(&mut app, "new-idea");
         let busy = AppFixture::status_line(&app, 100);
         let AppRequest::Block(operation) = request else {
             panic!("expected a blocking create, got {request:?}");
@@ -643,19 +666,65 @@ mod tests {
     }
 
     #[test]
+    fn the_busy_message_clears_before_the_startup_input_is_typed() {
+        let fixture = AppFixture::blocked_startup_input();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        let request = AppFixture::request_create(&mut app, "new-idea");
+
+        AppFixture::perform(&mut app, request);
+
+        assert_eq!(
+            AppFixture::status_line(&app, 100),
+            " Created new-idea on branch new-idea."
+        );
+        assert!(
+            fixture
+                .multiplexer()
+                .typed_when_ready("ringleader-new-idea")
+                .is_empty()
+        );
+        fixture.multiplexer().release_typing();
+        assert!(
+            fixture
+                .multiplexer()
+                .wait_for_typing("ringleader-new-idea", Duration::from_secs(2))
+        );
+        assert_eq!(
+            fixture
+                .multiplexer()
+                .typed_when_ready("ringleader-new-idea"),
+            ["/color"]
+        );
+    }
+
+    #[test]
+    fn a_stopped_app_hands_back_its_queued_startup_input() {
+        let fixture = AppFixture::blocked_startup_input();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        let request = AppFixture::request_create(&mut app, "new-idea");
+        AppFixture::perform(&mut app, request);
+        app.on_tick(Instant::now());
+
+        app.into_service().wait_startup_input(|| {
+            fixture.multiplexer().release_typing();
+            false
+        });
+
+        assert_eq!(
+            fixture
+                .multiplexer()
+                .typed_when_ready("ringleader-new-idea"),
+            ["/color"]
+        );
+    }
+
+    #[test]
     fn a_failed_create_keeps_the_dialog_open_with_the_error() {
         let fixture = AppFixture::two_waiting_sessions();
         let mut app = AppFixture::started(&fixture, 100, 28);
-        AppFixture::press(&mut app, 'n');
-        AppFixture::settle_dialog(&mut app);
-        for character in "fix-auth".chars() {
-            AppFixture::press(&mut app, character);
-        }
+        let request = AppFixture::request_create(&mut app, "fix-auth");
 
-        let AppRequest::Block(operation) = app.handle_event(&UiHarness::control('s')) else {
-            panic!("expected a blocking create");
-        };
-        app.perform(operation);
+        AppFixture::perform(&mut app, request);
 
         assert!(app.dialogs.is_open());
         assert!(AppFixture::screen(&app, 100, 28).contains("fix-auth"));

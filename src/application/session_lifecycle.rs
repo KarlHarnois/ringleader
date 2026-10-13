@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use super::agent_hooks::AgentHooks;
 use super::busy_worktree::BusyWorktree;
 use super::creation_plan::CreateRequest;
 use super::delete_impact::{DeleteConfirmation, DeleteImpact};
@@ -25,6 +26,7 @@ pub struct SessionLifecycle {
     renaming: SessionRenaming,
     deletion: SessionDeletion,
     restart: SessionRestart,
+    hooks: Arc<AgentHooks>,
 }
 
 impl SessionLifecycle {
@@ -32,15 +34,29 @@ impl SessionLifecycle {
         "recreated the socket of Ringleader's tmux server, which was removed while the server ran";
 
     pub fn new(ports: &ServicePorts, launch_directory: &Path) -> Self {
+        let hooks = Arc::new(AgentHooks::new(ports.tmux().multiplexer()));
         Self {
             multiplexer: ports.tmux().multiplexer(),
             host: ports.repos().host(),
             launch_directory: launch_directory.to_path_buf(),
-            creation: SessionCreation::new(ports),
-            renaming: SessionRenaming::new(ports),
+            creation: SessionCreation::new(ports, Arc::clone(&hooks)),
+            renaming: SessionRenaming::new(ports, Arc::clone(&hooks)),
             deletion: SessionDeletion::new(ports),
-            restart: SessionRestart::new(ports),
+            restart: SessionRestart::new(ports, Arc::clone(&hooks)),
+            hooks,
         }
+    }
+
+    pub fn poll_startup_input(&self) {
+        self.hooks.poll_startup_input();
+    }
+
+    pub fn startup_wait_note(&self) -> Option<&'static str> {
+        self.hooks.startup_wait_note()
+    }
+
+    pub fn wait_startup_input(&self, stop: impl Fn() -> bool) {
+        self.hooks.wait_startup_input(stop);
     }
 
     pub fn create(

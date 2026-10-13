@@ -18,11 +18,11 @@ pub struct SessionRenaming {
     multiplexer: Arc<dyn Multiplexer>,
     host: Arc<dyn HostProbe>,
     registry: Arc<dyn SessionRegistry>,
-    hooks: AgentHooks,
+    hooks: Arc<AgentHooks>,
 }
 
 impl SessionRenaming {
-    pub fn new(ports: &ServicePorts) -> Self {
+    pub fn new(ports: &ServicePorts, hooks: Arc<AgentHooks>) -> Self {
         Self {
             ownership: BranchOwnership::new(ports),
             branches: BranchAvailability::new(ports),
@@ -30,7 +30,7 @@ impl SessionRenaming {
             multiplexer: ports.tmux().multiplexer(),
             host: ports.repos().host(),
             registry: ports.state().registry(),
-            hooks: AgentHooks::new(ports),
+            hooks,
         }
     }
 

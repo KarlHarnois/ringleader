@@ -5,7 +5,7 @@ use thiserror::Error;
 use super::agent_launch::AgentLaunch;
 use crate::domain::{ReturnKey, SessionMetadata, SessionObservation, SessionSize};
 
-pub trait Multiplexer {
+pub trait Multiplexer: Send + Sync {
     fn socket(&self) -> PathBuf;
     fn create_session(&self, spec: &SessionSpec) -> Result<PathBuf, MultiplexerError>;
     fn kill_session(&self, tmux_name: &str) -> Result<(), MultiplexerError>;

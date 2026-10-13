@@ -42,6 +42,10 @@ impl CliHarness {
         Self { stdout, ..self }
     }
 
+    pub fn with_stderr(self, stderr: CapturedWriter) -> Self {
+        Self { stderr, ..self }
+    }
+
     pub fn with_signals(self, signals: SignalFlags) -> Self {
         Self { signals, ..self }
     }
@@ -55,7 +59,11 @@ impl CliHarness {
         if let Err(exit) = cli.take_write_lock(&mut *self.lock.borrow_mut(), &mut session) {
             return exit;
         }
-        cli.execute(&mut self.fixture.unloaded_service(), &mut session)
+        cli.execute(
+            &mut self.fixture.unloaded_service(),
+            &mut session,
+            &mut *self.lock.borrow_mut(),
+        )
     }
 
     pub fn fixture(&self) -> &ServiceFixture {
