@@ -2,6 +2,20 @@
 
 This file is the living reference for agents working in this repository.
 
+## Values
+
+When no rule covers a case, choose what these values favor. When two conflict, the earlier one wins.
+
+- **The user's own setup stays untouched.** Ringleader runs its own tmux server and never changes the user's tmux server, tmux config, or key bindings. It deletes or renames only the branches it marked as its own, and it assumes no particular personal setup. The private socket on every tmux call, the throwaway state for manual runs, the `ringleaderManaged` marker, and the consumer-agnostic repository all come from this.
+- **Refuse before losing work.** When an action could destroy work, Ringleader stops and says why instead of guessing. Delete measures uncommitted files and unmerged commits and asks first, rename refuses a branch that has been pushed, a failed create or rename undoes what it did, and a refused action exits with code 3.
+- **Intuitive, with several ways to do each thing.** Each way comes from an ecosystem users already know and keeps the meaning it has there, so a user who guesses a key is right.
+  - Vim: `j k` move, `gg G` jump to the ends, and `/` would open a session finder.
+  - fzf and readline: `Ctrl-J Ctrl-K` and `Ctrl-N Ctrl-P` move in the repo search, and `Ctrl-W Ctrl-U` edit text.
+  - Command palettes: `Ctrl-K` would also open the session finder.
+  - The arrows work wherever `j k` do, `?` `Esc` `q` all close the help, and create, delete, rename, restart, and attach work from both the TUI and the CLI.
+- **Side work never blocks or breaks the main action.** Typing an agent's startup input and looking up pull requests run in the background, and their failures are logged, never raised. A missing tool such as `gh` turns its feature off instead of failing the program. Logs go to a file, never to the terminal.
+- **Less is more.** Ringleader stays minimal in what it shows, what it asks for, and what it documents. Hint lines name only Ringleader's own keys and leave out the editing keys every terminal user already knows, and the README stays short with no architecture. Convention wins over configuration: every setting except the agent list has a working default, repos are found by scanning home, a session's branch and tmux session follow from its name, the diff base is found without a setting, and the new session dialog starts on the repo Ringleader was launched in or the newest session's repo. A new setting needs a case the convention cannot serve.
+
 ## Ground rules
 
 - Keep functions small, each doing one thing at one level of abstraction, with callers above the functions they call. Avoid flag arguments and side effects a name does not announce, keep commands separate from queries, and state each piece of knowledge once. Talk to direct collaborators instead of reaching through chains of objects. Errors use `Result` with the operation that failed in their message, and absence uses `Option`.
@@ -241,6 +255,7 @@ viewer exits.
     │       ├── mod.rs
     │       ├── session_registry.rs   # SessionRegistry trait
     │       ├── workspace.rs          # Workspace trait
+    │       ├── diff_base.rs          # DiffBase, the recorded commit and configured base branch a session diff measures from
     │       ├── dirty_state.rs        # DirtyState, the uncommitted files and nested repos of a worktree
     │       ├── unmerged_commits.rs   # UnmergedCommits, commits on no other ref with the tip and HEAD
     │       ├── multiplexer.rs        # Multiplexer trait
@@ -280,7 +295,10 @@ viewer exits.
     │   ├── git_branches.rs       # GitBranches: compare-and-swap delete, rename, the managed-branch marker, and whether a branch has been pushed
     │   ├── branch_marker.rs      # BranchMarker, the git config entry that marks a branch Ringleader created, and the command that sets it by hand
     │   ├── branch_section.rs     # BranchSection, the git config section and upstream keys of one branch
-    │   ├── start_point_resolver.rs # StartPointResolver, the base branch ladder
+    │   ├── start_point_resolver.rs # StartPointResolver, the commit a new worktree starts from
+    │   ├── base_branch_ladder.rs # BaseBranchLadder, the origin default, main, and master refs tried when no base branch is set
+    │   ├── base_branch_refs.rs   # BaseBranchRefs, the local, remote-tracking, and origin refs a configured base branch is looked up by
+    │   ├── diff_base_resolver.rs # DiffBaseResolver, the merge base of a worktree's HEAD with its base branch, which its diff measures from
     │   ├── submodule_commits.rs  # SubmoduleCommits, the submodule walk of unmerged_commits
     │   ├── system_clock.rs       # SystemClock, reads `SystemTime`
     │   ├── system_host_probe.rs  # SystemHostProbe
@@ -305,8 +323,11 @@ viewer exits.
     │   ├── mod.rs
     │   ├── app.rs                  # App
     │   ├── action_gate.rs          # ActionGate, which actions the selected row allows
+    │   ├── back_key.rs             # BackKey, Ctrl-Q, which closes any dialog and never quits
+    │   ├── key_sequence.rs         # KeySequence, the g that waits for a second g to make gg
     │   ├── home_state.rs           # HomeState, the polled rows, selection, and preview
-    │   ├── session_list.rs         # SessionList, sorted rows and name-based selection
+    │   ├── session_list.rs         # SessionList, rows sorted by repo, state, and name, the selected session or heading, and the folded repos
+    │   ├── list_selection.rs       # ListSelection, the selected session or repo heading
     │   ├── preview_feed.rs         # PreviewFeed, the preview capture and its timer
     │   ├── diff_queue.rs           # DiffQueue, round-robin diffs of visible rows
     │   ├── pull_request_feed.rs    # PullRequestFeed, the pull requests of visible rows and their timer
@@ -319,10 +340,13 @@ viewer exits.
     │   ├── terminal_guard.rs       # TerminalGuard
     │   ├── home_view.rs            # HomeView
     │   ├── empty_state.rs          # EmptyState, the no-sessions message with the logo above it when it fits
-    │   ├── session_table.rs        # SessionTable, the home screen's session list
+    │   ├── session_table.rs        # SessionTable, the home screen's session list, drawn as a tree of repos
+    │   ├── session_tree.rs         # SessionTree, the sorted rows as repo headings and branch lines, and the scroll rule
+    │   ├── repo_heading.rs         # RepoHeading, a repo's heading line with its number, fold arrow, and state counts
+    │   ├── repo_group.rs           # RepoGroup, the repo a row is listed under, or other
     │   ├── colored_row.rs          # ColoredRow, a row's text split around its coloured cells
     │   ├── state_indicator.rs      # StateIndicator, the glyph and color of a session state
-    │   ├── table_columns.rs        # TableColumns, column widths and dropping
+    │   ├── table_columns.rs        # TableColumns, column widths and dropping, and RowCells, the cell texts of one row
     │   ├── preview_panel.rs        # PreviewPanel, the Full tier's preview
     │   ├── preview_text.rs         # PreviewText, the captured rows that fit the preview
     │   ├── help_view.rs            # HelpView
@@ -345,12 +369,16 @@ viewer exits.
     │       ├── chosen_repo.rs           # ChosenRepo, the default repo until the search picks another
     │       ├── repo_finder.rs           # RepoFinder, the fuzzy search over the repos under home
     │       ├── repo_filter.rs           # RepoFilter, ranks repo paths against a fuzzy query
+    │       ├── fuzzy_ranker.rs          # FuzzyRanker, ranks names or paths against a fuzzy query
+    │       ├── match_list.rs            # MatchList, the ranked matches of a fuzzy search and the cursor over them
     │       ├── repo_scan.rs             # RepoScan, one home search and its result
+    │       ├── search_query.rs          # SearchQuery, a finder's typed query shown after its prompt
     │       ├── typed_repo_check.rs      # TypedRepoCheck, the git check of a typed repo path
     │       ├── home_path.rs             # HomePath, a path shown from ~ when it is under home
     │       ├── agent_picker.rs          # AgentPicker, the n dialog's agent list
     │       ├── delete_session_dialog.rs # DeleteSessionDialog
-    │       └── rename_session_dialog.rs # RenameSessionDialog
+    │       ├── rename_session_dialog.rs # RenameSessionDialog
+    │       └── session_finder.rs        # SessionFinder, the / and Ctrl-K search over session names that attaches to the pick
     └── test_support/               # #[cfg(test)] doubles and fixtures shared by unit tests
         ├── mod.rs
         ├── tmux_test_server.rs      # TmuxTestServer: private socket, generated config, control-mode clients, kill-server on drop

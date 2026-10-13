@@ -9,6 +9,7 @@ use super::dialog_labels::DialogLabels;
 use super::home_path::HomePath;
 use super::new_session_dialog::NewSessionDialog;
 use super::rename_session_dialog::RenameSessionDialog;
+use super::session_finder::SessionFinder;
 use crate::application::{DeleteImpact, SessionService};
 use crate::domain::{Session, SessionSummary};
 use crate::ui::app::AppRequest;
@@ -21,11 +22,13 @@ pub enum Dialog {
     Delete(Box<DeleteSessionDialog>),
     Rename(Box<RenameSessionDialog>),
     Help(Box<HelpView>),
+    FindSession(Box<SessionFinder>),
 }
 
 impl Dialog {
     const WIDTH: u16 = 76;
     const HEIGHT: u16 = 22;
+    const HELP_HEIGHT: u16 = 25;
 
     pub fn open(opening: DialogOpening, service: &SessionService) -> Self {
         match opening {
@@ -51,6 +54,10 @@ impl Dialog {
         } else {
             dialog
         }))
+    }
+
+    pub fn find_session(names: Vec<String>) -> Self {
+        Self::FindSession(Box::new(SessionFinder::open(names)))
     }
 
     fn help(service: &SessionService) -> Self {
@@ -102,6 +109,13 @@ impl Dialog {
                 dialog.paste(text);
                 DialogStep::Stay
             }
+            (Self::FindSession(finder), Event::Key(key)) if key.kind != KeyEventKind::Release => {
+                finder.handle_key(key)
+            }
+            (Self::FindSession(finder), Event::Paste(text)) => {
+                finder.paste(text);
+                DialogStep::Stay
+            }
             _ => DialogStep::Stay,
         }
     }
@@ -110,12 +124,12 @@ impl Dialog {
         match self {
             Self::NewSession(dialog) => dialog.fail(error),
             Self::Rename(dialog) => dialog.fail(error),
-            Self::Delete(_) | Self::Help(_) => {}
+            Self::Delete(_) | Self::Help(_) | Self::FindSession(_) => {}
         }
     }
 
     pub fn render(&self, frame: &mut Frame, theme: &Theme) {
-        let (area, labels) = Self::placement(frame.area());
+        let (area, labels) = Self::placement(frame.area(), self.preferred_height());
         let block = Block::default().borders(Borders::ALL).title(self.title());
         let inner = block.inner(area);
         frame.render_widget(Clear, area);
@@ -130,6 +144,9 @@ impl Dialog {
                 Self::render_lines(frame, inner, dialog.lines(width, labels, theme))
             }
             Self::Help(help) => Self::render_lines(frame, inner, help.lines(width, height, theme)),
+            Self::FindSession(finder) => {
+                Self::render_lines(frame, inner, finder.lines(width, height, theme))
+            }
         }
     }
 
@@ -143,16 +160,26 @@ impl Dialog {
             Self::Delete(_) => DeleteSessionDialog::TITLE,
             Self::Rename(_) => RenameSessionDialog::TITLE,
             Self::Help(_) => HelpView::TITLE,
+            Self::FindSession(_) => SessionFinder::TITLE,
         }
     }
 
-    fn placement(frame: Rect) -> (Rect, DialogLabels) {
+    fn preferred_height(&self) -> u16 {
+        match self {
+            Self::Help(_) => Self::HELP_HEIGHT,
+            Self::NewSession(_) | Self::Delete(_) | Self::Rename(_) | Self::FindSession(_) => {
+                Self::HEIGHT
+            }
+        }
+    }
+
+    fn placement(frame: Rect, preferred_height: u16) -> (Rect, DialogLabels) {
         if LayoutTier::for_size(frame.width, frame.height) != LayoutTier::Full {
             let margin = Margin::new(1, 1);
             return (frame.inner(margin), DialogLabels::abbreviated());
         }
         let width = Self::WIDTH.min(frame.width);
-        let height = Self::HEIGHT.min(frame.height.saturating_sub(2));
+        let height = preferred_height.min(frame.height.saturating_sub(2));
         let x = frame.x + (frame.width - width) / 2;
         let y = frame.y + (frame.height - height) / 2;
         (Rect::new(x, y, width, height), DialogLabels::full())
@@ -171,6 +198,7 @@ pub enum DialogStep {
     Stay,
     Close,
     Request(AppRequest),
+    CloseWith(AppRequest),
 }
 
 #[cfg(test)]
@@ -184,9 +212,9 @@ mod tests {
     struct PlacementFixture;
 
     impl PlacementFixture {
-        fn render(width: u16, height: u16) -> Terminal<TestBackend> {
+        fn render(opening: DialogOpening, width: u16, height: u16) -> Terminal<TestBackend> {
             let service = ServiceFixture::new().service();
-            let dialog = Dialog::open(DialogOpening::NewSession, &service);
+            let dialog = Dialog::open(opening, &service);
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
             terminal.draw(|frame| dialog.render(frame, &Theme)).unwrap();
             terminal
@@ -201,7 +229,7 @@ mod tests {
 
     #[test]
     fn the_full_tier_centers_the_dialog() {
-        let terminal = PlacementFixture::render(100, 28);
+        let terminal = PlacementFixture::render(DialogOpening::NewSession, 100, 28);
 
         assert_eq!(PlacementFixture::symbol(&terminal, 12, 3), "┌");
         assert_eq!(PlacementFixture::symbol(&terminal, 13, 3), " ");
@@ -210,8 +238,19 @@ mod tests {
     }
 
     #[test]
+    fn the_help_stands_taller_than_the_other_dialogs() {
+        let help = PlacementFixture::render(DialogOpening::Help, 100, 28);
+        let new_session = PlacementFixture::render(DialogOpening::NewSession, 100, 28);
+
+        assert_eq!(PlacementFixture::symbol(&help, 12, 1), "┌");
+        assert_eq!(PlacementFixture::symbol(&help, 12, 25), "└");
+        assert_eq!(PlacementFixture::symbol(&new_session, 12, 3), "┌");
+        assert_eq!(PlacementFixture::symbol(&new_session, 12, 24), "└");
+    }
+
+    #[test]
     fn a_compact_tier_uses_the_frame_with_a_margin_and_abbreviated_labels() {
-        let terminal = PlacementFixture::render(60, 12);
+        let terminal = PlacementFixture::render(DialogOpening::NewSession, 60, 12);
 
         assert_eq!(PlacementFixture::symbol(&terminal, 1, 1), "┌");
         assert_eq!(PlacementFixture::symbol(&terminal, 2, 2), "N");

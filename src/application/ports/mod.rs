@@ -1,6 +1,7 @@
 pub mod agent_launch;
 pub mod clock;
 pub mod config_source;
+pub mod diff_base;
 pub mod dirty_state;
 pub mod host_probe;
 pub mod interrupts;
@@ -15,6 +16,7 @@ pub mod workspace;
 pub use agent_launch::AgentLaunch;
 pub use clock::Clock;
 pub use config_source::{ConfigError, ConfigSource};
+pub use diff_base::DiffBase;
 pub use dirty_state::DirtyState;
 pub use host_probe::{DirectoryAccess, HostProbe, HostProbeError, ProcessInfo};
 pub use interrupts::Interrupts;
