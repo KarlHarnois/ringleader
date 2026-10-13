@@ -180,11 +180,13 @@ its sites step 4 still reports as uncovered.
 
 An edit to production code during these steps restarts them from step 1. An
 edit to tests only reruns step 2, because `dryer` also scans
-`src/test_support/`, then step 4 without `--reuse-coverage` for each changed file
-the new tests cover, because they changed the coverage. A step 4 run that prints
-`Rust coverage will score 0%` reads every site as uncovered, usually because a
-test failed: fix the cause and rerun. Once the steps pass after any edit, run
-the Commands again, because none of these tools runs `cargo fmt` or `clippy`.
+`src/test_support/`, then step 4 for each changed file the new tests cover.
+Drop `--reuse-coverage` on the first of those runs only, because the new tests
+changed the coverage and that run rewrites it for the whole crate. A step 4 run
+that prints `Rust coverage will score 0%` reads every site as uncovered, usually
+because a test failed: fix the cause and rerun. Once the steps pass after any
+edit, run the Commands again, because none of these tools runs `cargo fmt` or
+`clippy`.
 
 ## Layout
 
