@@ -62,10 +62,19 @@ impl LiveProcess {
     }
 
     pub fn tmux_servers_on(socket: &Path) -> Vec<Self> {
-        let socket = socket.to_string_lossy();
-        Self::all()
+        Self::servers_among(Self::all(), &socket.to_string_lossy())
+    }
+
+    fn servers_among(processes: Vec<Self>, socket: &str) -> Vec<Self> {
+        let serving: Vec<Self> = processes
             .into_iter()
-            .filter(|process| process.serves(&socket))
+            .filter(|process| process.serves(socket))
+            .collect();
+        let serving_pids: Vec<u32> = serving.iter().map(Self::pid).collect();
+        let forked_from_a_server = |process: &Self| serving_pids.contains(&process.parent);
+        serving
+            .into_iter()
+            .filter(|process| !forked_from_a_server(process))
             .collect()
     }
 
@@ -179,6 +188,19 @@ mod tests {
             }
         }
 
+        fn forked_but_not_yet_exec(server: &LiveProcess) -> LiveProcess {
+            LiveProcess {
+                pid: Self::AGENT_PID,
+                parent: server.pid,
+                session: Self::AGENT_PID,
+                cwd: None,
+                executable: server.executable.clone(),
+                arguments: server.arguments.clone(),
+                name: server.name.clone(),
+                ..*server
+            }
+        }
+
         fn agent_under(server: &LiveProcess) -> LiveProcess {
             LiveProcess {
                 pid: Self::AGENT_PID,
@@ -229,6 +251,20 @@ mod tests {
             .collect();
 
         assert_eq!(servers, [server.server_pid().parse::<u32>().unwrap()]);
+    }
+
+    #[test]
+    fn a_pane_the_server_forked_but_has_not_exec_is_not_a_second_server() {
+        let server = ProcessFixture::server_owned_by(LiveProcess::current_user());
+        let pane = ProcessFixture::forked_but_not_yet_exec(&server);
+
+        let servers: Vec<u32> =
+            LiveProcess::servers_among(vec![server, pane], ProcessFixture::SOCKET)
+                .iter()
+                .map(LiveProcess::pid)
+                .collect();
+
+        assert_eq!(servers, [ProcessFixture::SERVER_PID]);
     }
 
     #[test]
