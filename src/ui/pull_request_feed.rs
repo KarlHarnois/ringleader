@@ -179,6 +179,23 @@ mod tests {
     }
 
     #[test]
+    fn a_pull_request_that_is_gone_leaves_the_cache() {
+        let fixture = FeedFixture::with_pull_request(142);
+        let service = fixture.service();
+        let mut feed = PullRequestFeed::default();
+        FeedFixture::settle(&mut feed, &fixture, &service);
+        let session = ServiceFixture::session(FeedFixture::NAME);
+
+        fixture
+            .pull_requests()
+            .remove_pull_request(Path::new(ServiceFixture::REPO), session.branch());
+        feed.refresh_soon();
+        FeedFixture::settle(&mut feed, &fixture, &service);
+
+        assert_eq!(feed.pull_requests().get(FeedFixture::NAME), None);
+    }
+
+    #[test]
     fn a_failing_lookup_keeps_the_previous_cache() {
         let fixture = FeedFixture::with_pull_request(142);
         let service = fixture.service();

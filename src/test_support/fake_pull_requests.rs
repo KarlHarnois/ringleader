@@ -32,6 +32,14 @@ impl FakePullRequests {
         self
     }
 
+    pub fn remove_pull_request(&self, repo: &Path, branch: &str) {
+        self.state
+            .lock()
+            .unwrap()
+            .pull_requests
+            .remove(&(repo.to_path_buf(), branch.to_string()));
+    }
+
     pub fn fail(&self) {
         self.state.lock().unwrap().failure = true;
     }
