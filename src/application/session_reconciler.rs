@@ -253,6 +253,7 @@ impl<'a> SessionReconciler<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::application::ServiceError;
     use crate::domain::{AgentPane, NamingScheme, Registration, SessionMetadata};
     use crate::test_support::{FakeMultiplexer, FakeSessionRegistry, ServiceFixture};
 
@@ -460,7 +461,7 @@ mod tests {
         for name in ["=work", "Bad_Name"] {
             let error = service.delete_impact(name).unwrap_err();
 
-            assert_eq!(error.exit_code(), 3, "{name}");
+            assert!(matches!(error, ServiceError::Conflict(_)), "{name}");
         }
         assert!(fixture.multiplexer().state_changing_calls().is_empty());
     }

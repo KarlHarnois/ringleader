@@ -44,7 +44,7 @@ Ringleader follows hexagonal architecture, also called ports and adapters. The c
 Dependencies point inward only. An inner layer never imports an outer one.
 
 - `domain` holds the entities, value types, and pure rules. It imports nothing else from the crate.
-- `application` holds the use cases and the ports, and imports only `domain`. It never shells out, never touches the filesystem directly, and never reads the system clock. Ports are traits in `application/ports/`, named after the role they play, such as `Workspace` and `Multiplexer`, with any error type in the same file.
+- `application` holds the use cases and the ports, and imports only `domain`. It never shells out, never touches the filesystem directly, and never reads the system clock. Its errors say what kind of failure happened, and `CliExit` in `cli` alone turns them into exit codes. Ports are traits in `application/ports/`, named after the role they play, such as `Workspace` and `Multiplexer`, with any error type in the same file.
 - `adapters` holds the driven adapters, which implement the ports with git, tmux, files, and `/proc`, and the process-level types `CompositionRoot` uses directly, such as `ProcessEnvironment`, `XdgPaths`, and `AgentLauncher`. They import `application` and `domain`, never `ui` or `cli`. Each port adapter is named after its technology and the port it implements, such as `GitWorkspace` and `TmuxMultiplexer`.
 - `ui` and `cli` are the driving adapters. They import `application` and `domain`, never `adapters` or each other. They reach the use cases only through the `SessionService` facade, which composes `SessionLifecycle`, `SessionMonitor`, `SessionAccess`, `RepoCatalog`, `PullRequestCatalog`, and `Doctor`, so `ui` and `cli` never call those directly. A port handed to a `ui` or `cli` type, like `Lock`, is called by that type.
 - `main.rs` is the composition root and the only production code that imports every layer. The Wiring section says what it builds.
@@ -158,6 +158,7 @@ viewer exits.
     ├── cli.rs              # Cli struct, clap definitions, dispatch
     ├── cli/
     │   ├── cli_output.rs         # CliOutput, writeln! output that stops at a broken pipe
+    │   ├── cli_exit.rs           # CliExit, the exit of one command and the exit code of each service and lock error
     │   ├── cli_session.rs        # CliSession, signal checks, worker waits, the startup input wait the CLI and TUI end with, and the exit of one command
     │   ├── session_commands.rs   # SessionCommands: list, new, delete, attach, rename, restart
     │   ├── list_report.rs        # ListReport, the list text and JSON
@@ -190,7 +191,7 @@ viewer exits.
     │   ├── session_service.rs    # SessionService, the facade the UI and CLI call
     │   ├── service_context.rs    # ServiceContext and LoadedConfig, what main injects into the facade
     │   ├── service_ports.rs      # ServicePorts with the StatePorts, RepoPorts, and TmuxPorts bundles
-    │   ├── service_error.rs      # ServiceError and its exit codes
+    │   ├── service_error.rs      # ServiceError, the kinds of failure the use cases report
     │   ├── session_lifecycle.rs  # SessionLifecycle: create, delete, rename, restart
     │   ├── busy_worktree.rs      # BusyWorktree, the tmux server processes that keep a stopped entry from restarting, with the advice for each case
     │   ├── session_creation.rs   # SessionCreation: create_session with its rollbacks

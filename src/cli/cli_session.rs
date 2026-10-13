@@ -1,4 +1,4 @@
-use super::CliOutput;
+use super::{CliExit, CliOutput};
 use crate::application::ports::{Interrupts, Lock};
 use crate::application::{Pending, ServiceError, SessionService};
 
@@ -49,7 +49,7 @@ impl CliSession {
             Ok(code) => code,
             Err(CommandStop::Failed(error)) => {
                 self.output.error(&error.to_string());
-                error.exit_code()
+                CliExit::error_code(&error)
             }
             Err(CommandStop::Interrupted(signal)) => {
                 return CliExit::Interrupted {
@@ -70,20 +70,6 @@ impl CliSession {
 
     fn is_signaled(&self) -> bool {
         self.signals.raised().is_some()
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CliExit {
-    Code(u8),
-    Interrupted { signal: i32, code: u8 },
-}
-
-impl CliExit {
-    pub fn code(&self) -> u8 {
-        match self {
-            CliExit::Code(code) | CliExit::Interrupted { code, .. } => *code,
-        }
     }
 }
 

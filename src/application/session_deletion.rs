@@ -333,7 +333,7 @@ mod tests {
 
         let error = DeleteFixture::unconfirmed(&mut fixture.service()).unwrap_err();
 
-        assert_eq!(error.exit_code(), 3);
+        assert!(matches!(error, ServiceError::GuardsChanged { .. }));
         assert!(
             error
                 .to_string()
@@ -433,7 +433,7 @@ mod tests {
             .delete_session("fix-auth", &DeleteConfirmation::confirmed(seen))
             .unwrap_err();
 
-        assert_eq!(error.exit_code(), 3);
+        assert!(matches!(error, ServiceError::GuardsChanged { .. }));
     }
 
     #[test]
@@ -646,7 +646,7 @@ mod tests {
 
         let error = fixture.service().delete_impact("fix-auth").unwrap_err();
 
-        assert_eq!(error.exit_code(), 3);
+        assert!(matches!(error, ServiceError::Conflict(_)));
     }
 
     #[test]
@@ -735,7 +735,7 @@ mod tests {
 
         let error = DeleteFixture::force(&mut fixture.service()).unwrap_err();
 
-        assert_eq!(error.exit_code(), 3);
+        assert!(matches!(error, ServiceError::Conflict(_)));
         assert!(fixture.multiplexer().state_changing_calls().is_empty());
     }
 
@@ -746,7 +746,7 @@ mod tests {
 
         let error = DeleteFixture::force(&mut fixture.service()).unwrap_err();
 
-        assert_eq!(error.exit_code(), 3);
+        assert!(matches!(error, ServiceError::Conflict(_)));
         assert!(
             error
                 .to_string()
@@ -762,7 +762,7 @@ mod tests {
 
         let error = DeleteFixture::force(&mut fixture.service()).unwrap_err();
 
-        assert_eq!(error.exit_code(), ServiceError::CONFLICT_EXIT);
+        assert!(matches!(error, ServiceError::Conflict(_)));
         assert!(
             error
                 .to_string()

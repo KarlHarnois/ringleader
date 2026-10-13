@@ -58,9 +58,6 @@ struct CompositionRoot {
 }
 
 impl CompositionRoot {
-    const FAILURE: u8 = 1;
-    const CONFLICT: u8 = 3;
-
     fn capture() -> Self {
         let snapshot = ProcessEnvironment::capture();
         let (programs, environment) = snapshot.split_program_paths();
@@ -343,21 +340,17 @@ impl CompositionRoot {
     }
 
     fn lock_failure(error: &LockError) -> ExitCode {
-        let code = match error {
-            LockError::Held { .. } => Self::CONFLICT,
-            LockError::Io { .. } => Self::FAILURE,
-        };
         let _ = writeln!(io::stderr(), "ringleader: {error}");
-        ExitCode::from(code)
+        ExitCode::from(CliExit::lock_error_code(error))
     }
 
     fn refuse(error: &ServiceError) -> ExitCode {
         let _ = writeln!(io::stderr(), "ringleader: {error}");
-        ExitCode::from(error.exit_code())
+        ExitCode::from(CliExit::error_code(error))
     }
 
     fn fail(message: &str) -> ExitCode {
         let _ = writeln!(io::stderr(), "ringleader: {message}");
-        ExitCode::from(Self::FAILURE)
+        ExitCode::from(CliExit::FAILURE)
     }
 }

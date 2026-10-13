@@ -565,7 +565,7 @@ mod tests {
             .rename_session("fix-auth", "fix-login")
             .unwrap_err();
 
-        assert_eq!(error.exit_code(), 3);
+        assert!(matches!(error, ServiceError::Conflict(_)));
         assert!(
             error
                 .to_string()
@@ -761,7 +761,7 @@ mod tests {
             .rename_session("fix-auth", "fix-login")
             .unwrap_err();
 
-        assert_eq!(error.exit_code(), 3);
+        assert!(matches!(error, ServiceError::Conflict(_)));
     }
 
     #[test]
@@ -797,7 +797,7 @@ mod tests {
             .rename_session("nope", "fix-login")
             .unwrap_err();
 
-        assert_eq!(error.exit_code(), 2);
+        assert!(matches!(error, ServiceError::NotFound(_)));
     }
 
     #[test]
@@ -812,7 +812,7 @@ mod tests {
             .rename_session("mystery", "known")
             .unwrap_err();
 
-        assert_eq!(error.exit_code(), 3);
+        assert!(matches!(error, ServiceError::Conflict(_)));
     }
 
     #[test]
@@ -826,7 +826,7 @@ mod tests {
             .rename_session("fix-auth", "fix-login")
             .unwrap_err();
 
-        assert_eq!(error.exit_code(), 3);
+        assert!(matches!(error, ServiceError::Conflict(_)));
         assert!(
             error
                 .to_string()

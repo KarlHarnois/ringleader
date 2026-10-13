@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use super::delete_report::DeleteReport;
 use super::list_report::ListReport;
 use super::repo_argument::RepoArgument;
-use super::{CliSession, CommandStop, DeleteArgs, ListArgs, NewArgs, RenameArgs};
+use super::{CliExit, CliSession, CommandStop, DeleteArgs, ListArgs, NewArgs, RenameArgs};
 use crate::application::{
     CreateRequest, DeleteConfirmation, DeleteImpact, ServiceError, SessionService,
 };
@@ -93,7 +93,7 @@ impl<'a> SessionCommands<'a> {
                 for line in report.refusal(&impact) {
                     self.session.output().note(&line);
                 }
-                Ok(ServiceError::CONFLICT_EXIT)
+                Ok(CliExit::CONFLICT)
             }
             Err(error) => Err(error.into()),
         }
