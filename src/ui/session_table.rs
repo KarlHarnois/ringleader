@@ -539,9 +539,9 @@ mod tests {
 
         let terminal = TableFixture::render(&rows, None, 0, 6);
 
-        assert!(TableFixture::line(&terminal, 1).starts_with("│  Name         Agent    Diff"));
-        assert!(TableFixture::line(&terminal, 2).starts_with("│● fix-auth     claude"));
-        assert!(TableFixture::line(&terminal, 3).starts_with("│● docs         opencode"));
+        assert!(TableFixture::line(&terminal, 1).starts_with("│  Name          Agent     Diff"));
+        assert!(TableFixture::line(&terminal, 2).starts_with("│● fix-auth      claude"));
+        assert!(TableFixture::line(&terminal, 3).starts_with("│● docs          opencode"));
     }
 
     #[test]
@@ -568,7 +568,7 @@ mod tests {
         let buffer = terminal.backend().buffer();
 
         assert!(!buffer[(3, 2)].modifier.contains(Modifier::DIM));
-        assert!(buffer[(16, 2)].modifier.contains(Modifier::DIM));
+        assert!(buffer[(17, 2)].modifier.contains(Modifier::DIM));
     }
 
     #[test]
