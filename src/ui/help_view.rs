@@ -38,7 +38,8 @@ impl HelpView {
     ];
     const RETURN_ACTION: &'static str = "detach from a session and return here";
     const FIRST_SPINNER_TICK: u64 = 0;
-    const CLOSING: &'static str = "↑ ↓ scroll · ? Esc q close";
+    const CLOSE_HINT: &'static str = "? Esc q close";
+    const SCROLL_HINT: &'static str = "↑ ↓ scroll · ";
 
     pub fn new(return_key: &ReturnKey, files: &[(&str, &Path)], home: HomePath) -> Self {
         let files = files
@@ -74,8 +75,20 @@ impl HelpView {
         self.max_scroll.set(content.len().saturating_sub(room));
         let shown = content.into_iter().skip(self.visible_scroll()).take(room);
         let mut lines: Vec<Line<'static>> = shown.collect();
-        lines.push(Line::styled(Self::CLOSING, theme.dim()));
+        lines.push(Line::styled(self.hint(), theme.dim()));
         lines
+    }
+
+    fn hint(&self) -> String {
+        if self.scrolls() {
+            format!("{}{}", Self::SCROLL_HINT, Self::CLOSE_HINT)
+        } else {
+            Self::CLOSE_HINT.to_string()
+        }
+    }
+
+    fn scrolls(&self) -> bool {
+        self.max_scroll.get() > 0
     }
 
     fn visible_scroll(&self) -> usize {
@@ -277,6 +290,26 @@ mod tests {
 
         assert!(screen.contains("Keys"));
         assert!(screen.contains("tmux config  ~/.local/state/ringleader/tmux.conf"));
+    }
+
+    #[test]
+    fn a_help_that_fits_offers_no_scroll_keys() {
+        let (width, height) = LayoutTier::smallest_full_size();
+
+        let screen = HelpFixture::screen(HelpFixture::help(), width, height);
+
+        assert!(screen.contains("? Esc q close"));
+        assert!(!screen.contains("scroll"));
+    }
+
+    #[test]
+    fn a_help_that_overflows_offers_the_scroll_keys() {
+        let page = HelpFixture::short_page(&HelpFixture::help());
+
+        assert_eq!(
+            page.last().unwrap().spans[0].content,
+            "↑ ↓ scroll · ? Esc q close"
+        );
     }
 
     #[test]
