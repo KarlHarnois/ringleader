@@ -5,7 +5,8 @@ use super::home_path::HomePath;
 use super::match_list::MatchList;
 use super::repo_filter::RepoFilter;
 use super::repo_scan::RepoScan;
-use super::text_field::{FieldKind, TextField};
+use super::search_query::SearchQuery;
+use super::text_field::FieldKind;
 use super::typed_repo_check::TypedRepoCheck;
 use crate::application::SessionService;
 use crate::domain::Repo;
@@ -13,7 +14,7 @@ use crate::ui::text_fit::TextFit;
 use crate::ui::theme::Theme;
 
 pub struct RepoFinder {
-    query: TextField,
+    query: SearchQuery,
     scan: RepoScan,
     filter: RepoFilter,
     matches: MatchList,
@@ -21,15 +22,13 @@ pub struct RepoFinder {
 }
 
 impl RepoFinder {
-    const LABEL: &'static str = "Find: ";
-    const CURSOR: char = '█';
     const SEARCHING: &'static str = "Searching ~ for repos…";
     const NO_MATCH: &'static str = "no repo matches, Enter picks the typed path";
     const HINTS: &'static str = "Type to search · ↑ ↓ ctrl-j ctrl-k choose · Enter pick · Esc back";
 
     pub fn open(service: &SessionService) -> Self {
         Self {
-            query: TextField::new(FieldKind::Path),
+            query: SearchQuery::new(FieldKind::Path),
             scan: RepoScan::start(service),
             filter: RepoFilter::new(HomePath::new(service.home_directory())),
             matches: MatchList::default(),
@@ -42,7 +41,7 @@ impl RepoFinder {
     }
 
     pub fn begin(&mut self, first_key: &KeyEvent) {
-        self.query = TextField::new(FieldKind::Path);
+        self.query = SearchQuery::new(FieldKind::Path);
         self.query.edit(first_key);
         self.query_changed();
     }
@@ -85,9 +84,7 @@ impl RepoFinder {
     }
 
     pub fn lines(&self, width: usize, room: usize, theme: &Theme) -> Vec<Line<'static>> {
-        let field_room = width.saturating_sub(Self::LABEL.len());
-        let shown_query = self.query.visible(field_room, Some(Self::CURSOR));
-        let mut lines = vec![Line::from(format!("{}{shown_query}", Self::LABEL))];
+        let mut lines = vec![self.query.line(width)];
         lines.extend(self.summary_lines(width, theme));
         let footer = self.footer(width, theme);
         let rows = room.saturating_sub(lines.len() + footer.len()).max(1);

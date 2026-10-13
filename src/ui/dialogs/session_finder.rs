@@ -4,13 +4,14 @@ use ratatui::text::Line;
 use super::dialog::DialogStep;
 use super::fuzzy_ranker::FuzzyRanker;
 use super::match_list::MatchList;
-use super::text_field::{FieldKind, TextField};
+use super::search_query::SearchQuery;
+use super::text_field::FieldKind;
 use crate::ui::app::AppRequest;
 use crate::ui::text_fit::TextFit;
 use crate::ui::theme::Theme;
 
 pub struct SessionFinder {
-    query: TextField,
+    query: SearchQuery,
     names: Vec<String>,
     ranker: FuzzyRanker,
     matches: MatchList,
@@ -18,14 +19,12 @@ pub struct SessionFinder {
 
 impl SessionFinder {
     pub const TITLE: &'static str = " Find session ";
-    const LABEL: &'static str = "Find: ";
-    const CURSOR: char = '█';
     const HINTS: &'static str =
         "Type to search · ↑ ↓ ctrl-j ctrl-k choose · Enter attach · Esc cancel";
 
     pub fn open(names: Vec<String>) -> Self {
         let mut finder = Self {
-            query: TextField::new(FieldKind::Name),
+            query: SearchQuery::new(FieldKind::Name),
             names,
             ranker: FuzzyRanker::for_names(),
             matches: MatchList::default(),
@@ -54,7 +53,7 @@ impl SessionFinder {
     pub fn lines(&self, width: usize, height: usize, theme: &Theme) -> Vec<Line<'static>> {
         let hints = TextFit::new(Self::HINTS).styled_lines(width, theme.dim());
         let mut lines = vec![
-            self.query_line(width),
+            self.query.line(width),
             Line::styled(self.count(), theme.dim()),
         ];
         let rows = height.saturating_sub(lines.len() + hints.len()).max(1);
@@ -82,12 +81,6 @@ impl SessionFinder {
     fn rank(&mut self) {
         let ranked = self.ranker.ranked(self.query.value(), &self.names);
         self.matches.replace(ranked);
-    }
-
-    fn query_line(&self, width: usize) -> Line<'static> {
-        let room = width.saturating_sub(Self::LABEL.len());
-        let shown_query = self.query.visible(room, Some(Self::CURSOR));
-        Line::from(format!("{}{shown_query}", Self::LABEL))
     }
 
     fn count(&self) -> String {
