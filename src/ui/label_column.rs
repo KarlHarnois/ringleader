@@ -55,12 +55,7 @@ mod tests {
             column
                 .lines(rows, &Theme)
                 .iter()
-                .map(|line| {
-                    line.spans
-                        .iter()
-                        .map(|span| span.content.as_ref())
-                        .collect::<String>()
-                })
+                .map(ToString::to_string)
                 .collect()
         }
     }
