@@ -49,7 +49,8 @@ impl<'a> DiffBaseResolver<'a> {
         if commits.is_empty() {
             return Ok(None);
         }
-        self.best_common_ancestor(worktree, &head, &commits)
+        let bases = self.best_common_ancestors(worktree, &head, &commits)?;
+        Ok(Self::preferred_base(bases, recorded))
     }
 
     fn head(&self, worktree: &Path) -> Result<Option<String>, WorkspaceError> {
@@ -103,17 +104,25 @@ impl<'a> DiffBaseResolver<'a> {
         Ok(commits.lines().into_iter().map(str::to_string).collect())
     }
 
-    fn best_common_ancestor(
+    fn best_common_ancestors(
         &self,
         worktree: &Path,
         head: &str,
         commits: &[String],
-    ) -> Result<Option<String>, WorkspaceError> {
+    ) -> Result<Vec<String>, WorkspaceError> {
         let find = GitInvocation::in_worktree(worktree, "merge-base")
             .diffing()
-            .arg(head)
+            .args(["--all", head])
             .args(commits);
-        self.git.resolved_from(&find)
+        let bases = self.git.lookup(&find)?;
+        Ok(bases
+            .map(|found| found.lines().into_iter().map(str::to_string).collect())
+            .unwrap_or_default())
+    }
+
+    fn preferred_base(bases: Vec<String>, recorded: &str) -> Option<String> {
+        let through_the_base_branch = bases.iter().find(|base| *base != recorded).cloned();
+        through_the_base_branch.or_else(|| bases.into_iter().next())
     }
 
     fn empty_tree(&self, worktree: &Path) -> Result<String, WorkspaceError> {
@@ -144,6 +153,8 @@ mod tests {
         const SESSION: &'static str = "fix-auth";
         const ORIGIN_DEFAULT: &'static str = "refs/remotes/origin/main";
         const ORIGIN_SHORT_NAME: &'static str = "origin/main";
+        const EARLIER: &'static str = "2080-01-01T00:00:00Z";
+        const LATER: &'static str = "2090-01-01T00:00:00Z";
 
         fn started() -> Self {
             Self::started_in(GitTestRepo::new())
@@ -157,6 +168,29 @@ mod tests {
                 worktree,
                 recorded,
             }
+        }
+
+        fn started_after_an_unpushed_commit_dated(date: &str) -> Self {
+            let repo = GitTestRepo::new();
+            Self::commit_dated(&repo, repo.path(), &["local.md"], date);
+            Self::started_in(repo)
+        }
+
+        fn commit_dated(
+            repo: &GitTestRepo,
+            directory: &Path,
+            files: &[&str],
+            date: &str,
+        ) -> String {
+            for file in files {
+                fs::write(directory.join(file), file).unwrap();
+                repo.git(directory, &["add", file]);
+            }
+            repo.shell(&format!(
+                "GIT_COMMITTER_DATE={date} git -C '{}' commit -q -m Dated",
+                directory.display()
+            ));
+            repo.git(directory, &["rev-parse", "HEAD"])
         }
 
         fn repo_on_new_branch(branch: &str) -> GitTestRepo {
@@ -225,6 +259,17 @@ mod tests {
             let commit = self.repo.commit(repo, file);
             self.repo.git(repo, &["checkout", "-q", "-"]);
             commit
+        }
+
+        fn merge_two_upstream_files_dated(&self, date: &str) {
+            let repo = self.repo.path();
+            self.repo
+                .git(repo, &["checkout", "-q", "--detach", "HEAD~1"]);
+            let upstream =
+                Self::commit_dated(&self.repo, repo, &["upstream-1.md", "upstream-2.md"], date);
+            self.repo.git(repo, &["checkout", "-q", "-"]);
+            self.point_origin_at(&upstream);
+            self.merge_into_session(Self::ORIGIN_SHORT_NAME);
         }
 
         fn merge_on_origin(&self, tip: &str) {
@@ -341,6 +386,26 @@ mod tests {
         fixture.commit_in_session("session.md");
 
         assert_eq!(fixture.diff().files(), 1);
+    }
+
+    #[test]
+    fn a_tie_with_a_newer_recorded_commit_measures_from_the_base_branch() {
+        let fixture =
+            DiffBaseFixture::started_after_an_unpushed_commit_dated(DiffBaseFixture::LATER);
+        fixture.commit_in_session("session.md");
+        fixture.merge_two_upstream_files_dated(DiffBaseFixture::EARLIER);
+
+        assert_eq!(fixture.diff().files(), 2);
+    }
+
+    #[test]
+    fn a_tie_with_an_older_recorded_commit_measures_from_the_base_branch() {
+        let fixture =
+            DiffBaseFixture::started_after_an_unpushed_commit_dated(DiffBaseFixture::EARLIER);
+        fixture.commit_in_session("session.md");
+        fixture.merge_two_upstream_files_dated(DiffBaseFixture::LATER);
+
+        assert_eq!(fixture.diff().files(), 2);
     }
 
     #[test]
