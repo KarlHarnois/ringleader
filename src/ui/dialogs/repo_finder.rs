@@ -1,10 +1,12 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::KeyEvent;
 use ratatui::text::Line;
 
 use super::home_path::HomePath;
+use super::match_list::MatchList;
 use super::repo_filter::RepoFilter;
 use super::repo_scan::RepoScan;
-use super::text_field::{FieldKind, TextField};
+use super::search_query::SearchQuery;
+use super::text_field::FieldKind;
 use super::typed_repo_check::TypedRepoCheck;
 use crate::application::SessionService;
 use crate::domain::Repo;
@@ -12,28 +14,25 @@ use crate::ui::text_fit::TextFit;
 use crate::ui::theme::Theme;
 
 pub struct RepoFinder {
-    query: TextField,
+    query: SearchQuery,
     scan: RepoScan,
     filter: RepoFilter,
-    matches: Vec<usize>,
-    cursor: usize,
+    matches: MatchList,
     check: Option<TypedRepoCheck>,
 }
 
 impl RepoFinder {
-    const LABEL: &'static str = "Find: ";
-    const CURSOR: char = '█';
+    const PROMPT: &'static str = "Find: ";
     const SEARCHING: &'static str = "Searching ~ for repos…";
     const NO_MATCH: &'static str = "no repo matches, Enter picks the typed path";
-    const HINTS: &'static str = "Type to search · ↑ ↓ ctrl-j ctrl-k choose · Enter pick · Esc back";
+    const HINTS: &'static str = "Type to search · ↑ ↓ Ctrl-J Ctrl-K choose · Enter pick · Esc back";
 
     pub fn open(service: &SessionService) -> Self {
         Self {
-            query: TextField::new(FieldKind::Path),
+            query: Self::empty_query(),
             scan: RepoScan::start(service),
             filter: RepoFilter::new(HomePath::new(service.home_directory())),
-            matches: Vec::new(),
-            cursor: 0,
+            matches: MatchList::default(),
             check: None,
         }
     }
@@ -43,7 +42,7 @@ impl RepoFinder {
     }
 
     pub fn begin(&mut self, first_key: &KeyEvent) {
-        self.query = TextField::new(FieldKind::Path);
+        self.query = Self::empty_query();
         self.query.edit(first_key);
         self.query_changed();
     }
@@ -61,8 +60,7 @@ impl RepoFinder {
     }
 
     pub fn handle_key(&mut self, key: &KeyEvent) -> bool {
-        if let Some(offset) = Self::cursor_offset(key) {
-            self.move_cursor(offset);
+        if self.matches.move_cursor(key) {
             return true;
         }
         let edited = self.query.edit(key);
@@ -79,7 +77,7 @@ impl RepoFinder {
     }
 
     pub fn pick(&mut self, service: &SessionService) -> Option<Repo> {
-        if let Some(&index) = self.matches.get(self.cursor) {
+        if let Some(index) = self.matches.selected() {
             return Some(self.scan.repos()[index].clone());
         }
         self.check = Some(TypedRepoCheck::start(service, self.typed_path()?));
@@ -87,9 +85,7 @@ impl RepoFinder {
     }
 
     pub fn lines(&self, width: usize, room: usize, theme: &Theme) -> Vec<Line<'static>> {
-        let field_room = width.saturating_sub(Self::LABEL.len());
-        let shown_query = self.query.visible(field_room, Some(Self::CURSOR));
-        let mut lines = vec![Line::from(format!("{}{shown_query}", Self::LABEL))];
+        let mut lines = vec![Line::from(self.query.shown(width))];
         lines.extend(self.summary_lines(width, theme));
         let footer = self.footer(width, theme);
         let rows = room.saturating_sub(lines.len() + footer.len()).max(1);
@@ -98,26 +94,14 @@ impl RepoFinder {
         lines
     }
 
+    fn empty_query() -> SearchQuery {
+        SearchQuery::new(FieldKind::Path, Self::PROMPT)
+    }
+
     fn typed_path(&self) -> Option<&str> {
         let query = self.query.value();
         let offers_typed_path = self.matches.is_empty() && !query.trim().is_empty();
         offers_typed_path.then_some(query)
-    }
-
-    fn cursor_offset(key: &KeyEvent) -> Option<isize> {
-        let control = key.modifiers.contains(KeyModifiers::CONTROL);
-        match key.code {
-            KeyCode::Up => Some(-1),
-            KeyCode::Down => Some(1),
-            KeyCode::Char('k' | 'p') if control => Some(-1),
-            KeyCode::Char('j' | 'n') if control => Some(1),
-            _ => None,
-        }
-    }
-
-    fn move_cursor(&mut self, offset: isize) {
-        let last = self.matches.len().saturating_sub(1);
-        self.cursor = self.cursor.saturating_add_signed(offset).min(last);
     }
 
     fn query_changed(&mut self) {
@@ -126,8 +110,7 @@ impl RepoFinder {
     }
 
     fn rank(&mut self) {
-        self.matches = self.filter.ranked(self.query.value());
-        self.cursor = 0;
+        self.matches.replace(self.filter.ranked(self.query.value()));
     }
 
     fn summary_lines(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
@@ -153,19 +136,9 @@ impl RepoFinder {
     }
 
     fn match_lines(&self, width: usize, rows: usize, theme: &Theme) -> Vec<Line<'static>> {
-        let first = (self.cursor + 1).saturating_sub(rows);
-        let visible = self.matches.iter().enumerate().skip(first).take(rows);
-        visible
-            .map(|(position, &index)| {
-                let path = TextFit::new(self.filter.shown_path(index)).left_truncated(width);
-                let style = if position == self.cursor {
-                    theme.selected()
-                } else {
-                    theme.base()
-                };
-                Line::styled(path, style)
-            })
-            .collect()
+        self.matches.lines(rows, theme, |index| {
+            TextFit::new(self.filter.shown_path(index)).left_truncated(width)
+        })
     }
 
     fn footer(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
@@ -184,6 +157,8 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::thread;
     use std::time::{Duration, Instant};
+
+    use crossterm::event::{KeyCode, KeyModifiers};
 
     use super::*;
     use crate::application::ports::ScanError;

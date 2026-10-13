@@ -24,7 +24,7 @@ pub struct HelpView {
 impl HelpView {
     pub const TITLE: &'static str = concat!(" Help · ringleader ", env!("CARGO_PKG_VERSION"), " ");
     const KEYS_HEADING: &'static str = "Keys";
-    const KEYS: [(&'static str, &'static str); 13] = [
+    const KEYS: [(&'static str, &'static str); 14] = [
         ("n", "create a session"),
         ("d", "delete the selected session"),
         ("R", "rename the selected session and its branch"),
@@ -33,6 +33,7 @@ impl HelpView {
             "attach to the selected session, or fold the selected repo",
         ),
         ("Space", "fold or unfold the selected repo"),
+        ("/ Ctrl-K", "find a session by name and attach to it"),
         ("t", "open a shell in the selected session's worktree"),
         ("s", "restart an exited or stopped session"),
         (
@@ -110,7 +111,6 @@ impl HelpView {
     fn content(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
         let mut content = self.keys(width, theme);
         content.extend(Self::legends(width, theme));
-        content.push(Line::default());
         content.extend(self.files(width, theme));
         content
     }
@@ -409,6 +409,13 @@ mod tests {
         let text = HelpFixture::text(&HelpFixture::help_for(&ReturnKey::parse("M-x").unwrap()));
 
         assert!(text.contains("Alt-x        detach from a session and return here"));
+    }
+
+    #[test]
+    fn the_help_lists_the_session_finder_keys() {
+        let text = HelpFixture::text(&HelpFixture::help());
+
+        assert!(text.contains("/ Ctrl-K     find a session by name and attach to it"));
     }
 
     #[test]

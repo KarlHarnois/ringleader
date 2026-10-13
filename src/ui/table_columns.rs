@@ -11,7 +11,8 @@ pub struct TableColumns {
 impl TableColumns {
     pub const MINIMUM_NAME_WIDTH: usize = 12;
     const INDICATOR_WIDTH: usize = 1;
-    const GAP: usize = 1;
+    const INDICATOR_GAP: &'static str = " ";
+    const COLUMN_GAP: &'static str = "  ";
     const NAME_TITLE: &'static str = "Name";
     const AGENT_TITLE: &'static str = "Agent";
     const PULL_REQUEST_TITLE: &'static str = "PR";
@@ -65,13 +66,14 @@ impl TableColumns {
             .with_agent(Self::AGENT_TITLE)
             .with_pull_request(Self::PULL_REQUEST_TITLE)
             .with_diff(Self::DIFF_TITLE);
-        format!(" {}", self.row(&titles))
+        format!("{}{}", " ".repeat(Self::INDICATOR_WIDTH), self.row(&titles))
     }
 
     pub fn row(&self, cells: &RowCells) -> String {
-        let mut text = format!(" {}", self.name_cell(&cells.name));
+        let mut text = format!("{}{}", Self::INDICATOR_GAP, self.name_cell(&cells.name));
         for (width, cell) in self.optional_cells(cells) {
-            text.push_str(&format!(" {}", Self::fit_text(cell, width)));
+            text.push_str(Self::COLUMN_GAP);
+            text.push_str(&Self::fit_text(cell, width));
         }
         let width = self.inner_width.saturating_sub(Self::INDICATOR_WIDTH);
         format!("{text:<width$}")
@@ -100,8 +102,9 @@ impl TableColumns {
         let optional = [self.agent, self.pull_request, self.diff]
             .into_iter()
             .flatten();
-        let optional_width: usize = optional.map(|width| width + Self::GAP).sum();
-        Self::INDICATOR_WIDTH + Self::GAP + self.name + optional_width
+        let column_gap = Self::COLUMN_GAP.chars().count();
+        let optional_width: usize = optional.map(|width| width + column_gap).sum();
+        Self::INDICATOR_WIDTH + Self::INDICATOR_GAP.chars().count() + self.name + optional_width
     }
 
     fn fit_text(text: &str, width: usize) -> String {
@@ -211,21 +214,21 @@ mod tests {
 
     #[test]
     fn a_wide_table_shows_name_pull_request_and_diff() {
-        let row = ColumnsFixture::row(31, ColumnsFixture::NAME);
+        let row = ColumnsFixture::row(33, ColumnsFixture::NAME);
 
-        assert_eq!(row, " fix-auth     #142 +124 -31 ?2");
+        assert_eq!(row, " fix-auth      #142  +124 -31 ?2");
     }
 
     #[test]
     fn a_tight_table_drops_the_pull_request_first() {
-        let row = ColumnsFixture::row(30, ColumnsFixture::NAME);
+        let row = ColumnsFixture::row(32, ColumnsFixture::NAME);
 
-        assert_eq!(row.trim_end(), " fix-auth     +124 -31 ?2");
+        assert_eq!(row.trim_end(), " fix-auth      +124 -31 ?2");
     }
 
     #[test]
     fn the_tightest_table_drops_the_diff_last() {
-        let row = ColumnsFixture::row(25, ColumnsFixture::NAME);
+        let row = ColumnsFixture::row(26, ColumnsFixture::NAME);
 
         assert_eq!(row.trim_end(), " fix-auth");
     }
@@ -246,39 +249,39 @@ mod tests {
 
     #[test]
     fn the_agent_follows_the_name() {
-        let row = ColumnsFixture::row_with_agent(38);
+        let row = ColumnsFixture::row_with_agent(41);
 
-        assert_eq!(row, " fix-auth     claude #142 +124 -31 ?2");
+        assert_eq!(row, " fix-auth      claude  #142  +124 -31 ?2");
     }
 
     #[test]
     fn a_tight_table_drops_the_agent_before_the_pull_request() {
-        let row = ColumnsFixture::row_with_agent(37);
+        let row = ColumnsFixture::row_with_agent(40);
 
-        assert_eq!(row.trim_end(), " fix-auth     #142 +124 -31 ?2");
+        assert_eq!(row.trim_end(), " fix-auth      #142  +124 -31 ?2");
     }
 
     #[test]
     fn a_header_with_an_agent_column_names_it() {
-        let columns = ColumnsFixture::fitted_with_agent(38);
+        let columns = ColumnsFixture::fitted_with_agent(41);
 
         assert_eq!(
             columns.header().trim_end(),
-            "  Name         Agent  PR   Diff"
+            "  Name          Agent   PR    Diff"
         );
     }
 
     #[test]
     fn the_header_names_each_shown_column() {
-        let columns = ColumnsFixture::fitted(30, ColumnsFixture::NAME);
+        let columns = ColumnsFixture::fitted(32, ColumnsFixture::NAME);
 
-        assert_eq!(columns.header().trim_end(), "  Name         Diff");
+        assert_eq!(columns.header().trim_end(), "  Name          Diff");
     }
 
     #[test]
     fn a_wide_header_names_the_pull_request_column() {
-        let columns = ColumnsFixture::fitted(31, ColumnsFixture::NAME);
+        let columns = ColumnsFixture::fitted(33, ColumnsFixture::NAME);
 
-        assert_eq!(columns.header().trim_end(), "  Name         PR   Diff");
+        assert_eq!(columns.header().trim_end(), "  Name          PR    Diff");
     }
 }

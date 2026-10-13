@@ -83,7 +83,6 @@ impl<'a> RepoHeading<'a> {
         let mut spans = vec![
             Span::styled(" ", theme.base()),
             Span::styled(format!("({})", self.rows.len()), theme.dim()),
-            Span::styled(" ", theme.base()),
         ];
         spans.extend(self.count_spans(tick, theme));
         spans
@@ -158,7 +157,7 @@ mod tests {
 
         let heading = RepoHeading::new(1, &rows);
 
-        assert_eq!(HeadingFixture::text(&heading), "1 ▾ alpha (4)  ⠋1 ●2 ○1");
+        assert_eq!(HeadingFixture::text(&heading), "1 ▾ alpha (4) ⠋1 ●2 ○1");
     }
 
     #[test]
@@ -168,7 +167,7 @@ mod tests {
 
         let heading = RepoHeading::new(1, &rows).folded_among(&folded);
 
-        assert_eq!(HeadingFixture::text(&heading), "1 ▸ alpha (1)  ●1");
+        assert_eq!(HeadingFixture::text(&heading), "1 ▸ alpha (1) ●1");
         assert!(heading.shown_rows().is_empty());
     }
 
@@ -184,7 +183,7 @@ mod tests {
 
         assert_eq!(
             HeadingFixture::text_within(&heading, 30),
-            "1 ▾ example-projec… (2)  ⠋1 ●1"
+            "1 ▾ example-project… (2) ⠋1 ●1"
         );
     }
 
@@ -194,6 +193,6 @@ mod tests {
 
         let heading = RepoHeading::new(10, &rows);
 
-        assert_eq!(HeadingFixture::text(&heading), "  ▾ alpha (1)  ●1");
+        assert_eq!(HeadingFixture::text(&heading), "  ▾ alpha (1) ●1");
     }
 }
