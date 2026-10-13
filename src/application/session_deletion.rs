@@ -7,11 +7,13 @@ use super::ports::{HostProbe, Multiplexer, ProcessInfo, SessionRegistry, Workspa
 use super::reconciliation::ManagedRow;
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
+use super::unseen_session::UnseenSession;
 use super::worktree_inspection::WorktreeInspection;
 use crate::domain::{Session, SessionState};
 
 pub struct SessionDeletion {
     guards: DeletionGuards,
+    unseen: UnseenSession,
     inspection: WorktreeInspection,
     workspace: Arc<dyn Workspace>,
     multiplexer: Arc<dyn Multiplexer>,
@@ -23,6 +25,7 @@ impl SessionDeletion {
     pub fn new(ports: &ServicePorts) -> Self {
         Self {
             guards: DeletionGuards::new(ports),
+            unseen: UnseenSession::new(ports),
             inspection: WorktreeInspection::new(ports),
             workspace: ports.repos().workspace(),
             multiplexer: ports.tmux().multiplexer(),
@@ -53,7 +56,8 @@ impl SessionDeletion {
         self.remove_worktree(session, &measurement)?;
         self.delete_branch(session, &measurement)?;
         self.registry.save(remaining)?;
-        Ok(DeleteOutcome::deleted(measurement))
+        let stray_session = self.unseen.on_recorded_server(row);
+        Ok(DeleteOutcome::deleted(measurement).with_stray_session(stray_session))
     }
 
     fn forget(
@@ -285,6 +289,34 @@ mod tests {
                 stderr: "error: failed to delete".to_string(),
             }
         }
+    }
+
+    #[test]
+    fn a_stopped_session_behind_a_lost_socket_refuses_the_delete() {
+        let fixture = DeleteFixture::stopped_fixture()
+            .with_multiplexer(FakeMultiplexer::new().with_lost_socket());
+
+        let error = DeleteFixture::force(&mut fixture.service()).unwrap_err();
+
+        assert_eq!(error.exit_code(), 3);
+        assert!(error.to_string().contains("press r in a running TUI"));
+        DeleteFixture::assert_everything_kept(&fixture);
+    }
+
+    #[test]
+    fn a_delete_whose_recorded_server_still_runs_names_the_kill_command() {
+        let recorded = Path::new(ServiceFixture::OTHER_RUNTIME_SOCKET);
+        let session = DeleteFixture::session().on_socket(recorded);
+        let fixture = DeleteFixture::stopped_fixture()
+            .with_registry(FakeSessionRegistry::with_sessions(vec![session.clone()]))
+            .with_host(ServiceFixture::host_for(&[&session]).with_tmux_server_on(recorded));
+
+        let outcome = DeleteFixture::force(&mut fixture.service()).unwrap();
+
+        assert!(outcome.summary("fix-auth").contains(&format!(
+            "tmux -S {} kill-session -t '=ringleader-fix-auth:'",
+            recorded.display()
+        )));
     }
 
     #[test]

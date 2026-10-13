@@ -195,6 +195,7 @@ viewer exits.
     │   ├── service_error.rs      # ServiceError and its exit codes
     │   ├── session_lifecycle.rs  # SessionLifecycle: create, delete, rename, restart
     │   ├── busy_worktree.rs      # BusyWorktree, the tmux server processes that keep a stopped entry from restarting, with the advice for each case
+    │   ├── unseen_session.rs     # UnseenSession, a tmux server Ringleader cannot see that may still hold a stopped entry's session, which rename refuses and delete refuses or warns about
     │   ├── session_creation.rs   # SessionCreation: create_session with its rollbacks
     │   ├── worktree_rollback.rs  # WorktreeRollback, removes the worktree and branch of a failed create
     │   ├── creation_plan.rs      # CreationPlan and CreateRequest

@@ -16,6 +16,7 @@ pub trait HostProbe: Send + Sync {
     fn directory_access(&self, path: &Path) -> Option<DirectoryAccess>;
     fn processes_in(&self, path: &Path, excluded_sessions: &[u32]) -> Vec<ProcessInfo>;
     fn processes_under_server(&self, path: &Path, socket: &Path) -> Vec<ProcessInfo>;
+    fn tmux_server_serves(&self, socket: &Path) -> bool;
     fn session_processes(&self, sessions: &[u32]) -> Vec<ProcessInfo>;
     fn terminate(&self, pids: &[u32]) -> Vec<ProcessInfo>;
 }

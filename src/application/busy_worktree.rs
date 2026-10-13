@@ -28,23 +28,39 @@ impl<'a> BusyWorktree<'a> {
         }
         let processes = self.processes_under(session, recorded)?;
         let server = format!("its tmux server at {}", recorded.display());
-        let advice = format!(
-            "End the session with tmux -S {} kill-session -t '={}:', or run Ringleader again in the environment that started that server, which had another XDG_RUNTIME_DIR.",
-            recorded.display(),
-            session.tmux_name()
-        );
         Some(format!(
-            "{} {advice} {}",
+            "{} {} {}",
             Self::still_running(session, &server),
+            Self::recorded_server_advice(session),
             Self::listed(&processes)
         ))
+    }
+
+    pub fn recorded_server_advice(session: &Session) -> String {
+        format!(
+            "End the session with tmux -S {} kill-session -t '={}:', or run Ringleader again in the environment that started that server, which had another XDG_RUNTIME_DIR.",
+            session.socket_path().display(),
+            session.tmux_name()
+        )
+    }
+
+    pub fn lost_socket_advice(socket: &Path) -> String {
+        let directory = socket.parent().unwrap_or(socket);
+        format!(
+            "the socket {} was removed under the running server, and its sessions come back with it. Run ringleader again, or press r in a running TUI, to recreate it. By hand, recreate {} with mode 0700 and send SIGUSR1 to the tmux server whose command line names that socket.",
+            socket.display(),
+            directory.display()
+        )
     }
 
     fn on_private_server(&self, session: &Session) -> Option<String> {
         let processes = self.processes_under(session, self.private_socket)?;
         let advice = match self.host.path_exists(self.private_socket) {
             true => "End them before a restart or rename.".to_string(),
-            false => self.lost_socket_advice(),
+            false => format!(
+                "Do not end them: {}",
+                Self::lost_socket_advice(self.private_socket)
+            ),
         };
         Some(format!(
             "{} {advice} {}",
@@ -58,15 +74,6 @@ impl<'a> BusyWorktree<'a> {
             .host
             .processes_under_server(session.worktree_path(), socket);
         (!processes.is_empty()).then_some(processes)
-    }
-
-    fn lost_socket_advice(&self) -> String {
-        let socket = self.private_socket.display();
-        let directory = self.private_socket.parent().unwrap_or(self.private_socket);
-        format!(
-            "Do not end them: the socket {socket} was removed under the running server, and its sessions come back with it. Run ringleader again, or press r in a running TUI, to recreate it. By hand, recreate {} with mode 0700 and send SIGUSR1 to the tmux server whose command line names that socket.",
-            directory.display()
-        )
     }
 
     fn still_running(session: &Session, server: &str) -> String {

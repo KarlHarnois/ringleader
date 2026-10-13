@@ -525,6 +525,22 @@ mod tests {
     }
 
     #[test]
+    fn a_stopped_session_whose_recorded_server_still_runs_is_recreated_here() {
+        let recorded = Path::new(ServiceFixture::OTHER_RUNTIME_SOCKET);
+        let session = RestartFixture::session().on_socket(recorded);
+        let fixture = RestartFixture::stopped()
+            .with_sessions(std::slice::from_ref(&session))
+            .with_host(ServiceFixture::host_for(&[&session]).with_tmux_server_on(recorded));
+
+        RestartFixture::restart(&fixture).unwrap();
+
+        assert_eq!(
+            fixture.registry().sessions()[0].socket_path(),
+            Path::new(FakeMultiplexer::SOCKET)
+        );
+    }
+
+    #[test]
     fn an_editor_open_in_a_stopped_worktree_does_not_block_restart() {
         let fixture = RestartFixture::stopped().with_host(ServiceFixture::with_worktree_process(
             &RestartFixture::session(),

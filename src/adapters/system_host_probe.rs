@@ -140,6 +140,10 @@ impl HostProbe for SystemHostProbe {
             .collect()
     }
 
+    fn tmux_server_serves(&self, socket: &Path) -> bool {
+        !LiveProcess::tmux_servers_on(socket).is_empty()
+    }
+
     fn session_processes(&self, sessions: &[u32]) -> Vec<ProcessInfo> {
         LiveProcess::all()
             .into_iter()
@@ -284,6 +288,16 @@ mod tests {
         probe.terminate(&orphan.iter().map(ProcessInfo::pid).collect::<Vec<_>>());
         assert_eq!(orphan.len(), 1);
         assert!(under.is_empty());
+    }
+
+    #[test]
+    fn a_running_server_serves_its_own_socket_and_no_other() {
+        let server = TmuxTestServer::with_session("probe");
+        let other_socket = server.directory().join("other.sock");
+        let probe = ProbeFixture::probe();
+
+        assert!(probe.tmux_server_serves(server.socket()));
+        assert!(!probe.tmux_server_serves(&other_socket));
     }
 
     #[test]

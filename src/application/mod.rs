@@ -37,6 +37,7 @@ pub mod session_restart;
 pub mod session_service;
 pub mod tool_version;
 pub mod typed_paths;
+pub mod unseen_session;
 pub mod use_checks;
 pub mod worktree_containment;
 pub mod worktree_inspection;

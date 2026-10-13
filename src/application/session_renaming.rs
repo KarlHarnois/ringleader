@@ -9,11 +9,13 @@ use super::reconciliation::{ManagedRow, Reconciliation};
 use super::rename_request::RenameRequest;
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
+use super::unseen_session::UnseenSession;
 use crate::domain::{Config, Session, SessionName};
 
 pub struct SessionRenaming {
     ownership: BranchOwnership,
     branches: BranchAvailability,
+    unseen: UnseenSession,
     workspace: Arc<dyn Workspace>,
     multiplexer: Arc<dyn Multiplexer>,
     host: Arc<dyn HostProbe>,
@@ -26,6 +28,7 @@ impl SessionRenaming {
         Self {
             ownership: BranchOwnership::new(ports),
             branches: BranchAvailability::new(ports),
+            unseen: UnseenSession::new(ports),
             workspace: ports.repos().workspace(),
             multiplexer: ports.tmux().multiplexer(),
             host: ports.repos().host(),
@@ -41,6 +44,7 @@ impl SessionRenaming {
         reconciliation: &Reconciliation,
         config: &Config,
     ) -> Result<Session, ServiceError> {
+        self.unseen.refuse_rename(row)?;
         let renamed = row.session().renamed(SessionName::new(request.new_name())?);
         let mut renaming = BranchRenaming::new(
             self.workspace.as_ref(),
@@ -288,6 +292,40 @@ mod tests {
                 .with_workspace(ServiceFixture::workspace_for(&[&session]))
                 .with_host(ServiceFixture::host_for(&[&session]))
         }
+    }
+
+    #[test]
+    fn a_stopped_session_behind_a_lost_socket_refuses_the_rename() {
+        let fixture = RenameFixture::stopped("fix-auth")
+            .with_multiplexer(FakeMultiplexer::new().with_lost_socket());
+
+        let error = fixture
+            .service()
+            .rename_session("fix-auth", "fix-login")
+            .unwrap_err();
+
+        assert_eq!(error.exit_code(), 3);
+        assert!(error.to_string().contains("press r in a running TUI"));
+        assert!(fixture.workspace().state_changing_calls().is_empty());
+    }
+
+    #[test]
+    fn a_stopped_session_whose_recorded_server_still_runs_refuses_the_rename() {
+        let recorded = Path::new(ServiceFixture::OTHER_RUNTIME_SOCKET);
+        let session = ServiceFixture::session("fix-auth").on_socket(recorded);
+        let fixture = RenameFixture::registered(session.clone())
+            .with_host(ServiceFixture::host_for(&[&session]).with_tmux_server_on(recorded));
+
+        let error = fixture
+            .service()
+            .rename_session("fix-auth", "fix-login")
+            .unwrap_err();
+
+        assert!(error.to_string().contains(&format!(
+            "tmux -S {} kill-session -t '=ringleader-fix-auth:'",
+            recorded.display()
+        )));
+        assert!(fixture.workspace().state_changing_calls().is_empty());
     }
 
     #[test]

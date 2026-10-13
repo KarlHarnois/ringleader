@@ -11,6 +11,7 @@ pub struct DeleteOutcome {
     impact: DeleteImpact,
     branch: BranchPresence,
     kept: Option<(PathBuf, String)>,
+    stray_session: Option<String>,
 }
 
 impl DeleteOutcome {
@@ -28,6 +29,14 @@ impl DeleteOutcome {
             branch,
             impact: measurement.into_impact(),
             kept: None,
+            stray_session: None,
+        }
+    }
+
+    pub fn with_stray_session(self, warning: Option<String>) -> Self {
+        Self {
+            stray_session: warning,
+            ..self
         }
     }
 
@@ -41,6 +50,7 @@ impl DeleteOutcome {
                 session.worktree_path().to_path_buf(),
                 session.branch().to_string(),
             )),
+            stray_session: None,
         }
     }
 
@@ -68,6 +78,14 @@ impl DeleteOutcome {
     }
 
     pub fn summary(&self, name: &str) -> String {
+        let summary = self.removal_summary(name);
+        match &self.stray_session {
+            Some(warning) => format!("{summary}; {warning}"),
+            None => summary,
+        }
+    }
+
+    fn removal_summary(&self, name: &str) -> String {
         if let Some((worktree, branch)) = self.kept() {
             return format!(
                 "forgot {name}, left the worktree {} and the branch {branch} on disk, run ringleader doctor",
