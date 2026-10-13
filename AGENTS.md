@@ -91,15 +91,18 @@ shell, points the Clojure CLI at the `uml-viewer` flake input. Inside
 
 ```sh
 clojure -Sdeps "$UML_VIEWER_DEPS" -M:ir .uml-viewer/ringleader.policy.edn
-env -u TMUX -u TMUX_PANE TMUX_TMPDIR="$(mktemp -d /tmp/uml.XXXXXX)" \
+viewer_tmux_dir=$(mktemp -d /tmp/uml.XXXXXX)
+env -u TMUX -u TMUX_PANE TMUX_TMPDIR="$viewer_tmux_dir" \
   clojure -Sdeps "$UML_VIEWER_DEPS" -M:run --restart .uml-viewer/ringleader.edn
+rm -rf "$viewer_tmux_dir"
 ```
 
 Always pass `--restart`. Without it the viewer starts `grok --yolo --trust` as its
 companion in a new session on the user's tmux server, and opens on a blank canvas
 until that companion answers. `--restart` skips the companion and loads the EDN
 at once. It still looks for a companion with `tmux has-session`, so the `env`
-prefix sends those lookups to an empty private server.
+prefix sends those lookups to an empty private directory, removed after the
+viewer exits.
 
 ## Layout
 
