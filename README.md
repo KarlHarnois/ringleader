@@ -23,13 +23,6 @@ nix run github:KarlHarnois/ringleader
 nix profile add github:KarlHarnois/ringleader
 ```
 
-As a flake input:
-
-```nix
-inputs.ringleader.url = "github:KarlHarnois/ringleader";
-# then use inputs.ringleader.packages.${system}.default
-```
-
 Nix older than 2.30 spells `nix profile add` as `nix profile install`.
 
 ## First run
