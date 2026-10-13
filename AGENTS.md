@@ -325,5 +325,5 @@ A command interrupted by a signal before its use case starts never runs it, and 
 
 ## Documentation
 
-- `README.md` stays terse and human-facing: what Ringleader is, install, first run, keys, the CLI synopsis, and the exit codes. No architecture and no agent instructions.
+- `README.md` stays terse and human-facing: what Ringleader is, install, first run, the CLI synopsis, and the exit codes. No architecture and no agent instructions.
 - The repository holds no `CLAUDE.md` or `CLAUDE.local.md`, because either would hide this file from Claude Code. If one is ever needed, its first line is `@AGENTS.md`.
