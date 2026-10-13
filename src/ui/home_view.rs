@@ -91,6 +91,11 @@ impl LayoutTier {
         Self::TooSmall
     }
 
+    #[cfg(test)]
+    pub fn smallest_full_size() -> (u16, u16) {
+        Self::FULL
+    }
+
     pub fn shows_preview(self) -> bool {
         self == Self::Full
     }
