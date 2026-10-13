@@ -31,10 +31,7 @@ impl BlockingOperation {
 
     pub fn run(self, service: &mut SessionService) -> OperationOutcome {
         match self {
-            Self::Restart(name) => match service.restart_session(&name) {
-                Ok(()) => OperationOutcome::done(format!("Restarted {name}."), Some(name)),
-                Err(error) => OperationOutcome::Failed(error),
-            },
+            Self::Restart(name) => Self::restart(service, name),
             Self::Create(request) => match service.create_session(&request) {
                 Ok(session) => OperationOutcome::done(
                     format!("Created {} on branch {}.", session.name(), session.branch()),
@@ -48,17 +45,33 @@ impl BlockingOperation {
                 old,
                 new,
                 keep_branch,
-            } => match service.rename_session(&old, &new, keep_branch) {
-                Ok(session) => OperationOutcome::done(
-                    format!(
-                        "Renamed {old} to {}, branch {}.",
-                        session.name(),
-                        session.branch()
-                    ),
-                    Some(session.name().to_string()),
-                ),
-                Err(error) => OperationOutcome::Failed(error),
-            },
+            } => Self::rename(service, &old, &new, keep_branch),
+        }
+    }
+
+    fn restart(service: &mut SessionService, name: String) -> OperationOutcome {
+        match service.restart_session(&name) {
+            Ok(()) => OperationOutcome::done(format!("Restarted {name}."), Some(name)),
+            Err(error) => OperationOutcome::Failed(error),
+        }
+    }
+
+    fn rename(
+        service: &mut SessionService,
+        old: &str,
+        new: &str,
+        keep_branch: bool,
+    ) -> OperationOutcome {
+        match service.rename_session(old, new, keep_branch) {
+            Ok(session) => {
+                let renamed = format!(
+                    "Renamed {old} to {}, branch {}.",
+                    session.name(),
+                    session.branch()
+                );
+                OperationOutcome::done(renamed, Some(session.name().to_string()))
+            }
+            Err(error) => OperationOutcome::Failed(error),
         }
     }
 

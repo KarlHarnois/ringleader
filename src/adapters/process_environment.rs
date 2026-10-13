@@ -50,6 +50,7 @@ impl ProcessEnvironment {
             .map(|(_, value)| value.as_os_str())
     }
 
+    #[cfg(test)]
     pub fn contains(&self, name: &str) -> bool {
         self.get(name).is_some()
     }

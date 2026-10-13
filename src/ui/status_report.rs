@@ -1,7 +1,6 @@
 use std::fmt::Display;
 
 use super::status_bar::StatusMessage;
-use crate::application::AttachOutcome;
 
 #[derive(Debug, Default)]
 pub struct StatusReport {
@@ -36,11 +35,5 @@ impl StatusReport {
             Ok(()) => StatusMessage::Info(success),
             Err(error) => StatusMessage::Error(error.to_string()),
         });
-    }
-
-    pub fn attached(&mut self, outcome: &AttachOutcome) {
-        self.message = outcome
-            .binding_warning()
-            .map(|warning| StatusMessage::Warning(warning.to_string()));
     }
 }

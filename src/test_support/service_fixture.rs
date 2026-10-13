@@ -3,12 +3,12 @@ use std::sync::Arc;
 
 use super::{
     FakeClock, FakeConfigSource, FakeHostProbe, FakeMultiplexer, FakeRepoScanner,
-    FakeReturnBinding, FakeSessionRegistry, FakeWorkspace,
+    FakeSessionRegistry, FakeWorkspace,
 };
 use crate::application::ports::{ConfigError, WorktreeEntry};
 use crate::application::{
-    CorruptRegistry, LoadedConfig, RepoPorts, ServiceContext, ServicePorts, SessionService,
-    StatePorts, TmuxPorts,
+    CorruptRegistry, DiagnosticPaths, LoadedConfig, RepoPorts, ServiceContext, ServicePorts,
+    SessionService, StatePorts, TmuxPorts,
 };
 use crate::domain::{
     Agent, AgentPane, Config, NamingScheme, Registration, Repo, RepoName, Session, SessionMetadata,
@@ -19,13 +19,13 @@ pub struct ServiceFixture {
     registry: Arc<FakeSessionRegistry>,
     workspace: Arc<FakeWorkspace>,
     multiplexer: Arc<FakeMultiplexer>,
-    binding: Arc<FakeReturnBinding>,
     config_source: Arc<FakeConfigSource>,
     scanner: Arc<FakeRepoScanner>,
     host: Arc<FakeHostProbe>,
     clock: Arc<FakeClock>,
     config_error: Option<ConfigError>,
-    inside_tmux: bool,
+    launch_directory: PathBuf,
+    diagnostics: DiagnosticPaths,
     shell: String,
     home: Option<PathBuf>,
 }
@@ -40,19 +40,22 @@ impl ServiceFixture {
     pub const TIP: &'static str = "feedfacefeedfacefeedfacefeedfacefeedface";
     pub const IDLE_SECONDS: u64 = 3;
     pub const SHELL: &'static str = "/bin/example-shell";
+    pub const WORKTREE_PROCESS: u32 = 4_000_042;
+    pub const STATE_DIRECTORY: &'static str = "/state/ringleader";
+    pub const TMUX_CONFIG: &'static str = "/state/ringleader/tmux.conf";
 
     pub fn new() -> Self {
         Self {
             registry: Arc::new(FakeSessionRegistry::empty()),
             workspace: Arc::new(FakeWorkspace::default()),
             multiplexer: Arc::new(FakeMultiplexer::new()),
-            binding: Arc::new(FakeReturnBinding::default()),
             config_source: Arc::new(FakeConfigSource::with_config(Self::config())),
             scanner: Arc::new(FakeRepoScanner::finding(vec![Self::repo()])),
             host: Arc::new(Self::host_for(&[])),
             clock: Arc::new(FakeClock::at(Self::NOW)),
             config_error: None,
-            inside_tmux: false,
+            launch_directory: PathBuf::from(Self::REPO),
+            diagnostics: Self::diagnostics(),
             shell: Self::SHELL.to_string(),
             home: Some(PathBuf::from(Self::HOME)),
         }
@@ -79,13 +82,6 @@ impl ServiceFixture {
     pub fn with_multiplexer(self, multiplexer: FakeMultiplexer) -> Self {
         Self {
             multiplexer: Arc::new(multiplexer),
-            ..self
-        }
-    }
-
-    pub fn with_binding(self, binding: FakeReturnBinding) -> Self {
-        Self {
-            binding: Arc::new(binding),
             ..self
         }
     }
@@ -126,9 +122,23 @@ impl ServiceFixture {
         Self { home: None, ..self }
     }
 
-    pub fn inside_tmux(self) -> Self {
+    pub fn with_diagnostics(self, diagnostics: DiagnosticPaths) -> Self {
         Self {
-            inside_tmux: true,
+            diagnostics,
+            ..self
+        }
+    }
+
+    pub fn diagnostics() -> DiagnosticPaths {
+        DiagnosticPaths::new("tmux", "git", Path::new(Self::STATE_DIRECTORY)).with_tmux_server(
+            Path::new(FakeMultiplexer::SOCKET),
+            Path::new(Self::TMUX_CONFIG),
+        )
+    }
+
+    pub fn launched_in(self, directory: &Path) -> Self {
+        Self {
+            launch_directory: directory.to_path_buf(),
             ..self
         }
     }
@@ -159,14 +169,6 @@ impl ServiceFixture {
 
     pub fn shared_multiplexer(&self) -> Arc<FakeMultiplexer> {
         Arc::clone(&self.multiplexer)
-    }
-
-    pub fn binding(&self) -> &FakeReturnBinding {
-        &self.binding
-    }
-
-    pub fn shared_binding(&self) -> Arc<FakeReturnBinding> {
-        Arc::clone(&self.binding)
     }
 
     pub fn config_source(&self) -> &FakeConfigSource {
@@ -238,6 +240,20 @@ impl ServiceFixture {
         Session::new(name, metadata, Registration::new(tmux, naming, created_at))
     }
 
+    pub fn with_worktree_agent(session: &Session) -> FakeHostProbe {
+        Self::with_worktree_process(session)
+            .serving(Self::WORKTREE_PROCESS, Path::new(FakeMultiplexer::SOCKET))
+    }
+
+    pub fn with_worktree_process(session: &Session) -> FakeHostProbe {
+        Self::host_for(&[session]).with_process(
+            Self::WORKTREE_PROCESS,
+            "claude",
+            session.worktree_path(),
+            Self::WORKTREE_PROCESS,
+        )
+    }
+
     pub fn waiting(session: &Session) -> SessionObservation {
         Self::observed(session, AgentPane::live(Self::NOW - 600))
     }
@@ -263,7 +279,8 @@ impl ServiceFixture {
         let host = FakeHostProbe::default()
             .with_command("claude")
             .with_directory(Path::new(Self::REPO))
-            .with_directory(Path::new(Self::DATA_DIR));
+            .with_directory(Path::new(Self::DATA_DIR))
+            .with_directory(Path::new(Self::STATE_DIRECTORY));
         for session in sessions {
             host.add_directory(session.worktree_path());
         }
@@ -305,7 +322,7 @@ impl ServiceFixture {
                 self.scanner.clone(),
                 self.host.clone(),
             ),
-            TmuxPorts::new(self.multiplexer.clone(), self.binding.clone()),
+            TmuxPorts::new(self.multiplexer.clone()),
         )
     }
 
@@ -315,8 +332,8 @@ impl ServiceFixture {
             Some(error) => LoadedConfig::failed(config, error.clone()),
             None => LoadedConfig::valid(config),
         };
-        ServiceContext::new(loaded, Path::new(Self::REPO))
-            .with_inside_tmux(self.inside_tmux)
+        ServiceContext::new(loaded, &self.launch_directory)
+            .with_diagnostics(self.diagnostics.clone())
             .with_home(self.home.as_deref())
             .with_shell(&self.shell)
     }

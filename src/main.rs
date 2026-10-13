@@ -21,28 +21,26 @@ use ratatui::backend::CrosstermBackend;
 use adapters::agent_handoff::AgentHandoff;
 use adapters::agent_launcher::{AgentLauncher, LauncherCommand, ProcessExec};
 use adapters::app_log::AppLog;
-use adapters::caller_process::CallerProcess;
 use adapters::directory_repo_scanner::DirectoryRepoScanner;
 use adapters::file_lock::FileLock;
 use adapters::git_runner::GitRunner;
 use adapters::json_session_registry::JsonSessionRegistry;
 use adapters::process_environment::{ProcessEnvironment, ProgramPaths};
+use adapters::server_files::ServerFiles;
 use adapters::signal_flags::SignalFlags;
 use adapters::system_clock::SystemClock;
 use adapters::system_host_probe::SystemHostProbe;
 use adapters::tmux_command::TmuxCommand;
 use adapters::tmux_multiplexer::TmuxMultiplexer;
-use adapters::tmux_return_binding::TmuxReturnBinding;
 use adapters::toml_config_source::TomlConfigSource;
 use adapters::xdg_paths::XdgPaths;
 use adapters::{BoundedCommand, Deadlines, GitWorkspace};
-use application::ports::{ConfigSource, Lock, LockError, ReturnBinding};
+use application::ports::{ConfigSource, Lock, LockError};
 use application::{
-    CorruptRegistry, DiagnosticPaths, LoadedConfig, RepoPorts, ServiceContext, ServicePorts,
-    SessionService, StatePorts, TmuxPorts,
+    CorruptRegistry, DiagnosticPaths, LoadedConfig, RepoPorts, ServiceContext, ServiceError,
+    ServicePorts, SessionService, StatePorts, TmuxPorts,
 };
 use cli::{Cli, CliExit, CliOutput, CliSession};
-use ui::app::{BindingGuard, ExitNotice};
 use ui::{App, CrosstermInput, CrosstermScreenMode, EventLoop, TerminalGuard};
 
 fn main() -> ExitCode {
@@ -53,6 +51,7 @@ struct CompositionRoot {
     environment: ProcessEnvironment,
     programs: ProgramPaths,
     paths: XdgPaths,
+    server: ServerFiles,
     launch_directory: PathBuf,
 }
 
@@ -63,12 +62,18 @@ impl CompositionRoot {
     fn capture() -> Self {
         let snapshot = ProcessEnvironment::capture();
         let (programs, environment) = snapshot.split_program_paths();
+        let paths = XdgPaths::from_environment(&environment);
         Self {
-            paths: XdgPaths::from_environment(&environment),
+            server: Self::server_files(&paths),
+            paths,
             launch_directory: std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")),
             environment,
             programs,
         }
+    }
+
+    fn server_files(paths: &XdgPaths) -> ServerFiles {
+        ServerFiles::new(&paths.tmux_socket(), &paths.tmux_config())
     }
 
     fn run(self) -> ExitCode {
@@ -78,6 +83,11 @@ impl CompositionRoot {
         };
         if let Some(handoff) = cli.exec_agent_handoff() {
             return self.exec_agent(handoff);
+        }
+        if let Some(problem) = self.diagnostics().socket_problem()
+            && !cli.is_doctor()
+        {
+            return Self::fail(&problem);
         }
         if cli.runs_tui() {
             return self.run_tui(&cli);
@@ -124,9 +134,7 @@ impl CompositionRoot {
             session.output().error(&warning);
         }
         let loaded = Self::load(&config_source);
-        let inside_tmux = self.tmux(&[]).is_inside_client(&CallerProcess::read());
-        let binding = self.return_binding(&loaded, inside_tmux);
-        let mut service = self.service(config_source, loaded, inside_tmux, binding);
+        let mut service = self.service(config_source, loaded);
         Self::exit_with(cli.execute(&mut service, &mut session, &mut lock))
     }
 
@@ -173,30 +181,36 @@ impl CompositionRoot {
             .error()
             .map(|error| format!("config error, running read-only: {error}"))
             .or(template_warning);
-        let inside_tmux = self.tmux(&[]).is_inside_client(&CallerProcess::read());
-        let binding = self.return_binding(&loaded, inside_tmux);
-        let mut service = self.service(config_source, loaded, inside_tmux, binding.clone());
+        let mut service = self.service(config_source, loaded);
+        let socket_message = service
+            .restore_server_socket()
+            .unwrap_or_else(|error| Some(error.to_string()));
+        let pane_warning = match service.refuse_own_pane() {
+            Ok(()) => None,
+            Err(error @ ServiceError::Conflict(_)) => return Self::refuse(&error),
+            Err(error) => Some(error.to_string()),
+        };
         let registry_warning = match service.load_registry(CorruptRegistry::MoveAside) {
             Ok(warning) => warning,
             Err(error) => return Self::fail(&error.to_string()),
         };
-        let notice = ExitNotice::new(Box::new(io::stderr()));
-        let binding_guard = BindingGuard::new(binding, notice.handle());
+        let config_warning = service.reapply_server_config().err().map(|error| {
+            format!("could not update the config of Ringleader's tmux server: {error}")
+        });
         let warnings: Vec<String> = [
             log.err(),
             registry_warning,
             startup_message,
-            binding_guard.repair_stale(),
+            socket_message,
+            pane_warning,
+            config_warning,
         ]
         .into_iter()
         .flatten()
         .collect();
         let app = App::new(service, Box::new(io::stdout()), Instant::now())
-            .with_binding_guard(binding_guard)
             .with_message((!warnings.is_empty()).then(|| warnings.join("; ")));
-        let outcome = Self::run_event_loop(app);
-        drop(notice);
-        match outcome {
+        match Self::run_event_loop(app) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => Self::fail(&error.to_string()),
         }
@@ -245,23 +259,7 @@ impl CompositionRoot {
         }
     }
 
-    fn return_binding(&self, loaded: &LoadedConfig, inside_tmux: bool) -> Arc<dyn ReturnBinding> {
-        let env_names = loaded.config().agent_env_union();
-        Arc::new(TmuxReturnBinding::new(
-            self.tmux(&env_names),
-            &self.paths.state_directory().join("bindings.json"),
-            inside_tmux,
-            loaded.config().naming().tmux_prefix(),
-        ))
-    }
-
-    fn service(
-        &self,
-        config_source: TomlConfigSource,
-        loaded: LoadedConfig,
-        inside_tmux: bool,
-        binding: Arc<dyn ReturnBinding>,
-    ) -> SessionService {
+    fn service(&self, config_source: TomlConfigSource, loaded: LoadedConfig) -> SessionService {
         let env_names = loaded.config().agent_env_union();
         let tmux = self.tmux(&env_names);
         let bounded = BoundedCommand::new(Deadlines::standard());
@@ -284,29 +282,30 @@ impl CompositionRoot {
             )),
             Arc::new(SystemHostProbe::new(&self.environment)),
         );
-        let tmux_ports = TmuxPorts::new(
-            Arc::new(TmuxMultiplexer::new(tmux, self.launcher(), inside_tmux)),
-            binding,
-        );
+        let tmux_ports = TmuxPorts::new(Arc::new(TmuxMultiplexer::new(tmux, self.launcher())));
         let context = ServiceContext::new(loaded, &self.launch_directory)
-            .with_inside_tmux(inside_tmux)
             .with_home(self.paths.home())
-            .with_diagnostics(DiagnosticPaths::new(
-                &self.programs.tmux().to_string_lossy(),
-                &self.programs.git().to_string_lossy(),
-                &self.paths.state_directory(),
-            ))
+            .with_diagnostics(self.diagnostics())
             .with_shell(&self.shell());
         SessionService::new(ServicePorts::new(state, repos, tmux_ports), context)
     }
 
-    fn tmux(&self, env_names: &[String]) -> TmuxCommand {
-        TmuxCommand::new(
-            self.programs.tmux(),
-            &self.environment,
-            BoundedCommand::new(Deadlines::standard()),
+    fn diagnostics(&self) -> DiagnosticPaths {
+        let paths = DiagnosticPaths::new(
+            &self.programs.tmux().to_string_lossy(),
+            &self.programs.git().to_string_lossy(),
+            &self.paths.state_directory(),
         )
-        .removing_env_names(env_names)
+        .with_tmux_server(self.server.socket(), self.server.config());
+        match self.paths.has_runtime_directory() {
+            true => paths,
+            false => paths.with_socket_in_state_directory(),
+        }
+    }
+
+    fn tmux(&self, env_names: &[String]) -> TmuxCommand {
+        TmuxCommand::new(self.programs.tmux(), &self.server, &self.environment)
+            .removing_env_names(env_names)
     }
 
     fn launcher(&self) -> LauncherCommand {
@@ -333,6 +332,11 @@ impl CompositionRoot {
         };
         let _ = writeln!(io::stderr(), "ringleader: {error}");
         ExitCode::from(code)
+    }
+
+    fn refuse(error: &ServiceError) -> ExitCode {
+        let _ = writeln!(io::stderr(), "ringleader: {error}");
+        ExitCode::from(error.exit_code())
     }
 
     fn fail(message: &str) -> ExitCode {

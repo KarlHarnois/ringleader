@@ -11,16 +11,15 @@ This file is the living reference for agents working in this repository.
 - When a type's role matches an established pattern, name it after that pattern instead of inventing a name. The sign to look for one is a first name that is a gerund, or that says how the type works rather than what role it plays. User-configured actions that run when an event happens are hooks, so the type that runs them is `AgentHooks` with `after_start` and `after_rename`, not `AgentTyping`. This codebase already names adapters, guards, plans, requests, fakes, and fixtures this way. When no pattern fits, name the type after its domain role. Never reshape a type to fit a pattern, and never give a type a pattern name for a role it does not play.
 - Build, test, and run every tool inside `nix develop`. The host `PATH` may carry other versions of `cargo`, `rustc`, and `tmux`, so never rely on what the host provides. `.envrc` loads the same dev shell through direnv with `use flake` once `direnv allow` has been run in the repository. The commands below keep `nix develop -c`, so they also work without direnv.
 - Stage each new file by path with `git add` before running any `nix` command, because `nix develop`, `nix build`, and `nix flake check` ignore files outside the git index.
-- Every ad-hoc tmux command, such as a binding experiment, runs as `env -u TMUX -u TMUX_PANE tmux -u -S <tempdir>/x.sock -f /dev/null ...` and ends with `kill-server` on that socket. `nix develop` passes `$TMUX` through, so a bare `tmux` command reaches the user's live server. Never touch the default server or the server named in `$TMUX`. Keep the socket path under 100 bytes, because tmux rejects a longer one with `File name too long`. Use a directory from `mktemp -d` under `/tmp`.
-- Every manual run of the `ringleader` binary, TUI or CLI, uses throwaway state, because production `TmuxCommand` passes no socket or config arguments and `main` resolves the real XDG paths.
-  - Create `<tempdir>` with `mktemp -d /tmp/rl.XXXXXX`, and inside it `tmux-<uid>` with mode 0700 (`<uid>` from `id -u`), `config/ringleader`, `state`, `data`, `run`, `repos`, and `home`.
-  - The prefix is `env -u TMUX -u TMUX_PANE -u RINGLEADER_CONFIG TMUX_TMPDIR=<tempdir> XDG_CONFIG_HOME=<tempdir>/config XDG_STATE_HOME=<tempdir>/state XDG_DATA_HOME=<tempdir>/data XDG_RUNTIME_DIR=<tempdir>/run HOME=<tempdir>/home SHELL=sh` followed by the hermetic git environment below. It sends Ringleader's tmux calls to the private server at `<tempdir>/tmux-<uid>/default`, and it keeps the owner's shell and git startup files out of the run.
-  - Every tmux command typed for that server uses the prefix and also passes that path with `-S`, because tmux silently uses the user's default server when `TMUX_TMPDIR` names a missing directory.
-  - Before the binary runs, start the server with the prefix and `tmux -u -S <tempdir>/tmux-<uid>/default -f /dev/null new-session -d -s holder sh`, so it never loads the user's tmux config or login shell.
+- Every ad-hoc tmux command, such as a binding experiment, runs as `env -u TMUX -u TMUX_PANE tmux -u -S <tempdir>/x.sock -f /dev/null ...` and ends with `kill-server` on that socket. `nix develop` passes `$TMUX` through, so a bare `tmux` command reaches the user's live server. Never touch the default server, the server named in `$TMUX`, or the owner's real Ringleader server at `$XDG_RUNTIME_DIR/ringleader/tmux/tmux.sock`. Keep the socket path under 100 bytes, because tmux rejects a longer one with `File name too long`. Use a directory from `mktemp -d` under `/tmp`.
+- Every manual run of the `ringleader` binary, TUI or CLI, uses throwaway state, because `main` resolves the real XDG paths, and the private tmux server's socket lives under `XDG_RUNTIME_DIR`.
+  - Create `<tempdir>` with `mktemp -d /tmp/rl.XXXXXX`, and inside it `config/ringleader`, `state`, `data`, `run`, `repos`, and `home`.
+  - The prefix is `env -u TMUX -u TMUX_PANE -u RINGLEADER_CONFIG XDG_CONFIG_HOME=<tempdir>/config XDG_STATE_HOME=<tempdir>/state XDG_DATA_HOME=<tempdir>/data XDG_RUNTIME_DIR=<tempdir>/run HOME=<tempdir>/home SHELL=sh` followed by the hermetic git environment below. The throwaway `XDG_RUNTIME_DIR` and `XDG_STATE_HOME` keep a run off the owner's real private server and state, and the rest keeps the owner's shell and git startup files out of the run.
+  - Every tmux command typed for Ringleader's server uses the prefix and passes `-S <tempdir>/run/ringleader/tmux/tmux.sock`.
   - Before the first run, write `<tempdir>/config/ringleader/config.toml` with one stand-in agent, `name = "stand-in"` and `command = "sh"`, never `claude` or `opencode`.
   - Build fixture repos under `<tempdir>/repos` with the hermetic git environment, and run the binary by absolute path with `<tempdir>/repos` as the working directory, so no real repository is in scope.
-  - An outside-tmux check runs the binary with the prefix in a pane of a second server started under the ad-hoc tmux rule, and drives it with `send-keys` on that server. An inside-tmux check runs it in a pane of the `holder` server with the prefix minus `-u TMUX -u TMUX_PANE`.
-  - End with `kill-server` on each socket by explicit `-S` path, then remove `<tempdir>`. Never run the binary against the user's tmux server, config, state, data, or repositories.
+  - Runs happen in a pane of an outer server started under the ad-hoc tmux rule, which stands in for the user's tmux and is driven with `send-keys` on that server. Three checks cover the contexts: the binary with the prefix in a plain pane, the binary in the same pane with the prefix minus `-u TMUX -u TMUX_PANE` so the client opens nested, and the binary in a `t` shell of a session, which must refuse with exit 3. Each ends by asserting that the outer server's `list-keys` output and session list are unchanged.
+  - End with `kill-server` on the outer server and on `<tempdir>/run/ringleader/tmux/tmux.sock` by explicit `-S` path, then remove `<tempdir>`. Never run the binary against the user's tmux server, config, state, data, or repositories.
 - The hermetic git environment is `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_NOSYSTEM=1`, `HOME=<tempdir>`, and fake `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME`, and `GIT_COMMITTER_EMAIL` values. Fixture repos are created with `git init -b <branch>`, never relying on `init.defaultBranch`.
 - The private GitHub repository exists and is configured as `origin`. Do not create another repository or add another remote. Push only when the project owner asks.
 - Keep the repository consumer-agnostic. Never reference or assume any specific downstream setup, local directory layout, or personal configuration. Examples and fixtures use generic names such as `example-project`.
@@ -83,7 +82,8 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── config.rs             # Config, the parsed config.toml
     │   ├── config_draft.rs       # ConfigDraft, the raw config values the Config constructor checks
     │   ├── config_checks.rs      # ConfigChecks, the checks every config load runs
-    │   └── naming_scheme.rs      # NamingScheme, the worktree root and tmux prefix a session records
+    │   ├── naming_scheme.rs      # NamingScheme, the worktree root and tmux prefix a session records
+    │   └── return_key.rs         # ReturnKey, the key that detaches from a session back to Ringleader
     ├── application/
     │   ├── mod.rs
     │   ├── session_service.rs    # SessionService, the facade the UI and CLI call
@@ -91,6 +91,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── service_ports.rs      # ServicePorts with the StatePorts, RepoPorts, and TmuxPorts bundles
     │   ├── service_error.rs      # ServiceError and its exit codes
     │   ├── session_lifecycle.rs  # SessionLifecycle: create, delete, rename, restart
+    │   ├── busy_worktree.rs      # BusyWorktree, the tmux server processes that keep a stopped entry from restarting, with the advice for each case
     │   ├── session_creation.rs   # SessionCreation: create_session with its rollbacks
     │   ├── worktree_rollback.rs  # WorktreeRollback, removes the worktree and branch of a failed create
     │   ├── creation_plan.rs      # CreationPlan and CreateRequest
@@ -107,10 +108,10 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── delete_impact.rs      # DeleteImpact and DeleteConfirmation
     │   ├── delete_outcome.rs     # DeleteOutcome
     │   ├── worktree_containment.rs # WorktreeContainment, shared by delete step 3 and reconciliation
-    │   ├── session_monitor.rs    # SessionMonitor: reconcile, observe, diffs, preview, bell
+    │   ├── session_monitor.rs    # SessionMonitor: reconcile, observe, diffs, preview
     │   ├── session_reconciler.rs # SessionReconciler, pairs registry entries with live tmux sessions
     │   ├── reconciliation.rs     # Reconciliation, the reconciled entries and rows
-    │   ├── session_access.rs     # SessionAccess: attach, open_shell, return binding
+    │   ├── session_access.rs     # SessionAccess: attach and open_shell, and the refusal from a pane of the private server
     │   ├── repo_catalog.rs       # RepoCatalog: discover, find, add, and remove repos
     │   ├── repo_merge.rs         # RepoMerge, joins configured and scanned repos, configured entries winning
     │   ├── home_repo_search.rs   # HomeRepoSearch, the repos under home the repo search offers
@@ -119,11 +120,12 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── repo_overrides.rs     # RepoOverrides: the add_repo and remove_repo workers
     │   ├── pending.rs            # Pending, a worker result the TUI polls and the CLI waits on
     │   ├── doctor.rs             # Doctor
-    │   ├── diagnostic_paths.rs   # DiagnosticPaths, the program and state paths doctor and help report
+    │   ├── diagnostic_paths.rs   # DiagnosticPaths, the program, state, and private tmux server paths doctor and help report
     │   ├── tool_version.rs       # ToolVersion, the major and minor numbers of a tmux or git version
     │   ├── doctor_report.rs      # DoctorReport, the doctor's info, warning, and problem lines
     │   ├── registry_audit.rs     # RegistryAudit, the doctor's checks of each registry entry
     │   ├── orphan_audit.rs       # OrphanAudit, the doctor's search for worktrees and marked branches no session claims
+    │   ├── server_audit.rs       # ServerAudit, the doctor's checks of Ringleader's tmux server and the return key
     │   └── ports/
     │       ├── mod.rs
     │       ├── session_registry.rs   # SessionRegistry trait
@@ -132,7 +134,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │       ├── dirty_state.rs        # DirtyState, the uncommitted files and nested repos of a worktree
     │       ├── unmerged_commits.rs   # UnmergedCommits, commits on no other ref with the tip and HEAD
     │       ├── multiplexer.rs        # Multiplexer trait
-    │       ├── return_binding.rs     # ReturnBinding trait
+    │       ├── agent_launch.rs       # AgentLaunch, the argv, environment, and worktree an agent starts with
     │       ├── config_source.rs      # ConfigSource trait
     │       ├── repo_scanner.rs       # RepoScanner trait
     │       ├── host_probe.rs         # HostProbe trait
@@ -144,7 +146,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── agent_handoff.rs      # AgentHandoff, the handoff file a launch writes and the launcher takes
     │   ├── app_log.rs            # AppLog, the append-mode app.log behind env_logger
     │   ├── process_environment.rs # ProcessEnvironment, the environment snapshot main captures once
-    │   ├── xdg_paths.rs          # XdgPaths, the config, state, data, and runtime directories
+    │   ├── xdg_paths.rs          # XdgPaths, the config, state, data, and runtime directories and the private tmux server's socket and config
     │   ├── directory_repo_scanner.rs # DirectoryRepoScanner
     │   ├── mount_table.rs        # MountTable, the network and FUSE mount points the scan skips
     │   ├── toml_config_source.rs # TomlConfigSource
@@ -164,22 +166,23 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │   ├── submodule_commits.rs  # SubmoduleCommits, the submodule walk of unmerged_commits
     │   ├── system_clock.rs       # SystemClock, reads `SystemTime`
     │   ├── system_host_probe.rs  # SystemHostProbe
-    │   ├── live_process.rs       # LiveProcess, one /proc entry
+    │   ├── live_process.rs       # LiveProcess, one /proc entry, whether it is the tmux server of a socket, and signals to it
+    │   ├── metadata_json.rs      # MetadataJson, the @ringleader_meta JSON each session carries
     │   ├── signal_flags.rs       # SignalFlags, the SIGHUP, SIGINT, SIGTERM, and SIGQUIT flags
     │   ├── durable_file.rs       # DurableFile, synced temp file renamed over the target
-    │   ├── tmux_command.rs       # TmuxCommand, socket and config args, `-u` and `-N`, child environment, labeled output, `#` and `;` escaping, CallerProcess
-    │   ├── caller_process.rs     # CallerProcess, the parent chain is_inside_client reads from /proc
+    │   ├── tmux_command.rs       # TmuxCommand, the private server's `-S` and `-f`, `-u` and `-N`, a child environment without `TMUX` and `TMUX_PANE`, the caller's identity
+    │   ├── server_files.rs       # ServerFiles, the private server's socket and generated config, and the 0700 socket directory
     │   ├── tmux_error.rs         # TmuxError
     │   ├── tmux_sequence.rs      # TmuxSequence, `;`-separated commands with `#` and `;` escaping
     │   ├── tmux_output.rs        # TmuxOutput, labeled lines and the zero-session errors
     │   ├── tmux_scripts.rs       # TmuxScripts, every tmux command sequence the multiplexer sends, exact targets, start directories
     │   ├── tmux_launch.rs        # TmuxLaunch, ringleader-created and ringleader-done handling, rollback, tag move
     │   ├── tmux_agent_input.rs   # TmuxAgentInput, waits for the agent's prompt and types lines into its pane
-    │   ├── tmux_listing.rs       # TmuxListing, parses list-panes, list-windows, and list-clients rows and @ringleader_meta
+    │   ├── tmux_listing.rs       # TmuxListing, parses list-panes, list-windows, list-keys, and server rows
     │   ├── tmux_multiplexer.rs   # TmuxMultiplexer
-    │   ├── tmux_return_binding.rs # TmuxReturnBinding, owns bindings.json
-    │   ├── binding_records.rs    # BindingRecords, the bindings.json records
-    │   └── key_binding.rs        # KeyBinding, parses and compares list-keys lines
+    │   ├── private_server.rs     # PrivateServer, the private server's config files, return binding check, state, config reapply, and lost socket recovery
+    │   ├── running_config.rs     # RunningConfig, the hash and return key a running server reports
+    │   └── tmux_server_config.rs # TmuxServerConfig, the generated config of the private tmux server, its hash, and the script that reapplies it
     ├── ui/
     │   ├── mod.rs
     │   ├── app.rs                  # App
@@ -227,13 +230,12 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
     │       └── rename_session_dialog.rs # RenameSessionDialog
     └── test_support/               # #[cfg(test)] doubles and fixtures shared by unit tests
         ├── mod.rs
-        ├── tmux_test_server.rs      # TmuxTestServer: private socket, control-mode clients, kill-server on drop
+        ├── tmux_test_server.rs      # TmuxTestServer: private socket, generated config, control-mode clients, kill-server on drop
         ├── git_test_repo.rs         # GitTestRepo: hermetic git environment and fixture repos
         ├── service_fixture.rs       # ServiceFixture: every fake wired into a SessionService
         ├── fake_session_registry.rs # FakeSessionRegistry
         ├── fake_workspace.rs        # FakeWorkspace
         ├── fake_multiplexer.rs      # FakeMultiplexer
-        ├── fake_return_binding.rs   # FakeReturnBinding
         ├── fake_config_source.rs    # FakeConfigSource
         ├── fake_repo_scanner.rs     # FakeRepoScanner
         ├── fake_host_probe.rs       # FakeHostProbe
@@ -250,8 +252,8 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
 - `domain` never imports `crossterm`, `ratatui`, `std::process`, or any adapter.
 - `application` defines traits and use cases, never shells out, never touches the filesystem directly, and never reads the system clock. Ports are traits in `application/ports/`, and adapters implement them.
 - `ui` calls the `SessionService` facade only. `SessionLifecycle`, `SessionMonitor`, `SessionAccess`, `RepoCatalog`, and `Doctor` are composed by the facade and are not called from `ui` or `cli.rs`.
-- One primary type per file, named after it in snake case. Supporting types owned by the primary type live in the same file. Unit tests live inline. `mod.rs` declares and re-exports only. The tree in this file is the file contract: every listed file exists and holds its one type, and primary types are never merged into one file. Source files target under 200 lines excluding tests, and the files under `src/test_support/` count as tests. When one outgrows that, extract its largest behavior-bearing type into its own file. A file may stay over the target when its primary type is the only behavior-bearing type left in it. The types the next rule places in `cli.rs` and `app.rs` stay there even when that keeps the file over the target. Never split one type's own behavior across new collaborators only to meet the target. A commit that adds a file under `src/` that the tree does not list, or moves, renames, or removes a listed file, updates the tree in this file in the same commit.
-- `cli.rs` owns the clap argument structs (`ListArgs`, `NewArgs`, and so on) as support types of `Cli`. They get no files of their own. The binding guard and the exit notice are support types of `App` in `app.rs`.
+- One primary type per file, named after it in snake case. Supporting types owned by the primary type live in the same file. Unit tests live inline. `mod.rs` declares and re-exports only. The tree in this file is the file contract: every listed file exists and holds its one type, and primary types are never merged into one file. Source files target under 200 lines excluding tests, and the files under `src/test_support/` count as tests. When one outgrows that, extract its largest behavior-bearing type into its own file. A file may stay over the target when its primary type is the only behavior-bearing type left in it. The types the next rule places in `cli.rs` stay there even when that keeps the file over the target. Never split one type's own behavior across new collaborators only to meet the target. A commit that adds a file under `src/` that the tree does not list, or moves, renames, or removes a listed file, updates the tree in this file in the same commit.
+- `cli.rs` owns the clap argument structs (`ListArgs`, `NewArgs`, and so on) as support types of `Cli`. They get no files of their own.
 - Prefer a separate file for a type that is used across modules, carries behavior or invariants, and changes for its own reasons. Merging files later is mechanical, and splitting a file that grew is disruptive. The reverse also holds: do not invent files for types that need none.
 - `src/test_support/` is `#[cfg(test)]` only and never appears in the binary. It holds the hand-written doubles and fixtures that tests across modules share.
 - Other support types, such as a parser result, a doctor finding, a session spec, or a dialog's in-progress state, live in their primary type's file and get no tree entry.
@@ -264,7 +266,7 @@ These are the commands `.github/workflows/ci.yml` runs. A change is done when al
 - `main.rs` holds `fn main` and `CompositionRoot`, whose methods build the adapters, the `SessionService`, and the TUI or the CLI run. Argument parsing and dispatch stay in `Cli`.
 - `ringleader` with no subcommand opens the TUI. Any subcommand runs the CLI and never starts the TUI. The hidden `__exec-agent` path loads no config, opens no log, and takes no lock.
 - The TUI takes the lifetime lock, and the mutating commands (`new`, `delete`, `rename`, `restart`, `repo add`, `repo remove`) take the write lock. `list`, `doctor`, `attach`, `repo list`, and `__exec-agent` take no lock.
-- Only the TUI installs the Ctrl-Q return binding. The CLI never touches tmux key bindings.
+- Key bindings come only from the generated config of the private tmux server, which `create_session` writes, and which the TUI at start and after `r`, `new`, and `restart` re-source on the running server when its `@ringleader_config` hash differs from the current render. Only lock holders do either, so only one process ever writes that config, and the reapply is skipped while the config failed to load. Every tmux call passes `-S <private socket>` and `-f`, so Ringleader never reads or writes the user's tmux server. An entry recorded on another socket is checked only through `/proc`. The TUI and the CLI attach through the same foreground child.
 - Blocking TUI operations (create, delete, rename, restart, and the delete measurement) run behind a busy message, and the event loop drops the key and paste events queued while they ran.
 - A dialog's hint line lists only keys whose meaning is Ringleader's own, such as `Enter create`, `Ctrl-S create`, and `Esc cancel`, and the keys that choose from a list, such as `↑ ↓ j k choose`. It never lists text-editing keys like cursor movement, Ctrl-U, or Ctrl-W, because every terminal user already expects them. A new editing key goes into `TextField` with its usual terminal meaning, not into a hint.
 - Logs go to `$XDG_STATE_HOME/ringleader/app.log` through `env_logger`, never to the terminal.
@@ -284,7 +286,7 @@ A command interrupted by a signal before its use case starts never runs it, and 
 - All tests are unit tests inside `src/`, in `#[cfg(test)] mod tests` or `src/test_support/`. `tests/fixtures/` holds fixtures only, with fake data, and there are no `tests/*.rs` integration tests.
 - Application tests run against the hand-written fakes in `src/test_support/`, wired by `ServiceFixture`. There is no mocking crate. One concept per test, public interfaces only.
 - Git adapter tests run real git in `tempfile` repos with the hermetic git environment set on each `Command`, never through `std::env::set_var`.
-- tmux tests never skip. Each starts its own server through `TmuxTestServer` on a private socket under `/tmp` with `-f /dev/null`, and builds its snapshot from the test process's own `PATH`. Tests that need a client hold a control-mode client.
+- tmux tests never skip. Each starts its own server through `TmuxTestServer` on a private socket under `/tmp` with the rendered generated config, or with a fixture config when the test is about the config itself, and builds its snapshot from the test process's own `PATH`. Tests that need a client hold a control-mode client, and they press keys through it with `send-keys -K -c <client>`, never with `send-keys -t <pane>`, which skips the key tables. The one exception types raw terminal bytes with `send-keys -t <pane> -H` into a pane of a second test server that holds a nested client, so the nested client's own parsing of those bytes is what gets tested.
 - UI tests render with `TestBackend` and drive `EventLoop` with scripted input, a recording screen mode, and a recording shell runner. No test calls crossterm or needs a terminal.
 - No test reads wall-clock time to classify a session, and tests read nothing from the process environment except their own `PATH`.
 - A constructor, accessor, or helper that only tests call carries `#[cfg(test)]`, so `cargo clippy --all-targets -- -D warnings` stays clean without any dead-code allowance.

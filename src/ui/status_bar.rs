@@ -4,6 +4,7 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
+use super::text_fit::TextFit;
 use super::theme::Theme;
 use crate::domain::{SessionState, SessionSummary};
 
@@ -14,6 +15,8 @@ pub struct StatusBar<'a> {
 }
 
 impl<'a> StatusBar<'a> {
+    const MARGIN: &'static str = " ";
+
     pub fn new(theme: Theme) -> Self {
         Self {
             message: None,
@@ -30,39 +33,54 @@ impl<'a> StatusBar<'a> {
         Self { note, ..self }
     }
 
+    pub fn rows(&self, width: u16) -> u16 {
+        let count = self
+            .text()
+            .map_or(1, |(text, _)| Self::wrapped(text, width).len());
+        u16::try_from(count).unwrap_or(u16::MAX)
+    }
+
     pub fn render(&self, frame: &mut Frame, area: Rect) {
-        let line = match (self.message, &self.note) {
-            (Some(message), _) => Line::from(Span::styled(
-                format!(" {}", message.text()),
-                message.style(&self.theme),
-            )),
-            (None, Some(note)) => {
-                Line::from(Span::styled(format!(" {note}"), self.theme.warning()))
-            }
-            (None, None) => Line::from(KeyHints::new(usize::from(area.width)).text()),
+        let lines: Vec<Line> = match self.text() {
+            Some((text, style)) => Self::wrapped(text, area.width)
+                .into_iter()
+                .map(|line| Line::from(Span::styled(format!("{}{line}", Self::MARGIN), style)))
+                .collect(),
+            None => vec![Line::from(KeyHints::new(usize::from(area.width)).text())],
         };
-        frame.render_widget(Paragraph::new(line), area);
+        frame.render_widget(Paragraph::new(lines), area);
+    }
+
+    fn text(&self) -> Option<(&str, Style)> {
+        match (self.message, &self.note) {
+            (Some(message), _) => Some((message.text(), message.style(&self.theme))),
+            (None, Some(note)) => Some((note.as_str(), self.theme.warning())),
+            (None, None) => None,
+        }
+    }
+
+    fn wrapped(text: &str, width: u16) -> Vec<String> {
+        let room = usize::from(width).saturating_sub(Self::MARGIN.len());
+        TextFit::new(text).wrapped(room)
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StatusMessage {
     Info(String),
-    Warning(String),
     Error(String),
 }
 
 impl StatusMessage {
     pub fn text(&self) -> &str {
         match self {
-            Self::Info(text) | Self::Warning(text) | Self::Error(text) => text,
+            Self::Info(text) | Self::Error(text) => text,
         }
     }
 
     fn style(&self, theme: &Theme) -> Style {
         match self {
             Self::Info(_) => theme.base(),
-            Self::Warning(_) => theme.warning(),
             Self::Error(_) => theme.error(),
         }
     }
@@ -122,12 +140,11 @@ impl KeyHints {
 
 pub struct StatusNote<'a> {
     row: &'a SessionSummary,
-    tmux_prefix: &'a str,
 }
 
 impl<'a> StatusNote<'a> {
-    pub fn new(row: &'a SessionSummary, tmux_prefix: &'a str) -> Self {
-        Self { row, tmux_prefix }
+    pub fn new(row: &'a SessionSummary) -> Self {
+        Self { row }
     }
 
     pub fn text(&self) -> Option<String> {
@@ -138,12 +155,6 @@ impl<'a> StatusNote<'a> {
             .and_then(|session| session.advice())
         {
             return Some(advice);
-        }
-        if !tmux_name.starts_with(self.tmux_prefix) {
-            return Some(format!(
-                "Ctrl-Q does not return from {tmux_name}, whose name lacks the current tmux_prefix {}.",
-                self.tmux_prefix
-            ));
         }
         if self.row.state() == SessionState::Unmanaged {
             return Some(format!(
@@ -162,14 +173,12 @@ mod tests {
     use ratatui::backend::TestBackend;
 
     use super::*;
-    use crate::domain::{PairMismatch, Session, TmuxAddress, UnmanagedSession};
+    use crate::domain::{PairMismatch, UnmanagedSession};
     use crate::test_support::{FakeMultiplexer, ServiceFixture};
 
     struct BarFixture;
 
     impl BarFixture {
-        const PREFIX: &'static str = "ringleader-";
-
         fn render(status: StatusBar, width: u16) -> String {
             let mut terminal = Terminal::new(TestBackend::new(width, 1)).unwrap();
             terminal
@@ -183,15 +192,24 @@ mod tests {
                 .to_string()
         }
 
-        fn note_for(row: &SessionSummary) -> String {
-            let note = StatusNote::new(row, Self::PREFIX).text();
-            Self::render(StatusBar::new(Theme).with_note(note), 200)
+        fn render_rows(status: StatusBar, width: u16, height: u16) -> Vec<String> {
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal
+                .draw(|frame| status.render(frame, frame.area()))
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            (0..height)
+                .map(|row| {
+                    (0..width)
+                        .map(|column| buffer[(column, row)].symbol())
+                        .collect::<String>()
+                })
+                .collect()
         }
 
-        fn renamed_prefix_session() -> Session {
-            let session = ServiceFixture::session("fix-auth");
-            let address = TmuxAddress::new("agents-fix-auth", session.socket_path());
-            session.rekeyed(session.name().clone(), session.metadata().clone(), address)
+        fn note_for(row: &SessionSummary) -> String {
+            let note = StatusNote::new(row).text();
+            Self::render(StatusBar::new(Theme).with_note(note), 300)
         }
     }
 
@@ -220,6 +238,28 @@ mod tests {
     }
 
     #[test]
+    fn a_long_message_wraps_onto_more_rows_and_a_short_one_takes_one() {
+        let long = StatusMessage::Error("word ".repeat(40));
+        let short = StatusMessage::Info("Reloaded the config.".to_string());
+
+        let long_rows = StatusBar::new(Theme).with_message(Some(&long)).rows(80);
+        let short_rows = StatusBar::new(Theme).with_message(Some(&short)).rows(80);
+        let hint_rows = StatusBar::new(Theme).rows(80);
+
+        assert_eq!((long_rows, short_rows, hint_rows), (3, 1, 1));
+    }
+
+    #[test]
+    fn every_wrapped_row_keeps_the_left_margin() {
+        let message = StatusMessage::Error("word ".repeat(40));
+        let status = StatusBar::new(Theme).with_message(Some(&message));
+
+        let rows = BarFixture::render_rows(status, 80, 3);
+
+        assert!(rows.iter().all(|row| row.starts_with(" word")), "{rows:?}");
+    }
+
+    #[test]
     fn a_message_replaces_the_key_hints() {
         let message = StatusMessage::Error("config error".to_string());
         let status = StatusBar::new(Theme)
@@ -227,20 +267,6 @@ mod tests {
             .with_note(Some("note".to_string()));
 
         assert_eq!(BarFixture::render(status, 60), " config error");
-    }
-
-    #[test]
-    fn a_selected_session_under_an_earlier_prefix_explains_that_ctrl_q_does_not_return() {
-        let row = SessionSummary::managed(
-            BarFixture::renamed_prefix_session(),
-            SessionState::Waiting,
-            false,
-        );
-
-        assert_eq!(
-            BarFixture::note_for(&row),
-            " Ctrl-Q does not return from agents-fix-auth, whose name lacks the current tmux_prefix ringleader-."
-        );
     }
 
     #[test]
@@ -276,13 +302,13 @@ mod tests {
     }
 
     #[test]
-    fn a_selected_managed_session_under_the_current_prefix_has_no_note() {
+    fn a_selected_managed_session_has_no_note() {
         let row = SessionSummary::managed(
             ServiceFixture::session("fix-auth"),
             SessionState::Waiting,
             false,
         );
 
-        assert_eq!(StatusNote::new(&row, BarFixture::PREFIX).text(), None);
+        assert_eq!(StatusNote::new(&row).text(), None);
     }
 }
