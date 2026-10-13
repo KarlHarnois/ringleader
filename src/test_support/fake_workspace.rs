@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use crate::application::ports::{
-    DiffBase, DirtyState, StartPoint, UnmergedCommits, Workspace, WorkspaceError, WorktreeEntry,
+    DiffBase, DirtyState, MergeOutcome, StartPoint, UnmergedCommits, UpstreamMerge, Workspace,
+    WorkspaceError, WorktreeEntry,
 };
 use crate::domain::{BaseBranch, DiffStat};
 
@@ -21,6 +22,7 @@ struct WorkspaceState {
     dirty: HashMap<PathBuf, DirtyState>,
     unmerged: HashMap<String, VecDeque<UnmergedCommits>>,
     diffs: HashMap<PathBuf, DiffStat>,
+    upstream_merge: Option<UpstreamMerge>,
     start_point: Option<Result<StartPoint, WorkspaceError>>,
     invalid_repos: HashSet<PathBuf>,
     failures: HashMap<&'static str, WorkspaceError>,
@@ -45,7 +47,7 @@ enum FailedCreateLeftover {
 }
 
 impl FakeWorkspace {
-    pub const STATE_CHANGING: [&'static str; 7] = [
+    pub const STATE_CHANGING: [&'static str; 8] = [
         "create_worktree",
         "remove_worktree",
         "unlock_worktree",
@@ -53,9 +55,11 @@ impl FakeWorkspace {
         "rename_branch",
         "drop_stale_upstream",
         "mark_branch_managed",
+        "merge_upstream",
     ];
     pub const DEFAULT_START: &'static str = "0123456789abcdef0123456789abcdef01234567";
     pub const NO_BASE_BRANCH: &'static str = "-";
+    pub const UPSTREAM: &'static str = "origin/main";
 
     pub fn with_branch(self, repo: &Path, branch: &str, tip: &str) -> Self {
         self.edit(|state| state.add_branch(repo, branch, tip));
@@ -107,6 +111,12 @@ impl FakeWorkspace {
 
     pub fn with_diff(self, worktree: &Path, diff: DiffStat) -> Self {
         self.edit(|state| state.diffs.insert(worktree.to_path_buf(), diff));
+        self
+    }
+
+    pub fn with_upstream_merge(self, outcome: MergeOutcome) -> Self {
+        let merge = UpstreamMerge::new(Self::UPSTREAM, outcome);
+        self.edit(|state| state.upstream_merge = Some(merge));
         self
     }
 
@@ -510,6 +520,21 @@ impl Workspace for FakeWorkspace {
             .map_or(Self::NO_BASE_BRANCH, BaseBranch::as_str);
         self.call("diff_stat", format!("{} {base_branch}", worktree.display()))?;
         Ok(self.edit(|state| state.diffs.get(worktree).copied().unwrap_or_default()))
+    }
+
+    fn merge_upstream(
+        &self,
+        worktree: &Path,
+        base_branch: Option<&BaseBranch>,
+    ) -> Result<UpstreamMerge, WorkspaceError> {
+        let base = base_branch.map_or(Self::NO_BASE_BRANCH, BaseBranch::as_str);
+        self.call("merge_upstream", format!("{} {base}", worktree.display()))?;
+        Ok(self.edit(|state| {
+            state
+                .upstream_merge
+                .clone()
+                .unwrap_or_else(|| UpstreamMerge::new(Self::UPSTREAM, MergeOutcome::Merged))
+        }))
     }
 
     fn validate_repo(&self, path: &Path) -> Result<PathBuf, WorkspaceError> {

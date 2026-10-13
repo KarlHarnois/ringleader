@@ -4,6 +4,8 @@ use std::fmt;
 pub struct BaseBranch(String);
 
 impl BaseBranch {
+    const ORIGIN_PREFIX: &'static str = "origin/";
+
     pub fn new(name: &str) -> Option<Self> {
         let is_blank = name.trim().is_empty();
         (!is_blank).then(|| Self(name.to_string()))
@@ -26,11 +28,15 @@ impl BaseBranch {
     }
 
     pub fn origin_suggestion(&self) -> String {
-        format!("origin/{}", self.0)
+        format!("{}{}", Self::ORIGIN_PREFIX, self.0)
     }
 
     pub fn origin_ref(&self) -> String {
         format!("refs/remotes/{}", self.origin_suggestion())
+    }
+
+    pub fn on_origin(&self) -> Option<Self> {
+        Self::new(self.0.strip_prefix(Self::ORIGIN_PREFIX).unwrap_or(&self.0))
     }
 }
 
@@ -85,5 +91,26 @@ mod tests {
         let base = BaseBranch::new("develop").unwrap();
 
         assert_eq!(base.origin_ref(), "refs/remotes/origin/develop");
+    }
+
+    #[test]
+    fn a_local_name_keeps_its_name_on_origin() {
+        let base = BaseBranch::new("develop").unwrap();
+
+        assert_eq!(base.on_origin(), BaseBranch::new("develop"));
+    }
+
+    #[test]
+    fn an_origin_tracking_name_drops_the_remote_on_origin() {
+        let base = BaseBranch::new("origin/main").unwrap();
+
+        assert_eq!(base.on_origin(), BaseBranch::new("main"));
+    }
+
+    #[test]
+    fn the_bare_origin_prefix_names_no_branch_on_origin() {
+        let base = BaseBranch::new("origin/").unwrap();
+
+        assert_eq!(base.on_origin(), None);
     }
 }

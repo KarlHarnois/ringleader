@@ -56,7 +56,7 @@ impl<'a> StartPointResolver<'a> {
         })
     }
 
-    fn existing_origin_default(&self, repo: &Path) -> Result<Option<String>, WorkspaceError> {
+    pub fn existing_origin_default(&self, repo: &Path) -> Result<Option<String>, WorkspaceError> {
         let origin_head = GitInvocation::in_repo(repo, "symbolic-ref")
             .args(["-q", BaseBranchLadder::ORIGIN_HEAD]);
         let Some(origin_default) = self.git.resolved_from(&origin_head)? else {

@@ -65,8 +65,12 @@ impl HomeState {
 
     pub fn refresh_now(&mut self) {
         self.tmux_paused_until = None;
-        self.diffs.refresh_soon();
+        self.refresh_diffs_soon();
         self.pull_requests.refresh_soon();
+    }
+
+    pub fn refresh_diffs_soon(&mut self) {
+        self.diffs.refresh_soon();
     }
 
     pub fn pause_after(&mut self, error: &ServiceError) {

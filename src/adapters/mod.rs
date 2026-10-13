@@ -45,6 +45,7 @@ pub mod tmux_scripts;
 pub mod tmux_sequence;
 pub mod tmux_server_config;
 pub mod toml_config_source;
+pub mod upstream_merger;
 pub mod xdg_paths;
 
 pub use bounded_command::{BoundedCommand, Deadlines};

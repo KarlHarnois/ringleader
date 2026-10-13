@@ -52,6 +52,7 @@ impl<'a> ActionGate<'a> {
             KeyCode::Char('t') => KeyAction::from(self.shell().map(KeyAction::Request)),
             KeyCode::Char('s') => KeyAction::from(self.restart().map(KeyAction::Request)),
             KeyCode::Char('d') => KeyAction::from(self.delete().map(KeyAction::Request)),
+            KeyCode::Char('m') => KeyAction::from(self.merge().map(KeyAction::Request)),
             KeyCode::Char('R') => KeyAction::from(
                 self.rename()
                     .map(|session| KeyAction::Open(DialogOpening::Rename(Box::new(session)))),
@@ -118,6 +119,24 @@ impl<'a> ActionGate<'a> {
             }
             state => Err(format!(
                 "{name} is {}, so it cannot be restarted.",
+                state.label()
+            )),
+        }
+    }
+
+    pub fn merge(&self) -> Result<AppRequest, String> {
+        self.writable()?;
+        let row = self.selected()?;
+        let name = row.name();
+        match row.state() {
+            SessionState::Waiting => Ok(AppRequest::Block(BlockingOperation::Merge(
+                name.to_string(),
+            ))),
+            SessionState::Unmanaged => {
+                Err(format!("{name} is unmanaged, so m cannot merge into it."))
+            }
+            state => Err(format!(
+                "{name} is {}, m only merges into a session waiting at its prompt.",
                 state.label()
             )),
         }
@@ -253,6 +272,63 @@ mod tests {
             ActionGate::new(Some(&row), Some(&error)).shell(),
             Ok(AppRequest::Shell("fix-auth".to_string()))
         );
+    }
+
+    #[test]
+    fn a_waiting_session_merges() {
+        let row = GateFixture::row(SessionState::Waiting);
+
+        assert_eq!(
+            ActionGate::new(Some(&row), None).merge(),
+            Ok(AppRequest::Block(BlockingOperation::Merge(
+                "fix-auth".to_string()
+            )))
+        );
+    }
+
+    #[test]
+    fn a_session_away_from_its_prompt_cannot_merge() {
+        for state in [
+            SessionState::Working,
+            SessionState::Exited,
+            SessionState::Stopped,
+        ] {
+            let row = GateFixture::row(state);
+
+            assert_eq!(
+                ActionGate::new(Some(&row), None).merge(),
+                Err(format!(
+                    "fix-auth is {}, m only merges into a session waiting at its prompt.",
+                    state.label()
+                ))
+            );
+        }
+    }
+
+    #[test]
+    fn an_unmanaged_session_cannot_merge() {
+        let stranger = ServiceFixture::session("mystery");
+        let row = SessionSummary::unmanaged(UnmanagedSession::new(
+            "mystery",
+            ServiceFixture::waiting(&stranger).without_metadata(),
+        ));
+
+        assert_eq!(
+            ActionGate::new(Some(&row), None).merge(),
+            Err("mystery is unmanaged, so m cannot merge into it.".to_string())
+        );
+    }
+
+    #[test]
+    fn a_read_only_tui_refuses_a_merge_with_the_config_error() {
+        let row = GateFixture::row(SessionState::Waiting);
+        let error = GateFixture::config_error();
+
+        let refusal = ActionGate::new(Some(&row), Some(&error))
+            .merge()
+            .unwrap_err();
+
+        assert!(refusal.starts_with("config error, running read-only: "));
     }
 
     #[test]

@@ -26,6 +26,23 @@ impl BaseBranchLadder {
         self.origin_rung().into_iter().chain(conventional).collect()
     }
 
+    pub fn origin_candidates(&self) -> Vec<String> {
+        let conventional = Self::CONVENTIONAL_DEFAULT_BRANCHES
+            .into_iter()
+            .filter_map(Self::origin_counterpart);
+        self.origin_default
+            .clone()
+            .into_iter()
+            .chain(conventional)
+            .collect()
+    }
+
+    pub fn origin_branch(origin_ref: &str) -> Option<BaseBranch> {
+        origin_ref
+            .strip_prefix(Self::ORIGIN_BRANCH_PREFIX)
+            .and_then(BaseBranch::new)
+    }
+
     pub fn first_rung(&self, existing_branches: &[&str]) -> Vec<String> {
         match self.origin_default {
             Some(_) => self.origin_rung(),
@@ -66,10 +83,7 @@ impl BaseBranchLadder {
     }
 
     fn local_counterpart(origin_ref: &str) -> Option<String> {
-        origin_ref
-            .strip_prefix(Self::ORIGIN_BRANCH_PREFIX)
-            .and_then(BaseBranch::new)
-            .map(|branch| branch.local_ref())
+        Self::origin_branch(origin_ref).map(|branch| branch.local_ref())
     }
 }
 
@@ -120,6 +134,32 @@ mod tests {
             ladder.first_rung(&["refs/heads/master"]),
             ["refs/heads/master", "refs/remotes/origin/master"]
         );
+    }
+
+    #[test]
+    fn the_origin_candidates_lead_with_the_origin_default() {
+        let ladder = BaseBranchLadder::new(Some("refs/remotes/origin/trunk".to_string()));
+
+        assert_eq!(
+            ladder.origin_candidates(),
+            [
+                "refs/remotes/origin/trunk",
+                "refs/remotes/origin/main",
+                "refs/remotes/origin/master"
+            ]
+        );
+    }
+
+    #[test]
+    fn an_origin_ref_names_its_branch_on_origin() {
+        let branch = BaseBranchLadder::origin_branch("refs/remotes/origin/trunk");
+
+        assert_eq!(branch, BaseBranch::new("trunk"));
+    }
+
+    #[test]
+    fn a_local_ref_names_no_branch_on_origin() {
+        assert_eq!(BaseBranchLadder::origin_branch("refs/heads/trunk"), None);
     }
 
     #[test]

@@ -5,6 +5,7 @@ use thiserror::Error;
 use super::diff_base::DiffBase;
 use super::dirty_state::DirtyState;
 use super::unmerged_commits::UnmergedCommits;
+use super::upstream_merge::UpstreamMerge;
 use crate::domain::{BaseBranch, DiffStat};
 
 pub trait Workspace: Send + Sync {
@@ -55,6 +56,11 @@ pub trait Workspace: Send + Sync {
         worktree: &Path,
     ) -> Result<UnmergedCommits, WorkspaceError>;
     fn diff_stat(&self, worktree: &Path, base: &DiffBase) -> Result<DiffStat, WorkspaceError>;
+    fn merge_upstream(
+        &self,
+        worktree: &Path,
+        base_branch: Option<&BaseBranch>,
+    ) -> Result<UpstreamMerge, WorkspaceError>;
     fn validate_repo(&self, path: &Path) -> Result<PathBuf, WorkspaceError>;
     fn version(&self) -> Result<String, WorkspaceError>;
 }
@@ -175,6 +181,10 @@ pub enum WorkspaceError {
     Submodule { path: PathBuf },
     #[error("{repo} has no origin/HEAD, main, or master branch, set base_branch for it")]
     NoBaseBranch { repo: PathBuf },
+    #[error(
+        "{worktree} has no origin/HEAD, origin/main, or origin/master, set base_branch for its repo"
+    )]
+    NoUpstream { worktree: PathBuf },
     #[error(
         "base branch {base} matches neither {local_ref} nor {remote_ref}{}",
         .suggestion.as_ref().map(|name| format!(", did you mean {name}?")).unwrap_or_default()
