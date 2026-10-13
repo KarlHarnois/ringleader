@@ -303,6 +303,16 @@ mod tests {
     struct LockFlowFixture;
 
     impl LockFlowFixture {
+        const TYPING_DELAY: Duration = Duration::from_millis(200);
+
+        fn release_typing_later(multiplexer: &Arc<FakeMultiplexer>) {
+            let delayed = Arc::clone(multiplexer);
+            thread::spawn(move || {
+                thread::sleep(Self::TYPING_DELAY);
+                delayed.release_typing();
+            });
+        }
+
         fn wait_for(log: &Arc<Mutex<Vec<String>>>, event: &str, limit: Duration) -> bool {
             let deadline = Instant::now() + limit;
             while Instant::now() < deadline {
@@ -349,19 +359,17 @@ mod tests {
 
     #[test]
     fn new_types_the_startup_input_before_the_command_exits() {
-        let fixture = ServiceFixture::new().with_config(ServiceFixture::config_with_input());
+        let fixture = ServiceFixture::new()
+            .with_config(ServiceFixture::config_with_input())
+            .with_multiplexer(FakeMultiplexer::new().blocking_typing());
+        let typed = fixture.shared_multiplexer();
         let harness = CliHarness::new(fixture);
+        LockFlowFixture::release_typing_later(&typed);
 
         let exit = harness.run(&["new", "--name", "Fix Auth", "--repo", "example-project"]);
 
         assert_eq!(exit, CliExit::Code(0));
-        assert_eq!(
-            harness
-                .fixture()
-                .multiplexer()
-                .typed_when_ready("ringleader-fix-auth"),
-            ["/color"]
-        );
+        assert_eq!(typed.typed_when_ready("ringleader-fix-auth"), ["/color"]);
     }
 
     #[test]
