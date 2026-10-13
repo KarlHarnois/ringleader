@@ -39,6 +39,17 @@
       forEachSystem =
         build: nixpkgs.lib.genAttrs supportedSystems (system: build nixpkgs.legacyPackages.${system});
 
+      developmentPackages = pkgs: [
+        pkgs.rustc
+        pkgs.cargo
+        pkgs.clippy
+        pkgs.rustfmt
+        pkgs.tmux
+        pkgs.git
+        pkgs.nixfmt
+        pkgs.util-linux
+      ];
+
       metricsTools =
         pkgs:
         let
@@ -71,14 +82,13 @@
             runtimeInputs = [ pkgs.git ];
           };
           coverageRuntime = {
-            runtimeInputs = with pkgs; [
-              cargo
-              rustc
-              stdenv.cc
-              cargo-llvm-cov
-              tmux
-              git
-            ];
+            runtimeInputs =
+              developmentPackages pkgs
+              ++ pkgs.stdenv.initialPath
+              ++ [
+                pkgs.stdenv.cc
+                pkgs.cargo-llvm-cov
+              ];
             runtimeEnv = llvmCoverageEnv;
           };
           wrapTool =
@@ -155,16 +165,7 @@
       devShells = forEachSystemWithMetricsTools (
         pkgs: tools: rec {
           default = pkgs.mkShell {
-            packages = [
-              pkgs.rustc
-              pkgs.cargo
-              pkgs.clippy
-              pkgs.rustfmt
-              pkgs.tmux
-              pkgs.git
-              pkgs.nixfmt
-              pkgs.util-linux
-            ];
+            packages = developmentPackages pkgs;
           };
           metrics = pkgs.mkShell {
             inputsFrom = [ default ];
