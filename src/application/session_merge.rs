@@ -3,10 +3,11 @@ use std::sync::Arc;
 use super::ports::{
     HostProbe, MergeOutcome, Multiplexer, MultiplexerError, UpstreamMerge, Workspace,
 };
-use super::reconciliation::ManagedRow;
+use super::reconciliation::{ManagedRow, Reconciliation};
 use super::repo_merge::RepoMerge;
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
+use super::session_monitor::SessionMonitor;
 use super::worktree_inspection::WorktreeInspection;
 use crate::domain::{Config, Session, SessionName, SessionState};
 
@@ -15,6 +16,7 @@ pub struct SessionMerge {
     multiplexer: Arc<dyn Multiplexer>,
     host: Arc<dyn HostProbe>,
     inspection: WorktreeInspection,
+    monitor: SessionMonitor,
 }
 
 impl SessionMerge {
@@ -28,20 +30,36 @@ impl SessionMerge {
             multiplexer: ports.tmux().multiplexer(),
             host: ports.repos().host(),
             inspection: WorktreeInspection::new(ports),
+            monitor: SessionMonitor::new(ports),
         }
     }
 
-    pub fn merge(&self, row: &ManagedRow, config: &Config) -> Result<MergeReport, ServiceError> {
+    pub fn merge(
+        &self,
+        row: &ManagedRow,
+        reconciliation: &Reconciliation,
+        config: &Config,
+    ) -> Result<MergeReport, ServiceError> {
         let session = row.session();
         self.refuse_unsafe_merge(row)?;
         let base_branch =
             RepoMerge::new(self.host.as_ref()).base_branch_of(session, config.repos());
         let worktree = session.worktree_path();
         let branch_on_origin = self.workspace.fetch_upstream(worktree, base_branch)?;
-        self.refuse_unsafe_merge(row)?;
+        self.refuse_unsafe_merge_now(session, reconciliation, config)?;
         let merge = self.workspace.merge_upstream(worktree, &branch_on_origin)?;
         let handoff = self.hand_off_conflicts(session, &merge);
         Ok(MergeReport::new(session.name(), merge, handoff))
+    }
+
+    fn refuse_unsafe_merge_now(
+        &self,
+        session: &Session,
+        reconciliation: &Reconciliation,
+        config: &Config,
+    ) -> Result<(), ServiceError> {
+        let current = self.monitor.reconcile(reconciliation.entries(), config)?;
+        self.refuse_unsafe_merge(&current.managed(session.name().as_str())?)
     }
 
     fn refuse_unsafe_merge(&self, row: &ManagedRow) -> Result<(), ServiceError> {
@@ -248,6 +266,14 @@ mod tests {
             fixture.service().merge_upstream(Self::NAME)
         }
 
+        fn fetched_upstream(fixture: &ServiceFixture) -> bool {
+            fixture
+                .workspace()
+                .calls()
+                .iter()
+                .any(|call| call.starts_with("fetch_upstream"))
+        }
+
         fn merged_upstream(fixture: &ServiceFixture) -> bool {
             fixture
                 .workspace()
@@ -428,13 +454,23 @@ mod tests {
         let error = MergeFixture::merge(&fixture).unwrap_err();
 
         assert!(matches!(error, ServiceError::Conflict(_)), "{error:?}");
-        assert!(
-            fixture
-                .workspace()
-                .calls()
-                .iter()
-                .any(|call| call.starts_with("fetch_upstream"))
+        assert!(MergeFixture::fetched_upstream(&fixture));
+        assert!(!MergeFixture::merged_upstream(&fixture));
+    }
+
+    #[test]
+    fn an_agent_that_starts_working_during_the_fetch_is_refused_before_git_merges() {
+        let session = MergeFixture::session();
+        let fixture = MergeFixture::stopped().with_multiplexer(
+            FakeMultiplexer::new()
+                .with_live(ServiceFixture::waiting(&session))
+                .with_observation_after_next_look(ServiceFixture::working(&session)),
         );
+
+        let error = MergeFixture::merge(&fixture).unwrap_err();
+
+        assert!(matches!(error, ServiceError::Conflict(_)), "{error:?}");
+        assert!(MergeFixture::fetched_upstream(&fixture));
         assert!(!MergeFixture::merged_upstream(&fixture));
     }
 

@@ -46,6 +46,7 @@ struct MultiplexerState {
     socket_lost: bool,
     away_from_prompt: Vec<String>,
     prompt_checks: HashMap<String, VecDeque<bool>>,
+    later_observations: VecDeque<SessionObservation>,
 }
 
 impl FakeMultiplexer {
@@ -87,6 +88,7 @@ impl FakeMultiplexer {
                 socket_lost: false,
                 away_from_prompt: Vec::new(),
                 prompt_checks: HashMap::new(),
+                later_observations: VecDeque::new(),
             }),
         }
     }
@@ -117,6 +119,11 @@ impl FakeMultiplexer {
                 .captures
                 .insert(tmux_name.to_string(), text.to_string())
         });
+        self
+    }
+
+    pub fn with_observation_after_next_look(self, observation: SessionObservation) -> Self {
+        self.edit(|state| state.later_observations.push_back(observation));
         self
     }
 
@@ -310,6 +317,15 @@ impl MultiplexerState {
         }));
     }
 
+    fn apply_later_observation(&mut self) {
+        let Some(next) = self.later_observations.pop_front() else {
+            return;
+        };
+        self.live
+            .retain(|live| live.tmux_name() != next.tmux_name());
+        self.live.push(next);
+    }
+
     fn prompt_answer(&mut self, tmux_name: &str) -> bool {
         let scripted = self
             .prompt_checks
@@ -365,7 +381,11 @@ impl Multiplexer for FakeMultiplexer {
 
     fn observe_all(&self) -> Result<Vec<SessionObservation>, MultiplexerError> {
         self.call("observe_all", "")?;
-        Ok(self.edit(|state| state.live.clone()))
+        Ok(self.edit(|state| {
+            let seen = state.live.clone();
+            state.apply_later_observation();
+            seen
+        }))
     }
 
     fn attach(&self, target: &AttachTarget) -> Result<(), MultiplexerError> {

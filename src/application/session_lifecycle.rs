@@ -132,7 +132,7 @@ impl SessionLifecycle {
         config: &Config,
     ) -> Result<MergeReport, ServiceError> {
         let row = self.managed_target(reconciliation, name)?;
-        self.merging.merge(&row, config)
+        self.merging.merge(&row, reconciliation, config)
     }
 
     pub fn rename(
