@@ -72,4 +72,4 @@ Every command accepts `--config <path>` and `--log-level <level>`.
 | 0 | success |
 | 1 | invalid input or a failure |
 | 2 | no session or `[[repos]]` entry with that name |
-| 3 | conflict with existing state, such as a taken name or branch, a running session, a refused delete, or a held lock |
+| 3 | conflict with existing state, such as a taken name or branch, a running session, a delete that would lose work, or a held lock |
