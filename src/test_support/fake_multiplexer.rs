@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
+use super::{Deadline, Gate};
 use crate::application::ports::{
     AgentLaunch, AttachTarget, Multiplexer, MultiplexerError, ServerConfig, ServerState,
     SessionSpec,
@@ -11,6 +13,7 @@ use crate::domain::{AgentPane, ReturnKey, SessionMetadata, SessionObservation, T
 pub struct FakeMultiplexer {
     state: Mutex<MultiplexerState>,
     hooks: Mutex<HashMap<&'static str, CallHook>>,
+    typing_gate: Arc<Gate>,
 }
 
 type CallHook = Arc<dyn Fn() + Send + Sync>;
@@ -54,10 +57,12 @@ impl FakeMultiplexer {
         "type_if_ready",
         "ensure_shell_window",
     ];
+    const TYPING_GATE_LIMIT: Duration = Duration::from_secs(5);
 
     pub fn new() -> Self {
         Self {
             hooks: Mutex::new(HashMap::new()),
+            typing_gate: Arc::new(Gate::open()),
             state: Mutex::new(MultiplexerState {
                 socket: PathBuf::from(Self::SOCKET),
                 live: Vec::new(),
@@ -117,8 +122,12 @@ impl FakeMultiplexer {
     }
 
     pub fn on_call(self, operation: &'static str, hook: impl Fn() + Send + Sync + 'static) -> Self {
-        self.hooks.lock().unwrap().insert(operation, Arc::new(hook));
+        self.add_call_hook(operation, hook);
         self
+    }
+
+    pub fn add_call_hook(&self, operation: &'static str, hook: impl Fn() + Send + Sync + 'static) {
+        self.hooks.lock().unwrap().insert(operation, Arc::new(hook));
     }
 
     pub fn with_versions(self, client: &str, server: Option<&str>) -> Self {
@@ -149,6 +158,24 @@ impl FakeMultiplexer {
     pub fn called_from_other_tmux(self) -> Self {
         self.edit(|state| state.caller_in_other_tmux = true);
         self
+    }
+
+    pub fn with_typing_gate(mut self, gate: Arc<Gate>) -> Self {
+        self.typing_gate = gate;
+        self
+    }
+
+    pub fn blocking_typing(mut self) -> Self {
+        self.typing_gate = Arc::new(Gate::closed());
+        self
+    }
+
+    pub fn release_typing(&self) {
+        self.typing_gate.open_now();
+    }
+
+    pub fn wait_for_typing(&self, tmux_name: &str, limit: Duration) -> bool {
+        Deadline::after(limit).wait_until(|| !self.typed_when_ready(tmux_name).is_empty())
     }
 
     pub fn creating_despite_failure(self) -> Self {
@@ -222,6 +249,15 @@ impl FakeMultiplexer {
 
     fn edit<T>(&self, change: impl FnOnce(&mut MultiplexerState) -> T) -> T {
         change(&mut self.state.lock().unwrap())
+    }
+
+    fn pass_typing_gate(&self, tmux_name: &str) -> Result<(), MultiplexerError> {
+        match self.typing_gate.wait_up_to(Self::TYPING_GATE_LIMIT) {
+            true => Ok(()),
+            false => Err(MultiplexerError::AgentNotReady {
+                tmux_name: tmux_name.to_string(),
+            }),
+        }
     }
 
     fn call(&self, operation: &'static str, detail: &str) -> Result<(), MultiplexerError> {
@@ -345,6 +381,7 @@ impl Multiplexer for FakeMultiplexer {
 
     fn type_when_ready(&self, tmux_name: &str, lines: &[String]) -> Result<(), MultiplexerError> {
         self.call("type_when_ready", tmux_name)?;
+        self.pass_typing_gate(tmux_name)?;
         self.edit(|state| state.type_lines("type_when_ready", tmux_name, lines));
         Ok(())
     }
