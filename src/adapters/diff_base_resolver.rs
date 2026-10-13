@@ -275,6 +275,16 @@ mod tests {
             );
         }
 
+        fn leave_a_pruned_origin_default_beside_its_local_branch(&self, branch: &str) {
+            let repo = self.repo.path();
+            self.repo.git(repo, &["branch", branch]);
+            let pruned = BaseBranch::new(branch).unwrap().origin_ref();
+            self.repo.git(
+                repo,
+                &["symbolic-ref", BaseBranchLadder::ORIGIN_HEAD, &pruned],
+            );
+        }
+
         fn commit_on(&self, branch: &str, file: &str) {
             let repo = self.repo.path();
             self.repo.git(repo, &["checkout", "-q", branch]);
@@ -441,6 +451,17 @@ mod tests {
     fn a_plain_origin_head_leaves_main_as_the_base_branch() {
         let fixture = DiffBaseFixture::started();
         fixture.make_origin_head_a_plain_ref();
+        fixture.commit_in_session("session.md");
+        fixture.advance_the_checked_out_branch("news.md");
+        fixture.merge_into_session(GitTestRepo::BRANCH);
+
+        assert_eq!(fixture.diff().files(), 1);
+    }
+
+    #[test]
+    fn a_dangling_origin_head_leaves_main_as_the_base_branch() {
+        let fixture = DiffBaseFixture::started();
+        fixture.leave_a_pruned_origin_default_beside_its_local_branch("master");
         fixture.commit_in_session("session.md");
         fixture.advance_the_checked_out_branch("news.md");
         fixture.merge_into_session(GitTestRepo::BRANCH);
