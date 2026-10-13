@@ -17,6 +17,7 @@ pub mod repo_filter;
 pub mod repo_finder;
 pub mod repo_picker;
 pub mod repo_scan;
+pub mod session_finder;
 pub mod text_field;
 pub mod typed_repo_check;
 

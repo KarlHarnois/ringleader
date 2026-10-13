@@ -345,7 +345,8 @@ viewer exits.
     │       ├── home_path.rs             # HomePath, a path shown from ~ when it is under home
     │       ├── agent_picker.rs          # AgentPicker, the n dialog's agent list
     │       ├── delete_session_dialog.rs # DeleteSessionDialog
-    │       └── rename_session_dialog.rs # RenameSessionDialog
+    │       ├── rename_session_dialog.rs # RenameSessionDialog
+    │       └── session_finder.rs        # SessionFinder, the / and Ctrl-K search over session names that attaches to the pick
     └── test_support/               # #[cfg(test)] doubles and fixtures shared by unit tests
         ├── mod.rs
         ├── tmux_test_server.rs      # TmuxTestServer: private socket, generated config, control-mode clients, kill-server on drop

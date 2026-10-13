@@ -9,6 +9,7 @@ use super::dialog_labels::DialogLabels;
 use super::home_path::HomePath;
 use super::new_session_dialog::NewSessionDialog;
 use super::rename_session_dialog::RenameSessionDialog;
+use super::session_finder::SessionFinder;
 use crate::adapters::app_log::AppLog;
 use crate::application::{DeleteImpact, SessionService};
 use crate::domain::{Session, SessionSummary};
@@ -22,6 +23,7 @@ pub enum Dialog {
     Delete(Box<DeleteSessionDialog>),
     Rename(Box<RenameSessionDialog>),
     Help(Box<HelpView>),
+    FindSession(Box<SessionFinder>),
 }
 
 impl Dialog {
@@ -52,6 +54,10 @@ impl Dialog {
         } else {
             dialog
         }))
+    }
+
+    pub fn find_session(names: Vec<String>) -> Self {
+        Self::FindSession(Box::new(SessionFinder::open(names)))
     }
 
     fn help(service: &SessionService) -> Self {
@@ -104,6 +110,13 @@ impl Dialog {
                 dialog.paste(text);
                 DialogStep::Stay
             }
+            (Self::FindSession(finder), Event::Key(key)) if key.kind != KeyEventKind::Release => {
+                finder.handle_key(key)
+            }
+            (Self::FindSession(finder), Event::Paste(text)) => {
+                finder.paste(text);
+                DialogStep::Stay
+            }
             _ => DialogStep::Stay,
         }
     }
@@ -112,7 +125,7 @@ impl Dialog {
         match self {
             Self::NewSession(dialog) => dialog.fail(error),
             Self::Rename(dialog) => dialog.fail(error),
-            Self::Delete(_) | Self::Help(_) => {}
+            Self::Delete(_) | Self::Help(_) | Self::FindSession(_) => {}
         }
     }
 
@@ -132,6 +145,9 @@ impl Dialog {
                 Self::render_lines(frame, inner, dialog.lines(width, labels, theme))
             }
             Self::Help(help) => Self::render_lines(frame, inner, help.lines(width, height, theme)),
+            Self::FindSession(finder) => {
+                Self::render_lines(frame, inner, finder.lines(width, height, theme))
+            }
         }
     }
 
@@ -145,6 +161,7 @@ impl Dialog {
             Self::Delete(_) => DeleteSessionDialog::TITLE,
             Self::Rename(_) => RenameSessionDialog::TITLE,
             Self::Help(_) => HelpView::TITLE,
+            Self::FindSession(_) => SessionFinder::TITLE,
         }
     }
 
@@ -173,6 +190,7 @@ pub enum DialogStep {
     Stay,
     Close,
     Request(AppRequest),
+    CloseWith(AppRequest),
 }
 
 #[cfg(test)]

@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::app::AppRequest;
 use super::blocking_operation::BlockingOperation;
@@ -29,6 +29,10 @@ impl<'a> ActionGate<'a> {
             KeyCode::Char('q') => KeyAction::Request(AppRequest::Quit),
             KeyCode::Char('r') => KeyAction::Reload,
             KeyCode::Char('?') => KeyAction::Open(DialogOpening::Help),
+            KeyCode::Char('/') => KeyAction::FindSession,
+            KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                KeyAction::FindSession
+            }
             KeyCode::Down | KeyCode::Right | KeyCode::Char('j' | 'l') => KeyAction::Move(1),
             KeyCode::Up | KeyCode::Left | KeyCode::Char('k' | 'h') => KeyAction::Move(-1),
             KeyCode::Char('n') => KeyAction::from(
@@ -115,6 +119,7 @@ pub enum KeyAction {
     Request(AppRequest),
     Move(isize),
     Open(DialogOpening),
+    FindSession,
     Reload,
     Refuse(String),
     Ignore,
@@ -259,6 +264,26 @@ mod tests {
         assert_eq!(
             ActionGate::new(None, None).action_for(&key),
             KeyAction::Open(DialogOpening::NewSession)
+        );
+    }
+
+    #[test]
+    fn slash_and_control_k_open_the_session_finder() {
+        let gate = ActionGate::new(None, None);
+        let slash = KeyEvent::from(KeyCode::Char('/'));
+        let control_k = KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL);
+
+        assert_eq!(gate.action_for(&slash), KeyAction::FindSession);
+        assert_eq!(gate.action_for(&control_k), KeyAction::FindSession);
+    }
+
+    #[test]
+    fn a_plain_k_still_moves_the_selection_up() {
+        let key = KeyEvent::from(KeyCode::Char('k'));
+
+        assert_eq!(
+            ActionGate::new(None, None).action_for(&key),
+            KeyAction::Move(-1)
         );
     }
 

@@ -34,7 +34,7 @@ impl DialogSlot {
             return DialogStep::Stay;
         };
         let step = dialog.handle_event(event, service);
-        if step == DialogStep::Close {
+        if matches!(step, DialogStep::Close | DialogStep::CloseWith(_)) {
             self.close();
         }
         step
