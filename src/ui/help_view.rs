@@ -37,7 +37,7 @@ impl HelpView {
         ("s", "restart an exited or stopped session"),
         (
             "m",
-            "merge origin's default branch, the agent resolves conflicts",
+            "merge the base branch from origin, the agent fixes conflicts",
         ),
         (
             "r",

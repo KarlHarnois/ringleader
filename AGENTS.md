@@ -204,7 +204,7 @@ viewer exits.
     │   ├── rename_request.rs     # RenameRequest, the old and new names
     │   ├── branch_availability.rs # BranchAvailability, refuses a branch name that exists or holds other branches, for create and rename
     │   ├── session_restart.rs    # SessionRestart: restart of an Exited or Stopped session
-    │   ├── session_merge.rs      # SessionMerge: merge of origin's default branch into a Waiting session, with MergeReport
+    │   ├── session_merge.rs      # SessionMerge: merge of origin's copy of the base branch into a Waiting session, with MergeReport
     │   ├── agent_hooks.rs        # AgentHooks, schedules an agent's startup input in the background and types its rename input
     │   ├── worktree_inspection.rs # WorktreeInspection, the worktree checks restart, delete, and doctor share
     │   ├── session_deletion.rs   # SessionDeletion: delete_session steps 5 to 8 and forget
