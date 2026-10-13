@@ -157,6 +157,12 @@ mod tests {
             hooks.after_start(&session, &agent);
         }
 
+        fn start_and_settle(hooks: &AgentHooks) {
+            let session = ServiceFixture::session("fix-auth");
+            hooks.after_start(&session, &ServiceFixture::agent_with_input());
+            Self::settle(hooks);
+        }
+
         fn settle(hooks: &AgentHooks) {
             let started = Instant::now();
             hooks.wait_startup_input(|| started.elapsed() > Self::WAIT_LIMIT);
@@ -175,6 +181,20 @@ mod tests {
         assert_eq!(
             multiplexer.typed_when_ready(HooksFixture::TMUX_NAME),
             ["/color"]
+        );
+    }
+
+    #[test]
+    fn a_start_after_the_first_job_ended_types_again() {
+        let multiplexer = Arc::new(FakeMultiplexer::new());
+        let hooks = HooksFixture::hooks(&multiplexer);
+
+        HooksFixture::start_and_settle(&hooks);
+        HooksFixture::start_and_settle(&hooks);
+
+        assert_eq!(
+            multiplexer.typed_when_ready(HooksFixture::TMUX_NAME),
+            ["/color", "/color"]
         );
     }
 
