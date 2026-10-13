@@ -388,7 +388,7 @@ mod tests {
     #[test]
     fn a_drifted_server_config_is_reapplied_with_the_configured_key() {
         let fixture = ServiceFixture::new()
-            .with_multiplexer(FakeMultiplexer::new().with_drifted_config("C-q"));
+            .with_multiplexer(FakeMultiplexer::new().with_drifted_config("M-x"));
 
         fixture.service().reapply_server_config().unwrap();
 
