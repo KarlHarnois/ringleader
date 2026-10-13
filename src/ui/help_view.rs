@@ -224,12 +224,7 @@ mod tests {
         fn rows(help: &HelpView, width: usize) -> Vec<String> {
             Self::page(help, width)
                 .iter()
-                .map(|line| {
-                    line.spans
-                        .iter()
-                        .map(|span| span.content.as_ref())
-                        .collect::<String>()
-                })
+                .map(ToString::to_string)
                 .collect()
         }
 
