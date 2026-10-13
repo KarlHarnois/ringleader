@@ -32,7 +32,7 @@ impl HelpView {
         ("t", "open a shell in the selected session's worktree"),
         ("s", "restart an exited or stopped session"),
         ("r", "reload the config and the registry and refresh diffs"),
-        ("↑ ↓ j k", "move the selection"),
+        ("↑ ↓ j k h l", "move the selection"),
         ("q", "quit, the sessions keep running"),
     ];
     const RETURN_ACTION: &'static str = "detach from a session and return here";
