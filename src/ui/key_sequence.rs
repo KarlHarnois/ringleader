@@ -61,10 +61,15 @@ mod tests {
     }
 
     #[test]
-    fn g_j_g_leaves_a_sequence_pending() {
+    fn a_g_after_a_cancelled_one_waits_again() {
         assert_eq!(
-            SequenceFixture::actions("gjg"),
-            [KeyAction::Ignore, KeyAction::Move(1), KeyAction::Ignore]
+            SequenceFixture::actions("gjgg"),
+            [
+                KeyAction::Ignore,
+                KeyAction::Move(1),
+                KeyAction::Ignore,
+                KeyAction::SelectFirst
+            ]
         );
     }
 }
