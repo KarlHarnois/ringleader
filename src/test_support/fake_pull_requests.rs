@@ -51,7 +51,7 @@ impl FakePullRequests {
 
     fn failure() -> PullRequestError {
         PullRequestError::Failed {
-            subcommand: "pr list".to_string(),
+            subcommand: "api graphql".to_string(),
             status: "exit status: 1".to_string(),
             stderr: "not logged in".to_string(),
         }
@@ -63,27 +63,24 @@ impl PullRequests for FakePullRequests {
         &self,
         repo: &Path,
         branches: &[String],
-    ) -> HashMap<String, Result<Option<PullRequest>, PullRequestError>> {
+    ) -> Result<HashMap<String, Option<PullRequest>>, PullRequestError> {
         let mut state = self.state.lock().unwrap();
         state
             .calls
             .push(format!("lookup {} {}", repo.display(), branches.len()));
         if state.failure || state.failing_repos.contains(repo) {
-            return branches
-                .iter()
-                .map(|branch| (branch.clone(), Err(Self::failure())))
-                .collect();
+            return Err(Self::failure());
         }
         let repo = repo.to_path_buf();
-        branches
+        Ok(branches
             .iter()
             .map(|branch| {
                 let found = state
                     .pull_requests
                     .get(&(repo.clone(), branch.clone()))
                     .copied();
-                (branch.clone(), Ok(found))
+                (branch.clone(), found)
             })
-            .collect()
+            .collect())
     }
 }

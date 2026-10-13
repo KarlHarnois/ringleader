@@ -10,7 +10,7 @@ pub trait PullRequests: Send + Sync {
         &self,
         repo: &Path,
         branches: &[String],
-    ) -> HashMap<String, Result<Option<PullRequest>, PullRequestError>>;
+    ) -> Result<HashMap<String, Option<PullRequest>>, PullRequestError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]

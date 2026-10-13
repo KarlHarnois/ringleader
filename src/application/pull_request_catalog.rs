@@ -28,29 +28,30 @@ impl PullRequestCatalog {
         port: Arc<dyn PullRequests>,
         queries: Vec<PullRequestQuery>,
     ) -> HashMap<String, Option<PullRequest>> {
-        let mut by_repo: BTreeMap<PathBuf, Vec<PullRequestQuery>> = BTreeMap::new();
-        for query in queries {
-            by_repo.entry(query.repo.clone()).or_default().push(query);
-        }
         let mut found = HashMap::new();
-        for (repo, group) in by_repo {
+        for (repo, group) in Self::by_repo(queries) {
             let branches: Vec<String> = group.iter().map(|query| query.branch.clone()).collect();
-            let listed = port.lookup(&repo, &branches);
-            for query in group {
-                match listed.get(&query.branch) {
-                    Some(Ok(pull_request)) => {
-                        found.insert(query.name, *pull_request);
-                    }
-                    Some(Err(error)) => log::warn!(
-                        "could not look up the pull request of {} in {}: {error}",
-                        query.branch,
+            match port.lookup(&repo, &branches) {
+                Ok(listed) => {
+                    found.extend(group.into_iter().filter_map(|query| query.answer(&listed)))
+                }
+                Err(error) => {
+                    log::warn!(
+                        "could not look up the pull requests in {}: {error}",
                         repo.display()
-                    ),
-                    None => {}
+                    )
                 }
             }
         }
         found
+    }
+
+    fn by_repo(queries: Vec<PullRequestQuery>) -> BTreeMap<PathBuf, Vec<PullRequestQuery>> {
+        let mut by_repo: BTreeMap<PathBuf, Vec<PullRequestQuery>> = BTreeMap::new();
+        for query in queries {
+            by_repo.entry(query.repo.clone()).or_default().push(query);
+        }
+        by_repo
     }
 }
 
@@ -67,6 +68,14 @@ impl PullRequestQuery {
             repo: session.repo_path().to_path_buf(),
             branch: session.branch().to_string(),
         }
+    }
+
+    fn answer(
+        self,
+        listed: &HashMap<String, Option<PullRequest>>,
+    ) -> Option<(String, Option<PullRequest>)> {
+        let pull_request = *listed.get(&self.branch)?;
+        Some((self.name, pull_request))
     }
 }
 

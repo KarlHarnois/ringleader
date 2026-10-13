@@ -16,7 +16,7 @@ pub struct GhPullRequests {
 }
 
 impl GhPullRequests {
-    const SUBCOMMAND: &'static str = "pr list";
+    const SUBCOMMAND: &'static str = "api graphql";
 
     pub fn new(program: &OsStr, bounded: BoundedCommand) -> Self {
         Self {
@@ -25,41 +25,21 @@ impl GhPullRequests {
         }
     }
 
-    fn command(program: &OsStr, repo: &Path, branch: &str) -> Command {
+    fn command(program: &OsStr, repo: &Path, query: &GhQuery) -> Command {
         let mut command = Command::new(program);
         command
             .current_dir(repo)
             .env("GH_PROMPT_DISABLED", "1")
             .env("NO_COLOR", "1")
-            .args([
-                "pr",
-                "list",
-                "--head",
-                branch,
-                "--state",
-                "all",
-                "--limit",
-                "1",
-                "--json",
-                "number,state,isDraft",
-            ]);
+            .args(["api", "graphql", "-F", "owner={owner}", "-F", "name={repo}"])
+            .args(query.arguments());
         command
     }
 
-    fn branch_pull_request(
-        &self,
-        repo: &Path,
-        branch: &str,
-    ) -> Result<Option<PullRequest>, PullRequestError> {
-        let call = Call::new(Self::SUBCOMMAND, CallKind::GhQuery);
-        let output = self
-            .bounded
-            .run(Self::command(&self.program, repo, branch), &call)
-            .map_err(Self::error)?;
-        Self::pull_request(&output)
-    }
-
-    fn pull_request(output: &CommandOutput) -> Result<Option<PullRequest>, PullRequestError> {
+    fn pull_requests(
+        output: &CommandOutput,
+        query: &GhQuery,
+    ) -> Result<HashMap<String, Option<PullRequest>>, PullRequestError> {
         if !output.succeeded() {
             return Err(PullRequestError::Failed {
                 subcommand: Self::SUBCOMMAND.to_string(),
@@ -68,7 +48,7 @@ impl GhPullRequests {
             });
         }
         GhListing::parse(&output.stdout_text())
-            .map(|listing| listing.first())
+            .map(|listing| query.pull_requests(&listing))
             .map_err(|error| PullRequestError::Failed {
                 subcommand: Self::SUBCOMMAND.to_string(),
                 status: "unreadable json".to_string(),
@@ -96,16 +76,87 @@ impl PullRequests for GhPullRequests {
         &self,
         repo: &Path,
         branches: &[String],
-    ) -> HashMap<String, Result<Option<PullRequest>, PullRequestError>> {
-        branches
-            .iter()
-            .map(|branch| (branch.clone(), self.branch_pull_request(repo, branch)))
+    ) -> Result<HashMap<String, Option<PullRequest>>, PullRequestError> {
+        if branches.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let query = GhQuery::new(branches);
+        let call = Call::new(Self::SUBCOMMAND, CallKind::GhQuery);
+        let output = self
+            .bounded
+            .run(Self::command(&self.program, repo, &query), &call)
+            .map_err(Self::error)?;
+        Self::pull_requests(&output, &query)
+    }
+}
+
+struct GhQuery {
+    branches: Vec<String>,
+}
+
+impl GhQuery {
+    const NEWEST_FIRST: &'static str = "first: 1, orderBy: {field: CREATED_AT, direction: DESC}";
+    const FIELDS: &'static str = "number state isDraft";
+    const RESHAPE: &'static str = ".data.repository | map_values(.nodes[0])";
+
+    fn new(branches: &[String]) -> Self {
+        Self {
+            branches: branches.to_vec(),
+        }
+    }
+
+    fn arguments(&self) -> Vec<String> {
+        let mut arguments = vec![
+            "-f".to_string(),
+            format!("query={}", self.text()),
+            "--jq".to_string(),
+            Self::RESHAPE.to_string(),
+        ];
+        for (alias, branch) in self.aliased() {
+            arguments.extend(["-f".to_string(), format!("{alias}={branch}")]);
+        }
+        arguments
+    }
+
+    fn text(&self) -> String {
+        let variables: String = self
+            .aliased()
+            .map(|(alias, _)| format!(", ${alias}: String!"))
+            .collect();
+        let fields: String = self
+            .aliased()
+            .map(|(alias, _)| Self::field(&alias))
+            .collect();
+        format!(
+            "query($owner: String!, $name: String!{variables}) \
+             {{ repository(owner: $owner, name: $name) {{{fields} }} }}"
+        )
+    }
+
+    fn field(alias: &str) -> String {
+        format!(
+            " {alias}: pullRequests(headRefName: ${alias}, {}) {{ nodes {{ {} }} }}",
+            Self::NEWEST_FIRST,
+            Self::FIELDS
+        )
+    }
+
+    fn pull_requests(&self, listing: &GhListing) -> HashMap<String, Option<PullRequest>> {
+        self.aliased()
+            .map(|(alias, branch)| (branch.clone(), listing.pull_request(&alias)))
             .collect()
+    }
+
+    fn aliased(&self) -> impl Iterator<Item = (String, &String)> {
+        self.branches
+            .iter()
+            .enumerate()
+            .map(|(index, branch)| (format!("branch{index}"), branch))
     }
 }
 
 struct GhListing {
-    entries: Vec<GhEntry>,
+    entries: HashMap<String, Option<GhEntry>>,
 }
 
 impl GhListing {
@@ -115,8 +166,11 @@ impl GhListing {
         })
     }
 
-    fn first(&self) -> Option<PullRequest> {
-        self.entries.first().and_then(GhEntry::pull_request)
+    fn pull_request(&self, alias: &str) -> Option<PullRequest> {
+        self.entries
+            .get(alias)
+            .and_then(Option::as_ref)
+            .and_then(GhEntry::pull_request)
     }
 }
 
@@ -155,8 +209,31 @@ mod tests {
     struct ParseFixture;
 
     impl ParseFixture {
-        fn pull_request(json: &str) -> Option<PullRequest> {
-            GhListing::parse(json).unwrap().first()
+        const STAND_IN: &'static str = r#"#!/bin/sh
+echo call >> "$0.calls"
+listing=''
+while [ $# -gt 0 ]; do
+  if [ "$1" = "-f" ]; then
+    case "$2" in
+      branch*=fix-auth) entry='{"number":42,"state":"OPEN","isDraft":false}' ;;
+      branch*=*) entry=null ;;
+      *) entry='' ;;
+    esac
+    if [ -n "$entry" ]; then listing="$listing${listing:+,}\"${2%%=*}\":$entry"; fi
+    shift
+  fi
+  shift
+done
+printf '{%s}' "$listing"
+"#;
+
+        fn pull_request(entry: &str) -> Option<PullRequest> {
+            let listing = GhListing::parse(&format!(r#"{{"branch0":{entry}}}"#)).unwrap();
+            listing.pull_request("branch0")
+        }
+
+        fn branches() -> Vec<String> {
+            vec!["fix-auth".to_string(), "dark-mode".to_string()]
         }
 
         fn output(code: i32, stdout: &str) -> CommandOutput {
@@ -178,48 +255,50 @@ mod tests {
             fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
             path
         }
+
+        fn calls(directory: &tempfile::TempDir) -> usize {
+            fs::read_to_string(directory.path().join("fake-gh.calls"))
+                .map_or(0, |text| text.lines().count())
+        }
     }
 
     #[test]
     fn an_open_pull_request_is_read_with_its_number() {
-        let found =
-            ParseFixture::pull_request(r#"[{"number":142,"state":"OPEN","isDraft":false}]"#);
+        let found = ParseFixture::pull_request(r#"{"number":142,"state":"OPEN","isDraft":false}"#);
 
         assert_eq!(found, Some(PullRequest::new(142, PullRequestState::Open)));
     }
 
     #[test]
     fn a_draft_reads_as_a_draft() {
-        let found = ParseFixture::pull_request(r#"[{"number":5,"state":"OPEN","isDraft":true}]"#);
+        let found = ParseFixture::pull_request(r#"{"number":5,"state":"OPEN","isDraft":true}"#);
 
         assert_eq!(found, Some(PullRequest::new(5, PullRequestState::Draft)));
     }
 
     #[test]
     fn a_merged_pull_request_reads_as_merged() {
-        let found =
-            ParseFixture::pull_request(r#"[{"number":9,"state":"MERGED","isDraft":false}]"#);
+        let found = ParseFixture::pull_request(r#"{"number":9,"state":"MERGED","isDraft":false}"#);
 
         assert_eq!(found, Some(PullRequest::new(9, PullRequestState::Merged)));
     }
 
     #[test]
     fn a_closed_pull_request_reads_as_closed() {
-        let found =
-            ParseFixture::pull_request(r#"[{"number":3,"state":"CLOSED","isDraft":false}]"#);
+        let found = ParseFixture::pull_request(r#"{"number":3,"state":"CLOSED","isDraft":false}"#);
 
         assert_eq!(found, Some(PullRequest::new(3, PullRequestState::Closed)));
     }
 
     #[test]
     fn no_pull_request_reads_as_none() {
-        assert_eq!(ParseFixture::pull_request("[]"), None);
+        assert_eq!(ParseFixture::pull_request("null"), None);
     }
 
     #[test]
     fn an_unknown_state_reads_as_none() {
         assert_eq!(
-            ParseFixture::pull_request(r#"[{"number":1,"state":"QUEUED","isDraft":false}]"#),
+            ParseFixture::pull_request(r#"{"number":1,"state":"QUEUED","isDraft":false}"#),
             None
         );
     }
@@ -230,28 +309,29 @@ mod tests {
     }
 
     #[test]
-    fn a_successful_empty_listing_is_no_pull_request() {
-        let output = ParseFixture::output(0, "[]");
+    fn a_successful_listing_maps_each_alias_back_to_its_branch() {
+        let query = GhQuery::new(&ParseFixture::branches());
+        let output = ParseFixture::output(
+            0,
+            r#"{"branch0":{"number":7,"state":"OPEN","isDraft":false},"branch1":null}"#,
+        );
 
-        assert_eq!(GhPullRequests::pull_request(&output).unwrap(), None);
-    }
-
-    #[test]
-    fn a_successful_listing_parses_the_pull_request() {
-        let output = ParseFixture::output(0, r#"[{"number":7,"state":"OPEN","isDraft":false}]"#);
+        let found = GhPullRequests::pull_requests(&output, &query).unwrap();
 
         assert_eq!(
-            GhPullRequests::pull_request(&output).unwrap(),
-            Some(PullRequest::new(7, PullRequestState::Open))
+            found.get("fix-auth"),
+            Some(&Some(PullRequest::new(7, PullRequestState::Open)))
         );
+        assert_eq!(found.get("dark-mode"), Some(&None));
     }
 
     #[test]
     fn a_failed_call_is_an_error_not_a_missing_pull_request() {
+        let query = GhQuery::new(&ParseFixture::branches());
         let output = ParseFixture::output(1, "");
 
         assert!(matches!(
-            GhPullRequests::pull_request(&output),
+            GhPullRequests::pull_requests(&output, &query),
             Err(PullRequestError::Failed { .. })
         ));
     }
@@ -259,7 +339,7 @@ mod tests {
     #[test]
     fn a_timeout_maps_to_a_timeout_error() {
         let mapped = GhPullRequests::error(CommandError::TimedOut {
-            subcommand: "gh pr list".to_string(),
+            subcommand: "gh api graphql".to_string(),
             seconds: 20,
         });
 
@@ -272,7 +352,7 @@ mod tests {
     #[test]
     fn a_spawn_failure_maps_to_a_failure() {
         let mapped = GhPullRequests::error(CommandError::Spawn {
-            subcommand: "gh pr list".to_string(),
+            subcommand: "gh api graphql".to_string(),
             detail: "not found".to_string(),
         });
 
@@ -280,9 +360,10 @@ mod tests {
     }
 
     #[test]
-    fn the_command_asks_gh_for_one_branch_across_every_state() {
+    fn the_command_asks_gh_for_every_branch_of_the_repo_at_once() {
+        let query = GhQuery::new(&ParseFixture::branches());
         let command =
-            GhPullRequests::command(OsStr::new("gh"), Path::new("/repos/example"), "fix-auth");
+            GhPullRequests::command(OsStr::new("gh"), Path::new("/repos/example"), &query);
         let args: Vec<String> = command
             .get_args()
             .map(|arg| arg.to_string_lossy().into_owned())
@@ -293,61 +374,60 @@ mod tests {
             .and_then(|(_, value)| value);
 
         assert_eq!(
-            args,
-            [
-                "pr",
-                "list",
-                "--head",
-                "fix-auth",
-                "--state",
-                "all",
-                "--limit",
-                "1",
-                "--json",
-                "number,state,isDraft"
-            ]
+            args[..6],
+            ["api", "graphql", "-F", "owner={owner}", "-F", "name={repo}"]
+        );
+        assert_eq!(
+            args[args.len() - 4..],
+            ["-f", "branch0=fix-auth", "-f", "branch1=dark-mode"]
         );
         assert_eq!(command.get_current_dir(), Some(Path::new("/repos/example")));
         assert_eq!(prompt, Some(OsStr::new("1")));
     }
 
     #[test]
-    fn lookup_reads_one_pull_request_per_branch() {
-        let directory = tempfile::tempdir().unwrap();
-        let adapter = ParseFixture::adapter(
-            &directory,
-            "#!/bin/sh\n\
-             branch=\"\"\n\
-             while [ $# -gt 0 ]; do\n\
-               if [ \"$1\" = \"--head\" ]; then branch=\"$2\"; shift; fi\n\
-               shift\n\
-             done\n\
-             case \"$branch\" in\n\
-               fix-auth) printf '[{\"number\":42,\"state\":\"OPEN\",\"isDraft\":false}]' ;;\n\
-               *) printf '[]' ;;\n\
-             esac\n",
-        );
-        let branches = ["fix-auth".to_string(), "dark-mode".to_string()];
+    fn the_query_holds_one_aliased_field_per_branch() {
+        let text = GhQuery::new(&ParseFixture::branches()).text();
 
-        let found = adapter.lookup(directory.path(), &branches);
-
-        assert_eq!(
-            found.get("fix-auth"),
-            Some(&Ok(Some(PullRequest::new(42, PullRequestState::Open))))
-        );
-        assert_eq!(found.get("dark-mode"), Some(&Ok(None)));
+        assert!(text.contains("$branch0: String!, $branch1: String!"));
+        assert!(text.contains("branch1: pullRequests(headRefName: $branch1,"));
     }
 
     #[test]
-    fn lookup_reports_a_failed_branch_as_an_error() {
+    fn lookup_reads_every_branch_in_one_gh_call() {
+        let directory = tempfile::tempdir().unwrap();
+        let adapter = ParseFixture::adapter(&directory, ParseFixture::STAND_IN);
+
+        let found = adapter
+            .lookup(directory.path(), &ParseFixture::branches())
+            .unwrap();
+
+        assert_eq!(
+            found.get("fix-auth"),
+            Some(&Some(PullRequest::new(42, PullRequestState::Open)))
+        );
+        assert_eq!(found.get("dark-mode"), Some(&None));
+        assert_eq!(ParseFixture::calls(&directory), 1);
+    }
+
+    #[test]
+    fn lookup_reports_a_failed_call_as_an_error() {
         let directory = tempfile::tempdir().unwrap();
         let adapter = ParseFixture::adapter(&directory, "#!/bin/sh\nexit 1\n");
 
-        let found = adapter.lookup(directory.path(), &["fix-auth".to_string()]);
+        let found = adapter.lookup(directory.path(), &ParseFixture::branches());
 
-        assert!(matches!(
-            found.get("fix-auth"),
-            Some(Err(PullRequestError::Failed { .. }))
-        ));
+        assert!(matches!(found, Err(PullRequestError::Failed { .. })));
+    }
+
+    #[test]
+    fn lookup_of_no_branches_runs_no_gh() {
+        let directory = tempfile::tempdir().unwrap();
+        let adapter = ParseFixture::adapter(&directory, ParseFixture::STAND_IN);
+
+        let found = adapter.lookup(directory.path(), &[]).unwrap();
+
+        assert!(found.is_empty());
+        assert_eq!(ParseFixture::calls(&directory), 0);
     }
 }
