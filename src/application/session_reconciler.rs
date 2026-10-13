@@ -176,7 +176,16 @@ impl<'a> SessionReconciler<'a> {
             .or_else(|| self.recorded_prefix_label(observation, entries));
         match label {
             Some(label) => UnmanagedSession::new(label, observation.clone()),
-            None => UnmanagedSession::unprefixed(observation.clone(), naming.tmux_prefix()),
+            None => self.unprefixed(observation),
+        }
+    }
+
+    fn unprefixed(&self, observation: &SessionObservation) -> UnmanagedSession {
+        let naming = self.config.naming();
+        let unprefixed = UnmanagedSession::unprefixed(observation.clone());
+        match self.valid_metadata(observation, naming) {
+            Some(_) => unprefixed.missing_only(naming.tmux_prefix()),
+            None => unprefixed,
         }
     }
 
@@ -432,6 +441,20 @@ mod tests {
 
         assert_eq!(row.name(), "=work");
         assert_eq!(row.state(), SessionState::Unmanaged);
+    }
+
+    #[test]
+    fn a_session_made_by_hand_without_metadata_notes_the_missing_metadata() {
+        let fixture = ServiceFixture::new()
+            .with_multiplexer(FakeMultiplexer::new().with_live(ObserveFixture::named("scratch")));
+
+        let row = ObserveFixture::only_row(&fixture);
+
+        assert_eq!(row.name(), "=scratch");
+        assert_eq!(
+            row.unmanaged_session().unwrap().note(),
+            "scratch has no valid Ringleader metadata, so it can only be attached."
+        );
     }
 
     #[test]

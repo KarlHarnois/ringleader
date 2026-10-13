@@ -302,8 +302,9 @@ mod tests {
             ServiceFixture::CREATED_AT,
         )
         .with_metadata(session.metadata().clone());
-        let row =
-            SessionSummary::unmanaged(UnmanagedSession::unprefixed(observation, "ringleader-"));
+        let row = SessionSummary::unmanaged(
+            UnmanagedSession::unprefixed(observation).missing_only("ringleader-"),
+        );
 
         assert_eq!(
             BarFixture::note_for(&row),

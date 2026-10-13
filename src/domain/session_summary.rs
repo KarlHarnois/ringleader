@@ -135,12 +135,19 @@ impl UnmanagedSession {
         }
     }
 
-    pub fn unprefixed(observation: SessionObservation, prefix: &str) -> Self {
+    pub fn unprefixed(observation: SessionObservation) -> Self {
         Self {
             label: format!("{}{}", Self::EXACT_LABEL, observation.tmux_name()),
             observation,
-            missing_prefix: Some(prefix.to_string()),
+            missing_prefix: None,
             shadowed: None,
+        }
+    }
+
+    pub fn missing_only(self, prefix: &str) -> Self {
+        Self {
+            missing_prefix: Some(prefix.to_string()),
+            ..self
         }
     }
 
