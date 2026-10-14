@@ -67,9 +67,9 @@ Dependencies point inward only. An inner layer never imports an outer one.
 
 The code breaks these rules in four places today. They are violations to fix, not precedent to copy.
 
-- Advice in `domain/session_summary.rs`, `application/busy_worktree.rs`, `application/server_audit.rs`, `application/delete_outcome.rs`, `application/deletion_guards.rs`, and `application/session_renaming.rs` spells out tmux and git command lines. The tmux ones repeat the exact-target syntax that `TmuxScripts::exact` owns.
+- Advice in `domain/unmanaged_session.rs`, `application/busy_worktree.rs`, `application/server_audit.rs`, `application/delete_outcome.rs`, `application/deletion_guards.rs`, and `application/session_renaming.rs` spells out tmux and git command lines. The tmux ones repeat the exact-target syntax that `TmuxScripts::exact` owns.
 - `WorkspaceError`, `MultiplexerError`, and `PullRequestError` name the git, tmux, or gh subcommand that failed, and `WorkspaceError` and `PullRequestError` keep its exit status and stderr in fields. `ServiceError::TimedOut` names the tool, and `ui/diff_queue.rs` and `ui/home_state.rs` branch on it.
-- `ui/action_gate.rs` decides which actions each session state allows, such as restart only for an Exited or Stopped session, and `StatusNote` in `ui/status_bar.rs` repeats that an Unmanaged session can only be attached. The use cases enforce their own versions of those rules.
+- `ui/action_gate.rs` decides which actions each session state allows, such as restart only for an Exited or Stopped session. The use cases enforce their own versions of those rules.
 - `CompositionRoot::run_tui` in `main.rs` calls the TUI's startup use cases itself: `restore_server_socket`, `refuse_own_pane`, `load_registry`, and `reapply_server_config`.
 
 A new capability that `application`, `ui`, or `cli` needs from outside the process goes through a port, because none of them may import `adapters`. `CompositionRoot` and the types in `adapters` reach the outside directly. Logging needs no port: every layer writes through the `log` macros, and `CompositionRoot` installs `AppLog` behind them. The steps for a port:
