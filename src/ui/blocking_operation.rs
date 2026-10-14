@@ -161,9 +161,7 @@ impl OperationOutcome {
 mod tests {
     use super::*;
     use crate::application::ports::MergeOutcome;
-    use crate::test_support::{
-        FakeDirectoryEnvironment, FakeMultiplexer, ServiceFixture, UiHarness,
-    };
+    use crate::test_support::{FakeMultiplexer, ServiceFixture, UiHarness};
 
     struct MergeOperationFixture;
 
@@ -183,11 +181,6 @@ mod tests {
     struct StartOperationFixture;
 
     impl StartOperationFixture {
-        fn not_allowed_envrc() -> FakeDirectoryEnvironment {
-            FakeDirectoryEnvironment::default()
-                .with_envrc(&ServiceFixture::worktree_path("fix-auth"), "use flake\n")
-        }
-
         fn warning(outcome: OperationOutcome) -> String {
             match outcome {
                 OperationOutcome::Warned { message, .. } => message,
@@ -199,7 +192,7 @@ mod tests {
     #[test]
     fn a_create_whose_envrc_is_not_allowed_warns_after_reporting_the_session() {
         let fixture = ServiceFixture::new()
-            .with_directory_environment(StartOperationFixture::not_allowed_envrc());
+            .with_directory_environment(ServiceFixture::not_allowed_envrc("fix-auth"));
         let request = CreateRequest::new("fix-auth", ServiceFixture::repo());
 
         let outcome = BlockingOperation::Create(request).run(&mut fixture.service());
@@ -214,7 +207,7 @@ mod tests {
     #[test]
     fn a_restart_whose_envrc_is_not_allowed_warns_after_reporting_the_restart() {
         let fixture = UiHarness::exited_session_fixture("fix-auth")
-            .with_directory_environment(StartOperationFixture::not_allowed_envrc());
+            .with_directory_environment(ServiceFixture::not_allowed_envrc("fix-auth"));
 
         let outcome =
             BlockingOperation::Restart("fix-auth".to_string()).run(&mut fixture.service());

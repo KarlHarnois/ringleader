@@ -141,8 +141,8 @@ mod tests {
     use crate::cli::CliExit;
     use crate::domain::{Repo, RepoName, Session};
     use crate::test_support::{
-        CapturedWriter, CliHarness, FakeDirectoryEnvironment, FakeMultiplexer, FakeRepoScanner,
-        FakeSessionRegistry, ServiceFixture,
+        CapturedWriter, CliHarness, FakeMultiplexer, FakeRepoScanner, FakeSessionRegistry,
+        ServiceFixture,
     };
 
     struct CommandFixture;
@@ -178,11 +178,6 @@ mod tests {
             ServiceFixture::new()
                 .with_sessions(std::slice::from_ref(&entry))
                 .with_multiplexer(FakeMultiplexer::new().with_live(renamed))
-        }
-
-        fn not_allowed_envrc(name: &str) -> FakeDirectoryEnvironment {
-            FakeDirectoryEnvironment::default()
-                .with_envrc(&ServiceFixture::worktree_path(name), "use flake\n")
         }
 
         fn broken_config() -> ConfigError {
@@ -305,7 +300,7 @@ mod tests {
     #[test]
     fn new_with_a_not_allowed_envrc_warns_on_stderr_and_exits_zero() {
         let fixture = ServiceFixture::new()
-            .with_directory_environment(CommandFixture::not_allowed_envrc("fix-auth"));
+            .with_directory_environment(ServiceFixture::not_allowed_envrc("fix-auth"));
         let harness = CliHarness::new(fixture);
 
         let exit = harness.run(&["new", "--name", "fix-auth", "--repo", "example-project"]);
@@ -324,7 +319,7 @@ mod tests {
         let session = CommandFixture::session();
         let fixture = CommandFixture::live()
             .with_multiplexer(FakeMultiplexer::new().with_live(ServiceFixture::exited(&session)))
-            .with_directory_environment(CommandFixture::not_allowed_envrc("fix-auth"));
+            .with_directory_environment(ServiceFixture::not_allowed_envrc("fix-auth"));
         let harness = CliHarness::new(fixture);
 
         let exit = harness.run(&["restart", "fix-auth"]);

@@ -212,8 +212,6 @@ mod tests {
     struct CreateFixture;
 
     impl CreateFixture {
-        const FLAKE: &'static str = "use flake\n";
-
         fn request(name: &str) -> CreateRequest {
             CreateRequest::new(name, ServiceFixture::repo())
         }
@@ -268,18 +266,9 @@ mod tests {
             ServiceFixture::new().with_directory_environment(environment)
         }
 
-        fn worktree_envrc() -> FakeDirectoryEnvironment {
-            FakeDirectoryEnvironment::default()
-                .with_envrc(&ServiceFixture::worktree_path("fix-auth"), Self::FLAKE)
-        }
-
-        fn allowed_worktree_envrc() -> FakeDirectoryEnvironment {
-            FakeDirectoryEnvironment::default()
-                .with_allowed_envrc(&ServiceFixture::worktree_path("fix-auth"), Self::FLAKE)
-        }
-
         fn envrc_matching_the_main_checkout() -> FakeDirectoryEnvironment {
-            Self::worktree_envrc().with_allowed_envrc(Path::new(ServiceFixture::REPO), Self::FLAKE)
+            ServiceFixture::not_allowed_envrc("fix-auth")
+                .with_allowed_envrc(Path::new(ServiceFixture::REPO), ServiceFixture::ENVRC)
         }
 
         fn assert_nothing_touched(fixture: &ServiceFixture) {
@@ -856,7 +845,7 @@ mod tests {
 
     #[test]
     fn create_starts_the_agent_through_an_allowed_envrc() {
-        let fixture = CreateFixture::with_envrc(CreateFixture::allowed_worktree_envrc());
+        let fixture = CreateFixture::with_envrc(ServiceFixture::allowed_envrc("fix-auth"));
 
         let outcome = CreateFixture::start(&fixture, CreateFixture::request("fix-auth")).unwrap();
 
@@ -879,7 +868,7 @@ mod tests {
 
     #[test]
     fn a_not_allowed_envrc_still_creates_the_session_and_returns_the_warning() {
-        let fixture = CreateFixture::with_envrc(CreateFixture::worktree_envrc());
+        let fixture = CreateFixture::with_envrc(ServiceFixture::not_allowed_envrc("fix-auth"));
 
         let outcome = CreateFixture::start(&fixture, CreateFixture::request("fix-auth")).unwrap();
 
@@ -907,11 +896,12 @@ mod tests {
 
     #[test]
     fn an_allowed_envrc_never_excuses_an_agent_command_that_does_not_resolve() {
-        let fixture = CreateFixture::with_envrc(CreateFixture::allowed_worktree_envrc()).with_host(
-            FakeHostProbe::default()
-                .with_directory(Path::new(ServiceFixture::REPO))
-                .with_directory(Path::new(ServiceFixture::DATA_DIR)),
-        );
+        let fixture = CreateFixture::with_envrc(ServiceFixture::allowed_envrc("fix-auth"))
+            .with_host(
+                FakeHostProbe::default()
+                    .with_directory(Path::new(ServiceFixture::REPO))
+                    .with_directory(Path::new(ServiceFixture::DATA_DIR)),
+            );
 
         let error =
             CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap_err();

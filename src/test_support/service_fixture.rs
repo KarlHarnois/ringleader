@@ -52,6 +52,7 @@ impl ServiceFixture {
     pub const STATE_DIRECTORY: &'static str = "/state/ringleader";
     pub const TMUX_CONFIG: &'static str = "/state/ringleader/tmux.conf";
     pub const LOG_FILE: &'static str = "/state/ringleader/app.log";
+    pub const ENVRC: &'static str = "use flake\n";
 
     pub fn new() -> Self {
         Self {
@@ -350,6 +351,15 @@ impl ServiceFixture {
             tmux_name: Self::session(name).tmux_name().to_string(),
         };
         FakeMultiplexer::new().failing("type_if_ready", not_ready)
+    }
+
+    pub fn not_allowed_envrc(name: &str) -> FakeDirectoryEnvironment {
+        FakeDirectoryEnvironment::default().with_envrc(&Self::worktree_path(name), Self::ENVRC)
+    }
+
+    pub fn allowed_envrc(name: &str) -> FakeDirectoryEnvironment {
+        FakeDirectoryEnvironment::default()
+            .with_allowed_envrc(&Self::worktree_path(name), Self::ENVRC)
     }
 
     pub fn with_worktree_agent(session: &Session) -> FakeHostProbe {

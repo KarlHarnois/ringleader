@@ -133,9 +133,7 @@ mod tests {
     use super::*;
     use crate::application::ports::MultiplexerError;
     use crate::domain::AgentPane;
-    use crate::test_support::{
-        FakeDirectoryEnvironment, FakeMultiplexer, FakeSessionRegistry, ServiceFixture,
-    };
+    use crate::test_support::{FakeMultiplexer, FakeSessionRegistry, ServiceFixture};
 
     struct RestartFixture;
 
@@ -171,16 +169,6 @@ mod tests {
                 subcommand: "new-session".to_string(),
                 detail: "server exited unexpectedly".to_string(),
             }
-        }
-
-        fn allowed_envrc() -> FakeDirectoryEnvironment {
-            FakeDirectoryEnvironment::default()
-                .with_allowed_envrc(Self::session().worktree_path(), "use flake\n")
-        }
-
-        fn not_allowed_envrc() -> FakeDirectoryEnvironment {
-            FakeDirectoryEnvironment::default()
-                .with_envrc(Self::session().worktree_path(), "use flake\n")
         }
 
         fn loads_envrc(fixture: &ServiceFixture) -> bool {
@@ -698,8 +686,8 @@ mod tests {
 
     #[test]
     fn an_exited_session_is_respawned_through_its_allowed_envrc() {
-        let fixture =
-            RestartFixture::exited().with_directory_environment(RestartFixture::allowed_envrc());
+        let fixture = RestartFixture::exited()
+            .with_directory_environment(ServiceFixture::allowed_envrc("fix-auth"));
 
         RestartFixture::restart(&fixture).unwrap();
 
@@ -708,8 +696,8 @@ mod tests {
 
     #[test]
     fn a_stopped_session_is_recreated_through_its_allowed_envrc() {
-        let fixture =
-            RestartFixture::stopped().with_directory_environment(RestartFixture::allowed_envrc());
+        let fixture = RestartFixture::stopped()
+            .with_directory_environment(ServiceFixture::allowed_envrc("fix-auth"));
 
         RestartFixture::restart(&fixture).unwrap();
 
@@ -728,7 +716,7 @@ mod tests {
     fn a_restart_through_the_envrc_passes_the_agent_its_args_and_the_session_name() {
         let fixture = RestartFixture::exited()
             .with_config(ServiceFixture::config_with_input())
-            .with_directory_environment(RestartFixture::allowed_envrc());
+            .with_directory_environment(ServiceFixture::allowed_envrc("fix-auth"));
 
         RestartFixture::restart(&fixture).unwrap();
 
@@ -739,8 +727,8 @@ mod tests {
 
     #[test]
     fn a_restart_allows_an_envrc_matching_the_main_checkout() {
-        let environment = RestartFixture::not_allowed_envrc()
-            .with_allowed_envrc(Path::new(ServiceFixture::REPO), "use flake\n");
+        let environment = ServiceFixture::not_allowed_envrc("fix-auth")
+            .with_allowed_envrc(Path::new(ServiceFixture::REPO), ServiceFixture::ENVRC);
         let fixture = RestartFixture::stopped().with_directory_environment(environment);
 
         RestartFixture::restart(&fixture).unwrap();
@@ -754,7 +742,7 @@ mod tests {
     #[test]
     fn a_not_allowed_envrc_still_restarts_the_agent_and_returns_the_warning() {
         let fixture = RestartFixture::exited()
-            .with_directory_environment(RestartFixture::not_allowed_envrc());
+            .with_directory_environment(ServiceFixture::not_allowed_envrc("fix-auth"));
 
         let outcome = fixture.service().restart_session("fix-auth").unwrap();
 
