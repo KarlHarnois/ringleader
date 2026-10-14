@@ -8,7 +8,7 @@ use thiserror::Error;
 
 use super::agent_handoff::AgentHandoff;
 use super::handoff_contents::{EnvrcStep, HandoffContents};
-use super::launcher_command::LauncherCommand;
+use super::launcher_command::{LauncherCommand, PreparedLaunch};
 use super::process_environment::ProcessEnvironment;
 
 pub trait ExecSeam {
@@ -92,14 +92,19 @@ impl AgentLauncher {
                 };
             }
         };
+        let loader = Self::envrc_loader(contents, &prepared);
+        let error = self.exec(self.in_pane(loader, contents, contents.inherited()));
+        prepared.discard();
+        error
+    }
+
+    fn envrc_loader(contents: &HandoffContents, reentry: &PreparedLaunch) -> Command {
         let mut loader = Command::new(Self::ENVRC_LOADER);
         loader
             .arg(Self::ENVRC_LOADER_EXEC)
             .arg(contents.worktree())
-            .args(prepared.words());
-        let error = self.exec(self.in_pane(loader, contents, contents.inherited()));
-        prepared.discard();
-        error
+            .args(reentry.words());
+        loader
     }
 
     fn exec_inside_envrc(&mut self, contents: &HandoffContents) -> LaunchError {
