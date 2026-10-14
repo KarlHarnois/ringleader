@@ -428,6 +428,21 @@ mod tests {
     }
 
     #[test]
+    fn a_return_key_parse_now_refuses_is_still_unbound_when_the_key_changes() {
+        let recorded = HotKey::recorded("M-BSpace").unwrap();
+        let older = KeyBindings::default().with_return_key(recorded);
+        let server = TmuxTestServer::with_config(&TmuxServerConfig::new(&older).render());
+        server.start_session("holder");
+        let tmux = server.command();
+
+        PrivateServer::new(&tmux)
+            .apply(&KeyBindings::default())
+            .unwrap();
+
+        assert_eq!(ServerFixture::detach_keys(&server), ["C-q"]);
+    }
+
+    #[test]
     fn dropping_a_session_key_copy_mode_binds_gives_that_binding_back() {
         let server = TmuxTestServer::with_session("holder");
         let tmux = server.command();

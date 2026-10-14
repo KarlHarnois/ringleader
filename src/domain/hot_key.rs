@@ -28,12 +28,15 @@ impl HotKey {
     ];
 
     pub fn parse(text: &str) -> Option<Self> {
+        Self::recorded(text).filter(Self::is_reachable)
+    }
+
+    pub fn recorded(text: &str) -> Option<Self> {
         let (modifiers, rest) = Modifier::split(text);
-        let key = Self {
+        (!rest.is_empty()).then(|| Self {
             key: Self::normalized(&modifiers, rest),
             modifiers,
-        };
-        key.is_reachable().then_some(key)
+        })
     }
 
     pub fn parse_valid<T: AsRef<str>>(texts: impl IntoIterator<Item = T>) -> Vec<Self> {
@@ -267,6 +270,16 @@ mod tests {
         KeyFixture::assert_refused(&[
             "C-Enter", "C-Tab", "C-Escape", "C-BSpace", "S-Tab", "S-Space",
         ]);
+    }
+
+    #[test]
+    fn a_recorded_key_skips_only_the_reachability_rule() {
+        assert_eq!(
+            HotKey::recorded("M-BSpace").map(|key| key.to_string()),
+            Some("M-BSpace".to_string())
+        );
+        assert_eq!(HotKey::parse("M-BSpace"), None);
+        assert_eq!(HotKey::recorded(""), None);
     }
 
     #[test]
