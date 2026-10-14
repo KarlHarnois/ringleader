@@ -75,3 +75,78 @@ pub(super) enum ConflictHandoff {
     Asked,
     Refused(MultiplexerError),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct ReportFixture;
+
+    impl ReportFixture {
+        fn report(outcome: MergeOutcome, handoff: ConflictHandoff) -> MergeReport {
+            let name = SessionName::new("fix-auth").unwrap();
+            let main = BaseBranch::new("main").unwrap();
+            MergeReport::new(&name, UpstreamMerge::new(&main, outcome), handoff)
+        }
+
+        fn conflicts(count: usize) -> MergeOutcome {
+            let paths = (1..=count).map(|number| format!("src/file{number}.rs"));
+            MergeOutcome::Conflicted(paths.collect())
+        }
+
+        fn not_at_its_prompt() -> ConflictHandoff {
+            ConflictHandoff::Refused(MultiplexerError::AgentNotReady {
+                tmux_name: "ringleader-fix-auth".to_string(),
+            })
+        }
+    }
+
+    #[test]
+    fn an_up_to_date_session_is_summarized() {
+        let report = ReportFixture::report(MergeOutcome::UpToDate, ConflictHandoff::Unneeded);
+
+        assert_eq!(report.summary(), "fix-auth already has origin/main");
+    }
+
+    #[test]
+    fn a_merge_is_summarized() {
+        let report = ReportFixture::report(MergeOutcome::Merged, ConflictHandoff::Unneeded);
+
+        assert_eq!(report.summary(), "merged origin/main into fix-auth");
+    }
+
+    #[test]
+    fn conflicts_asked_of_the_agent_are_summarized() {
+        let report = ReportFixture::report(ReportFixture::conflicts(2), ConflictHandoff::Asked);
+
+        assert_eq!(
+            report.summary(),
+            "merging origin/main into fix-auth stopped on conflicts in 2 files, asked its agent to finish the merge"
+        );
+        assert!(!report.needs_attention());
+    }
+
+    #[test]
+    fn a_single_conflict_is_named_in_the_singular() {
+        let report = ReportFixture::report(ReportFixture::conflicts(1), ConflictHandoff::Asked);
+
+        assert_eq!(
+            report.summary(),
+            "merging origin/main into fix-auth stopped on a conflict in 1 file, asked its agent to finish the merge"
+        );
+    }
+
+    #[test]
+    fn conflicts_the_agent_was_not_asked_about_need_attention_and_say_why() {
+        let report = ReportFixture::report(
+            ReportFixture::conflicts(2),
+            ReportFixture::not_at_its_prompt(),
+        );
+
+        assert!(report.needs_attention());
+        assert_eq!(
+            report.summary(),
+            "merging origin/main into fix-auth stopped on conflicts in 2 files, and its agent was not asked to finish the merge: the agent in tmux session ringleader-fix-auth is not at its prompt"
+        );
+    }
+}

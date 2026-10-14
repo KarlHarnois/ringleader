@@ -325,15 +325,11 @@ mod tests {
     }
 
     #[test]
-    fn conflicts_asked_of_the_agent_are_summarized() {
+    fn conflicts_handed_to_the_agent_need_no_attention() {
         let fixture = MergeFixture::conflicted();
 
         let report = MergeFixture::merge(&fixture).unwrap();
 
-        assert_eq!(
-            report.summary(),
-            "merging origin/main into fix-auth stopped on conflicts in 2 files, asked its agent to finish the merge"
-        );
         assert!(!report.needs_attention());
     }
 
@@ -353,16 +349,7 @@ mod tests {
     }
 
     #[test]
-    fn an_up_to_date_session_is_summarized() {
-        let fixture = MergeFixture::ending(MergeOutcome::UpToDate);
-
-        let report = MergeFixture::merge(&fixture).unwrap();
-
-        assert_eq!(report.summary(), "fix-auth already has origin/main");
-    }
-
-    #[test]
-    fn an_agent_that_leaves_its_prompt_during_the_merge_is_reported() {
+    fn an_agent_that_leaves_its_prompt_during_the_merge_needs_attention() {
         let fixture = ServiceFixture::merging(
             MergeFixture::NAME,
             MergeFixture::conflicts(),
@@ -372,23 +359,6 @@ mod tests {
         let report = MergeFixture::merge(&fixture).unwrap();
 
         assert!(report.needs_attention());
-        assert_eq!(
-            report.summary(),
-            "merging origin/main into fix-auth stopped on conflicts in 2 files, and its agent was not asked to finish the merge: the agent in tmux session ringleader-fix-auth is not at its prompt"
-        );
-    }
-
-    #[test]
-    fn a_single_conflict_is_named_in_the_singular() {
-        let fixture =
-            MergeFixture::ending(MergeOutcome::Conflicted(vec!["src/auth.rs".to_string()]));
-
-        let report = MergeFixture::merge(&fixture).unwrap();
-
-        assert_eq!(
-            report.summary(),
-            "merging origin/main into fix-auth stopped on a conflict in 1 file, asked its agent to finish the merge"
-        );
     }
 
     #[test]
