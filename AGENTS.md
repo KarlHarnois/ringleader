@@ -190,6 +190,7 @@ viewer exits.
     │   ├── session_classifier.rs # SessionClassifier, the pure state classifier
     │   ├── diff_stat.rs          # DiffStat
     │   ├── session_summary.rs    # SessionSummary
+    │   ├── unmanaged_session.rs  # UnmanagedSession, a live tmux session Ringleader does not manage, its label, and the note or kill-session advice that explains why
     │   ├── agent.rs              # Agent
     │   ├── agent_mode.rs         # AgentMode, build or plan, the mode a new session's agent starts in
     │   ├── repo.rs               # Repo

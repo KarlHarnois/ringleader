@@ -18,6 +18,7 @@ pub mod session_name;
 pub mod session_observation;
 pub mod session_state;
 pub mod session_summary;
+pub mod unmanaged_session;
 
 pub use agent::Agent;
 pub use agent_mode::AgentMode;
@@ -37,4 +38,5 @@ pub use session_metadata::{SessionMetadata, SessionRepo, SessionWorktree};
 pub use session_name::{InvalidName, SessionName};
 pub use session_observation::{AgentPane, SessionObservation};
 pub use session_state::SessionState;
-pub use session_summary::{PairMismatch, SessionSummary, UnmanagedSession};
+pub use session_summary::SessionSummary;
+pub use unmanaged_session::{PairMismatch, UnmanagedSession};
