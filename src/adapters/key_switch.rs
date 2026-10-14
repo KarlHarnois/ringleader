@@ -70,6 +70,9 @@ impl DisplacedBindings {
     }
 
     fn replaced_by(tmux: &TmuxCommand, keys: &[&HotKey]) -> Result<Self, MultiplexerError> {
+        if keys.is_empty() {
+            return Ok(Self::default());
+        }
         let listings = Self::copy_table_listings(tmux)?;
         let slots = keys
             .iter()
@@ -172,6 +175,8 @@ impl DisplacedBindings {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::adapters::process_environment::ProcessEnvironment;
+    use crate::adapters::server_files::ServerFiles;
     use crate::test_support::TmuxTestServer;
 
     #[test]
@@ -201,6 +206,26 @@ mod tests {
     #[test]
     fn a_line_without_a_table_flag_lists_no_key() {
         assert_eq!(DisplacedBindings::listed_key("unknown key: C-q"), None);
+    }
+
+    #[test]
+    fn a_switch_that_keeps_every_key_asks_tmux_nothing() {
+        let directory = tempfile::tempdir().unwrap();
+        let files = ServerFiles::new(
+            &directory.path().join("tmux.sock"),
+            &directory.path().join("tmux.conf"),
+        );
+        let missing_program = directory.path().join("no-such-tmux");
+        let tmux = TmuxCommand::new(
+            missing_program.as_os_str(),
+            &files,
+            &ProcessEnvironment::default(),
+        );
+        let bindings = KeyBindings::default();
+
+        let switch = KeySwitch::read(&tmux, Some(&bindings), &bindings);
+
+        assert!(switch.is_ok());
     }
 
     #[test]
