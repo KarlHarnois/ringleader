@@ -3,9 +3,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use crate::application::ports::{
-    DirtyState, Head, StartPoint, UnmergedCommits, Workspace, WorkspaceError, WorktreeEntry,
+    DirtyState, Head, MergeOutcome, StartPoint, UnmergedCommits, UpstreamMerge, Workspace,
+    WorkspaceError, WorktreeEntry,
 };
-use crate::domain::{Branch, BranchTips, DiffStat, MergeBases};
+use crate::domain::{BaseBranch, Branch, BranchTips, DiffStat, MergeBases};
 
 #[derive(Default)]
 pub struct FakeWorkspace {
@@ -30,6 +31,7 @@ struct WorkspaceState {
     merge_bases: HashMap<PathBuf, Vec<String>>,
     merge_base_requests: Vec<Vec<String>>,
     diff_bases: Vec<StartPoint>,
+    upstream_merge: Option<UpstreamMerge>,
     invalid_repos: HashSet<PathBuf>,
     failures: HashMap<&'static str, WorkspaceError>,
     failed_create_leftover: Option<FailedCreateLeftover>,
@@ -53,7 +55,7 @@ enum FailedCreateLeftover {
 }
 
 impl FakeWorkspace {
-    pub const STATE_CHANGING: [&'static str; 7] = [
+    pub const STATE_CHANGING: [&'static str; 9] = [
         "create_worktree",
         "remove_worktree",
         "unlock_worktree",
@@ -61,9 +63,14 @@ impl FakeWorkspace {
         "rename_branch",
         "drop_stale_upstream",
         "mark_branch_managed",
+        "fetch_upstream",
+        "merge_upstream",
     ];
     pub const DEFAULT_START: &'static str = "0123456789abcdef0123456789abcdef01234567";
     pub const DEFAULT_BRANCH: &'static str = "main";
+    pub const NO_BASE_BRANCH: &'static str = "-";
+    pub const UPSTREAM: &'static str = "origin/main";
+    pub const UPSTREAM_BRANCH: &'static str = "main";
 
     pub fn with_branch(self, repo: &Path, branch: &str, tip: &str) -> Self {
         self.edit(|state| state.add_branch(repo, branch, tip));
@@ -149,6 +156,12 @@ impl FakeWorkspace {
 
     pub fn with_diff(self, worktree: &Path, diff: DiffStat) -> Self {
         self.edit(|state| state.diffs.insert(worktree.to_path_buf(), diff));
+        self
+    }
+
+    pub fn with_upstream_merge(self, outcome: MergeOutcome) -> Self {
+        let merge = UpstreamMerge::new(Self::UPSTREAM, outcome);
+        self.edit(|state| state.upstream_merge = Some(merge));
         self
     }
 
@@ -638,6 +651,38 @@ impl Workspace for FakeWorkspace {
         Ok(self.edit(|state| {
             state.diff_bases.push(base.clone());
             state.diffs.get(worktree).copied().unwrap_or_default()
+        }))
+    }
+
+    fn fetch_upstream(
+        &self,
+        worktree: &Path,
+        base_branch: Option<&BaseBranch>,
+    ) -> Result<BaseBranch, WorkspaceError> {
+        let base = base_branch.map_or(Self::NO_BASE_BRANCH, BaseBranch::as_str);
+        self.call("fetch_upstream", format!("{} {base}", worktree.display()))?;
+        let default_branch = BaseBranch::new(Self::UPSTREAM_BRANCH);
+        Ok(base_branch
+            .and_then(BaseBranch::on_origin)
+            .or(default_branch)
+            .expect("the fake's upstream branch has a name"))
+    }
+
+    fn merge_upstream(
+        &self,
+        worktree: &Path,
+        branch_on_origin: &BaseBranch,
+        started_from: &str,
+    ) -> Result<UpstreamMerge, WorkspaceError> {
+        self.call(
+            "merge_upstream",
+            format!("{} {branch_on_origin} {started_from}", worktree.display()),
+        )?;
+        Ok(self.edit(|state| {
+            state
+                .upstream_merge
+                .clone()
+                .unwrap_or_else(|| UpstreamMerge::new(Self::UPSTREAM, MergeOutcome::Merged))
         }))
     }
 

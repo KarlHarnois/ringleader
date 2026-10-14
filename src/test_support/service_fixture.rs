@@ -5,15 +5,15 @@ use super::{
     FakeClock, FakeConfigSource, FakeHostProbe, FakeMultiplexer, FakePullRequests, FakeRepoScanner,
     FakeSessionRegistry, FakeWorkspace,
 };
-use crate::application::ports::{ConfigError, WorktreeEntry};
+use crate::application::ports::{ConfigError, MergeOutcome, MultiplexerError, WorktreeEntry};
 use crate::application::{
     CorruptRegistry, DiagnosticPaths, LoadedConfig, RepoPorts, ServiceContext, ServicePorts,
     SessionService, StatePorts, TmuxPorts,
 };
 use crate::domain::{
-    Agent, AgentPane, BaseBranch, Config, NamingScheme, PullRequest, PullRequestState,
-    Registration, Repo, RepoName, Session, SessionMetadata, SessionName, SessionObservation,
-    SessionRepo, SessionState, SessionSummary, SessionWorktree, TmuxAddress,
+    Agent, AgentPane, BaseBranch, Config, HotKey, KeyBindings, NamingScheme, PullRequest,
+    PullRequestState, Registration, Repo, RepoName, Session, SessionMetadata, SessionName,
+    SessionObservation, SessionRepo, SessionState, SessionSummary, SessionWorktree, TmuxAddress,
 };
 
 pub struct ServiceFixture {
@@ -211,6 +211,7 @@ impl ServiceFixture {
         Agent::new("claude", "claude")
             .with_env_names(&["ANTHROPIC_API_KEY".to_string()])
             .with_prompt_args(&["{prompt}".to_string()])
+            .with_plan_args(&["--permission-mode".to_string(), "plan".to_string()])
     }
 
     pub fn agent_with_input() -> Agent {
@@ -226,6 +227,14 @@ impl ServiceFixture {
 
     pub fn config() -> Config {
         Config::defaults(Path::new(Self::WORKTREE_ROOT)).with_agents(vec![Self::agent()])
+    }
+
+    pub fn config_with_alt_n() -> Config {
+        Self::config().with_key_bindings(Self::alt_n_bindings())
+    }
+
+    pub fn alt_n_bindings() -> KeyBindings {
+        KeyBindings::default().with_next_session_keys(HotKey::parse_valid(["M-n"]))
     }
 
     pub fn naming() -> NamingScheme {
@@ -300,6 +309,22 @@ impl ServiceFixture {
             Path::new(FakeMultiplexer::SOCKET),
         );
         Session::new(name, metadata, Registration::new(tmux, naming, created_at))
+    }
+
+    pub fn merging(name: &str, outcome: MergeOutcome, multiplexer: FakeMultiplexer) -> Self {
+        let session = Self::session(name);
+        Self::new()
+            .with_sessions(std::slice::from_ref(&session))
+            .with_workspace(Self::workspace_for(&[&session]).with_upstream_merge(outcome))
+            .with_host(Self::host_for(&[&session]))
+            .with_multiplexer(multiplexer.with_live(Self::waiting(&session)))
+    }
+
+    pub fn refusing_typing(name: &str) -> FakeMultiplexer {
+        let not_ready = MultiplexerError::AgentNotReady {
+            tmux_name: Self::session(name).tmux_name().to_string(),
+        };
+        FakeMultiplexer::new().failing("type_if_ready", not_ready)
     }
 
     pub fn with_worktree_agent(session: &Session) -> FakeHostProbe {

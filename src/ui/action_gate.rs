@@ -48,6 +48,9 @@ impl<'a> ActionGate<'a> {
             KeyCode::Down | KeyCode::Right | KeyCode::Char('j' | 'l') => KeyAction::Move(1),
             KeyCode::Up | KeyCode::Left | KeyCode::Char('k' | 'h') => KeyAction::Move(-1),
             KeyCode::Char('G') => KeyAction::SelectLast,
+            KeyCode::Char('H') => KeyAction::SelectHigh,
+            KeyCode::Char('M') => KeyAction::SelectMiddle,
+            KeyCode::Char('L') => KeyAction::SelectLow,
             KeyCode::Char('n') => KeyAction::from(
                 self.writable()
                     .map(|()| KeyAction::Open(DialogOpening::NewSession)),
@@ -58,6 +61,7 @@ impl<'a> ActionGate<'a> {
             KeyCode::Char('t') => KeyAction::from(self.shell().map(KeyAction::Request)),
             KeyCode::Char('s') => KeyAction::from(self.restart().map(KeyAction::Request)),
             KeyCode::Char('d') => KeyAction::from(self.delete().map(KeyAction::Request)),
+            KeyCode::Char('p') => KeyAction::from(self.pull().map(KeyAction::Request)),
             KeyCode::Char('R') => KeyAction::from(
                 self.rename()
                     .map(|session| KeyAction::Open(DialogOpening::Rename(Box::new(session)))),
@@ -129,6 +133,24 @@ impl<'a> ActionGate<'a> {
         }
     }
 
+    pub fn pull(&self) -> Result<AppRequest, String> {
+        self.writable()?;
+        let row = self.selected()?;
+        let name = row.name();
+        match row.state() {
+            SessionState::Waiting => Ok(AppRequest::Block(BlockingOperation::Merge(
+                name.to_string(),
+            ))),
+            SessionState::Unmanaged => {
+                Err(format!("{name} is unmanaged, so p cannot pull into it."))
+            }
+            state => Err(format!(
+                "{name} is {}, p only pulls into a session waiting at its prompt.",
+                state.label()
+            )),
+        }
+    }
+
     fn writable(&self) -> Result<(), String> {
         match self.config_error {
             Some(error) => Err(format!("config error, running read-only: {error}")),
@@ -147,6 +169,9 @@ pub enum KeyAction {
     Move(isize),
     SelectFirst,
     SelectLast,
+    SelectHigh,
+    SelectMiddle,
+    SelectLow,
     Fold,
     JumpToRepo(usize),
     Open(DialogOpening),
@@ -263,6 +288,63 @@ mod tests {
     }
 
     #[test]
+    fn a_waiting_session_pulls() {
+        let row = GateFixture::row(SessionState::Waiting);
+
+        assert_eq!(
+            ActionGate::new(Some(&row), None).pull(),
+            Ok(AppRequest::Block(BlockingOperation::Merge(
+                "fix-auth".to_string()
+            )))
+        );
+    }
+
+    #[test]
+    fn a_session_away_from_its_prompt_cannot_pull() {
+        for state in [
+            SessionState::Working,
+            SessionState::Exited,
+            SessionState::Stopped,
+        ] {
+            let row = GateFixture::row(state);
+
+            assert_eq!(
+                ActionGate::new(Some(&row), None).pull(),
+                Err(format!(
+                    "fix-auth is {}, p only pulls into a session waiting at its prompt.",
+                    state.label()
+                ))
+            );
+        }
+    }
+
+    #[test]
+    fn an_unmanaged_session_cannot_pull() {
+        let stranger = ServiceFixture::session("mystery");
+        let row = SessionSummary::unmanaged(UnmanagedSession::new(
+            "mystery",
+            ServiceFixture::waiting(&stranger).without_metadata(),
+        ));
+
+        assert_eq!(
+            ActionGate::new(Some(&row), None).pull(),
+            Err("mystery is unmanaged, so p cannot pull into it.".to_string())
+        );
+    }
+
+    #[test]
+    fn a_read_only_tui_refuses_a_pull_with_the_config_error() {
+        let row = GateFixture::row(SessionState::Waiting);
+        let error = GateFixture::config_error();
+
+        let refusal = ActionGate::new(Some(&row), Some(&error))
+            .pull()
+            .unwrap_err();
+
+        assert!(refusal.starts_with("config error, running read-only: "));
+    }
+
+    #[test]
     fn an_unmanaged_session_opens_no_shell() {
         let stranger = ServiceFixture::session("mystery");
         let row = SessionSummary::unmanaged(UnmanagedSession::new(
@@ -350,6 +432,16 @@ mod tests {
             ActionGate::new(None, None).action_for(&key),
             KeyAction::SelectLast
         );
+    }
+
+    #[test]
+    fn capital_h_m_and_l_select_the_top_middle_and_bottom_rows_on_screen() {
+        let gate = ActionGate::new(None, None);
+        let action = |character| gate.action_for(&KeyEvent::from(KeyCode::Char(character)));
+
+        assert_eq!(action('H'), KeyAction::SelectHigh);
+        assert_eq!(action('M'), KeyAction::SelectMiddle);
+        assert_eq!(action('L'), KeyAction::SelectLow);
     }
 
     #[test]

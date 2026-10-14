@@ -32,6 +32,11 @@ impl BaseBranch {
             .chain([self.origin_copy()])
             .collect()
     }
+
+    pub fn on_origin(&self) -> Option<BaseBranch> {
+        let origin_prefix = format!("{}/", Branch::ORIGIN);
+        Self::new(self.0.strip_prefix(&origin_prefix).unwrap_or(&self.0))
+    }
 }
 
 impl fmt::Display for BaseBranch {
@@ -88,5 +93,27 @@ mod tests {
                 Branch::RemoteTracking("origin/develop".to_string())
             ]
         );
+    }
+
+    #[test]
+    fn a_local_name_keeps_its_name_on_origin() {
+        assert_eq!(
+            BaseFixture::develop().on_origin(),
+            Some(BaseFixture::develop())
+        );
+    }
+
+    #[test]
+    fn an_origin_tracking_name_drops_the_remote_on_origin() {
+        let base = BaseBranch::new("origin/main").unwrap();
+
+        assert_eq!(base.on_origin(), BaseBranch::new("main"));
+    }
+
+    #[test]
+    fn the_bare_origin_prefix_names_no_branch_on_origin() {
+        let base = BaseBranch::new("origin/").unwrap();
+
+        assert_eq!(base.on_origin(), None);
     }
 }

@@ -13,10 +13,11 @@ use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
 use super::session_creation::SessionCreation;
 use super::session_deletion::SessionDeletion;
+use super::session_merge::{MergeReport, SessionMerge};
 use super::session_renaming::SessionRenaming;
 use super::session_restart::SessionRestart;
 use super::worktree_containment::WorktreeContainment;
-use crate::domain::{Config, ReturnKey, Session, SessionState};
+use crate::domain::{Config, KeyBindings, Session, SessionState};
 
 pub struct SessionLifecycle {
     multiplexer: Arc<dyn Multiplexer>,
@@ -26,6 +27,7 @@ pub struct SessionLifecycle {
     renaming: SessionRenaming,
     deletion: SessionDeletion,
     restart: SessionRestart,
+    merging: SessionMerge,
     hooks: Arc<AgentHooks>,
 }
 
@@ -43,6 +45,7 @@ impl SessionLifecycle {
             renaming: SessionRenaming::new(ports, Arc::clone(&hooks)),
             deletion: SessionDeletion::new(ports),
             restart: SessionRestart::new(ports, Arc::clone(&hooks)),
+            merging: SessionMerge::new(ports),
             hooks,
         }
     }
@@ -66,7 +69,7 @@ impl SessionLifecycle {
         config: &Config,
         config_path: &Path,
     ) -> Result<Session, ServiceError> {
-        self.sync_server_config(config.return_key())?;
+        self.sync_server_config(config.key_bindings())?;
         self.creation
             .create(request, reconciliation, config, config_path)
     }
@@ -76,10 +79,10 @@ impl SessionLifecycle {
         Ok(restored.then(|| Self::RESTORED_SOCKET.to_string()))
     }
 
-    pub fn sync_server_config(&self, return_key: &ReturnKey) -> Result<(), ServiceError> {
-        match self.multiplexer.server_config(return_key)? {
+    pub fn sync_server_config(&self, key_bindings: &KeyBindings) -> Result<(), ServiceError> {
+        match self.multiplexer.server_config(key_bindings)? {
             Some(running) if !running.is_current() => {
-                Ok(self.multiplexer.apply_config(return_key)?)
+                Ok(self.multiplexer.apply_config(key_bindings)?)
             }
             _ => Ok(()),
         }
@@ -117,9 +120,19 @@ impl SessionLifecycle {
         config_path: &Path,
     ) -> Result<Session, ServiceError> {
         let row = self.quiet_target(reconciliation, name)?;
-        self.sync_server_config(config.return_key())?;
+        self.sync_server_config(config.key_bindings())?;
         self.restart
             .restart(&row, reconciliation, config, config_path)
+    }
+
+    pub fn merge_upstream(
+        &self,
+        reconciliation: &Reconciliation,
+        name: &str,
+        config: &Config,
+    ) -> Result<MergeReport, ServiceError> {
+        let row = self.managed_target(reconciliation, name)?;
+        self.merging.merge(&row, reconciliation, config)
     }
 
     pub fn rename(

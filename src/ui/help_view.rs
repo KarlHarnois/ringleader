@@ -1,6 +1,7 @@
 use std::cell::Cell;
 use std::iter::once;
 use std::path::Path;
+use std::slice;
 
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::text::{Line, Span};
@@ -12,10 +13,10 @@ use super::legend::{Legend, LegendEntry};
 use super::state_indicator::StateIndicator;
 use super::text_fit::TextFit;
 use super::theme::Theme;
-use crate::domain::{PullRequestState, ReturnKey, SessionState};
+use crate::domain::{HotKey, KeyBindings, PullRequestState, SessionState};
 
 pub struct HelpView {
-    return_key: String,
+    bound_keys: Vec<(String, &'static str)>,
     files: Vec<(String, String)>,
     scroll: usize,
     max_scroll: Cell<usize>,
@@ -24,7 +25,7 @@ pub struct HelpView {
 impl HelpView {
     pub const TITLE: &'static str = concat!(" Help · ringleader ", env!("CARGO_PKG_VERSION"), " ");
     const KEYS_HEADING: &'static str = "Keys";
-    const KEYS: [(&'static str, &'static str); 13] = [
+    const KEYS: [(&'static str, &'static str); 15] = [
         ("n", "create a session"),
         ("d", "delete the selected session"),
         ("R", "rename the selected session and its branch"),
@@ -37,31 +38,64 @@ impl HelpView {
         ("t", "open a shell in the selected session's worktree"),
         ("s", "restart an exited or stopped session"),
         (
+            "p",
+            "pull the base branch from origin, the agent fixes conflicts",
+        ),
+        (
             "r",
             "reload the config and the registry and refresh diffs and PRs",
         ),
         ("↑ ↓ j k h l", "move the selection"),
         ("gg G", "select the first or the last row"),
+        ("H M L", "select the top, middle, or bottom row on screen"),
         ("1-9", "jump to a repo"),
         ("q", "quit, the sessions keep running"),
     ];
     const RETURN_ACTION: &'static str = "detach from a session and return here";
+    const NEXT_SESSION_ACTION: &'static str = "switch to the next session by name while attached";
+    const PREVIOUS_SESSION_ACTION: &'static str =
+        "switch to the previous session by name while attached";
     const FIRST_SPINNER_TICK: u64 = 0;
     const PULL_REQUEST_SYMBOL: &'static str = "#n";
     const CLOSE_HINT: &'static str = "? Esc q close";
     const SCROLL_HINT: &'static str = "↑ ↓ scroll · ";
 
-    pub fn new(return_key: &ReturnKey, files: &[(&str, &Path)], home: &HomePath) -> Self {
+    pub fn new(key_bindings: &KeyBindings, files: &[(&str, &Path)], home: &HomePath) -> Self {
         let files = files
             .iter()
             .map(|(label, path)| (label.to_string(), home.shown(path)))
             .collect();
         Self {
-            return_key: return_key.display(),
+            bound_keys: Self::bound_keys(key_bindings),
             files,
             scroll: 0,
             max_scroll: Cell::new(0),
         }
+    }
+
+    fn bound_keys(key_bindings: &KeyBindings) -> Vec<(String, &'static str)> {
+        let rows = [
+            (
+                Self::shown(slice::from_ref(key_bindings.return_key())),
+                Self::RETURN_ACTION,
+            ),
+            (
+                Self::shown(key_bindings.next_session_keys()),
+                Self::NEXT_SESSION_ACTION,
+            ),
+            (
+                Self::shown(key_bindings.previous_session_keys()),
+                Self::PREVIOUS_SESSION_ACTION,
+            ),
+        ];
+        rows.into_iter()
+            .filter(|(keys, _)| !keys.is_empty())
+            .collect()
+    }
+
+    fn shown(keys: &[HotKey]) -> String {
+        let shown: Vec<String> = keys.iter().map(HotKey::display).collect();
+        shown.join(" ")
     }
 
     pub fn handle_key(&mut self, key: &KeyEvent) -> DialogStep {
@@ -116,8 +150,11 @@ impl HelpView {
         let rows = Self::KEYS
             .iter()
             .flat_map(|(key, action)| Self::labeled(key, action, width, theme));
-        let return_row = Self::labeled(&self.return_key, Self::RETURN_ACTION, width, theme);
-        once(heading).chain(rows).chain(return_row).collect()
+        let bound_rows = self
+            .bound_keys
+            .iter()
+            .flat_map(|(keys, action)| Self::labeled(keys, action, width, theme));
+        once(heading).chain(rows).chain(bound_rows).collect()
     }
 
     fn legends(width: usize, theme: &Theme) -> Vec<Line<'static>> {
@@ -197,17 +234,21 @@ mod tests {
         const SHORT_WIDTH: usize = 56;
         const SHORT_HEIGHT: usize = 8;
         const PAST_THE_END: usize = 50;
-        const ROWS_ABOVE_THE_SMALLEST_FULL_SIZE: u16 = 3;
-        const TALL_NARROW_SIZE: (u16, u16) = (79, 30);
+        const ROWS_ABOVE_THE_SMALLEST_FULL_SIZE: u16 = 7;
+        const TALL_NARROW_SIZE: (u16, u16) = (79, 31);
         const TMUX_CONFIG_ROW: &'static str = "tmux config  ~/.local/state/ringleader/tmux.conf";
 
         fn help() -> HelpView {
-            Self::help_for(&ReturnKey::default())
+            Self::help_for(&KeyBindings::default())
         }
 
-        fn help_for(return_key: &ReturnKey) -> HelpView {
+        fn with_return_key(text: &str) -> HelpView {
+            Self::help_for(&KeyBindings::default().with_return_key(HotKey::parse(text).unwrap()))
+        }
+
+        fn help_for(key_bindings: &KeyBindings) -> HelpView {
             HelpView::new(
-                return_key,
+                key_bindings,
                 &[
                     (
                         "Config",
@@ -402,7 +443,7 @@ mod tests {
 
     #[test]
     fn the_help_lists_the_configured_return_key() {
-        let text = HelpFixture::text(&HelpFixture::help_for(&ReturnKey::parse("M-x").unwrap()));
+        let text = HelpFixture::text(&HelpFixture::with_return_key("M-x"));
 
         assert!(text.contains("Alt-x        detach from a session and return here"));
     }
@@ -415,10 +456,43 @@ mod tests {
     }
 
     #[test]
-    fn a_long_return_key_shows_in_full_with_a_gap_before_its_action() {
-        let long_key = ReturnKey::parse("C-M-S-F12").unwrap();
+    fn the_help_lists_the_configured_next_and_previous_session_keys() {
+        let bindings = KeyBindings::default()
+            .with_next_session_keys(HotKey::parse_valid(["M-n"]))
+            .with_previous_session_keys(HotKey::parse_valid(["M-p", "F7"]));
 
-        let text = HelpFixture::text(&HelpFixture::help_for(&long_key));
+        let text = HelpFixture::text(&HelpFixture::help_for(&bindings));
+
+        assert!(text.contains("Alt-n        switch to the next session by name while attached"));
+        assert!(
+            text.contains("Alt-p F7     switch to the previous session by name while attached")
+        );
+    }
+
+    #[test]
+    fn the_default_session_key_rows_line_up_with_the_other_keys() {
+        let rows = HelpFixture::rows(&HelpFixture::help(), HelpFixture::WIDE_WIDTH);
+
+        assert!(rows.contains(
+            &"Alt-j Alt-↓  switch to the next session by name while attached".to_string()
+        ));
+        assert!(rows.contains(
+            &"Alt-k Alt-↑  switch to the previous session by name while attached".to_string()
+        ));
+    }
+
+    #[test]
+    fn a_session_direction_without_keys_has_no_row() {
+        let bindings = KeyBindings::default().with_next_session_keys(Vec::new());
+
+        let text = HelpFixture::text(&HelpFixture::help_for(&bindings));
+
+        assert!(!text.contains("next session"));
+    }
+
+    #[test]
+    fn a_long_return_key_shows_in_full_with_a_gap_before_its_action() {
+        let text = HelpFixture::text(&HelpFixture::with_return_key("C-M-S-F12"));
 
         assert!(text.contains("Ctrl-Alt-Shift-F12  detach from a session and return here"));
     }

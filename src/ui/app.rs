@@ -112,11 +112,12 @@ impl App {
         self.observe();
         match outcome {
             OperationOutcome::Done { message, select } => {
-                self.dialogs.close();
-                if let Some(name) = select {
-                    self.home.select(&name, &self.service);
-                }
+                self.settle(select);
                 self.status.info(message);
+            }
+            OperationOutcome::Warned { message, select } => {
+                self.settle(select);
+                self.status.error(message);
             }
             OperationOutcome::ConfirmDelete {
                 name,
@@ -149,6 +150,9 @@ impl App {
             KeyAction::Move(offset) => self.home.move_selection(offset, &self.service),
             KeyAction::SelectFirst => self.home.select_first(&self.service),
             KeyAction::SelectLast => self.home.select_last(&self.service),
+            KeyAction::SelectHigh => self.home.select_high(&self.service),
+            KeyAction::SelectMiddle => self.home.select_middle(&self.service),
+            KeyAction::SelectLow => self.home.select_low(&self.service),
             KeyAction::Fold => self.home.toggle_fold(&self.service),
             KeyAction::JumpToRepo(number) => self.home.jump_to_repo(number, &self.service),
             KeyAction::Open(opening) => {
@@ -201,6 +205,14 @@ impl App {
         self.status.outcome(outcome, reloaded);
     }
 
+    fn settle(&mut self, select: Option<String>) {
+        self.dialogs.close();
+        self.home.refresh_diffs_soon();
+        if let Some(name) = select {
+            self.home.select(&name, &self.service);
+        }
+    }
+
     fn report_failure(&mut self, error: ServiceError) {
         self.home.pause_after(&error);
         match self.dialogs.fail(error.to_string()) {
@@ -235,7 +247,9 @@ mod tests {
     use ratatui::backend::TestBackend;
 
     use super::*;
-    use crate::application::ports::{ConfigError, MultiplexerError, UnmergedCommits};
+    use ratatui::style::Color;
+
+    use crate::application::ports::{ConfigError, MergeOutcome, MultiplexerError, UnmergedCommits};
     use crate::domain::{Config, ConfigDraft, DiffStat, PullRequestState, Session};
     use crate::test_support::{FakeMultiplexer, FakePullRequests, ServiceFixture, UiHarness};
 
@@ -337,6 +351,22 @@ mod tests {
                 .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
                 .collect::<Vec<_>>()
                 .join("\n")
+        }
+
+        fn status_color(app: &App, width: u16) -> Option<Color> {
+            let mut terminal = Terminal::new(TestBackend::new(width, 28)).unwrap();
+            terminal.draw(|frame| app.render(frame)).unwrap();
+            let first_letter = terminal.backend().buffer().cell((1, 27)).unwrap();
+            first_letter.style().fg
+        }
+
+        fn merge_missing_the_agent() -> ServiceFixture {
+            let conflicts = MergeOutcome::Conflicted(vec!["src/auth.rs".to_string()]);
+            ServiceFixture::merging(
+                "fix-auth",
+                conflicts,
+                ServiceFixture::refusing_typing("fix-auth"),
+            )
         }
 
         fn status_line(app: &App, width: u16) -> String {
@@ -546,6 +576,30 @@ mod tests {
     }
 
     #[test]
+    fn capital_m_selects_the_middle_session_on_screen() {
+        let fixture = AppFixture::three_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press(&mut app, 'M');
+
+        assert_eq!(AppFixture::selected(&app).as_deref(), Some("fix-auth"));
+        assert_eq!(
+            AppFixture::captures(&fixture).last().unwrap(),
+            "capture_pane ringleader-fix-auth"
+        );
+    }
+
+    #[test]
+    fn capital_l_selects_the_bottom_session_on_screen() {
+        let fixture = AppFixture::three_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press(&mut app, 'L');
+
+        assert_eq!(AppFixture::selected(&app).as_deref(), Some("spike-tui"));
+    }
+
+    #[test]
     fn space_folds_the_selected_repo() {
         let fixture = AppFixture::two_repos();
         let mut app = AppFixture::started(&fixture, 100, 28);
@@ -602,6 +656,47 @@ mod tests {
             AppFixture::flattened_screen(&app, 100, 28)
                 .contains("Inspect it, then end it with tmux -S")
         );
+    }
+
+    #[test]
+    fn p_on_a_waiting_session_asks_for_a_pull_behind_a_busy_message() {
+        let fixture = AppFixture::deletable();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        let request = app.handle_event(&UiHarness::character('p'));
+
+        assert_eq!(
+            request,
+            AppRequest::Block(BlockingOperation::Merge("fix-auth".to_string()))
+        );
+        assert_eq!(
+            AppFixture::status_line(&app, 100),
+            " Fetching origin and merging it into fix-auth…"
+        );
+    }
+
+    #[test]
+    fn a_clean_merge_reports_in_the_plain_status_color() {
+        let fixture = AppFixture::deletable();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        app.perform(BlockingOperation::Merge("fix-auth".to_string()));
+
+        assert_eq!(
+            AppFixture::status_line(&app, 100),
+            " merged origin/main into fix-auth"
+        );
+        assert_ne!(AppFixture::status_color(&app, 100), Theme.error().fg);
+    }
+
+    #[test]
+    fn conflicts_the_agent_was_not_told_about_show_as_an_error() {
+        let fixture = AppFixture::merge_missing_the_agent();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        app.perform(BlockingOperation::Merge("fix-auth".to_string()));
+
+        assert_eq!(AppFixture::status_color(&app, 100), Theme.error().fg);
     }
 
     #[test]

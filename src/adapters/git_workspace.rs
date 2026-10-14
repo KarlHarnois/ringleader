@@ -11,10 +11,12 @@ use super::git_refs::GitRefs;
 use super::git_runner::GitRunner;
 use super::host_path::HostPath;
 use super::submodule_commits::SubmoduleCommits;
+use super::upstream_merger::UpstreamMerger;
 use crate::application::ports::{
-    DirtyState, Head, StartPoint, UnmergedCommits, Workspace, WorkspaceError, WorktreeEntry,
+    DirtyState, Head, StartPoint, UnmergedCommits, UpstreamMerge, Workspace, WorkspaceError,
+    WorktreeEntry,
 };
-use crate::domain::{Branch, BranchTips, DiffStat, MergeBases};
+use crate::domain::{BaseBranch, Branch, BranchTips, DiffStat, MergeBases};
 
 pub struct GitWorkspace {
     git: GitRunner,
@@ -246,6 +248,23 @@ impl Workspace for GitWorkspace {
 
     fn diff_stat(&self, worktree: &Path, base: &StartPoint) -> Result<DiffStat, WorkspaceError> {
         GitDiffs::new(&self.git).diff_stat(worktree, base)
+    }
+
+    fn fetch_upstream(
+        &self,
+        worktree: &Path,
+        base_branch: Option<&BaseBranch>,
+    ) -> Result<BaseBranch, WorkspaceError> {
+        UpstreamMerger::new(&self.git).fetch(worktree, base_branch)
+    }
+
+    fn merge_upstream(
+        &self,
+        worktree: &Path,
+        branch_on_origin: &BaseBranch,
+        started_from: &str,
+    ) -> Result<UpstreamMerge, WorkspaceError> {
+        UpstreamMerger::new(&self.git).merge(worktree, branch_on_origin, started_from)
     }
 
     fn validate_repo(&self, path: &Path) -> Result<PathBuf, WorkspaceError> {

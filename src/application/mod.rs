@@ -31,6 +31,7 @@ pub mod session_access;
 pub mod session_creation;
 pub mod session_deletion;
 pub mod session_lifecycle;
+pub mod session_merge;
 pub mod session_monitor;
 pub mod session_reconciler;
 pub mod session_renaming;
