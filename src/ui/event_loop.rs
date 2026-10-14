@@ -256,6 +256,18 @@ mod tests {
     }
 
     #[test]
+    fn an_idle_loop_waits_for_the_next_tick() {
+        let harness = UiHarness::new();
+        let mut app = UiHarness::app(&ServiceFixture::new());
+        let mut event_loop = harness.event_loop(ScriptedInput::events(Vec::new()));
+
+        event_loop.run(&mut app).unwrap();
+
+        let frame = EventLoop::<FixtureBackend, ScriptedInput>::RESULT_POLL;
+        assert!(event_loop.input().timeouts()[0] > frame);
+    }
+
+    #[test]
     fn a_raised_signal_flag_ends_the_loop_normally() {
         let harness = UiHarness::new();
         let mut app = UiHarness::app(&ServiceFixture::new());
