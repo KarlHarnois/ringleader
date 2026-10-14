@@ -9,7 +9,7 @@ When no rule covers a case, choose what these values favor. When two conflict, t
 - **The user's own setup stays untouched.** Ringleader runs its own tmux server and never changes the user's tmux server, tmux config, or key bindings. It deletes or renames only the branches it marked as its own, and it assumes no particular personal setup. The private socket on every tmux call, the throwaway state for manual runs, the `ringleaderManaged` marker, and the consumer-agnostic repository all come from this.
 - **Refuse before losing work.** When an action could destroy work, Ringleader stops and says why instead of guessing. Delete measures uncommitted files and unmerged commits and asks first, rename refuses a branch that has been pushed, a failed create or rename undoes what it did, and a refused action exits with code 3.
 - **Intuitive, with several ways to do each thing.** Each way comes from an ecosystem users already know and keeps the meaning it has there, so a user who guesses a key is right.
-  - Vim: `j k` move, `gg G` jump to the ends, and `/` would open a session finder.
+  - Vim: `j k` move, `gg G` jump to the ends, `H M L` select the top, middle, or bottom row on screen, and `/` would open a session finder.
   - fzf and readline: `Ctrl-J Ctrl-K` and `Ctrl-N Ctrl-P` move in the repo search, and `Ctrl-W Ctrl-U` edit text.
   - Command palettes: `Ctrl-K` would also open the session finder.
   - The arrows work wherever `j k` do, `?` `Esc` `q` all close the help, and create, delete, rename, restart, and attach work from both the TUI and the CLI.
@@ -320,7 +320,7 @@ viewer exits.
     │   ├── back_key.rs             # BackKey, Ctrl-Q, which closes any dialog and never quits
     │   ├── key_sequence.rs         # KeySequence, the g that waits for a second g to make gg
     │   ├── home_state.rs           # HomeState, the polled rows, selection, and preview
-    │   ├── session_list.rs         # SessionList, rows sorted by repo, state, and name, the selected session or heading, and the folded repos
+    │   ├── session_list.rs         # SessionList, rows sorted by repo, state, and name, the selected session or heading, the folded repos, and the viewport
     │   ├── list_selection.rs       # ListSelection, the selected session or repo heading
     │   ├── preview_feed.rs         # PreviewFeed, the preview capture and its timer
     │   ├── diff_queue.rs           # DiffQueue, round-robin diffs of visible rows
@@ -335,7 +335,8 @@ viewer exits.
     │   ├── home_view.rs            # HomeView
     │   ├── empty_state.rs          # EmptyState, the no-sessions message with the logo above it when it fits
     │   ├── session_table.rs        # SessionTable, the home screen's session list, drawn as a tree of repos
-    │   ├── session_tree.rs         # SessionTree, the sorted rows as repo headings and branch lines, and the scroll rule
+    │   ├── session_tree.rs         # SessionTree, the sorted rows as repo headings and branch lines, and the lines a viewport shows
+    │   ├── viewport.rs             # Viewport, the lines the session table shows, which move only to keep the selection in view, and the lines H M L select
     │   ├── repo_heading.rs         # RepoHeading, a repo's heading line with its number, fold arrow, and state counts
     │   ├── repo_group.rs           # RepoGroup, the repo a row is listed under, or other
     │   ├── colored_row.rs          # ColoredRow, a row's text split around its coloured cells
