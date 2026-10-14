@@ -134,6 +134,14 @@ impl Deadlines {
         }
     }
 
+    pub fn diff_poll() -> Self {
+        let standard = Self::standard();
+        Self {
+            git_read: standard.git_diff,
+            ..standard
+        }
+    }
+
     #[cfg(test)]
     pub fn uniform(deadline: Duration) -> Self {
         Self {
@@ -220,6 +228,14 @@ mod tests {
             let after_name = &stat[stat.rfind(')').unwrap() + 2..];
             after_name.split(' ').nth(3).unwrap().to_string()
         }
+    }
+
+    #[test]
+    fn the_diff_poll_reads_git_under_the_diff_deadline() {
+        assert_eq!(
+            Deadlines::diff_poll().for_kind(CallKind::GitRead),
+            Deadlines::standard().for_kind(CallKind::GitDiff)
+        );
     }
 
     #[test]

@@ -63,6 +63,7 @@ impl StatePorts {
 
 pub struct RepoPorts {
     workspace: Arc<dyn Workspace>,
+    diff_workspace: Arc<dyn Workspace>,
     scanner: Arc<dyn RepoScanner>,
     host: Arc<dyn HostProbe>,
     pull_requests: Arc<dyn PullRequests>,
@@ -76,6 +77,7 @@ impl RepoPorts {
         pull_requests: Arc<dyn PullRequests>,
     ) -> Self {
         Self {
+            diff_workspace: Arc::clone(&workspace),
             workspace,
             scanner,
             host,
@@ -83,8 +85,19 @@ impl RepoPorts {
         }
     }
 
+    pub fn with_diff_workspace(self, diff_workspace: Arc<dyn Workspace>) -> Self {
+        Self {
+            diff_workspace,
+            ..self
+        }
+    }
+
     pub fn workspace(&self) -> Arc<dyn Workspace> {
         Arc::clone(&self.workspace)
+    }
+
+    pub fn diff_workspace(&self) -> Arc<dyn Workspace> {
+        Arc::clone(&self.diff_workspace)
     }
 
     pub fn scanner(&self) -> Arc<dyn RepoScanner> {

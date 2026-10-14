@@ -11,7 +11,7 @@ use crate::domain::{BaseBranch, Config, DiffStat, KeyBindings, Session};
 
 pub struct SessionMonitor {
     multiplexer: Arc<dyn Multiplexer>,
-    workspace: Arc<dyn Workspace>,
+    diff_workspace: Arc<dyn Workspace>,
     host: Arc<dyn HostProbe>,
     clock: Arc<dyn Clock>,
 }
@@ -20,7 +20,7 @@ impl SessionMonitor {
     pub fn new(ports: &ServicePorts) -> Self {
         Self {
             multiplexer: ports.tmux().multiplexer(),
-            workspace: ports.repos().workspace(),
+            diff_workspace: ports.repos().diff_workspace(),
             host: ports.repos().host(),
             clock: ports.state().clock(),
         }
@@ -48,10 +48,10 @@ impl SessionMonitor {
         let worktree = session.worktree_path();
         let session_branches =
             RepoMerge::new(self.host.as_ref()).session_branches_in(session.repo_path(), sessions);
-        let measured_from = DiffBaseResolver::new(self.workspace.as_ref())
+        let measured_from = DiffBaseResolver::new(self.diff_workspace.as_ref())
             .skipping(session_branches)
             .resolve(worktree, &recorded, base_branch)?;
-        Ok(self.workspace.diff_stat(worktree, &measured_from)?)
+        Ok(self.diff_workspace.diff_stat(worktree, &measured_from)?)
     }
 
     pub fn preview(&self, tmux_name: &str) -> Result<String, ServiceError> {
@@ -76,7 +76,7 @@ mod tests {
     use std::path::Path;
 
     use crate::application::ports::StartPoint;
-    use crate::domain::{BaseBranch, BaseBranchLadder, Branch, Config, Repo, RepoName};
+    use crate::domain::{BaseBranch, BaseBranchLadder, Branch, Config, DiffStat, Repo, RepoName};
     use crate::test_support::{FakeWorkspace, ServiceFixture};
 
     struct MonitorFixture;
@@ -152,6 +152,20 @@ mod tests {
             MonitorFixture::branch_lookups(&fixture),
             [BaseBranchLadder::new(None).diff_lookups()]
         );
+    }
+
+    #[test]
+    fn the_diff_is_measured_through_the_diff_poll_workspace() {
+        let worktree = ServiceFixture::worktree_path(MonitorFixture::SESSION);
+        let diff = DiffStat::from_changes([], 4);
+        let fixture = MonitorFixture::fixture_with_repo_at(ServiceFixture::REPO)
+            .with_diff_workspace(FakeWorkspace::default().with_diff(&worktree, diff));
+
+        let measured = fixture
+            .service()
+            .diff_stats(&[MonitorFixture::SESSION.to_string()]);
+
+        assert_eq!(measured[0].1, Ok(diff));
     }
 
     #[test]

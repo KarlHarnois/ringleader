@@ -19,6 +19,7 @@ use crate::domain::{
 pub struct ServiceFixture {
     registry: Arc<FakeSessionRegistry>,
     workspace: Arc<FakeWorkspace>,
+    diff_workspace: Option<Arc<FakeWorkspace>>,
     multiplexer: Arc<FakeMultiplexer>,
     config_source: Arc<FakeConfigSource>,
     scanner: Arc<FakeRepoScanner>,
@@ -51,6 +52,7 @@ impl ServiceFixture {
         Self {
             registry: Arc::new(FakeSessionRegistry::empty()),
             workspace: Arc::new(FakeWorkspace::default()),
+            diff_workspace: None,
             multiplexer: Arc::new(FakeMultiplexer::new()),
             config_source: Arc::new(FakeConfigSource::with_config(Self::config())),
             scanner: Arc::new(FakeRepoScanner::finding(vec![Self::repo()])),
@@ -79,6 +81,13 @@ impl ServiceFixture {
     pub fn with_workspace(self, workspace: FakeWorkspace) -> Self {
         Self {
             workspace: Arc::new(workspace),
+            ..self
+        }
+    }
+
+    pub fn with_diff_workspace(self, diff_workspace: FakeWorkspace) -> Self {
+        Self {
+            diff_workspace: Some(Arc::new(diff_workspace)),
             ..self
         }
     }
@@ -409,9 +418,15 @@ impl ServiceFixture {
                 self.scanner.clone(),
                 self.host.clone(),
                 self.pull_requests.clone(),
-            ),
+            )
+            .with_diff_workspace(self.measuring_workspace()),
             TmuxPorts::new(self.multiplexer.clone()),
         )
+    }
+
+    fn measuring_workspace(&self) -> Arc<FakeWorkspace> {
+        let diff_workspace = self.diff_workspace.as_ref().unwrap_or(&self.workspace);
+        Arc::clone(diff_workspace)
     }
 
     fn context(&self) -> ServiceContext {

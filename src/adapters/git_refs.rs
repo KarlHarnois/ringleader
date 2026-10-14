@@ -20,9 +20,12 @@ impl<'a> GitRefs<'a> {
     }
 
     pub fn head(&self, location: &Path) -> Result<Head, WorkspaceError> {
-        let verify = GitInvocation::in_worktree(location, "rev-parse")
-            .diffing()
-            .args(["--verify", "-q", "--symbolic-full-name", Self::HEAD]);
+        let verify = GitInvocation::in_worktree(location, "rev-parse").args([
+            "--verify",
+            "-q",
+            "--symbolic-full-name",
+            Self::HEAD,
+        ]);
         let checked_out = self.git.resolved_from(&verify)?;
         Ok(checked_out.map_or(Head::Unborn, |name| {
             BranchRef::parse(&name).map_or(Head::Detached, Head::On)
@@ -80,7 +83,6 @@ impl<'a> GitRefs<'a> {
         patterns: &[String],
     ) -> Result<Vec<(String, String)>, WorkspaceError> {
         let list = GitInvocation::in_worktree(location, "for-each-ref")
-            .diffing()
             .arg(format)
             .args(patterns);
         let listing = self.git.run_checked(&list)?;
