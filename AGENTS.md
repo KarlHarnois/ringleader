@@ -49,7 +49,7 @@ nix build .#
 nix flake check
 ```
 
-These are the commands `.github/workflows/ci.yml` runs. All of them run on pushes to `master` and on merge-queue runs, and the first three also run on pull requests. A change is done when all of them pass and, for a change under `src/`, the Metrics completion steps pass too.
+These are the commands `.github/workflows/ci.yml` runs. All of them run on pushes to `master` and on merge-queue runs, and the first three also run on pull requests. A change is done when all of them pass. If a change edits a file under `src/`, the change is done only when the completion steps in Metrics also pass.
 
 ## Architecture
 
@@ -78,8 +78,9 @@ The one exception is a driving adapter's own channel to the user: the terminal f
 
 ## Metrics
 
-Local code-health tools that agents run before finishing a change. CI never
-builds or runs them. Do not add them to `checks`, to the default dev shell, or to
+The metrics tools are `dryer`, `crapper`, and `mutator`, local code-health tools
+that agents run in the completion steps below. CI never builds or runs them. Do
+not add them to `checks`, to the default dev shell, or to
 `.github/workflows/ci.yml`. The flake builds them as `apps` so `nix flake check`
 only evaluates them, and puts them in the `metrics` dev shell, which extends the
 default one. That evaluation still downloads the four upstream inputs, so if one
@@ -156,56 +157,85 @@ viewer exits.
 
 ### Completion steps
 
-A change under `src/` is not done until these pass, after the Commands above. Run
-them one at a time and never alongside another command, because the tests start
-real tmux servers and share `target/`. Changed functions are the production
-functions the change's diff adds or edits, outside `#[cfg(test)]` code and
-`src/test_support/`. Changed files are the files that hold them. Expect about a
-minute for `crapper` and two to three minutes per changed file for `mutator`,
-mostly the cold worker build.
+**The completion steps are the four numbered steps below.** Run them after the
+Commands pass. A `crapper` run takes about a minute, and a step 4 run takes two
+to three minutes.
 
-1. `nix develop .#metrics -c crapper src`. Every changed function scores 8 or
-   less. Reduce its complexity or add tests until it does. Leave the scores of
-   functions the change did not touch. A run that prints
-   `Rust coverage will score 0%` is not a result: fix the cause and rerun.
-2. `nix develop .#metrics -c dryer src`. Remove every duplicate candidate that
-   includes lines the change added, or tell the project owner why the pair is
-   not real duplication. Skip a pair of builders whose whole body is one
-   `Self { field: value, ..self }` expression. They configure fakes and plans
-   across the codebase and make up most candidates. A builder that runs logic
-   before the struct update does not count.
-3. `nix develop .#metrics -c mutator --scan <file>` for each changed file. Its
-   first line reads `Scan: N mutation sites in <file>`. Tell the project owner
-   about any file over 50 sites and offer to split it.
-4. `nix develop .#metrics -c mutator --reuse-coverage --max-workers 2 --timeout-factor 60 <file>`
-   for each changed file. Each run reuses the coverage step 1 wrote. Add or
-   strengthen tests until every changed function's row reads 0 under `Survived`
-   and `Uncovered`. Leave the rows of functions the change did not touch. Read
-   the rows, not the exit code: 3 means a mutant survived anywhere in the file,
-   and uncovered sites still exit 0. When no test can tell a survivor from the
-   original, remove the code it mutates if the behavior stays the same, and
-   otherwise tell the project owner which mutant survived and why no test can
-   kill it.
+| Term | Meaning |
+| --- | --- |
+| Test code | `#[cfg(test)]` code and every file under `src/test_support/` |
+| Production code | Every other line under `src/` |
+| Changed function | A production function the change's diff adds or edits |
+| Changed file | A file under `src/` that holds a changed function |
+| Added line | A line the change's diff adds |
+| Untestable function | A production function that needs a terminal or reads the process environment, which the Tests rules keep out of every test |
+| Step edit | Any change to a file under `src/` after step 1 first runs, including one made to pass a later Commands run |
 
-Some functions only run with a real terminal or the process's own arguments,
-which the Tests rules keep out of tests, such as `CompositionRoot` in
-`src/main.rs`, `TmuxMultiplexer::attach_in_foreground`, and
-`ProcessEnvironment::standard_input_terminal`. When a change edits one, move its
-logic into functions that tests reach until it has complexity 2 or less, the
-most that scores 8 or less at 0% coverage. Then tell the project owner which of
-its sites step 4 still reports as uncovered.
+**Never run a completion step alongside another command:** the tests start real
+tmux servers and share `target/`.
 
-Run `nix develop -c cargo fmt` after any edit during these steps, then restart
-them from step 1, an edit to tests included, because `crapper` is the only
-coverage check for a function with no mutation sites. After an edit to tests
-only, keep the step 3 and step 4 results that passed since the last production
-edit, and rerun step 4 for the changed files the edited tests cover. When an edit
-rewrites or deletes an existing test instead of only adding one, add
-`--mutate-all` to the next step 4 run of each changed file that test covered,
-because a rerun keeps every kill recorded for a function whose text did not
-change. Once the steps pass after any edit, run the Commands again, because none
-of these tools runs `clippy`. An edit made to pass that run restarts the steps
-too.
+**Only changed functions decide whether step 1 or step 4 passes.** Never work on
+the score or the mutants of a function the change did not touch.
+
+**If a command in these steps fails to run, or exits with a code this section
+does not name, stop and show its output to the project owner.**
+
+1. Run `nix develop .#metrics -c crapper src`. Step 1 passes when every changed
+   function scores 8 or less.
+   - If the output contains `Rust coverage will score 0%`, the coverage run
+     failed and no score is real: fix the cause, then rerun step 1.
+   - If a changed function scores above 8, reduce the function's complexity or
+     add tests for it.
+2. Run `nix develop .#metrics -c dryer src`. Step 2 passes when every candidate
+   that includes an added line is resolved.
+   - A candidate whose two sides are both builders, each with one
+     `Self { field: value, ..self }` expression as its whole body, is resolved:
+     these builders configure fakes and plans across the codebase and make up
+     most candidates.
+   - If any other candidate that includes an added line is real duplication,
+     remove the duplication.
+   - Otherwise, tell the project owner why the pair is not real duplication,
+     which resolves the candidate.
+3. For each changed file, run `nix develop .#metrics -c mutator --scan <file>`.
+   The first output line, `Scan: N mutation sites in <file>`, gives the file's
+   site count. If N is over 50, tell the project owner and offer to split the
+   file. Step 3 always passes.
+4. For each changed file, run
+   `nix develop .#metrics -c mutator --reuse-coverage --max-workers 2 --timeout-factor 60 <file>`.
+   `--reuse-coverage` reads the coverage step 1 wrote. Step 4 passes when every
+   changed function's row reads 0 under `Survived` and `Uncovered`, apart from
+   survivors and uncovered sites this section has you report to the project
+   owner.
+   - Never judge step 4 by its exit code: exit 3 means a mutant survived
+     anywhere in the file, and a run with uncovered sites exits 0.
+   - If the run exits 2, the baseline tests failed: fix them, which is a step
+     edit.
+   - If a changed function has an uncovered site, add a test that runs the
+     site, unless the function is untestable.
+   - If a test can kill a survivor, add or strengthen that test.
+   - If no test can kill a survivor and removing the code it mutates keeps the
+     behavior, remove that code.
+   - Otherwise, tell the project owner which mutant survived and why no test
+     can kill it.
+
+**If a change edits an untestable function, move its logic into functions that
+tests reach until the untestable function has complexity 2 or less**, the most
+that scores 8 or less at 0% coverage. Then tell the project owner which of the
+untestable function's sites step 4 reports as uncovered.
+
+**After a step edit, run `nix develop -c cargo fmt`, then restart the completion
+steps from step 1.** Restart even when the step edit touched test code only:
+`crapper` is the only coverage check for a function with no mutation sites.
+
+- If the step edit changed only test code, skip each step 3 or step 4 run that
+  passed with the current production code, unless the step 4 run is for a
+  changed file the edited tests cover.
+- If the step edit rewrote or deleted an existing test, add `--mutate-all` to
+  the next step 4 run of each changed file that test covered: a rerun keeps
+  every kill recorded for a function whose text did not change.
+
+**If a step edit happened since the Commands last passed, run the Commands again
+once the completion steps pass:** none of the metrics tools runs `clippy`.
 
 ## Layout
 
@@ -492,7 +522,7 @@ A command interrupted by a signal before its use case starts never runs it, and 
 
 ## Commits
 
-- One commit per finished change, after every command in Commands and the Metrics completion steps pass.
+- Give each change one commit, made after the change is done as Commands defines it.
 - The title starts with a capital letter, uses the imperative mood, and stays under 72 characters. The body says what changed in plain language.
 - Push only when the project owner asks.
 
