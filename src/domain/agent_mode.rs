@@ -26,7 +26,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_new_session_starts_in_build_mode() {
+    fn the_default_mode_is_build() {
         assert_eq!(AgentMode::default(), AgentMode::Build);
     }
 
