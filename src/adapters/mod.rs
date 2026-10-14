@@ -8,6 +8,7 @@ pub mod branch_marker;
 pub mod branch_section;
 pub mod command_output;
 pub mod config_file_writer;
+pub mod deadlines;
 pub mod diff_base_resolver;
 pub mod directory_repo_scanner;
 pub mod directory_scratch_space;
@@ -55,5 +56,6 @@ pub mod toml_config_source;
 pub mod upstream_merger;
 pub mod xdg_paths;
 
-pub use bounded_command::{BoundedCommand, Deadlines};
+pub use bounded_command::BoundedCommand;
+pub use deadlines::Deadlines;
 pub use git_workspace::GitWorkspace;

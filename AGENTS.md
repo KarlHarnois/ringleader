@@ -323,7 +323,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── delete_impact.rs      # DeleteImpact and DeleteConfirmation
     │   ├── delete_outcome.rs     # DeleteOutcome
     │   ├── worktree_containment.rs # WorktreeContainment, shared by delete step 3 and reconciliation
-    │   ├── session_monitor.rs    # SessionMonitor: reconcile, observe, diffs, preview
+    │   ├── session_monitor.rs    # SessionMonitor: observation, reconciliation, diff measurement, and the background jobs for observation, diff measurement, and preview capture
     │   ├── session_reconciler.rs # SessionReconciler, pairs registry entries with live tmux sessions
     │   ├── reconciliation.rs     # Reconciliation, the reconciled entries and rows
     │   ├── session_access.rs     # SessionAccess: attach and open_shell, and the refusal from a pane of the private server
@@ -381,6 +381,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── gh_listing.rs         # GhListing, the viewer's or repo owner's newest pull request per branch in a gh response
     │   ├── null_pull_requests.rs # NullPullRequests, finds no pull request on a host without gh
     │   ├── bounded_command.rs    # BoundedCommand, runs git, tmux, and gh children in a new session with a deadline
+    │   ├── deadlines.rs          # Deadlines and CallKind, the deadline of each kind of child call
     │   ├── command_output.rs     # CommandOutput, a finished child's status and output
     │   ├── host_path.rs          # HostPath, lenient canonicalization and directory listing
     │   ├── git_workspace.rs      # GitWorkspace
@@ -427,8 +428,9 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── home_state.rs           # HomeState, the polled rows, selection, and preview
     │   ├── session_list.rs         # SessionList, rows sorted by repo, state, and name, the selected session or heading, the folded repos, and the viewport
     │   ├── list_selection.rs       # ListSelection, the selected session or repo heading
-    │   ├── preview_feed.rs         # PreviewFeed, the preview capture and its timer
-    │   ├── diff_queue.rs           # DiffQueue, round-robin diffs of visible rows
+    │   ├── observation_feed.rs     # ObservationFeed, the observation background job and its timer
+    │   ├── preview_feed.rs         # PreviewFeed, the preview capture background job for the selected row and its timer
+    │   ├── diff_queue.rs           # DiffQueue, round-robin diff measurement background jobs for visible rows, at most two at a time
     │   ├── pull_request_feed.rs    # PullRequestFeed, the pull requests of visible rows and their timer
     │   ├── bell.rs                 # Bell, rings on a Working to Waiting edge
     │   ├── shell_runner.rs         # ShellRunner, runs the ephemeral t shell
@@ -448,7 +450,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── state_indicator.rs      # StateIndicator, the glyph and color of a session state
     │   ├── table_columns.rs        # TableColumns, column widths and dropping, and RowCells, the cell texts of one row
     │   ├── preview_panel.rs        # PreviewPanel, the Full tier's preview
-    │   ├── preview_text.rs         # PreviewText, the captured rows that fit the preview
+    │   ├── preview_text.rs         # PreviewText, the rows of a preview capture, parsed once, and the rows that fit the preview
     │   ├── help_view.rs            # HelpView
     │   ├── label_column.rs         # LabelColumn, the help's padded label and the indent of its wrapped rows
     │   ├── legend.rs               # Legend, the help's symbols and their meanings, wrapped under a label
@@ -494,7 +496,9 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
         ├── log_capture.rs           # LogCapture, the test logger that keeps warnings for assertions
         ├── fake_host_probe.rs       # FakeHostProbe
         ├── fake_clock.rs            # FakeClock
+        ├── call_hooks.rs            # CallHooks, the hooks FakeMultiplexer and FakeWorkspace run before a call
         ├── gate.rs                  # Gate: a test gate that blocks a call until it is opened or a deadline passes
+        ├── held_calls.rs            # HeldCalls: holds the calls that reach a call hook on a Gate and counts them
         ├── deadline.rs              # Deadline: polls a condition until it holds or a time limit passes
         ├── recording_screen_mode.rs # RecordingScreenMode, the screen mode that records each switch
         ├── ui_harness.rs            # UiHarness: scripted input and a TestBackend wrapper for EventLoop tests
@@ -522,6 +526,8 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
 - A session's branch is its name, and its tmux session is the tmux prefix followed by its name. Create and rename never record a branch that differs from the name, and rename always moves the branch with the name. Rename refuses a branch that has been pushed, because the remote branch and any pull request keep the old name, and it never moves the worktree, because the running agent and its transcripts are keyed by that path. A session recorded on another branch, from before the branch prefix was dropped, from an adopted tmux session, or from a tmux session renamed by hand, keeps working. When its branch is marked and not pushed, `doctor` warns about it, and renaming it to a new name moves its branch.
 - Key bindings come only from the generated config of the private tmux server, which `create_session` writes, and which the TUI at start, `new`, and `restart` re-source on the running server when its `@ringleader_config` hash differs from the current render, and `r` re-sources whenever the server runs, since a `tmux source-file` run from a pane changes the server without changing that hash. Only lock holders do either, so only one process ever writes that config, and the reapply is skipped while the config failed to load. Every tmux call passes `-S <private socket>` and `-f`, so Ringleader never reads or writes the user's tmux server. An entry recorded on another socket is checked only through `/proc`. The TUI and the CLI attach through the same foreground child.
 - Blocking TUI operations (create, delete, rename, restart, merge, and the delete measurement) run behind a busy message, and the event loop drops the key and paste events queued while they ran.
+- **No background job blocks input.** A background job is a `Pending` worker that runs the tmux, git, or gh calls of one observation, preview capture, diff measurement, or pull request lookup for the TUI. An observation is one tmux listing of every session, which the TUI reconciles with the registry. A background job is in flight from its start until the event loop collects it. The event loop collects finished observations, preview captures, and diff measurements on every wake. The event loop starts and collects pull request lookups only on its 100 millisecond tick. While an observation, a preview capture, or a diff measurement is in flight, the event loop wakes every 16 milliseconds. A pull request lookup never shortens the event loop's wait: a lookup may run up to 20 seconds for each repo. A preview capture is shown only under the row the capture was taken for.
+- **A synchronous observation is an observation the TUI runs on its own thread instead of as a background job.** The TUI runs a synchronous observation before its first frame: without one, the first frame and the keys typed at launch see no sessions. The TUI runs a synchronous observation after every attach, shell, reload, and blocking operation. A synchronous observation drops any observation in flight: an observation listed before a delete would bring the deleted session back. A synchronous observation restarts the `state_poll_ms` interval.
 - `p` pulls: it merges origin's copy of a session's base branch into its worktree. It runs only on a `Waiting` session whose agent is at its prompt, by the conditions below, and whose worktree has no uncommitted changes and is on the session's branch, so the merge never changes files under a turn that is still running. The branch is the repo's configured `base_branch` without any `origin/` prefix, or else the first of origin's default, `origin/main`, and `origin/master` that exists. It fetches only that branch, refuses when it does not hold the commit the session started from, which catches a session created with its own `--base-branch` only once that branch has moved away from the merged one, since a session records its start commit and not its base branch, observes the session again and checks the guards on that fresh state, so the fetch's network time stays outside the window they close, merges it with `--no-edit`, and when the merge stops on conflicts it leaves the merge in progress and types one line into the agent naming the first 20 conflicted paths, counting the rest, and asking it to resolve them and commit. It refuses a worktree with staged changes or a merge already in progress, so a merge that then fails without conflicts, such as a merge commit a hook refuses or a merge killed at its deadline before git recorded it, is undone with `git merge --abort` or `git reset --merge HEAD`, unless its merge commit had already landed, as when a slow `post-merge` hook is killed, which is kept and reported as landed. The line goes through `type_if_ready`, so an agent that left its prompt is not typed into, and the status bar says so as an error.
 - A dialog's hint line lists only keys whose meaning is Ringleader's own, such as `Enter create`, `Ctrl-S create`, and `Esc cancel`, and the keys that choose from a list, such as `↑ ↓ j k choose`. It never lists text-editing keys like cursor movement, Ctrl-U, or Ctrl-W, because every terminal user already expects them. A new editing key goes into `TextField` with its usual terminal meaning, not into a hint.
 - Logs go to `$XDG_STATE_HOME/ringleader/app.log` through `env_logger`, never to the terminal.

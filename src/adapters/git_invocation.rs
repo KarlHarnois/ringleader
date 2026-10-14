@@ -2,7 +2,8 @@ use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use super::bounded_command::{Call, CallKind};
+use super::bounded_command::Call;
+use super::deadlines::CallKind;
 
 pub struct GitInvocation {
     subcommand: String,

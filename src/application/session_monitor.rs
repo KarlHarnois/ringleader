@@ -1,12 +1,13 @@
 use std::sync::Arc;
 
+use super::pending::Pending;
 use super::ports::{Clock, DiffBase, HostProbe, Multiplexer, Workspace};
 use super::reconciliation::Reconciliation;
 use super::repo_merge::RepoMerge;
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
 use super::session_reconciler::SessionReconciler;
-use crate::domain::{BaseBranch, Config, DiffStat, KeyBindings, Session};
+use crate::domain::{BaseBranch, Config, DiffStat, KeyBindings, Session, SessionObservation};
 
 pub struct SessionMonitor {
     multiplexer: Arc<dyn Multiplexer>,
@@ -25,25 +26,42 @@ impl SessionMonitor {
         }
     }
 
+    pub fn observe_all(&self) -> Result<Vec<SessionObservation>, ServiceError> {
+        Ok(self.multiplexer.observe_all()?)
+    }
+
+    pub fn start_observing(&self) -> Pending<Vec<SessionObservation>> {
+        let multiplexer = Arc::clone(&self.multiplexer);
+        Pending::start(move || Ok(multiplexer.observe_all()?))
+    }
+
     pub fn reconcile(
         &self,
         entries: &[Session],
         config: &Config,
-    ) -> Result<Reconciliation, ServiceError> {
-        let observations = self.multiplexer.observe_all()?;
+        observations: Vec<SessionObservation>,
+    ) -> Reconciliation {
         let now = self.clock.now_epoch_seconds();
         let reconciler = SessionReconciler::new(config, self.host.as_ref(), now);
-        Ok(reconciler.reconcile(entries, observations))
+        reconciler.reconcile(entries, observations)
     }
 
     pub fn diff_stat(&self, session: &Session, config: &Config) -> Result<DiffStat, ServiceError> {
-        let base_branch = self.configured_base_branch(session, config);
-        let base = DiffBase::new(session.base_commit(), base_branch);
+        let base = self.diff_base(session, config);
         Ok(self.workspace.diff_stat(session.worktree_path(), &base)?)
     }
 
-    pub fn preview(&self, tmux_name: &str) -> Result<String, ServiceError> {
-        Ok(self.multiplexer.capture_pane(tmux_name)?)
+    pub fn start_diff(&self, session: &Session, config: &Config) -> Pending<DiffStat> {
+        let workspace = Arc::clone(&self.workspace);
+        let worktree = session.worktree_path().to_path_buf();
+        let base = self.diff_base(session, config);
+        Pending::start(move || Ok(workspace.diff_stat(&worktree, &base)?))
+    }
+
+    pub fn start_preview(&self, tmux_name: &str) -> Pending<String> {
+        let multiplexer = Arc::clone(&self.multiplexer);
+        let tmux_name = tmux_name.to_string();
+        Pending::start(move || Ok(multiplexer.capture_pane(&tmux_name)?))
     }
 
     pub fn server_key_bindings(&self) -> Option<KeyBindings> {
@@ -52,6 +70,11 @@ impl SessionMonitor {
             .server_config(&KeyBindings::default())
             .ok()??;
         running.key_bindings().cloned()
+    }
+
+    fn diff_base(&self, session: &Session, config: &Config) -> DiffBase {
+        let base_branch = self.configured_base_branch(session, config);
+        DiffBase::new(session.base_commit(), base_branch)
     }
 
     fn configured_base_branch<'c>(
@@ -96,6 +119,16 @@ mod tests {
 
         fn diff_calls(fixture: &ServiceFixture) -> Vec<String> {
             fixture.service().diff_stats(&[Self::SESSION.to_string()]);
+            Self::recorded_diff_calls(fixture)
+        }
+
+        fn background_diff_calls(fixture: &ServiceFixture) -> Vec<String> {
+            let measurement = fixture.service().start_diff(Self::SESSION).unwrap();
+            measurement.wait_unless(|| false);
+            Self::recorded_diff_calls(fixture)
+        }
+
+        fn recorded_diff_calls(fixture: &ServiceFixture) -> Vec<String> {
             let calls = fixture.workspace().calls();
             calls
                 .into_iter()
@@ -115,6 +148,18 @@ mod tests {
 
         assert_eq!(
             MonitorFixture::diff_calls(&fixture),
+            [MonitorFixture::diff_call_against(
+                MonitorFixture::BASE_BRANCH
+            )]
+        );
+    }
+
+    #[test]
+    fn the_background_diff_uses_the_configured_base_branch_too() {
+        let fixture = MonitorFixture::fixture_with_repo_at(ServiceFixture::REPO);
+
+        assert_eq!(
+            MonitorFixture::background_diff_calls(&fixture),
             [MonitorFixture::diff_call_against(
                 MonitorFixture::BASE_BRANCH
             )]

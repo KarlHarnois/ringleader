@@ -59,7 +59,7 @@ impl<'a> PreviewPanel<'a> {
 
     fn body(&self, row: &SessionSummary, room: usize) -> Vec<Line<'static>> {
         match self.capture {
-            Some(PreviewCapture::Text(text)) => PreviewText::new(text).bottom_lines(room),
+            Some(PreviewCapture::Text(text)) => text.bottom_lines(room),
             Some(PreviewCapture::Unavailable(reason)) => Self::metadata_lines(row, reason)
                 .into_iter()
                 .map(Line::from)
@@ -94,7 +94,7 @@ impl<'a> PreviewPanel<'a> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PreviewCapture {
-    Text(String),
+    Text(PreviewText),
     Unavailable(String),
 }
 
@@ -117,6 +117,10 @@ mod tests {
                 SessionState::Working,
                 false,
             )
+        }
+
+        fn text(raw: &str) -> PreviewCapture {
+            PreviewCapture::Text(PreviewText::parse(raw))
         }
 
         fn lines(capture: Option<&PreviewCapture>, width: u16, height: u16) -> Vec<String> {
@@ -156,9 +160,8 @@ mod tests {
 
     #[test]
     fn captured_escape_sequences_are_removed() {
-        let capture = PreviewCapture::Text(
-            "\u{1b}[1;32m✻ Thinking…\u{1b}[0m\n\u{1b}]8;;https://example.com\u{7}link\u{1b}]8;;\u{1b}\\"
-                .to_string(),
+        let capture = PanelFixture::text(
+            "\u{1b}[1;32m✻ Thinking…\u{1b}[0m\n\u{1b}]8;;https://example.com\u{7}link\u{1b}]8;;\u{1b}\\",
         );
 
         let lines = PanelFixture::lines(Some(&capture), 50, 8);
@@ -168,7 +171,7 @@ mod tests {
 
     #[test]
     fn the_preview_keeps_the_last_rows_that_fit_without_trailing_blank_rows() {
-        let capture = PreviewCapture::Text("one\ntwo\nthree\nfour\n\n  \n".to_string());
+        let capture = PanelFixture::text("one\ntwo\nthree\nfour\n\n  \n");
 
         let lines = PanelFixture::lines(Some(&capture), 50, 7);
 
@@ -177,7 +180,7 @@ mod tests {
 
     #[test]
     fn a_long_captured_row_is_clipped_without_wrapping() {
-        let capture = PreviewCapture::Text(format!("{}\nnext", "x".repeat(80)));
+        let capture = PanelFixture::text(&format!("{}\nnext", "x".repeat(80)));
 
         let lines = PanelFixture::lines(Some(&capture), 30, 8);
 
@@ -186,7 +189,7 @@ mod tests {
 
     #[test]
     fn a_short_capture_is_anchored_to_the_bottom_of_the_panel() {
-        let capture = PreviewCapture::Text("sh-5.3$\n\n\n".to_string());
+        let capture = PanelFixture::text("sh-5.3$\n\n\n");
 
         let lines = PanelFixture::lines(Some(&capture), 50, 10);
 
@@ -195,7 +198,7 @@ mod tests {
 
     #[test]
     fn captured_colors_are_kept() {
-        let capture = PreviewCapture::Text("\u{1b}[32mready\u{1b}[0m".to_string());
+        let capture = PanelFixture::text("\u{1b}[32mready\u{1b}[0m");
         let row = PanelFixture::row();
         let mut terminal = Terminal::new(TestBackend::new(30, 6)).unwrap();
 

@@ -7,6 +7,7 @@ pub struct Deadline {
 
 impl Deadline {
     const POLL_INTERVAL: Duration = Duration::from_millis(5);
+    const BACKGROUND_WORK_LIMIT: Duration = Duration::from_secs(2);
 
     pub fn after(limit: Duration) -> Self {
         Self {
@@ -14,7 +15,11 @@ impl Deadline {
         }
     }
 
-    pub fn wait_until(&self, condition: impl Fn() -> bool) -> bool {
+    pub fn for_background_work() -> Self {
+        Self::after(Self::BACKGROUND_WORK_LIMIT)
+    }
+
+    pub fn wait_until(&self, mut condition: impl FnMut() -> bool) -> bool {
         while Instant::now() < self.end {
             if condition() {
                 return true;

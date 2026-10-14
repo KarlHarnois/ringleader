@@ -1,24 +1,39 @@
 use ansi_to_tui::IntoText;
 use ratatui::text::Line;
 
-pub struct PreviewText<'a> {
-    raw: &'a str,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreviewText {
+    lines: Vec<Line<'static>>,
 }
 
-impl<'a> PreviewText<'a> {
+impl PreviewText {
     const ESCAPE: char = '\u{1b}';
     const BELL: char = '\u{7}';
     const CONTROL_SEQUENCE: char = '[';
     const OPERATING_SYSTEM_COMMAND: char = ']';
     const STRING_TERMINATOR: char = '\\';
 
-    pub fn new(raw: &'a str) -> Self {
-        Self { raw }
+    pub fn parse(raw: &str) -> Self {
+        let mut lines = Self::styled_lines(raw).unwrap_or_else(|| Self::plain_lines(raw));
+        while lines.last().is_some_and(Self::is_blank) {
+            lines.pop();
+        }
+        Self { lines }
     }
 
-    pub fn plain(&self) -> String {
-        let mut plain = String::with_capacity(self.raw.len());
-        let mut characters = self.raw.chars();
+    pub fn bottom_lines(&self, room: usize) -> Vec<Line<'static>> {
+        let kept = self.kept_rows(room);
+        let shown = &kept[kept.len().saturating_sub(room)..];
+        let padding = room.saturating_sub(shown.len());
+        let shown_lines = shown.iter().map(|&index| self.lines[index].clone());
+        std::iter::repeat_n(Line::default(), padding)
+            .chain(shown_lines)
+            .collect()
+    }
+
+    fn plain(raw: &str) -> String {
+        let mut plain = String::with_capacity(raw.len());
+        let mut characters = raw.chars();
         while let Some(character) = characters.next() {
             if character != Self::ESCAPE {
                 plain.push(character);
@@ -39,22 +54,9 @@ impl<'a> PreviewText<'a> {
         plain
     }
 
-    pub fn bottom_lines(&self, room: usize) -> Vec<Line<'static>> {
-        let mut lines = self.styled_lines().unwrap_or_else(|| self.plain_lines());
-        while lines.last().is_some_and(Self::is_blank) {
-            lines.pop();
-        }
-        let mut lines = Self::squeezed(lines, room);
-        let shown = lines.split_off(lines.len().saturating_sub(room));
-        let padding = room.saturating_sub(shown.len());
-        std::iter::repeat_n(Line::default(), padding)
-            .chain(shown)
-            .collect()
-    }
-
-    fn squeezed(lines: Vec<Line<'static>>, room: usize) -> Vec<Line<'static>> {
-        let mut runs = Self::blank_runs(&lines);
-        let mut excess = lines.len().saturating_sub(room);
+    fn kept_rows(&self, room: usize) -> Vec<usize> {
+        let mut runs = Self::blank_runs(&self.lines);
+        let mut excess = self.lines.len().saturating_sub(room);
         while excess > 0 {
             let shrinkable = runs.iter_mut().filter(|run| run.kept > 1);
             let Some(longest) = shrinkable.max_by_key(|run| run.kept) else {
@@ -63,11 +65,8 @@ impl<'a> PreviewText<'a> {
             longest.kept -= 1;
             excess -= 1;
         }
-        lines
-            .into_iter()
-            .enumerate()
-            .filter(|(index, _)| runs.iter().all(|run| run.keeps(*index)))
-            .map(|(_, line)| line)
+        (0..self.lines.len())
+            .filter(|index| runs.iter().all(|run| run.keeps(*index)))
             .collect()
     }
 
@@ -86,12 +85,12 @@ impl<'a> PreviewText<'a> {
         runs
     }
 
-    fn styled_lines(&self) -> Option<Vec<Line<'static>>> {
-        self.raw.as_bytes().into_text().ok().map(|text| text.lines)
+    fn styled_lines(raw: &str) -> Option<Vec<Line<'static>>> {
+        raw.as_bytes().into_text().ok().map(|text| text.lines)
     }
 
-    fn plain_lines(&self) -> Vec<Line<'static>> {
-        self.plain()
+    fn plain_lines(raw: &str) -> Vec<Line<'static>> {
+        Self::plain(raw)
             .lines()
             .map(|row| Line::from(row.to_string()))
             .collect()
@@ -148,7 +147,7 @@ mod tests {
     impl TextFixture {
         fn shown(rows: &[String], room: usize) -> Vec<String> {
             let screen = rows.join("\n");
-            PreviewText::new(&screen)
+            PreviewText::parse(&screen)
                 .bottom_lines(room)
                 .iter()
                 .map(|line| {
@@ -177,7 +176,7 @@ mod tests {
         let raw =
             "\u{1b}[1;32mready\u{1b}[0m \u{1b}]8;;https://example.com\u{7}link\u{1b}]8;;\u{1b}\\";
 
-        assert_eq!(PreviewText::new(raw).plain(), "ready link");
+        assert_eq!(PreviewText::plain(raw), "ready link");
     }
 
     #[test]

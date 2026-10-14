@@ -9,7 +9,7 @@ use ratatui::backend::{Backend, ClearType, TestBackend, WindowSize};
 use ratatui::buffer::Cell;
 use ratatui::layout::{Position, Size};
 
-use super::{FakeInterrupts, FakeMultiplexer, RecordingScreenMode, ServiceFixture};
+use super::{Deadline, FakeInterrupts, FakeMultiplexer, RecordingScreenMode, ServiceFixture};
 use crate::application::EphemeralShell;
 use crate::ui::App;
 use crate::ui::event_loop::{EventLoop, InputSource};
@@ -47,6 +47,13 @@ impl UiHarness {
 
     pub fn app(fixture: &ServiceFixture) -> App {
         App::new(fixture.service(), Box::new(io::sink()), Instant::now())
+    }
+
+    pub fn settle(app: &mut App) {
+        Deadline::for_background_work().wait_until(|| {
+            app.on_tick(Instant::now());
+            !app.awaits_results()
+        });
     }
 
     pub fn signals(&self) -> &FakeInterrupts {
@@ -126,13 +133,19 @@ impl ShellRunner for RecordingShells {
 
 pub struct ScriptedInput {
     events: VecDeque<io::Result<Option<Event>>>,
+    timeouts: Vec<Duration>,
 }
 
 impl ScriptedInput {
     pub fn events(events: Vec<Event>) -> Self {
         Self {
             events: events.into_iter().map(|event| Ok(Some(event))).collect(),
+            timeouts: Vec::new(),
         }
+    }
+
+    pub fn timeouts(&self) -> &[Duration] {
+        &self.timeouts
     }
 
     pub fn then_after_a_pause(mut self, events: Vec<Event>) -> Self {
@@ -145,12 +158,14 @@ impl ScriptedInput {
     pub fn failing() -> Self {
         Self {
             events: VecDeque::from([Err(io::Error::other("the terminal hung up"))]),
+            timeouts: Vec::new(),
         }
     }
 }
 
 impl InputSource for ScriptedInput {
     fn next_event(&mut self, timeout: Duration) -> io::Result<Option<Event>> {
+        self.timeouts.push(timeout);
         match self.events.pop_front() {
             Some(event) => event,
             None if timeout.is_zero() => Ok(None),
