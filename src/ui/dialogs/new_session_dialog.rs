@@ -31,14 +31,26 @@ impl NewSessionDialog {
     const CREATE_KEY: char = 's';
 
     pub fn open(service: &SessionService) -> Self {
+        let agents = AgentPicker::new(service.config().agents(), &service.config_path());
         Self {
             name: TextField::new(FieldKind::Name),
             repos: RepoPicker::open(service),
-            agents: AgentPicker::new(service.config().agents(), &service.config_path()),
+            mode: Self::starting_mode(&agents),
+            agents,
             prompt: PromptField::default(),
             focus: NewSessionField::Name,
-            mode: AgentMode::default(),
             error: None,
+        }
+    }
+
+    fn starting_mode(agents: &AgentPicker) -> AgentMode {
+        let agent_has_plan_mode = agents
+            .selected()
+            .is_ok_and(|agent| agent.supports(AgentMode::Plan));
+        if agent_has_plan_mode {
+            AgentMode::Plan
+        } else {
+            AgentMode::Build
         }
     }
 
@@ -454,6 +466,7 @@ mod tests {
             DialogFixture::submitted(step),
             CreateRequest::new("fix-auth", ServiceFixture::repo())
                 .with_agent("claude")
+                .with_mode(AgentMode::Plan)
                 .with_prompt("fix the tests")
         );
     }
@@ -554,7 +567,9 @@ mod tests {
 
     #[test]
     fn j_and_k_move_through_the_agents() {
-        let agents = vec![ServiceFixture::agent(), Agent::new("opencode", "opencode")];
+        let opencode = Agent::new("opencode", "opencode")
+            .with_plan_args(&["--agent".to_string(), "plan".to_string()]);
+        let agents = vec![ServiceFixture::agent(), opencode];
         let fixture = DialogFixture::launched_in_repo()
             .with_config(ServiceFixture::config().with_agents(agents));
         let (mut dialog, service) = DialogFixture::opened(&fixture);
@@ -583,6 +598,7 @@ mod tests {
             DialogFixture::submitted(step),
             CreateRequest::new("fix-auth", ServiceFixture::repo())
                 .with_agent("claude")
+                .with_mode(AgentMode::Plan)
                 .with_prompt("")
         );
     }
@@ -784,33 +800,33 @@ mod tests {
 
         let request = DialogFixture::submitted(step);
         assert_eq!(request.prompt(), "fix");
-        assert_eq!(request.mode(), AgentMode::Plan);
+        assert_eq!(request.mode(), AgentMode::Build);
     }
 
     #[test]
-    fn a_new_session_starts_in_build_mode() {
+    fn a_new_session_starts_in_plan_mode_when_the_agent_has_plan_args() {
         let (dialog, _service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
-
-        assert!(DialogFixture::text(&dialog).contains("Agent     claude\nMode      build\n"));
-    }
-
-    #[test]
-    fn shift_tab_shows_plan_mode() {
-        let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
-
-        DialogFixture::press(&mut dialog, &service, KeyCode::BackTab);
 
         assert!(DialogFixture::text(&dialog).contains("Agent     claude\nMode      plan\n"));
     }
 
     #[test]
-    fn a_second_shift_tab_goes_back_to_build_mode() {
+    fn shift_tab_shows_build_mode() {
+        let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
+
+        DialogFixture::press(&mut dialog, &service, KeyCode::BackTab);
+
+        assert!(DialogFixture::text(&dialog).contains("Agent     claude\nMode      build\n"));
+    }
+
+    #[test]
+    fn a_second_shift_tab_goes_back_to_plan_mode() {
         let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
 
         DialogFixture::press(&mut dialog, &service, KeyCode::BackTab);
         DialogFixture::press(&mut dialog, &service, KeyCode::BackTab);
 
-        assert!(DialogFixture::text(&dialog).contains("Mode      build\n"));
+        assert!(DialogFixture::text(&dialog).contains("Mode      plan\n"));
     }
 
     #[test]
@@ -846,11 +862,11 @@ mod tests {
 
         let shown = DialogFixture::text(&dialog);
         assert!(shown.contains("Find: gate"));
-        assert!(shown.contains("Mode      plan\n"));
+        assert!(shown.contains("Mode      build\n"));
     }
 
     #[test]
-    fn create_in_plan_mode_asks_for_plan_mode() {
+    fn create_after_shift_tab_asks_for_build_mode() {
         let (mut dialog, service) =
             DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
 
@@ -859,9 +875,7 @@ mod tests {
 
         assert_eq!(
             DialogFixture::submitted(step),
-            CreateRequest::new("fix-auth", ServiceFixture::repo())
-                .with_agent("claude")
-                .with_mode(AgentMode::Plan)
+            CreateRequest::new("fix-auth", ServiceFixture::repo()).with_agent("claude")
         );
     }
 
@@ -880,13 +894,29 @@ mod tests {
     }
 
     #[test]
-    fn build_mode_never_warns_about_plan_args() {
+    fn a_new_session_starts_in_build_mode_when_the_agent_has_no_plan_args() {
         let agent = Agent::new("example-agent", "sh");
         let fixture = DialogFixture::launched_in_repo()
             .with_config(ServiceFixture::config().with_agents(vec![agent]));
         let (dialog, _service) = DialogFixture::opened(&fixture);
 
         assert!(DialogFixture::text(&dialog).contains("Mode      build\n"));
+    }
+
+    #[test]
+    fn picking_an_agent_without_plan_args_keeps_plan_mode_and_warns() {
+        let agents = vec![ServiceFixture::agent(), Agent::new("example-agent", "sh")];
+        let fixture = DialogFixture::launched_in_repo()
+            .with_config(ServiceFixture::config().with_agents(agents));
+        let (mut dialog, service) = DialogFixture::opened(&fixture);
+        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
+        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
+
+        DialogFixture::press(&mut dialog, &service, KeyCode::Char('j'));
+
+        assert!(
+            DialogFixture::text(&dialog).contains("Mode      plan · this agent has no plan_args\n")
+        );
     }
 
     #[test]
@@ -984,7 +1014,7 @@ mod tests {
 
         assert!(
             DialogFixture::text_with_cursor(&dialog)
-                .contains("Agent     claude\nMode      build\nPrompt    █\n\n")
+                .contains("Agent     claude\nMode      plan\nPrompt    █\n\n")
         );
     }
 
@@ -996,7 +1026,7 @@ mod tests {
         dialog.paste(DialogFixture::SEVEN_LINES);
 
         assert!(DialogFixture::text_with_cursor(&dialog).contains(
-            "Agent     claude\nMode      build\nPrompt    two\n          three\n          four\n          five\n          six\n          seven█\n\n"
+            "Agent     claude\nMode      plan\nPrompt    two\n          three\n          four\n          five\n          six\n          seven█\n\n"
         ));
     }
 
@@ -1011,7 +1041,7 @@ mod tests {
             DialogFixture::press(&mut dialog, &service, KeyCode::Up);
         }
 
-        assert!(scrolled.contains("Agent     claude\nMode      build\nPrompt    two\n"));
+        assert!(scrolled.contains("Agent     claude\nMode      plan\nPrompt    two\n"));
         assert!(DialogFixture::text_with_cursor(&dialog).contains(
             "Prompt    one█\n          two\n          three\n          four\n          five\n          six\n\n"
         ));
@@ -1028,7 +1058,7 @@ mod tests {
             DialogFixture::press(&mut dialog, &service, KeyCode::Backspace);
         }
 
-        assert!(scrolled.contains("Agent     claude\nMode      build\nPrompt    two\n"));
+        assert!(scrolled.contains("Agent     claude\nMode      plan\nPrompt    two\n"));
         assert!(DialogFixture::text_with_cursor(&dialog).contains(
             "Prompt    one\n          two\n          three\n          four\n          five\n          six█\n\n"
         ));
@@ -1218,7 +1248,7 @@ mod tests {
 
         let shown = DialogFixture::text_at(&dialog, rows_without_the_name);
         assert!(shown.starts_with("Repo      Find: gate█\n"));
-        assert!(shown.contains("~/work/gateway-01\nMode      build\nPrompt"));
+        assert!(shown.contains("~/work/gateway-01\nMode      plan\nPrompt"));
     }
 
     #[test]
@@ -1244,7 +1274,7 @@ mod tests {
         assert_eq!(
             shown,
             format!(
-                "Name      fix-auth\nRepo      example-project\nAgent     claude\nMode      build\nPrompt\n{}",
+                "Name      fix-auth\nRepo      example-project\nAgent     claude\nMode      plan\nPrompt\n{}",
                 DialogFixture::PROMPT_HINTS
             )
         );
@@ -1261,7 +1291,7 @@ mod tests {
         DialogFixture::settle(&mut dialog, |text| text.contains("20/20 repos under ~"));
 
         let shown = DialogFixture::text(&dialog);
-        assert!(shown.contains("gateway-06\nAgent     claude\nMode      build\nPrompt    two\n"));
+        assert!(shown.contains("gateway-06\nAgent     claude\nMode      plan\nPrompt    two\n"));
         assert!(shown.ends_with(DialogFixture::SEARCH_HINTS));
     }
 
@@ -1276,7 +1306,7 @@ mod tests {
         DialogFixture::settle(&mut dialog, |text| text.contains("20/20 repos under ~"));
 
         let shown = DialogFixture::text_at(&dialog, DialogFixture::COMPACT_HEIGHT);
-        assert!(shown.contains("gateway-01\nAgent     claude\nMode      build\nPrompt    seven\n"));
+        assert!(shown.contains("gateway-01\nAgent     claude\nMode      plan\nPrompt    seven\n"));
         assert!(shown.ends_with(DialogFixture::SEARCH_HINTS));
     }
 
@@ -1291,7 +1321,7 @@ mod tests {
 
         let shown = DialogFixture::text_at(&dialog, DialogFixture::COMPACT_HEIGHT);
         assert!(shown.starts_with(
-            "Name      fix-auth\nRepo      example-project\nAgent     claude\nMode      build\nPrompt    seven\n"
+            "Name      fix-auth\nRepo      example-project\nAgent     claude\nMode      plan\nPrompt    seven\n"
         ));
         assert!(shown.replace('\n', " ").contains(&error));
         assert!(shown.ends_with(DialogFixture::PROMPT_HINTS));
@@ -1306,7 +1336,7 @@ mod tests {
         DialogFixture::press(&mut dialog, &service, KeyCode::BackTab);
 
         let shown = DialogFixture::text_at(&dialog, rows_for_three_fields);
-        assert!(shown.contains("Mode      plan\nPrompt"));
+        assert!(shown.contains("Mode      build\nPrompt"));
     }
 
     #[test]
@@ -1321,7 +1351,7 @@ mod tests {
 
         let shown = DialogFixture::text_at(&dialog, rows_for_all_but_the_agent);
         assert!(shown.starts_with(
-            "Name      fix-auth\nRepo      example-project\nMode      build\nPrompt    seven\n"
+            "Name      fix-auth\nRepo      example-project\nMode      plan\nPrompt    seven\n"
         ));
         assert!(shown.replace('\n', " ").contains(&error));
         assert!(shown.ends_with(DialogFixture::PROMPT_HINTS));
