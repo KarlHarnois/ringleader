@@ -54,7 +54,7 @@ impl DirectoryScratchSpace {
 impl ScratchSpace for DirectoryScratchSpace {
     fn directory(&self, worktree: &Path) -> PathBuf {
         self.root
-            .join(FnvHash::of(worktree.as_os_str().as_bytes()).hex())
+            .join(FnvHash::of(worktree.as_os_str().as_bytes()).short_hex())
     }
 
     fn create(&self, worktree: &Path) -> Result<(), ScratchSpaceError> {
@@ -91,8 +91,8 @@ mod tests {
     impl ScratchFixture {
         const WORKTREE: &'static str = "/data/ringleader/worktrees/example-project/fix-auth";
         const OTHER_WORKTREE: &'static str = "/data/ringleader/worktrees/example-project/fix-ui";
-        const WORKTREE_HASH: &'static str = "779a3f80f082ab8d";
-        const ROOT: &'static str = "cache/ringleader/scratch";
+        const WORKTREE_HASH: &'static str = "8718940d";
+        const ROOT: &'static str = "cache/ringleader/tmp";
         const SEALED_MODE: u32 = 0o500;
         const ACCESS_BITS: u32 = 0o777;
 

@@ -57,7 +57,7 @@ impl XdgPaths {
     }
 
     pub fn scratch_root(&self) -> PathBuf {
-        self.cache_home.join(Self::APPLICATION).join("scratch")
+        self.cache_home.join(Self::APPLICATION).join("tmp")
     }
 
     pub fn handoff_directory(&self) -> PathBuf {
@@ -147,7 +147,7 @@ mod tests {
 
         assert_eq!(
             paths.scratch_root(),
-            Path::new("/example-cache/ringleader/scratch")
+            Path::new("/example-cache/ringleader/tmp")
         );
     }
 
@@ -157,7 +157,7 @@ mod tests {
 
         assert_eq!(
             paths.scratch_root(),
-            Path::new("/home/example/.cache/ringleader/scratch")
+            Path::new("/home/example/.cache/ringleader/tmp")
         );
     }
 
