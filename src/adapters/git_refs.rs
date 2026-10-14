@@ -20,7 +20,7 @@ impl<'a> GitRefs<'a> {
     }
 
     pub fn head(&self, location: &Path) -> Result<Head, WorkspaceError> {
-        let verify = GitInvocation::in_worktree(location, "rev-parse").args([
+        let verify = GitInvocation::in_repo(location, "rev-parse").args([
             "--verify",
             "-q",
             "--symbolic-full-name",
@@ -82,7 +82,7 @@ impl<'a> GitRefs<'a> {
         format: &str,
         patterns: &[String],
     ) -> Result<Vec<(String, String)>, WorkspaceError> {
-        let list = GitInvocation::in_worktree(location, "for-each-ref")
+        let list = GitInvocation::in_repo(location, "for-each-ref")
             .arg(format)
             .args(patterns);
         let listing = self.git.run_checked(&list)?;
@@ -97,6 +97,8 @@ impl<'a> GitRefs<'a> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
     use crate::test_support::GitTestRepo;
 
@@ -146,6 +148,12 @@ mod tests {
 
         fn local(name: &str) -> Branch {
             Branch::Local(name.to_string())
+        }
+
+        fn subdirectory(&self) -> PathBuf {
+            let subdirectory = self.repo.path().join("services");
+            std::fs::create_dir(&subdirectory).unwrap();
+            subdirectory
         }
     }
 
@@ -219,6 +227,28 @@ mod tests {
         let main = RefsFixture::local(GitTestRepo::BRANCH);
 
         let tips = fixture.tips(std::slice::from_ref(&main));
+
+        assert_eq!(tips.tip_of(&main), Some(fixture.tip().as_str()));
+    }
+
+    #[test]
+    fn a_subdirectory_of_a_repo_reads_the_repo_head() {
+        let fixture = RefsFixture::new();
+
+        let head = fixture.refs().head(&fixture.subdirectory()).unwrap();
+
+        assert_eq!(head, Head::On(RefsFixture::local(GitTestRepo::BRANCH)));
+    }
+
+    #[test]
+    fn a_subdirectory_of_a_repo_reads_the_repo_tips() {
+        let fixture = RefsFixture::new();
+        let main = RefsFixture::local(GitTestRepo::BRANCH);
+
+        let tips = fixture
+            .refs()
+            .branch_tips(&fixture.subdirectory(), std::slice::from_ref(&main))
+            .unwrap();
 
         assert_eq!(tips.tip_of(&main), Some(fixture.tip().as_str()));
     }
