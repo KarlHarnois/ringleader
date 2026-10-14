@@ -13,9 +13,22 @@ pub struct TmuxScripts;
 impl TmuxScripts {
     const SESSION_CREATED: &'static str = "ringleader-created #{session_id} #{pane_id}";
     const WINDOW_CREATED: &'static str = "ringleader-created #{window_id} #{pane_id}";
+    const SESSION_ID_MARKER: char = '$';
 
     pub fn exact(tmux_name: &str) -> String {
         format!("={tmux_name}:")
+    }
+
+    pub fn reads_as_session_id(tmux_name: &str) -> bool {
+        tmux_name.starts_with(Self::SESSION_ID_MARKER)
+    }
+
+    pub fn by_session_id(session_id: &str) -> String {
+        format!("{session_id}:")
+    }
+
+    pub fn session_ids() -> TmuxSequence {
+        TmuxSequence::new().command(["list-sessions", "-F", TmuxListing::SESSION_ID_FORMAT])
     }
 
     pub fn create_session(spec: &SessionSpec, launcher: &[OsString], shell: &str) -> TmuxSequence {
@@ -154,15 +167,8 @@ impl TmuxScripts {
             .command(["display-message", "-p", TmuxLaunch::DONE_LABEL])
     }
 
-    pub fn session_panes(tmux_name: &str, format: &str) -> TmuxSequence {
-        TmuxSequence::new().command([
-            "list-panes",
-            "-s",
-            "-t",
-            &Self::exact(tmux_name),
-            "-F",
-            format,
-        ])
+    pub fn session_panes(session: &str, format: &str) -> TmuxSequence {
+        TmuxSequence::new().command(["list-panes", "-s", "-t", session, "-F", format])
     }
 
     pub fn all_panes(format: &str) -> TmuxSequence {

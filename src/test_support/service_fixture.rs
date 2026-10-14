@@ -46,6 +46,8 @@ impl ServiceFixture {
     pub const IDLE_SECONDS: u64 = 3;
     pub const SHELL: &'static str = "/bin/example-shell";
     pub const WORKTREE_PROCESS: u32 = 4_000_042;
+    pub const OTHER_RUNTIME_SOCKET: &'static str =
+        "/home/example/.local/state/ringleader/tmux/tmux.sock";
     pub const STATE_DIRECTORY: &'static str = "/state/ringleader";
     pub const TMUX_CONFIG: &'static str = "/state/ringleader/tmux.conf";
     pub const LOG_FILE: &'static str = "/state/ringleader/app.log";

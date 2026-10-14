@@ -22,6 +22,7 @@ use crate::domain::{KeyBindings, RepoName, SessionMetadata, SessionRepo, Session
 pub struct TmuxTestServer {
     directory: TempDir,
     files: ServerFiles,
+    program: OsString,
 }
 
 impl TmuxTestServer {
@@ -44,7 +45,28 @@ impl TmuxTestServer {
             &directory.path().join("tmux.conf"),
         );
         std::fs::write(files.config(), config_text).expect("the test server config is written");
-        Self { directory, files }
+        Self {
+            directory,
+            files,
+            program: OsString::from("tmux"),
+        }
+    }
+
+    pub fn under_program_name(name: &str) -> Self {
+        let mut server = Self::new();
+        let program = server.directory().join(name);
+        let copied = Command::new("cp")
+            .arg(Self::tmux_on_path())
+            .arg(&program)
+            .status()
+            .expect("cp runs");
+        assert!(copied.success(), "a copy of tmux under another name");
+        server.program = program.into_os_string();
+        server
+    }
+
+    pub fn program(&self) -> &std::ffi::OsStr {
+        &self.program
     }
 
     pub fn with_session(name: &str) -> Self {
@@ -99,8 +121,7 @@ impl TmuxTestServer {
         environment: &ProcessEnvironment,
         deadlines: Deadlines,
     ) -> TmuxCommand {
-        TmuxCommand::new(&OsString::from("tmux"), &self.files, environment)
-            .with_deadlines(deadlines)
+        TmuxCommand::new(&self.program, &self.files, environment).with_deadlines(deadlines)
     }
 
     pub fn server_pid(&self) -> String {
@@ -290,7 +311,7 @@ impl TmuxTestServer {
     }
 
     fn typed(&self, args: &[&str]) -> Command {
-        let mut command = Command::new("tmux");
+        let mut command = Command::new(&self.program);
         command
             .env_clear()
             .envs(self.environment().variables().iter().cloned())
@@ -302,6 +323,14 @@ impl TmuxTestServer {
             .args(args)
             .current_dir(self.directory());
         command
+    }
+
+    fn tmux_on_path() -> PathBuf {
+        let search_path = std::env::var_os("PATH").unwrap_or_default();
+        std::env::split_paths(&search_path)
+            .map(|directory| directory.join("tmux"))
+            .find(|candidate| candidate.is_file())
+            .expect("tmux is on PATH")
     }
 
     fn client_named_by_pid(&self, pid: &str) -> Option<String> {

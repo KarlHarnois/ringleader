@@ -67,9 +67,9 @@ Dependencies point inward only. An inner layer never imports an outer one.
 
 The code breaks these rules in four places today. They are violations to fix, not precedent to copy.
 
-- Advice in `domain/session_summary.rs`, `application/busy_worktree.rs`, `application/server_audit.rs`, `application/delete_outcome.rs`, `application/deletion_guards.rs`, and `application/session_renaming.rs` spells out tmux and git command lines. The tmux ones repeat the exact-target syntax that `TmuxScripts::exact` owns.
+- Advice in `domain/unmanaged_session.rs`, `application/busy_worktree.rs`, `application/server_audit.rs`, `application/delete_outcome.rs`, `application/deletion_guards.rs`, and `application/session_renaming.rs` spells out tmux and git command lines. The tmux ones repeat the exact-target syntax that `TmuxScripts::exact` owns.
 - `WorkspaceError`, `MultiplexerError`, and `PullRequestError` name the git, tmux, or gh subcommand that failed, and `WorkspaceError` and `PullRequestError` keep its exit status and stderr in fields. `ServiceError::TimedOut` names the tool, and `ui/diff_queue.rs` and `ui/home_state.rs` branch on it.
-- `ui/action_gate.rs` decides which actions each session state allows, such as restart only for an Exited or Stopped session, and `StatusNote` in `ui/status_bar.rs` repeats that an Unmanaged session can only be attached. The use cases enforce their own versions of those rules.
+- `ui/action_gate.rs` decides which actions each session state allows, such as restart only for an Exited or Stopped session. The use cases enforce their own versions of those rules.
 - `CompositionRoot::run_tui` in `main.rs` calls the TUI's startup use cases itself: `restore_server_socket`, `refuse_own_pane`, `load_registry`, and `reapply_server_config`.
 
 A new capability that `application`, `ui`, or `cli` needs from outside the process goes through a port, because none of them may import `adapters`. `CompositionRoot` and the types in `adapters` reach the outside directly. Logging needs no port: every layer writes through the `log` macros, and `CompositionRoot` installs `AppLog` behind them. The steps for a port:
@@ -281,6 +281,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── session_classifier.rs # SessionClassifier, the pure state classifier
     │   ├── diff_stat.rs          # DiffStat
     │   ├── session_summary.rs    # SessionSummary
+    │   ├── unmanaged_session.rs  # UnmanagedSession, a live tmux session Ringleader does not manage, its label, and the note or kill-session advice that explains why
     │   ├── agent.rs              # Agent
     │   ├── agent_mode.rs         # AgentMode, build or plan, the mode a new session's agent starts in
     │   ├── repo.rs               # Repo
@@ -302,6 +303,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── service_error.rs      # ServiceError, the kinds of failure the use cases report
     │   ├── session_lifecycle.rs  # SessionLifecycle: create, delete, rename, restart, merge
     │   ├── busy_worktree.rs      # BusyWorktree, the tmux server processes that keep a stopped entry from restarting, with the advice for each case
+    │   ├── unseen_session.rs     # UnseenSession, a tmux server Ringleader cannot see that may still hold a stopped entry's session, which rename refuses and delete refuses or warns about
     │   ├── session_creation.rs   # SessionCreation: create_session with its rollbacks
     │   ├── worktree_rollback.rs  # WorktreeRollback, removes the worktree and branch of a failed create
     │   ├── creation_plan.rs      # CreationPlan and CreateRequest
@@ -396,12 +398,13 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── submodule_commits.rs  # SubmoduleCommits, the submodule walk of unmerged_commits
     │   ├── system_clock.rs       # SystemClock, reads `SystemTime`
     │   ├── system_host_probe.rs  # SystemHostProbe
-    │   ├── live_process.rs       # LiveProcess, one /proc entry, whether it is the tmux server of a socket, and signals to it
+    │   ├── live_process.rs       # LiveProcess, one /proc entry, whether it is this user's tmux server of a socket, and signals to it
+    │   ├── tmux_command_line.rs  # TmuxCommandLine, the socket a tmux argv names in its global flags and the process name tmux gives a server it starts
     │   ├── metadata_json.rs      # MetadataJson, the @ringleader_meta JSON each session carries
     │   ├── signal_hook_interrupts.rs # SignalHookInterrupts, the SIGHUP, SIGINT, SIGTERM, and SIGQUIT flags
     │   ├── durable_file.rs       # DurableFile, synced temp file renamed over the target
     │   ├── tmux_command.rs       # TmuxCommand, the private server's `-S` and `-f`, `-u` and `-N`, a child environment without `TMUX` and `TMUX_PANE`, the caller's identity
-    │   ├── server_files.rs       # ServerFiles, the private server's socket and generated config, and the 0700 socket directory
+    │   ├── server_files.rs       # ServerFiles, the private server's socket and generated config, the 0700 socket directory, and whether a server still starts under the socket's lock
     │   ├── tmux_error.rs         # TmuxError
     │   ├── tmux_sequence.rs      # TmuxSequence, `;`-separated commands with `#` and `;` escaping
     │   ├── tmux_output.rs        # TmuxOutput, labeled lines and the zero-session errors
@@ -410,6 +413,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── tmux_agent_input.rs   # TmuxAgentInput, waits for the agent's prompt and types lines into its pane
     │   ├── tmux_listing.rs       # TmuxListing, parses list-panes, list-windows, list-keys, and server rows
     │   ├── tmux_multiplexer.rs   # TmuxMultiplexer
+    │   ├── key_switch.rs         # KeySwitch, the copy-mode bindings each newly bound key displaces, saved in server options, and the ones each dropped key displaced, replayed
     │   ├── private_server.rs     # PrivateServer, the private server's config files, return binding check, state, config reapply that unbinds the keys the config dropped, and lost socket recovery
     │   ├── running_config.rs     # RunningConfig, the hash and key bindings a running server reports
     │   ├── tmux_server_config.rs # TmuxServerConfig, the generated config of the private tmux server with its return, session switch, and shell toggle bindings, its hash, and the script that reapplies it
@@ -508,7 +512,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
 - Other support types, such as a parser result, a doctor finding, a session spec, or a dialog's in-progress state, live in their primary type's file and get no tree entry.
 - No code below `main` calls `std::env::current_exe`, reads the process environment (including `$TMUX`, `$TMUX_PANE`, `$HOME`, and `$SHELL`) or the process cwd, resolves XDG paths, or asks which terminal standard input is. `main` reads them once and injects them, with environment values in the `ProcessEnvironment` snapshot. `ProcessEnvironment::capture` reads the terminal name of standard input with `libc::ttyname_r` on descriptor 0, in the type's only `unsafe` block.
 - Every `unsafe` block carries one `// SAFETY:` comment that states why the call is sound, and is confined to one adapter method.
-- Every tmux target is exact: `=<session>:` from `TmuxScripts::exact`, a window id, or a pane id. Never pass a bare `-t <name>`, because tmux resolves a name with no exact match by prefix, so `fix` would reach `fix-auth`. Every `new-session`, `new-window`, and `respawn-window` passes `-c` with the worktree, because without `-c` tmux starts the pane in the caller's directory and still exits 0. A command Ringleader sends gets its `-c` from `TmuxScripts::start_in`. A binding in the generated config passes `-c '#{session_path}'`, because the config is rendered before any session exists and `create_session` starts each session in its worktree.
+- Every tmux target is exact: `=<session>:` from `TmuxScripts::exact`, a session id, a window id, or a pane id. tmux reads `=$0:` as the session whose id is `$0`, so a session whose name starts with `$` is targeted by its own id, which `TmuxMultiplexer` looks up by name. Never pass a bare `-t <name>`, because tmux resolves a name with no exact match by prefix, so `fix` would reach `fix-auth`. Every `new-session`, `new-window`, and `respawn-window` passes `-c` with the worktree, because without `-c` tmux starts the pane in the caller's directory and still exits 0. A command Ringleader sends gets its `-c` from `TmuxScripts::start_in`. A binding in the generated config passes `-c '#{session_path}'`, because the config is rendered before any session exists and `create_session` starts each session in its worktree.
 
 ## Wiring
 
@@ -516,7 +520,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
 - `ringleader` with no subcommand opens the TUI. Any subcommand runs the CLI and never starts the TUI. The hidden `__exec-agent` path loads no config, opens no log, and takes no lock.
 - The TUI takes the lifetime lock, and the mutating commands (`new`, `delete`, `rename`, `restart`, `repo add`, `repo remove`) take the write lock. `list`, `doctor`, `attach`, `repo list`, and `__exec-agent` take no lock.
 - A session's branch is its name, and its tmux session is the tmux prefix followed by its name. Create and rename never record a branch that differs from the name, and rename always moves the branch with the name. Rename refuses a branch that has been pushed, because the remote branch and any pull request keep the old name, and it never moves the worktree, because the running agent and its transcripts are keyed by that path. A session recorded on another branch, from before the branch prefix was dropped, from an adopted tmux session, or from a tmux session renamed by hand, keeps working. When its branch is marked and not pushed, `doctor` warns about it, and renaming it to a new name moves its branch.
-- Key bindings come only from the generated config of the private tmux server, which `create_session` writes, and which the TUI at start and after `r`, `new`, and `restart` re-source on the running server when its `@ringleader_config` hash differs from the current render. Only lock holders do either, so only one process ever writes that config, and the reapply is skipped while the config failed to load. Every tmux call passes `-S <private socket>` and `-f`, so Ringleader never reads or writes the user's tmux server. An entry recorded on another socket is checked only through `/proc`. The TUI and the CLI attach through the same foreground child.
+- Key bindings come only from the generated config of the private tmux server, which `create_session` writes, and which the TUI at start, `new`, and `restart` re-source on the running server when its `@ringleader_config` hash differs from the current render, and `r` re-sources whenever the server runs, since a `tmux source-file` run from a pane changes the server without changing that hash. Only lock holders do either, so only one process ever writes that config, and the reapply is skipped while the config failed to load. Every tmux call passes `-S <private socket>` and `-f`, so Ringleader never reads or writes the user's tmux server. An entry recorded on another socket is checked only through `/proc`. The TUI and the CLI attach through the same foreground child.
 - Blocking TUI operations (create, delete, rename, restart, merge, and the delete measurement) run behind a busy message, and the event loop drops the key and paste events queued while they ran.
 - `p` pulls: it merges origin's copy of a session's base branch into its worktree. It runs only on a `Waiting` session whose agent is at its prompt, by the conditions below, and whose worktree has no uncommitted changes and is on the session's branch, so the merge never changes files under a turn that is still running. The branch is the repo's configured `base_branch` without any `origin/` prefix, or else the first of origin's default, `origin/main`, and `origin/master` that exists. It fetches only that branch, refuses when it does not hold the commit the session started from, which catches a session created with its own `--base-branch` only once that branch has moved away from the merged one, since a session records its start commit and not its base branch, observes the session again and checks the guards on that fresh state, so the fetch's network time stays outside the window they close, merges it with `--no-edit`, and when the merge stops on conflicts it leaves the merge in progress and types one line into the agent naming the first 20 conflicted paths, counting the rest, and asking it to resolve them and commit. It refuses a worktree with staged changes or a merge already in progress, so a merge that then fails without conflicts, such as a merge commit a hook refuses or a merge killed at its deadline before git recorded it, is undone with `git merge --abort` or `git reset --merge HEAD`, unless its merge commit had already landed, as when a slow `post-merge` hook is killed, which is kept and reported as landed. The line goes through `type_if_ready`, so an agent that left its prompt is not typed into, and the status bar says so as an error.
 - A dialog's hint line lists only keys whose meaning is Ringleader's own, such as `Enter create`, `Ctrl-S create`, and `Esc cancel`, and the keys that choose from a list, such as `↑ ↓ j k choose`. It never lists text-editing keys like cursor movement, Ctrl-U, or Ctrl-W, because every terminal user already expects them. A new editing key goes into `TextField` with its usual terminal meaning, not into a hint.

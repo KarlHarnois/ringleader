@@ -126,9 +126,6 @@ impl SessionService {
     }
 
     pub fn restore_server_socket(&self) -> Result<Option<String>, ServiceError> {
-        if self.read_only_reason().is_some() {
-            return Ok(None);
-        }
         self.lifecycle.restore_server_socket()
     }
 
@@ -140,12 +137,18 @@ impl SessionService {
             .sync_server_config(self.config().key_bindings())
     }
 
-    pub fn shown_key_bindings(&self) -> KeyBindings {
-        let configured = self.config().key_bindings().clone();
-        if self.read_only_reason().is_none() {
-            return configured;
+    pub fn reload_server_config(&self) -> Result<(), ServiceError> {
+        if self.read_only_reason().is_some() {
+            return Ok(());
         }
-        self.monitor.server_key_bindings().unwrap_or(configured)
+        self.lifecycle
+            .reload_server_config(self.config().key_bindings())
+    }
+
+    pub fn shown_key_bindings(&self) -> KeyBindings {
+        self.monitor
+            .server_key_bindings()
+            .unwrap_or_else(|| self.config().key_bindings().clone())
     }
 
     pub fn refuse_own_pane(&self) -> Result<(), ServiceError> {
@@ -232,14 +235,15 @@ impl SessionService {
             .examine(self.config(), self.read_only_reason(), &self.config_path())
     }
 
-    pub fn restart_session(&mut self, name: &str) -> Result<(), ServiceError> {
+    pub fn restart_session(&mut self, name: &str) -> Result<Option<String>, ServiceError> {
+        let recovery = self.lifecycle.restore_server_socket()?;
         let reconciliation = self.reconcile()?;
         let config_path = self.config_path();
         let restarted =
             self.lifecycle
                 .restart(&reconciliation, name, self.config(), &config_path)?;
         self.entries = reconciliation.entries_with(name, restarted);
-        Ok(())
+        Ok(recovery)
     }
 
     pub fn merge_upstream(&mut self, name: &str) -> Result<MergeReport, ServiceError> {
@@ -327,6 +331,20 @@ mod tests {
     }
 
     #[test]
+    fn a_read_only_service_still_recreates_a_lost_socket() {
+        let fixture = ServiceFixture::new()
+            .with_broken_config(ConfigError::Parse {
+                path: PathBuf::from("/config/ringleader/config.toml"),
+                detail: "expected `=`".to_string(),
+            })
+            .with_multiplexer(FakeMultiplexer::new().with_lost_socket());
+
+        let note = fixture.service().restore_server_socket().unwrap();
+
+        assert!(note.unwrap().contains("recreated the socket"));
+    }
+
+    #[test]
     fn a_reload_reads_the_config_again() {
         let fixture = ServiceFixture::new();
         let mut service = fixture.service();
@@ -394,6 +412,36 @@ mod tests {
     }
 
     #[test]
+    fn a_reload_resources_a_server_config_whose_hash_matches() {
+        let fixture = ServiceFixture::new();
+
+        fixture.service().reload_server_config().unwrap();
+
+        assert!(
+            fixture
+                .multiplexer()
+                .calls()
+                .contains(&"apply_config C-q M-j M-Down M-k M-Up M-l".to_string())
+        );
+    }
+
+    #[test]
+    fn a_reload_without_a_running_server_sends_no_change() {
+        let fixture = ServiceFixture::new()
+            .with_multiplexer(FakeMultiplexer::new().with_versions("3.6a", None));
+
+        fixture.service().reload_server_config().unwrap();
+
+        assert!(
+            fixture
+                .multiplexer()
+                .calls()
+                .iter()
+                .all(|call| !call.starts_with("apply_config"))
+        );
+    }
+
+    #[test]
     fn a_matching_server_config_sends_no_change() {
         let fixture = ServiceFixture::new();
 
@@ -433,6 +481,32 @@ mod tests {
 
         let shown = fixture.service().shown_key_bindings();
         assert_eq!(shown.return_key().to_string(), "M-x");
+    }
+
+    #[test]
+    fn a_server_still_binding_another_key_shows_the_key_it_binds() {
+        let fixture = ServiceFixture::new()
+            .with_multiplexer(FakeMultiplexer::new().with_drifted_config("M-x"));
+
+        assert_eq!(
+            fixture
+                .service()
+                .shown_key_bindings()
+                .return_key()
+                .to_string(),
+            "M-x"
+        );
+    }
+
+    #[test]
+    fn without_a_running_server_the_configured_key_is_shown() {
+        let fixture = ServiceFixture::new()
+            .with_multiplexer(FakeMultiplexer::new().with_versions("3.6a", None));
+
+        assert_eq!(
+            fixture.service().shown_key_bindings(),
+            *ServiceFixture::config().key_bindings()
+        );
     }
 
     #[test]

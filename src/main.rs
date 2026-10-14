@@ -184,9 +184,7 @@ impl CompositionRoot {
             .map(|error| format!("config error, running read-only: {error}"))
             .or(template_warning);
         let mut service = self.service(config_source, loaded);
-        let socket_message = service
-            .restore_server_socket()
-            .unwrap_or_else(|error| Some(error.to_string()));
+        let socket_recovery = service.restore_server_socket();
         let pane_warning = match service.refuse_own_pane() {
             Ok(()) => None,
             Err(error @ ServiceError::Conflict(_)) => return Self::refuse(&error),
@@ -203,7 +201,7 @@ impl CompositionRoot {
             log.err(),
             registry_warning,
             startup_message,
-            socket_message,
+            socket_recovery.as_ref().err().map(ToString::to_string),
             pane_warning,
             config_warning,
         ]
@@ -211,7 +209,7 @@ impl CompositionRoot {
         .flatten()
         .collect();
         let mut app = App::new(service, Box::new(io::stdout()), Instant::now())
-            .with_message((!warnings.is_empty()).then(|| warnings.join("; ")));
+            .with_startup_messages(&warnings, socket_recovery.ok().flatten());
         let signals = match SignalHookInterrupts::register() {
             Ok(signals) => signals,
             Err(error) => return Self::fail(&error.to_string()),
@@ -269,7 +267,10 @@ impl CompositionRoot {
         let tmux = self.tmux(&env_names);
         let bounded = BoundedCommand::new(Deadlines::standard());
         let state = self.state_ports(config_source);
-        let host = Arc::new(SystemHostProbe::new(&self.environment));
+        let host = Arc::new(SystemHostProbe::new(
+            &self.environment,
+            self.programs.tmux(),
+        ));
         let pull_requests = Self::pull_requests(&host, bounded);
         let repos = RepoPorts::new(
             Arc::new(GitWorkspace::new(self.programs.git(), bounded)),

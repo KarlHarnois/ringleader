@@ -39,7 +39,7 @@ impl RunningConfig {
     pub fn read(output: &TmuxOutput) -> Option<Self> {
         let values = output.first(Self::LABEL)?;
         let (hash, return_key) = values.split_once(' ').unwrap_or((values, ""));
-        let key_bindings = HotKey::parse(return_key).map(|return_key| {
+        let key_bindings = HotKey::recorded(return_key).map(|return_key| {
             KeyBindings::new(
                 return_key,
                 Self::keys(output, Self::NEXT_SESSION_LABEL),
@@ -67,7 +67,10 @@ impl RunningConfig {
 
     fn keys(output: &TmuxOutput, label: &'static str) -> Vec<HotKey> {
         let listed = output.first(label).unwrap_or_default();
-        HotKey::parse_valid(listed.split_whitespace())
+        listed
+            .split_whitespace()
+            .filter_map(HotKey::recorded)
+            .collect()
     }
 }
 
@@ -124,6 +127,22 @@ mod tests {
 
         let bindings = running.key_bindings().unwrap();
         assert!(bindings.shell_toggle_keys().is_empty());
+    }
+
+    #[test]
+    fn keys_a_config_can_no_longer_set_are_still_read_off_the_server() {
+        let running = RunningFixture::read(concat!(
+            "ringleader-config 0123456789abcdef M-BSpace\n",
+            "ringleader-next-session-keys M-BTab M-j\n",
+            "ringleader-previous-session-keys M-k\n",
+        ));
+
+        let bindings = running.key_bindings().unwrap();
+        assert_eq!(bindings.return_key().to_string(), "M-BSpace");
+        assert_eq!(
+            RunningFixture::names(bindings.next_session_keys()),
+            ["M-BTab", "M-j"]
+        );
     }
 
     #[test]

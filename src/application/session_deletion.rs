@@ -8,11 +8,13 @@ use super::reconciliation::ManagedRow;
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
 use super::session_scratch::SessionScratch;
+use super::unseen_session::UnseenSession;
 use super::worktree_inspection::WorktreeInspection;
 use crate::domain::{Session, SessionState};
 
 pub struct SessionDeletion {
     guards: DeletionGuards,
+    unseen: UnseenSession,
     inspection: WorktreeInspection,
     workspace: Arc<dyn Workspace>,
     multiplexer: Arc<dyn Multiplexer>,
@@ -25,6 +27,7 @@ impl SessionDeletion {
     pub fn new(ports: &ServicePorts) -> Self {
         Self {
             guards: DeletionGuards::new(ports),
+            unseen: UnseenSession::new(ports),
             inspection: WorktreeInspection::new(ports),
             workspace: ports.repos().workspace(),
             multiplexer: ports.tmux().multiplexer(),
@@ -49,7 +52,8 @@ impl SessionDeletion {
         }
         let measurement = self.confirmed_measurement(row, confirmation)?;
         self.tear_down(row, remaining, &measurement)?;
-        Ok(DeleteOutcome::deleted(measurement))
+        let stray_session = self.unseen.stray_session_warning(row);
+        Ok(DeleteOutcome::deleted(measurement).with_stray_session(stray_session))
     }
 
     fn forget(
@@ -311,6 +315,66 @@ mod tests {
                 stderr: "error: failed to delete".to_string(),
             }
         }
+    }
+
+    #[test]
+    fn a_stopped_session_behind_a_lost_socket_refuses_the_delete() {
+        let fixture = DeleteFixture::stopped_fixture()
+            .with_multiplexer(FakeMultiplexer::new().with_lost_socket());
+
+        let error = DeleteFixture::force(&mut fixture.service()).unwrap_err();
+
+        assert!(matches!(error, ServiceError::Conflict(_)));
+        assert!(error.to_string().contains("press r in a running TUI"));
+        DeleteFixture::assert_everything_kept(&fixture);
+    }
+
+    #[test]
+    fn a_delete_whose_recorded_server_still_runs_names_the_kill_command() {
+        let recorded = Path::new(ServiceFixture::OTHER_RUNTIME_SOCKET);
+        let session = DeleteFixture::session().on_socket(recorded);
+        let fixture = DeleteFixture::stopped_fixture()
+            .with_registry(FakeSessionRegistry::with_sessions(vec![session.clone()]))
+            .with_host(ServiceFixture::host_for(&[&session]).with_tmux_server_on(recorded));
+
+        let outcome = DeleteFixture::force(&mut fixture.service()).unwrap();
+
+        assert!(outcome.stray_session().unwrap().contains(&format!(
+            "tmux -S {} kill-session -t '=ringleader-fix-auth:'",
+            recorded.display()
+        )));
+        assert!(!outcome.summary("fix-auth").contains("kill-session"));
+    }
+
+    #[test]
+    fn a_delete_on_the_private_socket_warns_of_no_stray_session_while_that_server_runs() {
+        let session = DeleteFixture::session();
+        let fixture = DeleteFixture::stopped_fixture().with_host(
+            ServiceFixture::host_for(&[&session])
+                .with_tmux_server_on(Path::new(FakeMultiplexer::SOCKET)),
+        );
+
+        let outcome = DeleteFixture::force(&mut fixture.service()).unwrap();
+
+        assert_eq!(outcome.stray_session(), None);
+    }
+
+    #[test]
+    fn a_stray_session_warning_never_sends_the_user_to_adopt_it_back() {
+        let recorded = Path::new(ServiceFixture::OTHER_RUNTIME_SOCKET);
+        let session = DeleteFixture::session().on_socket(recorded);
+        let fixture = DeleteFixture::stopped_fixture()
+            .with_registry(FakeSessionRegistry::with_sessions(vec![session.clone()]))
+            .with_host(ServiceFixture::host_for(&[&session]).with_tmux_server_on(recorded));
+
+        let outcome = DeleteFixture::force(&mut fixture.service()).unwrap();
+
+        assert!(
+            !outcome
+                .stray_session()
+                .unwrap()
+                .contains("run Ringleader again")
+        );
     }
 
     #[test]
@@ -801,6 +865,20 @@ mod tests {
         let error = DeleteFixture::force(&mut fixture.service()).unwrap_err();
 
         assert!(matches!(error, ServiceError::Conflict(_)));
+        assert!(
+            error
+                .to_string()
+                .contains("delete it from another directory")
+        );
+        assert!(fixture.multiplexer().state_changing_calls().is_empty());
+    }
+
+    #[test]
+    fn delete_refuses_while_ringleader_runs_from_the_worktree_root() {
+        let fixture = DeleteFixture::live_fixture().launched_in(&DeleteFixture::worktree());
+
+        let error = DeleteFixture::force(&mut fixture.service()).unwrap_err();
+
         assert!(
             error
                 .to_string()
