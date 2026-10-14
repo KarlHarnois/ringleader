@@ -10,6 +10,7 @@ use super::bounded_command::{BoundedCommand, Call, CallKind};
 use super::command_output::CommandOutput;
 use super::null_directory_environment::NullDirectoryEnvironment;
 use super::process_environment::ProcessEnvironment;
+use super::shell_word::ShellWord;
 use crate::application::ports::{
     DirectoryEnvironment, DirectoryEnvironmentError, Envrc, HostProbe,
 };
@@ -74,7 +75,13 @@ impl DirenvDirectoryEnvironment {
     }
 
     fn allow_command(directory: &Path) -> String {
-        format!("{} {} {}", Self::PROGRAM, Self::ALLOW, directory.display())
+        let directory = directory.display().to_string();
+        format!(
+            "{} {} {}",
+            Self::PROGRAM,
+            Self::ALLOW,
+            ShellWord::new(&directory)
+        )
     }
 
     fn allow_failure(directory: &Path, reason: String) -> DirectoryEnvironmentError {
@@ -235,6 +242,21 @@ mod tests {
         assert_eq!(
             envrc.allow_command(),
             format!("direnv allow {}", project.display())
+        );
+    }
+
+    #[test]
+    fn the_allow_command_quotes_a_directory_with_a_space() {
+        let fixture = DirenvFixture::new();
+        let project = fixture
+            .home
+            .project_with_envrc("example project", DirenvFixture::ENVRC);
+
+        let envrc = fixture.direnv().envrc(&project).unwrap();
+
+        assert_eq!(
+            envrc.allow_command(),
+            format!("direnv allow '{}'", project.display())
         );
     }
 

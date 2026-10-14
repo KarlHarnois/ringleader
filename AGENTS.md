@@ -396,6 +396,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── git_porcelain.rs      # GitPorcelain, parses git's machine-readable output
     │   ├── git_branches.rs       # GitBranches: compare-and-swap delete, rename, the managed-branch marker, and whether a branch has been pushed
     │   ├── branch_marker.rs      # BranchMarker, the git config entry that marks a branch Ringleader created, and the command that sets it by hand
+    │   ├── shell_word.rs         # ShellWord, one word of a command Ringleader advises, quoted when a shell would split or expand it
     │   ├── branch_section.rs     # BranchSection, the git config section and upstream keys of one branch
     │   ├── start_point_resolver.rs # StartPointResolver, the commit a new worktree starts from
     │   ├── base_branch_ladder.rs # BaseBranchLadder, the origin default, main, and master refs tried when no base branch is set
