@@ -8,6 +8,7 @@ use super::ports::{Clock, HostProbe, Multiplexer, SessionRegistry, StartPoint, W
 use super::reconciliation::Reconciliation;
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
+use super::start_point_resolver::StartPointResolver;
 use super::use_checks::UseChecks;
 use super::worktree_rollback::WorktreeRollback;
 use crate::domain::{Config, Session};
@@ -44,9 +45,8 @@ impl SessionCreation {
     ) -> Result<Session, ServiceError> {
         let plan = self.plan_creation(request, config, config_path)?;
         self.check_availability(&plan, reconciliation)?;
-        let start = self
-            .workspace
-            .resolve_start_point(plan.repo_path(), plan.base_branch())?;
+        let start = StartPointResolver::new(self.workspace.as_ref())
+            .resolve(plan.repo_path(), plan.base_branch())?;
         let rollback =
             WorktreeRollback::new(self.workspace.as_ref(), self.host.as_ref(), &plan, &start);
         self.create_marked_worktree(&plan, &start, &rollback)?;
@@ -177,6 +177,7 @@ mod tests {
     use crate::application::ports::{MultiplexerError, WorkspaceError, WorktreeEntry};
     use crate::domain::Agent;
     use crate::domain::AgentPane;
+    use crate::domain::{BaseBranch, Branch};
     use crate::test_support::{FakeHostProbe, FakeMultiplexer, FakeWorkspace, ServiceFixture};
 
     struct CreateFixture;
@@ -258,6 +259,35 @@ mod tests {
                 "mark_branch_managed fix-auth".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn a_configured_base_branch_tip_becomes_the_recorded_start() {
+        let develop_tip = "5555555555555555555555555555555555555555";
+        let fixture =
+            ServiceFixture::new().with_workspace(FakeWorkspace::default().with_branch_tip(
+                Path::new(ServiceFixture::REPO),
+                Branch::Local("develop".to_string()),
+                develop_tip,
+            ));
+        let request = CreateFixture::request("fix-auth")
+            .with_base_branch(BaseBranch::new("develop").unwrap());
+
+        let session = CreateFixture::create(&fixture, request).unwrap();
+
+        assert_eq!(session.base_commit(), develop_tip);
+    }
+
+    #[test]
+    fn a_missing_configured_base_branch_is_refused_before_anything_is_touched() {
+        let fixture = ServiceFixture::new();
+        let request = CreateFixture::request("fix-auth")
+            .with_base_branch(BaseBranch::new("develop").unwrap());
+
+        let error = CreateFixture::create(&fixture, request).unwrap_err();
+
+        assert!(matches!(error, ServiceError::Invalid(_)));
+        CreateFixture::assert_nothing_touched(&fixture);
     }
 
     #[test]

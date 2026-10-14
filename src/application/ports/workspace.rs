@@ -4,8 +4,9 @@ use thiserror::Error;
 
 use super::diff_base::DiffBase;
 use super::dirty_state::DirtyState;
+use super::head::Head;
 use super::unmerged_commits::UnmergedCommits;
-use crate::domain::{BaseBranch, DiffStat};
+use crate::domain::{Branch, BranchTips, DiffStat};
 
 pub trait Workspace: Send + Sync {
     fn create_worktree(
@@ -43,11 +44,17 @@ pub trait Workspace: Send + Sync {
     fn list_managed_branches(&self, repo: &Path) -> Result<Vec<String>, WorkspaceError>;
     fn branch_marking_command(&self, repo: &Path, branch: &str) -> String;
     fn is_branch_published(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError>;
-    fn resolve_start_point(
+    fn head(&self, location: &Path) -> Result<Head, WorkspaceError>;
+    fn remote_default_branch(
         &self,
-        repo: &Path,
-        base_branch: Option<&BaseBranch>,
-    ) -> Result<StartPoint, WorkspaceError>;
+        location: &Path,
+        remote: &str,
+    ) -> Result<Option<String>, WorkspaceError>;
+    fn branch_tips(
+        &self,
+        location: &Path,
+        branches: &[Branch],
+    ) -> Result<BranchTips, WorkspaceError>;
     fn dirty_state(&self, worktree: &Path) -> Result<DirtyState, WorkspaceError>;
     fn unmerged_commits(
         &self,
@@ -174,16 +181,4 @@ pub enum WorkspaceError {
     LinkedWorktree { path: PathBuf },
     #[error("{path} is a submodule, add its superproject instead")]
     Submodule { path: PathBuf },
-    #[error("{repo} has no origin/HEAD, main, or master branch, set base_branch for it")]
-    NoBaseBranch { repo: PathBuf },
-    #[error(
-        "base branch {base} matches neither {local_ref} nor {remote_ref}{}",
-        .suggestion.as_ref().map(|name| format!(", did you mean {name}?")).unwrap_or_default()
-    )]
-    BaseBranchNotFound {
-        base: String,
-        local_ref: String,
-        remote_ref: String,
-        suggestion: Option<String>,
-    },
 }

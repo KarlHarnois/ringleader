@@ -35,6 +35,7 @@ pub mod session_reconciler;
 pub mod session_renaming;
 pub mod session_restart;
 pub mod session_service;
+pub mod start_point_resolver;
 pub mod tool_version;
 pub mod typed_paths;
 pub mod use_checks;

@@ -3,9 +3,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use crate::application::ports::{
-    DiffBase, DirtyState, StartPoint, UnmergedCommits, Workspace, WorkspaceError, WorktreeEntry,
+    DiffBase, DirtyState, Head, StartPoint, UnmergedCommits, Workspace, WorkspaceError,
+    WorktreeEntry,
 };
-use crate::domain::{BaseBranch, DiffStat};
+use crate::domain::{BaseBranch, Branch, BranchTips, DiffStat};
 
 #[derive(Default)]
 pub struct FakeWorkspace {
@@ -21,7 +22,10 @@ struct WorkspaceState {
     dirty: HashMap<PathBuf, DirtyState>,
     unmerged: HashMap<String, VecDeque<UnmergedCommits>>,
     diffs: HashMap<PathBuf, DiffStat>,
-    start_point: Option<Result<StartPoint, WorkspaceError>>,
+    tips: Vec<(PathBuf, Branch, String)>,
+    without_default_tips: bool,
+    remote_defaults: Vec<(PathBuf, String)>,
+    orphan_start: bool,
     invalid_repos: HashSet<PathBuf>,
     failures: HashMap<&'static str, WorkspaceError>,
     failed_create_leftover: Option<FailedCreateLeftover>,
@@ -55,6 +59,7 @@ impl FakeWorkspace {
         "mark_branch_managed",
     ];
     pub const DEFAULT_START: &'static str = "0123456789abcdef0123456789abcdef01234567";
+    pub const DEFAULT_BRANCH: &'static str = "main";
     pub const NO_BASE_BRANCH: &'static str = "-";
 
     pub fn with_branch(self, repo: &Path, branch: &str, tip: &str) -> Self {
@@ -86,7 +91,30 @@ impl FakeWorkspace {
     }
 
     pub fn starting_orphan(self) -> Self {
-        self.edit(|state| state.start_point = Some(Ok(StartPoint::Orphan)));
+        self.edit(|state| state.orphan_start = true);
+        self.without_branch_tips()
+    }
+
+    pub fn with_branch_tip(self, location: &Path, branch: Branch, commit: &str) -> Self {
+        self.edit(|state| {
+            state
+                .tips
+                .push((location.to_path_buf(), branch, commit.to_string()))
+        });
+        self
+    }
+
+    pub fn without_branch_tips(self) -> Self {
+        self.edit(|state| state.without_default_tips = true);
+        self
+    }
+
+    pub fn with_remote_default(self, location: &Path, branch: &str) -> Self {
+        self.edit(|state| {
+            state
+                .remote_defaults
+                .push((location.to_path_buf(), branch.to_string()))
+        });
         self
     }
 
@@ -208,6 +236,29 @@ impl WorkspaceState {
             name: name.to_string(),
             tip: tip.to_string(),
         });
+    }
+
+    fn tips_at(&self, location: &Path) -> Vec<(Branch, String)> {
+        let listed: Vec<(Branch, String)> = self
+            .tips
+            .iter()
+            .filter(|(owner, _, _)| owner == location)
+            .map(|(_, branch, commit)| (branch.clone(), commit.clone()))
+            .collect();
+        if !listed.is_empty() || self.without_default_tips {
+            return listed;
+        }
+        vec![(
+            Branch::Local(FakeWorkspace::DEFAULT_BRANCH.to_string()),
+            FakeWorkspace::DEFAULT_START.to_string(),
+        )]
+    }
+
+    fn default_head(&self) -> Head {
+        match self.orphan_start {
+            true => Head::Unborn,
+            false => Head::Detached,
+        }
     }
 
     fn add_marker(&mut self, repo: &Path, branch: &str) {
@@ -483,14 +534,42 @@ impl Workspace for FakeWorkspace {
         }))
     }
 
-    fn resolve_start_point(
+    fn head(&self, location: &Path) -> Result<Head, WorkspaceError> {
+        self.call("head", location.display().to_string())?;
+        Ok(self.edit(|state| state.default_head()))
+    }
+
+    fn remote_default_branch(
         &self,
-        repo: &Path,
-        _base_branch: Option<&BaseBranch>,
-    ) -> Result<StartPoint, WorkspaceError> {
-        self.call("resolve_start_point", repo.display().to_string())?;
-        self.edit(|state| state.start_point.clone())
-            .unwrap_or_else(|| Ok(StartPoint::Commit(Self::DEFAULT_START.to_string())))
+        location: &Path,
+        remote: &str,
+    ) -> Result<Option<String>, WorkspaceError> {
+        self.call(
+            "remote_default_branch",
+            format!("{} {remote}", location.display()),
+        )?;
+        Ok(self.edit(|state| {
+            state
+                .remote_defaults
+                .iter()
+                .find(|(owner, _)| owner == location)
+                .map(|(_, branch)| branch.clone())
+        }))
+    }
+
+    fn branch_tips(
+        &self,
+        location: &Path,
+        branches: &[Branch],
+    ) -> Result<BranchTips, WorkspaceError> {
+        self.call("branch_tips", location.display().to_string())?;
+        Ok(self.edit(|state| {
+            let known = state.tips_at(location);
+            let tips = branches
+                .iter()
+                .filter_map(|branch| known.iter().find(|(tipped, _)| tipped == branch).cloned());
+            BranchTips::new(tips.collect())
+        }))
     }
 
     fn dirty_state(&self, worktree: &Path) -> Result<DirtyState, WorkspaceError> {

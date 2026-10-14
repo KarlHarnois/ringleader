@@ -8,14 +8,15 @@ use super::git_branches::GitBranches;
 use super::git_diffs::GitDiffs;
 use super::git_invocation::GitInvocation;
 use super::git_porcelain::GitPorcelain;
+use super::git_refs::GitRefs;
 use super::git_runner::GitRunner;
 use super::host_path::HostPath;
-use super::start_point_resolver::StartPointResolver;
 use super::submodule_commits::SubmoduleCommits;
 use crate::application::ports::{
-    DiffBase, DirtyState, StartPoint, UnmergedCommits, Workspace, WorkspaceError, WorktreeEntry,
+    DiffBase, DirtyState, Head, StartPoint, UnmergedCommits, Workspace, WorkspaceError,
+    WorktreeEntry,
 };
-use crate::domain::{BaseBranch, DiffStat};
+use crate::domain::{Branch, BranchTips, DiffStat};
 
 pub struct GitWorkspace {
     git: GitRunner,
@@ -185,12 +186,24 @@ impl Workspace for GitWorkspace {
         GitBranches::new(&self.git).is_published(repo, branch)
     }
 
-    fn resolve_start_point(
+    fn head(&self, location: &Path) -> Result<Head, WorkspaceError> {
+        GitRefs::new(&self.git).head(location)
+    }
+
+    fn remote_default_branch(
         &self,
-        repo: &Path,
-        base_branch: Option<&BaseBranch>,
-    ) -> Result<StartPoint, WorkspaceError> {
-        StartPointResolver::new(&self.git).resolve(repo, base_branch)
+        location: &Path,
+        remote: &str,
+    ) -> Result<Option<String>, WorkspaceError> {
+        GitRefs::new(&self.git).remote_default_branch(location, remote)
+    }
+
+    fn branch_tips(
+        &self,
+        location: &Path,
+        branches: &[Branch],
+    ) -> Result<BranchTips, WorkspaceError> {
+        GitRefs::new(&self.git).branch_tips(location, branches)
     }
 
     fn dirty_state(&self, worktree: &Path) -> Result<DirtyState, WorkspaceError> {
@@ -266,7 +279,9 @@ mod tests {
 
     use super::*;
     use crate::adapters::bounded_command::Deadlines;
-    use crate::domain::SessionName;
+    use crate::application::ServiceError;
+    use crate::application::start_point_resolver::StartPointResolver;
+    use crate::domain::{BaseBranch, SessionName};
     use crate::test_support::GitTestRepo;
 
     const BRANCH: &str = "ringleader/fix-auth";
@@ -284,7 +299,9 @@ mod tests {
         fn created(fixture: &GitTestRepo) -> PathBuf {
             let workspace = fixture.workspace();
             let target = Self::target(fixture);
-            let start = workspace.resolve_start_point(fixture.path(), None).unwrap();
+            let start = StartPointResolver::new(&workspace)
+                .resolve(fixture.path(), None)
+                .unwrap();
             workspace
                 .create_worktree(fixture.path(), &target, BRANCH, &start)
                 .unwrap();
@@ -334,7 +351,9 @@ mod tests {
         fn clone_with_branch(origin: &GitTestRepo) -> PathBuf {
             let clone = Self::clone_of(origin, "clone");
             let workspace = origin.workspace();
-            let start = workspace.resolve_start_point(&clone, None).unwrap();
+            let start = StartPointResolver::new(&workspace)
+                .resolve(&clone, None)
+                .unwrap();
             workspace
                 .create_worktree(&clone, &origin.sibling("wt"), BRANCH, &start)
                 .unwrap();
@@ -735,9 +754,8 @@ mod tests {
         let clone = WorktreeFixture::clone_of(&origin, "clone");
         let local_main = origin.commit(&clone, "unpushed.md");
 
-        let start = origin
-            .workspace()
-            .resolve_start_point(&clone, None)
+        let start = StartPointResolver::new(&origin.workspace())
+            .resolve(&clone, None)
             .unwrap();
 
         assert_eq!(start, StartPoint::Commit(local_main));
@@ -751,9 +769,8 @@ mod tests {
         origin.commit(origin.path(), "merged.md");
         origin.git(&clone, &["fetch", "-q", "origin"]);
 
-        let start = origin
-            .workspace()
-            .resolve_start_point(&clone, None)
+        let start = StartPointResolver::new(&origin.workspace())
+            .resolve(&clone, None)
             .unwrap();
 
         assert_eq!(start, StartPoint::Commit(local_main));
@@ -769,9 +786,8 @@ mod tests {
         let clone = WorktreeFixture::clone_of(&origin, "clone");
         let local_trunk = origin.commit(&clone, "unpushed.md");
 
-        let start = origin
-            .workspace()
-            .resolve_start_point(&clone, None)
+        let start = StartPointResolver::new(&origin.workspace())
+            .resolve(&clone, None)
             .unwrap();
 
         assert_eq!(start, StartPoint::Commit(local_trunk));
@@ -786,9 +802,8 @@ mod tests {
         origin.git(&clone, &["branch", "-q", "-D", GitTestRepo::BRANCH]);
         origin.commit(&clone, "feature.md");
 
-        let start = origin
-            .workspace()
-            .resolve_start_point(&clone, None)
+        let start = StartPointResolver::new(&origin.workspace())
+            .resolve(&clone, None)
             .unwrap();
 
         assert_eq!(start, StartPoint::Commit(origin_main));
@@ -803,9 +818,8 @@ mod tests {
         let origin_main = origin.commit(origin.path(), "merged.md");
         origin.git(&clone, &["fetch", "-q", "origin"]);
 
-        let start = origin
-            .workspace()
-            .resolve_start_point(&clone, None)
+        let start = StartPointResolver::new(&origin.workspace())
+            .resolve(&clone, None)
             .unwrap();
 
         assert_eq!(start, StartPoint::Commit(origin_main));
@@ -828,9 +842,8 @@ mod tests {
         origin.git(&clone, &["checkout", "-q", GitTestRepo::BRANCH]);
         let local_main = origin.commit(&clone, "unpushed.md");
 
-        let start = origin
-            .workspace()
-            .resolve_start_point(&clone, None)
+        let start = StartPointResolver::new(&origin.workspace())
+            .resolve(&clone, None)
             .unwrap();
 
         assert_eq!(start, StartPoint::Commit(local_main));
@@ -841,7 +854,9 @@ mod tests {
         let fixture = GitTestRepo::unborn();
         let workspace = fixture.workspace();
 
-        let start = workspace.resolve_start_point(fixture.path(), None).unwrap();
+        let start = StartPointResolver::new(&workspace)
+            .resolve(fixture.path(), None)
+            .unwrap();
         let target = WorktreeFixture::target(&fixture);
         workspace
             .create_worktree(fixture.path(), &target, BRANCH, &start)
@@ -856,12 +871,12 @@ mod tests {
         let fixture = GitTestRepo::new();
         fixture.git(fixture.path(), &["branch", "-m", "main", "trunk"]);
 
-        let error = fixture
-            .workspace()
-            .resolve_start_point(fixture.path(), None)
+        let error = StartPointResolver::new(&fixture.workspace())
+            .resolve(fixture.path(), None)
             .unwrap_err();
 
-        assert!(matches!(error, WorkspaceError::NoBaseBranch { .. }));
+        assert!(matches!(error, ServiceError::Invalid(_)));
+        assert!(error.to_string().contains("set base_branch for it"));
     }
 
     #[test]
@@ -873,9 +888,8 @@ mod tests {
         fixture.git(fixture.path(), &["tag", "main"]);
         let base = BaseBranch::new("main").unwrap();
 
-        let start = fixture
-            .workspace()
-            .resolve_start_point(fixture.path(), Some(&base))
+        let start = StartPointResolver::new(&fixture.workspace())
+            .resolve(fixture.path(), Some(&base))
             .unwrap();
 
         assert_eq!(start, StartPoint::Commit(main));
@@ -888,9 +902,8 @@ mod tests {
         let clone = WorktreeFixture::clone_of(&origin, "clone");
         let base = BaseBranch::new("feature").unwrap();
 
-        let error = origin
-            .workspace()
-            .resolve_start_point(&clone, Some(&base))
+        let error = StartPointResolver::new(&origin.workspace())
+            .resolve(&clone, Some(&base))
             .unwrap_err();
 
         assert!(error.to_string().contains("did you mean origin/feature?"));
@@ -902,7 +915,7 @@ mod tests {
         let clone = WorktreeFixture::clone_of(&origin, "clone");
         let base = BaseBranch::new("origin/main").unwrap();
 
-        let start = origin.workspace().resolve_start_point(&clone, Some(&base));
+        let start = StartPointResolver::new(&origin.workspace()).resolve(&clone, Some(&base));
 
         assert!(matches!(start, Ok(StartPoint::Commit(_))));
     }
@@ -1182,7 +1195,9 @@ mod tests {
         let ancestor = fixture.init_repo("ancestor");
         let worktree = ancestor.join("nested/fix-auth");
         let workspace = fixture.workspace();
-        let start = workspace.resolve_start_point(fixture.path(), None).unwrap();
+        let start = StartPointResolver::new(&workspace)
+            .resolve(fixture.path(), None)
+            .unwrap();
         workspace
             .create_worktree(fixture.path(), &worktree, BRANCH, &start)
             .unwrap();
@@ -1307,7 +1322,9 @@ mod tests {
         )
         .with_environment(environment);
         let target = WorktreeFixture::target(&fixture);
-        let start = workspace.resolve_start_point(fixture.path(), None).unwrap();
+        let start = StartPointResolver::new(&workspace)
+            .resolve(fixture.path(), None)
+            .unwrap();
 
         let top_level = workspace.validate_repo(fixture.path()).unwrap();
         workspace
@@ -1323,7 +1340,9 @@ mod tests {
         let fixture = GitTestRepo::new();
         WorktreeFixture::hook(&fixture, "post-checkout", "exit 1");
         let workspace = fixture.workspace();
-        let start = workspace.resolve_start_point(fixture.path(), None).unwrap();
+        let start = StartPointResolver::new(&workspace)
+            .resolve(fixture.path(), None)
+            .unwrap();
         let target = WorktreeFixture::target(&fixture);
 
         let result = workspace.create_worktree(fixture.path(), &target, BRANCH, &start);
@@ -1343,7 +1362,9 @@ mod tests {
             "git worktree lock \"$PWD\"\nexit 1",
         );
         let workspace = fixture.workspace();
-        let start = workspace.resolve_start_point(fixture.path(), None).unwrap();
+        let start = StartPointResolver::new(&workspace)
+            .resolve(fixture.path(), None)
+            .unwrap();
         let target = WorktreeFixture::target(&fixture);
 
         let result = workspace.create_worktree(fixture.path(), &target, BRANCH, &start);
@@ -1366,9 +1387,8 @@ mod tests {
         fixture.git(fixture.path(), &["add", ".gitattributes"]);
         fixture.commit(fixture.path(), "slow.txt");
         let workspace = fixture.workspace_with_deadline(Duration::from_secs(1));
-        let start = fixture
-            .workspace()
-            .resolve_start_point(fixture.path(), None)
+        let start = StartPointResolver::new(&fixture.workspace())
+            .resolve(fixture.path(), None)
             .unwrap();
         let target = WorktreeFixture::target(&fixture);
 

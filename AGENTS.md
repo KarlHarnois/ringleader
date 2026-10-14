@@ -220,6 +220,7 @@ viewer exits.
     │   ├── session_lifecycle.rs  # SessionLifecycle: create, delete, rename, restart
     │   ├── busy_worktree.rs      # BusyWorktree, the tmux server processes that keep a stopped entry from restarting, with the advice for each case
     │   ├── session_creation.rs   # SessionCreation: create_session with its rollbacks
+    │   ├── start_point_resolver.rs # StartPointResolver, the commit a new worktree starts from, or why there is none
     │   ├── worktree_rollback.rs  # WorktreeRollback, removes the worktree and branch of a failed create
     │   ├── creation_plan.rs      # CreationPlan and CreateRequest
     │   ├── use_checks.rs         # UseChecks, the checks a create or a restart runs before acting
@@ -303,7 +304,6 @@ viewer exits.
     │   ├── git_branches.rs       # GitBranches: compare-and-swap delete, rename, the managed-branch marker, and whether a branch has been pushed
     │   ├── branch_marker.rs      # BranchMarker, the git config entry that marks a branch Ringleader created, and the command that sets it by hand
     │   ├── branch_section.rs     # BranchSection, the git config section and upstream keys of one branch
-    │   ├── start_point_resolver.rs # StartPointResolver, the commit a new worktree starts from
     │   ├── diff_base_resolver.rs # DiffBaseResolver, the commit a session diff measures from
     │   ├── submodule_commits.rs  # SubmoduleCommits, the submodule walk of unmerged_commits
     │   ├── system_clock.rs       # SystemClock, reads `SystemTime`
