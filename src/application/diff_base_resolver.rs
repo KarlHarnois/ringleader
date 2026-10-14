@@ -6,11 +6,22 @@ use crate::domain::{BaseBranch, BaseBranchLadder, Branch, BranchTips};
 
 pub struct DiffBaseResolver<'a> {
     workspace: &'a dyn Workspace,
+    session_branches: Vec<Branch>,
 }
 
 impl<'a> DiffBaseResolver<'a> {
     pub fn new(workspace: &'a dyn Workspace) -> Self {
-        Self { workspace }
+        Self {
+            workspace,
+            session_branches: Vec::new(),
+        }
+    }
+
+    pub fn skipping(self, session_branches: Vec<Branch>) -> Self {
+        Self {
+            session_branches,
+            ..self
+        }
     }
 
     pub fn resolve(
@@ -76,7 +87,7 @@ impl<'a> DiffBaseResolver<'a> {
         let origin_default = self
             .workspace
             .remote_default_branch(worktree, Branch::ORIGIN)?;
-        let ladder = BaseBranchLadder::new(origin_default);
+        let ladder = BaseBranchLadder::new(origin_default).skipping(&self.session_branches);
         let tips = self
             .workspace
             .branch_tips(worktree, &ladder.diff_lookups())?;
@@ -340,6 +351,25 @@ mod tests {
         assert_eq!(
             DiffFixture::asked_about(&workspace, None),
             DiffFixture::recorded_and(&[DiffFixture::MASTER_TIP, DiffFixture::ORIGIN_TIP])
+        );
+    }
+
+    #[test]
+    fn another_sessions_branch_named_main_leaves_master_to_measure_with() {
+        let workspace = DiffFixture::with_tips(&[
+            (DiffFixture::local("main"), DiffFixture::MAIN_TIP),
+            (DiffFixture::local("master"), DiffFixture::MASTER_TIP),
+        ]);
+        let recorded = StartPoint::Commit(DiffFixture::RECORDED.to_string());
+
+        DiffBaseResolver::new(&workspace)
+            .skipping(vec![DiffFixture::local("main")])
+            .resolve(DiffFixture::worktree(), &recorded, None)
+            .unwrap();
+
+        assert_eq!(
+            workspace.merge_base_requests(),
+            DiffFixture::recorded_and(&[DiffFixture::MASTER_TIP])
         );
     }
 }

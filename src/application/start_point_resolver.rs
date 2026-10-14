@@ -6,11 +6,22 @@ use crate::domain::{BaseBranch, BaseBranchLadder, Branch};
 
 pub struct StartPointResolver<'a> {
     workspace: &'a dyn Workspace,
+    session_branches: Vec<Branch>,
 }
 
 impl<'a> StartPointResolver<'a> {
     pub fn new(workspace: &'a dyn Workspace) -> Self {
-        Self { workspace }
+        Self {
+            workspace,
+            session_branches: Vec::new(),
+        }
+    }
+
+    pub fn skipping(self, session_branches: Vec<Branch>) -> Self {
+        Self {
+            session_branches,
+            ..self
+        }
     }
 
     pub fn resolve(
@@ -47,7 +58,9 @@ impl<'a> StartPointResolver<'a> {
 
     fn resolve_ladder(&self, repo: &Path) -> Result<StartPoint, ServiceError> {
         let origin_default = self.workspace.remote_default_branch(repo, Branch::ORIGIN)?;
-        let candidates = BaseBranchLadder::new(origin_default).start_candidates();
+        let candidates = BaseBranchLadder::new(origin_default)
+            .skipping(&self.session_branches)
+            .start_candidates();
         let tips = self.workspace.branch_tips(repo, &candidates)?;
         if let Some(commit) = tips.first_of(&candidates) {
             return Ok(StartPoint::Commit(commit.to_string()));
@@ -225,6 +238,21 @@ mod tests {
         assert_eq!(
             StartFixture::resolve(&workspace, None).unwrap(),
             StartFixture::commit(StartFixture::MAIN_TIP)
+        );
+    }
+
+    #[test]
+    fn a_session_branch_named_main_leaves_master_to_start_from() {
+        let workspace = StartFixture::with_tips(&[
+            (StartFixture::local("main"), StartFixture::MAIN_TIP),
+            (StartFixture::local("master"), StartFixture::LOCAL_TIP),
+        ]);
+        let resolver =
+            StartPointResolver::new(&workspace).skipping(vec![StartFixture::local("main")]);
+
+        assert_eq!(
+            resolver.resolve(StartFixture::repo(), None).unwrap(),
+            StartFixture::commit(StartFixture::LOCAL_TIP)
         );
     }
 

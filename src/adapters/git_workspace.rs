@@ -286,7 +286,7 @@ mod tests {
     use crate::application::ServiceError;
     use crate::application::diff_base_resolver::DiffBaseResolver;
     use crate::application::start_point_resolver::StartPointResolver;
-    use crate::domain::{BaseBranch, SessionName};
+    use crate::domain::{BaseBranch, Branch, SessionName};
     use crate::test_support::GitTestRepo;
 
     const BRANCH: &str = "ringleader/fix-auth";
@@ -869,6 +869,24 @@ mod tests {
 
         assert_eq!(start, StartPoint::Orphan);
         assert!(WorktreeFixture::listed(&fixture, &target));
+    }
+
+    #[test]
+    fn the_ladder_skips_a_main_branch_that_belongs_to_a_session() {
+        let fixture = GitTestRepo::new();
+        fixture.git(fixture.path(), &["branch", "-m", "main", "master"]);
+        let master = fixture.git(fixture.path(), &["rev-parse", "HEAD"]);
+        fixture.git(fixture.path(), &["checkout", "-q", "-b", "main"]);
+        fixture.commit(fixture.path(), "session.txt");
+        fixture.git(fixture.path(), &["checkout", "-q", "master"]);
+        let workspace = fixture.workspace();
+
+        let start = StartPointResolver::new(&workspace)
+            .skipping(vec![Branch::Local("main".to_string())])
+            .resolve(fixture.path(), None)
+            .unwrap();
+
+        assert_eq!(start, StartPoint::Commit(master));
     }
 
     #[test]

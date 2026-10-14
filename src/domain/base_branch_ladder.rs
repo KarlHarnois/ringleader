@@ -3,19 +3,31 @@ use super::branch_tips::BranchTips;
 
 pub struct BaseBranchLadder {
     origin_default: Option<String>,
+    session_branches: Vec<Branch>,
 }
 
 impl BaseBranchLadder {
     const CONVENTIONAL_DEFAULT_BRANCHES: [&'static str; 2] = ["main", "master"];
 
     pub fn new(origin_default: Option<String>) -> Self {
-        Self { origin_default }
+        Self {
+            origin_default,
+            session_branches: Vec::new(),
+        }
+    }
+
+    pub fn skipping(self, session_branches: &[Branch]) -> Self {
+        Self {
+            session_branches: session_branches.to_vec(),
+            ..self
+        }
     }
 
     pub fn start_candidates(&self) -> Vec<Branch> {
         self.origin_rung()
             .into_iter()
             .chain(Self::conventional_branches())
+            .filter(|branch| self.is_free(branch))
             .collect()
     }
 
@@ -31,13 +43,25 @@ impl BaseBranchLadder {
 
     pub fn diff_rung(&self, tips: &BranchTips, checked_out: Option<&Branch>) -> Vec<Branch> {
         match self.origin_default {
-            Some(_) => self.origin_rung(),
+            Some(_) => self
+                .origin_rung()
+                .into_iter()
+                .filter(|branch| self.is_free(branch))
+                .collect(),
             None => Self::conventional_branches()
                 .into_iter()
-                .find(|branch| Some(branch) != checked_out && tips.tip_of(branch).is_some())
+                .find(|branch| {
+                    Some(branch) != checked_out
+                        && self.is_free(branch)
+                        && tips.tip_of(branch).is_some()
+                })
                 .map(|branch| Self::with_origin_copy(&branch))
                 .unwrap_or_default(),
         }
+    }
+
+    fn is_free(&self, branch: &Branch) -> bool {
+        !self.session_branches.contains(branch)
     }
 
     fn origin_rung(&self) -> Vec<Branch> {
@@ -180,6 +204,39 @@ mod tests {
 
         assert_eq!(
             LadderFixture::without_origin_default().diff_rung(&tips, Some(&checked_out)),
+            [
+                LadderFixture::local("master"),
+                LadderFixture::tracked("origin/master")
+            ]
+        );
+    }
+
+    #[test]
+    fn a_session_branch_is_never_a_start_candidate() {
+        let ladder =
+            LadderFixture::without_origin_default().skipping(&[LadderFixture::local("main")]);
+
+        assert_eq!(ladder.start_candidates(), [LadderFixture::local("master")]);
+    }
+
+    #[test]
+    fn a_session_branch_named_like_the_origin_default_leaves_origin_copy_to_start_from() {
+        let ladder = LadderFixture::with_trunk().skipping(&[LadderFixture::local("trunk")]);
+
+        assert_eq!(
+            ladder.start_candidates()[0],
+            LadderFixture::tracked("origin/trunk")
+        );
+    }
+
+    #[test]
+    fn a_session_branch_is_never_a_diff_rung() {
+        let tips = LadderFixture::tips_of(&["main", "master"]);
+        let ladder =
+            LadderFixture::without_origin_default().skipping(&[LadderFixture::local("main")]);
+
+        assert_eq!(
+            ladder.diff_rung(&tips, None),
             [
                 LadderFixture::local("master"),
                 LadderFixture::tracked("origin/master")

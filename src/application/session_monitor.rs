@@ -7,7 +7,7 @@ use super::repo_merge::RepoMerge;
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
 use super::session_reconciler::SessionReconciler;
-use crate::domain::{BaseBranch, Config, DiffStat, Repo, ReturnKey, Session};
+use crate::domain::{BaseBranch, Branch, Config, DiffStat, Repo, ReturnKey, Session};
 
 pub struct SessionMonitor {
     multiplexer: Arc<dyn Multiplexer>,
@@ -37,15 +37,19 @@ impl SessionMonitor {
         Ok(reconciler.reconcile(entries, observations))
     }
 
-    pub fn diff_stat(&self, session: &Session, config: &Config) -> Result<DiffStat, ServiceError> {
+    pub fn diff_stat(
+        &self,
+        session: &Session,
+        sessions: &[Session],
+        config: &Config,
+    ) -> Result<DiffStat, ServiceError> {
         let base_branch = self.configured_base_branch(session, config);
         let recorded = StartPoint::from_base_commit(session.base_commit());
         let worktree = session.worktree_path();
-        let measured_from = DiffBaseResolver::new(self.workspace.as_ref()).resolve(
-            worktree,
-            &recorded,
-            base_branch,
-        )?;
+        let session_branches = Branch::of_sessions_in(session.repo_path(), sessions);
+        let measured_from = DiffBaseResolver::new(self.workspace.as_ref())
+            .skipping(session_branches)
+            .resolve(worktree, &recorded, base_branch)?;
         Ok(self.workspace.diff_stat(worktree, &measured_from)?)
     }
 
@@ -168,6 +172,33 @@ mod tests {
         assert_eq!(
             fixture.workspace().diff_bases(),
             [StartPoint::Commit(merge_base.to_string())]
+        );
+    }
+
+    #[test]
+    fn another_sessions_branch_named_main_is_not_measured_with() {
+        let master_tip = "8888888888888888888888888888888888888888";
+        let session = ServiceFixture::session(MonitorFixture::SESSION);
+        let worktree = ServiceFixture::worktree_path(MonitorFixture::SESSION);
+        let workspace = FakeWorkspace::default()
+            .with_branch_tip(
+                &worktree,
+                Branch::Local("main".to_string()),
+                FakeWorkspace::DEFAULT_START,
+            )
+            .with_branch_tip(&worktree, Branch::Local("master".to_string()), master_tip);
+        let fixture = ServiceFixture::new()
+            .with_sessions(&[session.clone(), ServiceFixture::session("main")])
+            .with_workspace(workspace);
+
+        MonitorFixture::measure(&fixture);
+
+        assert_eq!(
+            fixture.workspace().merge_base_requests(),
+            [vec![
+                session.base_commit().to_string(),
+                master_tip.to_string()
+            ]]
         );
     }
 }

@@ -11,7 +11,7 @@ use super::service_ports::ServicePorts;
 use super::start_point_resolver::StartPointResolver;
 use super::use_checks::UseChecks;
 use super::worktree_rollback::WorktreeRollback;
-use crate::domain::{Config, Session};
+use crate::domain::{Branch, Config, Session};
 
 pub struct SessionCreation {
     branches: BranchAvailability,
@@ -45,7 +45,9 @@ impl SessionCreation {
     ) -> Result<Session, ServiceError> {
         let plan = self.plan_creation(request, config, config_path)?;
         self.check_availability(&plan, reconciliation)?;
+        let session_branches = Branch::of_sessions_in(plan.repo_path(), reconciliation.entries());
         let start = StartPointResolver::new(self.workspace.as_ref())
+            .skipping(session_branches)
             .resolve(plan.repo_path(), plan.base_branch())?;
         let rollback =
             WorktreeRollback::new(self.workspace.as_ref(), self.host.as_ref(), &plan, &start);
@@ -288,6 +290,26 @@ mod tests {
 
         assert!(matches!(error, ServiceError::Invalid(_)));
         CreateFixture::assert_nothing_touched(&fixture);
+    }
+
+    #[test]
+    fn a_new_session_never_starts_from_another_sessions_branch() {
+        let master_tip = "7777777777777777777777777777777777777777";
+        let repo = Path::new(ServiceFixture::REPO);
+        let workspace = FakeWorkspace::default()
+            .with_branch_tip(
+                repo,
+                Branch::Local("main".to_string()),
+                FakeWorkspace::DEFAULT_START,
+            )
+            .with_branch_tip(repo, Branch::Local("master".to_string()), master_tip);
+        let fixture = ServiceFixture::new()
+            .with_sessions(&[ServiceFixture::session("main")])
+            .with_workspace(workspace);
+
+        let session = CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap();
+
+        assert_eq!(session.base_commit(), master_tip);
     }
 
     #[test]
