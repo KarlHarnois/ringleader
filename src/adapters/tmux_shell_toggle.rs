@@ -82,9 +82,7 @@ mod tests {
         const SHELL_SCRIPT: &'static str = "#!/bin/sh\nexec sleep 30\n";
 
         fn toggled(server: &TmuxTestServer, client: &ControlClient) -> String {
-            let before = Self::client_window(server);
-            server.press(client, Self::TOGGLE_KEY);
-            server.wait_for(|| Self::client_window(server) != before);
+            Self::toggle_switches_window(server, client);
             Self::client_window(server)
         }
 
@@ -144,6 +142,10 @@ mod tests {
             shown: &str,
         ) -> bool {
             server.text(&["copy-mode", "-t", shown]);
+            Self::toggle_switches_window(server, client)
+        }
+
+        fn toggle_switches_window(server: &TmuxTestServer, client: &ControlClient) -> bool {
             let before = Self::client_window(server);
             server.press(client, Self::TOGGLE_KEY);
             server.wait_for(|| Self::client_window(server) != before)
