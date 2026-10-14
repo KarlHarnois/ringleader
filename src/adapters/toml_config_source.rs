@@ -33,7 +33,9 @@ next_session_keys = ["M-j", "M-Down"]
 previous_session_keys = ["M-k", "M-Up"]
 # Keys that switch between a session's agent and its shell, the one t opens,
 # while you are attached. [] turns the toggle off, and a missing list keeps
-# this default. Inside your own tmux, they follow the rules of the session keys.
+# this default. They follow the rules of the session keys inside your own tmux
+# and in copy mode, so a removed M-l stays unbound in emacs copy mode until
+# Ringleader's tmux server restarts.
 shell_toggle_keys = ["M-l"]
 state_poll_ms = 1000
 preview_refresh_ms = 750
