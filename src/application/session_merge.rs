@@ -233,7 +233,10 @@ mod tests {
         }
 
         fn stopped() -> ServiceFixture {
-            let session = Self::session();
+            Self::stopped_as(Self::session())
+        }
+
+        fn stopped_as(session: Session) -> ServiceFixture {
             ServiceFixture::new()
                 .with_sessions(std::slice::from_ref(&session))
                 .with_workspace(ServiceFixture::workspace_for(&[&session]))
@@ -245,7 +248,31 @@ mod tests {
         }
 
         fn waiting() -> ServiceFixture {
-            Self::observed(ServiceFixture::waiting(&Self::session()))
+            Self::waiting_as(Self::session())
+        }
+
+        fn waiting_as(session: Session) -> ServiceFixture {
+            let observation = ServiceFixture::waiting(&session);
+            Self::stopped_as(session)
+                .with_multiplexer(FakeMultiplexer::new().with_live(observation))
+        }
+
+        fn config_with_develop() -> Config {
+            let repo = Repo::explicit(
+                RepoName::parse("example-project").unwrap(),
+                Path::new(ServiceFixture::REPO),
+                BaseBranch::new("develop"),
+            );
+            ServiceFixture::config().with_repos(vec![repo])
+        }
+
+        fn worktree() -> String {
+            Self::session().worktree_path().display().to_string()
+        }
+
+        fn fetched_branch(fixture: &ServiceFixture, branch: &str) -> bool {
+            let fetch = format!("fetch_upstream {} {branch}", Self::worktree());
+            fixture.workspace().calls().contains(&fetch)
         }
 
         fn ending(outcome: MergeOutcome) -> ServiceFixture {
@@ -531,31 +558,27 @@ mod tests {
 
     #[test]
     fn the_configured_base_branch_is_merged() {
-        let base = BaseBranch::new("develop");
-        let repo = Repo::explicit(
-            RepoName::parse("example-project").unwrap(),
-            Path::new(ServiceFixture::REPO),
-            base,
-        );
-        let fixture =
-            MergeFixture::waiting().with_config(ServiceFixture::config().with_repos(vec![repo]));
+        let fixture = MergeFixture::waiting().with_config(MergeFixture::config_with_develop());
 
         MergeFixture::merge(&fixture).unwrap();
 
-        let worktree = MergeFixture::session()
-            .worktree_path()
-            .display()
-            .to_string();
-        assert!(
-            fixture
-                .workspace()
-                .calls()
-                .contains(&format!("fetch_upstream {worktree} develop"))
-        );
+        assert!(MergeFixture::fetched_branch(&fixture, "develop"));
         assert!(fixture.workspace().calls().contains(&format!(
-            "merge_upstream {worktree} develop {}",
+            "merge_upstream {} develop {}",
+            MergeFixture::worktree(),
             FakeWorkspace::DEFAULT_START
         )));
+    }
+
+    #[test]
+    fn a_requested_base_branch_is_merged_over_the_configured_one() {
+        let requested = ServiceFixture::session_based_on(MergeFixture::NAME, "release");
+        let fixture =
+            MergeFixture::waiting_as(requested).with_config(MergeFixture::config_with_develop());
+
+        MergeFixture::merge(&fixture).unwrap();
+
+        assert!(MergeFixture::fetched_branch(&fixture, "release"));
     }
 
     #[test]

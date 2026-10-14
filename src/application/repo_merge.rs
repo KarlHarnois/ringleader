@@ -42,7 +42,17 @@ impl<'a> RepoMerge<'a> {
             .find(|repo| self.host.canonical_or_given(repo.path()) == top_level)
     }
 
-    pub fn base_branch_of<'e>(
+    pub fn base_branch_of<'s>(
+        &self,
+        session: &'s Session,
+        explicit: &'s [Repo],
+    ) -> Option<&'s BaseBranch> {
+        session
+            .base_branch()
+            .or_else(|| self.configured_base_branch(session, explicit))
+    }
+
+    fn configured_base_branch<'e>(
         &self,
         session: &Session,
         explicit: &'e [Repo],

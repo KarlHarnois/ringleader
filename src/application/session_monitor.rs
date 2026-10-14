@@ -43,9 +43,7 @@ impl SessionMonitor {
         sessions: &[Session],
         config: &Config,
     ) -> Result<DiffStat, ServiceError> {
-        let base_branch = session
-            .base_branch()
-            .or_else(|| self.configured_base_branch(session, config));
+        let base_branch = self.base_branch(session, config);
         let recorded = StartPoint::from_base_commit(session.base_commit());
         let worktree = session.worktree_path();
         let session_branches = Branch::of_sessions_in(session.repo_path(), sessions);
@@ -67,11 +65,7 @@ impl SessionMonitor {
         running.key_bindings().cloned()
     }
 
-    fn configured_base_branch<'c>(
-        &self,
-        session: &Session,
-        config: &'c Config,
-    ) -> Option<&'c BaseBranch> {
+    fn base_branch<'a>(&self, session: &'a Session, config: &'a Config) -> Option<&'a BaseBranch> {
         RepoMerge::new(self.host.as_ref()).base_branch_of(session, config.repos())
     }
 }
