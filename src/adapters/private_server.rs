@@ -150,7 +150,7 @@ impl<'a> PrivateServer<'a> {
     }
 
     fn render_for(&self, key_bindings: &KeyBindings) -> TmuxServerConfig {
-        TmuxServerConfig::new(key_bindings, &self.tmux.caller_shell())
+        TmuxServerConfig::new(key_bindings)
     }
 
     fn write_render(&self, render: &TmuxServerConfig) -> Result<(), MultiplexerError> {
@@ -243,6 +243,10 @@ mod tests {
 
         fn option(server: &TmuxTestServer, name: &str) -> String {
             server.text(&["show-options", "-g", "-v", name])
+        }
+
+        fn command_with_shell(server: &TmuxTestServer, shell: &str) -> TmuxCommand {
+            server.command_with(&server.environment_with(&[("SHELL", shell)]))
         }
     }
 
@@ -355,6 +359,23 @@ mod tests {
     }
 
     #[test]
+    fn a_config_applied_under_one_shell_is_current_under_another() {
+        let server = TmuxTestServer::with_session("holder");
+        let applier = ServerFixture::command_with_shell(&server, "/bin/example-bash");
+        let checker = ServerFixture::command_with_shell(&server, "/bin/example-zsh");
+        PrivateServer::new(&applier)
+            .apply(&KeyBindings::default())
+            .unwrap();
+
+        let running = PrivateServer::new(&checker)
+            .config(&KeyBindings::default())
+            .unwrap()
+            .unwrap();
+
+        assert!(running.is_current());
+    }
+
+    #[test]
     fn applying_another_return_key_rebinds_and_records_the_new_render() {
         let server = TmuxTestServer::with_session("holder");
         let tmux = server.command();
@@ -372,7 +393,7 @@ mod tests {
         assert!(written.contains("bind-key -T root 'M-x' detach-client"));
         assert_eq!(
             ServerFixture::option(&server, "@ringleader_config"),
-            TmuxServerConfig::new(&ServerFixture::alt_x(), &tmux.caller_shell()).hash()
+            TmuxServerConfig::new(&ServerFixture::alt_x()).hash()
         );
     }
 
@@ -423,7 +444,7 @@ mod tests {
 
         assert_eq!(
             ServerFixture::option(&server, "@ringleader_config"),
-            TmuxServerConfig::new(&changed, &tmux.caller_shell()).hash()
+            TmuxServerConfig::new(&changed).hash()
         );
         assert_eq!(
             ServerFixture::option(&server, "@ringleader_next_session_keys"),

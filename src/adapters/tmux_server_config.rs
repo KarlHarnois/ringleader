@@ -6,7 +6,6 @@ use crate::domain::{HotKey, KeyBindings};
 
 pub struct TmuxServerConfig {
     key_bindings: KeyBindings,
-    shell_toggle: TmuxShellToggle,
 }
 
 impl TmuxServerConfig {
@@ -45,10 +44,9 @@ impl TmuxServerConfig {
     const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
     const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 
-    pub fn new(key_bindings: &KeyBindings, shell: &str) -> Self {
+    pub fn new(key_bindings: &KeyBindings) -> Self {
         Self {
             key_bindings: key_bindings.clone(),
-            shell_toggle: TmuxShellToggle::new(shell),
         }
     }
 
@@ -167,7 +165,7 @@ impl TmuxServerConfig {
             Self::bound(
                 table,
                 bindings.shell_toggle_keys(),
-                &self.shell_toggle.command(),
+                &TmuxShellToggle::command(),
             ),
             Self::bound(table, return_key, Self::RETURN),
         ]
@@ -199,14 +197,13 @@ mod tests {
     const GOLDEN: &str = include_str!("../../tests/fixtures/tmux-server.conf");
     const KEY_CLASSES: [&str; 6] = ["C-q", "M-x", "F12", "~", "}", "M-}"];
     const DETACH_LIMIT: Duration = Duration::from_secs(2);
-    const SHELL: &str = "sh";
 
     struct ConfigFixture;
 
     impl ConfigFixture {
         fn render(key: &str) -> String {
             let bindings = KeyBindings::default().with_return_key(HotKey::parse(key).unwrap());
-            TmuxServerConfig::new(&bindings, SHELL).render()
+            TmuxServerConfig::new(&bindings).render()
         }
 
         fn binding(key: &str) -> String {
@@ -294,7 +291,7 @@ mod tests {
 
     #[test]
     fn the_default_render_matches_the_golden_fixture() {
-        let render = TmuxServerConfig::new(&KeyBindings::default(), SHELL).render();
+        let render = TmuxServerConfig::new(&KeyBindings::default()).render();
 
         assert_eq!(render, GOLDEN);
     }

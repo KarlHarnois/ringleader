@@ -31,9 +31,7 @@ impl TmuxTestServer {
     const OUTER_SESSION: &'static str = "outer";
 
     pub fn new() -> Self {
-        let server = Self::with_config("");
-        server.write_config(&server.default_config());
-        server
+        Self::with_config(&TmuxServerConfig::new(&KeyBindings::default()).render())
     }
 
     pub fn with_config(config_text: &str) -> Self {
@@ -45,9 +43,8 @@ impl TmuxTestServer {
             &directory.path().join("tmux.sock"),
             &directory.path().join("tmux.conf"),
         );
-        let server = Self { directory, files };
-        server.write_config(config_text);
-        server
+        std::fs::write(files.config(), config_text).expect("the test server config is written");
+        Self { directory, files }
     }
 
     pub fn with_session(name: &str) -> Self {
@@ -290,14 +287,6 @@ impl TmuxTestServer {
     pub fn press(&self, client: &ControlClient, key: &str) {
         let name = self.client_name(client);
         self.text(&["send-keys", "-K", "-c", &name, key]);
-    }
-
-    fn default_config(&self) -> String {
-        TmuxServerConfig::new(&KeyBindings::default(), &self.command().caller_shell()).render()
-    }
-
-    fn write_config(&self, text: &str) {
-        std::fs::write(self.config(), text).expect("the test server config is written");
     }
 
     fn typed(&self, args: &[&str]) -> Command {

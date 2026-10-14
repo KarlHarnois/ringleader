@@ -1,24 +1,15 @@
 use super::tmux_listing::TmuxListing;
 
-pub struct TmuxShellToggle {
-    shell: String,
-}
+pub struct TmuxShellToggle;
 
 impl TmuxShellToggle {
     const WORKTREE: &'static str = "#{session_path}";
-    const ESCAPED_QUOTE: &'static str = r"'\''";
 
-    pub fn new(shell: &str) -> Self {
-        Self {
-            shell: shell.to_string(),
-        }
-    }
-
-    pub fn command(&self) -> String {
+    pub fn command() -> String {
         let toggled = Self::either(
             &Self::on_shell_window(),
             &Self::shown(&Self::agent_window()),
-            &self.shell_window_shown(),
+            &Self::shell_window_shown(),
         );
         Self::only_if(&Self::in_managed_session(), &toggled)
     }
@@ -32,19 +23,18 @@ impl TmuxShellToggle {
         Self::over_windows(&Self::over_panes(&agent_pane_window))
     }
 
-    fn shell_window_shown(&self) -> String {
+    fn shell_window_shown() -> String {
         Self::either(
             &Self::has_shell_window(),
             &Self::shown(&Self::shell_window()),
-            &self.shell_window_created(),
+            &Self::shell_window_created(),
         )
     }
 
-    fn shell_window_created(&self) -> String {
+    fn shell_window_created() -> String {
         format!(
-            "new-window -c '{}' {} ; set-option -w {} 1",
+            "new-window -c '{}' ; set-option -w {} 1",
             Self::WORKTREE,
-            Self::quoted(&self.shell),
             TmuxListing::SHELL_TAG
         )
     }
@@ -73,10 +63,6 @@ impl TmuxShellToggle {
         format!("if-shell -F '{condition}' {{ {then} }}")
     }
 
-    fn quoted(text: &str) -> String {
-        format!("'{}'", text.replace('\'', Self::ESCAPED_QUOTE))
-    }
-
     fn over_windows(format: &str) -> String {
         Self::expanded(&format!("W:{format}"))
     }
@@ -102,6 +88,7 @@ mod tests {
 
     use crate::adapters::tmux_multiplexer::TmuxMultiplexer;
     use crate::application::ports::Multiplexer;
+    use crate::domain::KeyBindings;
     use crate::test_support::TmuxTestServer;
     use crate::test_support::tmux_test_server::ControlClient;
 
@@ -157,10 +144,18 @@ mod tests {
         }
 
         fn shell_named_with_a_quote(server: &TmuxTestServer) -> PathBuf {
-            let shell = server.directory().join("it's a shell");
+            Self::shell_named(server, "it's a shell")
+        }
+
+        fn shell_named(server: &TmuxTestServer, name: &str) -> PathBuf {
+            let shell = server.directory().join(name);
             fs::write(&shell, Self::SHELL_SCRIPT).unwrap();
             fs::set_permissions(&shell, fs::Permissions::from_mode(0o755)).unwrap();
             shell
+        }
+
+        fn start_command(server: &TmuxTestServer, window: &str) -> String {
+            Self::value(server, window, "#{pane_start_command}")
         }
 
         fn multiplexer_with_shell(server: &TmuxTestServer, shell: &Path) -> TmuxMultiplexer {
@@ -222,8 +217,30 @@ mod tests {
             .ensure_shell_window("ringleader-other", &other, &shell.display().to_string())
             .unwrap();
 
-        let command = |window: &str| ToggleFixture::value(&server, window, "#{pane_start_command}");
-        assert_eq!(command(&toggled), command(&opened_by_t));
+        assert_eq!(
+            ToggleFixture::start_command(&server, &toggled),
+            ToggleFixture::start_command(&server, &opened_by_t)
+        );
+    }
+
+    #[test]
+    fn the_toggle_key_runs_the_shell_of_the_process_that_created_the_session() {
+        let server = TmuxTestServer::new();
+        let creators_shell = ToggleFixture::shell_named(&server, "creators-shell");
+        let creator = ToggleFixture::multiplexer_with_shell(&server, &creators_shell);
+        server.managed_session_through(&creator, "fix-auth");
+        let other_shell = ToggleFixture::shell_named(&server, "other-shell");
+        ToggleFixture::multiplexer_with_shell(&server, &other_shell)
+            .apply_config(&KeyBindings::default())
+            .unwrap();
+        let client = server.control_client(ToggleFixture::SESSION);
+
+        let toggled = ToggleFixture::toggled(&server, &client);
+
+        assert_eq!(
+            ToggleFixture::start_command(&server, &toggled),
+            creators_shell.display().to_string()
+        );
     }
 
     #[test]
