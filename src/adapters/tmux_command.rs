@@ -2,7 +2,8 @@ use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
 use std::process::Command;
 
-use super::bounded_command::{BoundedCommand, Call, CallKind, Deadlines};
+use super::bounded_command::{BoundedCommand, Call};
+use super::deadlines::{CallKind, Deadlines};
 use super::process_environment::ProcessEnvironment;
 use super::server_files::ServerFiles;
 use super::tmux_error::TmuxError;
@@ -64,6 +65,10 @@ impl TmuxCommand {
 
     pub fn caller_terminal(&self) -> Option<&OsStr> {
         self.environment.terminal()
+    }
+
+    pub fn caller_shell(&self) -> String {
+        self.caller.shell()
     }
 
     pub fn query(&self, sequence: &TmuxSequence) -> Result<TmuxOutput, TmuxError> {
@@ -146,10 +151,11 @@ impl TmuxCommand {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 struct CallerIdentity {
     tmux: Option<OsString>,
     pane: Option<String>,
+    shell: String,
 }
 
 impl CallerIdentity {
@@ -166,6 +172,7 @@ impl CallerIdentity {
             pane: environment
                 .get(Self::TMUX_PANE)
                 .map(|pane| pane.to_string_lossy().into_owned()),
+            shell: environment.shell(),
         }
     }
 
@@ -177,6 +184,10 @@ impl CallerIdentity {
 
     fn pane(&self) -> Option<String> {
         self.pane.clone()
+    }
+
+    fn shell(&self) -> String {
+        self.shell.clone()
     }
 }
 

@@ -1,5 +1,6 @@
 use super::tmux_command::TmuxCommand;
 use super::tmux_error::TmuxError;
+use super::tmux_listing::TmuxListing;
 use super::tmux_output::TmuxOutput;
 use super::tmux_sequence::TmuxSequence;
 
@@ -47,7 +48,7 @@ impl<'a> TmuxLaunch<'a> {
                 "-u",
                 "-t",
                 current_pane,
-                "@ringleader_agent",
+                TmuxListing::AGENT_TAG,
             ])
             .command([
                 "set-option",
@@ -62,7 +63,7 @@ impl<'a> TmuxLaunch<'a> {
                 "-p",
                 "-t",
                 created_pane,
-                "@ringleader_agent",
+                TmuxListing::AGENT_TAG,
                 "1",
             ])
             .command([

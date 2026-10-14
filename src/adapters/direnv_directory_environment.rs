@@ -6,8 +6,9 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
-use super::bounded_command::{BoundedCommand, Call, CallKind};
+use super::bounded_command::{BoundedCommand, Call};
 use super::command_output::CommandOutput;
+use super::deadlines::CallKind;
 use super::null_directory_environment::NullDirectoryEnvironment;
 use super::process_environment::ProcessEnvironment;
 use super::shell_word::ShellWord;
@@ -127,7 +128,7 @@ impl DirectoryEnvironment for DirenvDirectoryEnvironment {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::bounded_command::Deadlines;
+    use crate::adapters::Deadlines;
     use crate::test_support::{DirenvTestHome, FakeHostProbe};
 
     struct DirenvFixture {

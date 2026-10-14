@@ -15,6 +15,7 @@ pub mod key_sequence;
 pub mod label_column;
 pub mod legend;
 pub mod list_selection;
+pub mod observation_feed;
 pub mod preview_feed;
 pub mod preview_panel;
 pub mod preview_text;

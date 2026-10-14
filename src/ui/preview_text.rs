@@ -3,31 +3,33 @@ use ratatui::text::Line;
 
 use crate::domain::TerminalText;
 
-pub struct PreviewText<'a> {
-    raw: &'a str,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreviewText {
+    lines: Vec<Line<'static>>,
 }
 
-impl<'a> PreviewText<'a> {
-    pub fn new(raw: &'a str) -> Self {
-        Self { raw }
-    }
-
-    pub fn bottom_lines(&self, room: usize) -> Vec<Line<'static>> {
-        let mut lines = self.styled_lines().unwrap_or_else(|| self.plain_lines());
+impl PreviewText {
+    pub fn parse(raw: &str) -> Self {
+        let mut lines = Self::styled_lines(raw).unwrap_or_else(|| Self::plain_lines(raw));
         while lines.last().is_some_and(Self::is_blank) {
             lines.pop();
         }
-        let mut lines = Self::squeezed(lines, room);
-        let shown = lines.split_off(lines.len().saturating_sub(room));
+        Self { lines }
+    }
+
+    pub fn bottom_lines(&self, room: usize) -> Vec<Line<'static>> {
+        let kept = self.kept_rows(room);
+        let shown = &kept[kept.len().saturating_sub(room)..];
         let padding = room.saturating_sub(shown.len());
+        let shown_lines = shown.iter().map(|&index| self.lines[index].clone());
         std::iter::repeat_n(Line::default(), padding)
-            .chain(shown)
+            .chain(shown_lines)
             .collect()
     }
 
-    fn squeezed(lines: Vec<Line<'static>>, room: usize) -> Vec<Line<'static>> {
-        let mut runs = Self::blank_runs(&lines);
-        let mut excess = lines.len().saturating_sub(room);
+    fn kept_rows(&self, room: usize) -> Vec<usize> {
+        let mut runs = Self::blank_runs(&self.lines);
+        let mut excess = self.lines.len().saturating_sub(room);
         while excess > 0 {
             let shrinkable = runs.iter_mut().filter(|run| run.kept > 1);
             let Some(longest) = shrinkable.max_by_key(|run| run.kept) else {
@@ -36,11 +38,8 @@ impl<'a> PreviewText<'a> {
             longest.kept -= 1;
             excess -= 1;
         }
-        lines
-            .into_iter()
-            .enumerate()
-            .filter(|(index, _)| runs.iter().all(|run| run.keeps(*index)))
-            .map(|(_, line)| line)
+        (0..self.lines.len())
+            .filter(|index| runs.iter().all(|run| run.keeps(*index)))
             .collect()
     }
 
@@ -59,12 +58,12 @@ impl<'a> PreviewText<'a> {
         runs
     }
 
-    fn styled_lines(&self) -> Option<Vec<Line<'static>>> {
-        self.raw.as_bytes().into_text().ok().map(|text| text.lines)
+    fn styled_lines(raw: &str) -> Option<Vec<Line<'static>>> {
+        raw.as_bytes().into_text().ok().map(|text| text.lines)
     }
 
-    fn plain_lines(&self) -> Vec<Line<'static>> {
-        TerminalText::new(self.raw)
+    fn plain_lines(raw: &str) -> Vec<Line<'static>> {
+        TerminalText::new(raw)
             .plain()
             .lines()
             .map(|row| Line::from(row.to_string()))
@@ -114,7 +113,7 @@ mod tests {
     impl TextFixture {
         fn shown(rows: &[String], room: usize) -> Vec<String> {
             let screen = rows.join("\n");
-            PreviewText::new(&screen)
+            PreviewText::parse(&screen)
                 .bottom_lines(room)
                 .iter()
                 .map(|line| {

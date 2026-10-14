@@ -23,7 +23,9 @@ use super::session_lifecycle::SessionLifecycle;
 use super::session_merge::MergeReport;
 use super::session_monitor::SessionMonitor;
 use super::start_outcome::StartOutcome;
-use crate::domain::{Config, DiffStat, KeyBindings, PullRequest, Repo, Session, SessionSummary};
+use crate::domain::{
+    Config, DiffStat, KeyBindings, PullRequest, Repo, Session, SessionObservation, SessionSummary,
+};
 
 pub struct SessionService {
     config: LoadedConfig,
@@ -165,7 +167,20 @@ impl SessionService {
     }
 
     pub fn observe(&mut self, persist: bool) -> Result<Vec<SessionSummary>, ServiceError> {
-        let reconciliation = self.reconcile()?;
+        let observations = self.monitor.observe_all()?;
+        self.observe_with(observations, persist)
+    }
+
+    pub fn start_observing(&self) -> Pending<Vec<SessionObservation>> {
+        self.monitor.start_observing()
+    }
+
+    pub fn observe_with(
+        &mut self,
+        observations: Vec<SessionObservation>,
+        persist: bool,
+    ) -> Result<Vec<SessionSummary>, ServiceError> {
+        let reconciliation = self.reconcile_with(observations);
         if persist && reconciliation.changed() {
             self.registry.save(reconciliation.entries())?;
         }
@@ -183,8 +198,13 @@ impl SessionService {
             .collect()
     }
 
-    pub fn preview(&self, tmux_name: &str) -> Result<String, ServiceError> {
-        self.monitor.preview(tmux_name)
+    pub fn start_diff(&self, name: &str) -> Option<Pending<DiffStat>> {
+        let session = self.entry(name)?;
+        Some(self.monitor.start_diff(session, self.config()))
+    }
+
+    pub fn start_preview(&self, tmux_name: &str) -> Pending<String> {
+        self.monitor.start_preview(tmux_name)
     }
 
     pub fn find_pull_requests(
@@ -279,11 +299,16 @@ impl SessionService {
     }
 
     fn reconcile(&mut self) -> Result<Reconciliation, ServiceError> {
-        let reconciliation = self
-            .monitor
-            .reconcile(&self.entries, self.config.config())?;
+        let observations = self.monitor.observe_all()?;
+        Ok(self.reconcile_with(observations))
+    }
+
+    fn reconcile_with(&mut self, observations: Vec<SessionObservation>) -> Reconciliation {
+        let reconciliation =
+            self.monitor
+                .reconcile(&self.entries, self.config.config(), observations);
         self.entries = reconciliation.entries().to_vec();
-        Ok(reconciliation)
+        reconciliation
     }
 
     fn entry(&self, name: &str) -> Option<&Session> {
@@ -411,7 +436,7 @@ mod tests {
             fixture
                 .multiplexer()
                 .calls()
-                .contains(&"apply_config C-q M-n M-k M-Up".to_string())
+                .contains(&"apply_config C-q M-n M-k M-Up M-l".to_string())
         );
     }
 
@@ -425,7 +450,7 @@ mod tests {
             fixture
                 .multiplexer()
                 .calls()
-                .contains(&"apply_config C-q M-j M-Down M-k M-Up".to_string())
+                .contains(&"apply_config C-q M-j M-Down M-k M-Up M-l".to_string())
         );
     }
 

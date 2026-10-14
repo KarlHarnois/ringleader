@@ -290,7 +290,7 @@ mod tests {
     use std::fs;
 
     use super::*;
-    use crate::adapters::bounded_command::Deadlines;
+    use crate::adapters::Deadlines;
     use crate::domain::SessionName;
     use crate::test_support::GitTestRepo;
 

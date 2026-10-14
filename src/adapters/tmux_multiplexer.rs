@@ -57,7 +57,8 @@ impl TmuxMultiplexer {
         let server = PrivateServer::new(&self.tmux);
         server.restore_socket()?;
         server.write_files(spec.key_bindings())?;
-        let sequence = TmuxScripts::create_session(spec, prepared.words());
+        let sequence =
+            TmuxScripts::create_session(spec, prepared.words(), &self.tmux.caller_shell());
         let output = self.tmux.create(&sequence, spec.removed_env_names())?;
         let launched = TmuxLaunch::new(&self.tmux).run(&sequence, output)?;
         let socket = self.finish_creation(&launched)?;
@@ -131,7 +132,7 @@ impl TmuxMultiplexer {
     }
 
     fn agent_pane_in(&self, session: &str) -> Result<Option<String>, MultiplexerError> {
-        let lookup = TmuxScripts::session_panes(session, TmuxListing::AGENT_FORMAT);
+        let lookup = TmuxScripts::session_panes(session, &TmuxListing::agent_format());
         let output = self.tmux.query(&lookup)?;
         if !output.succeeded() && !output.has("ringleader-agent") {
             return Err(TmuxError::failed("list-panes", &output).into());
@@ -276,7 +277,7 @@ impl Multiplexer for TmuxMultiplexer {
     fn observe_all(&self) -> Result<Vec<SessionObservation>, MultiplexerError> {
         let output = self
             .tmux
-            .query(&TmuxScripts::all_panes(TmuxListing::PANE_FORMAT))?;
+            .query(&TmuxScripts::all_panes(&TmuxListing::pane_format()))?;
         if output.has("ringleader-pane") || output.succeeded() {
             return Ok(TmuxListing::new(&output).observations());
         }
@@ -505,6 +506,12 @@ mod tests {
 
         fn created_pane(&self, tmux_name: &str) -> String {
             self.server.pane_of(&format!("={tmux_name}:0.0"))
+        }
+
+        fn recorded_shell(&self, tmux_name: &str) -> String {
+            let target = format!("={tmux_name}:");
+            self.server
+                .text(&["show-options", "-t", &target, "-v", "default-command"])
         }
 
         fn attached_to(&self, target: &AttachTarget) -> Vec<String> {
@@ -1312,6 +1319,19 @@ mod tests {
     }
 
     #[test]
+    fn capturing_a_missing_session_reports_the_failed_pane_lookup() {
+        let fixture = MultiplexerFixture::with_holder();
+
+        let error = fixture
+            .server
+            .multiplexer()
+            .capture_pane("ringleader-missing")
+            .unwrap_err();
+
+        assert!(matches!(error, MultiplexerError::Failed { .. }));
+    }
+
+    #[test]
     fn capture_reads_a_session_without_an_agent_pane() {
         let fixture = MultiplexerFixture::new();
         fixture.server.text(&[
@@ -1548,6 +1568,35 @@ mod tests {
         assert!(!global.contains(secret));
         assert!(!String::from_utf8_lossy(&environ).contains(secret));
         assert!(!String::from_utf8_lossy(&cmdline).contains(secret));
+    }
+
+    #[test]
+    fn a_created_session_records_the_creators_shell_whatever_the_agent_sets() {
+        let fixture = MultiplexerFixture::new();
+        let environment = fixture
+            .server
+            .environment_with(&[("SHELL", "/bin/example-shell")]);
+        let agent_env = vec!["SHELL".to_string()];
+        let multiplexer = TmuxMultiplexer::new(
+            fixture
+                .server
+                .command_with(&environment)
+                .removing_env_names(&agent_env),
+            fixture.server.stand_in(),
+        );
+        let agent_shell = [("SHELL".to_string(), "/bin/agent-shell".to_string())];
+        let launch = fixture
+            .launch("fix-auth")
+            .with_env_assignments(&agent_shell);
+        let spec = SessionSpec::new("ringleader-fix-auth", fixture.metadata("fix-auth"), launch)
+            .removing_env_names(&agent_env);
+
+        multiplexer.create_session(&spec).unwrap();
+
+        assert_eq!(
+            fixture.recorded_shell("ringleader-fix-auth"),
+            "/bin/example-shell"
+        );
     }
 
     #[test]

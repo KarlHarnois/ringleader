@@ -1,92 +1,162 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
-use crate::application::{ServiceError, SessionService, Tool};
+use crate::application::{Pending, ServiceError, SessionService, Tool};
 use crate::domain::DiffStat;
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct DiffQueue {
     queued: VecDeque<String>,
+    measuring: Vec<Measurement>,
     diffs: HashMap<String, DiffStat>,
     timed_out: HashSet<String>,
     next_refresh: Option<Instant>,
 }
 
 impl DiffQueue {
-    pub const CALLS_PER_TICK: usize = 2;
-    pub const TICK_BUDGET: Duration = Duration::from_millis(50);
+    pub const IN_FLIGHT: usize = 2;
 
     pub fn diffs(&self) -> &HashMap<String, DiffStat> {
         &self.diffs
     }
 
+    pub fn awaits_results(&self) -> bool {
+        !self.measuring.is_empty()
+    }
+
     pub fn refresh_soon(&mut self) {
         self.next_refresh = None;
         self.timed_out.clear();
+        self.measuring.iter_mut().for_each(Measurement::supersede);
     }
 
     pub fn keep_only(&mut self, names: &[String]) {
         self.diffs.retain(|name, _| names.contains(name));
         self.timed_out.retain(|name| names.contains(name));
+        self.measuring
+            .iter_mut()
+            .filter(|measurement| !names.contains(&measurement.name))
+            .for_each(Measurement::supersede);
     }
 
-    pub fn tick(
+    pub fn poll(
         &mut self,
-        tick_start: Instant,
+        now: Instant,
         visible: &[String],
         service: &SessionService,
     ) -> Result<(), ServiceError> {
-        if self.next_refresh.is_none_or(|due| tick_start >= due) {
-            self.next_refresh = Some(tick_start + service.config().intervals().diff_refresh());
+        let collected = self.collect();
+        if self.is_due(now, visible) {
+            self.next_refresh = Some(now + service.config().intervals().diff_refresh());
             self.queue_unqueued(visible);
         }
         self.queued.retain(|name| visible.contains(name));
+        self.start_measurements(service);
+        collected
+    }
+
+    fn collect(&mut self) -> Result<(), ServiceError> {
         let mut outcome = Ok(());
-        for _ in 0..Self::CALLS_PER_TICK {
-            if tick_start.elapsed() >= Self::TICK_BUDGET {
-                break;
+        for measurement in std::mem::take(&mut self.measuring) {
+            match measurement.pending.poll() {
+                Some(_) if measurement.superseded => {}
+                Some(measured) => outcome = outcome.and(self.record(measurement.name, measured)),
+                None => self.measuring.push(measurement),
             }
-            let Some(name) = self.queued.pop_front() else {
-                break;
-            };
-            outcome = outcome.and(self.measure(&name, service));
         }
         outcome
     }
 
+    fn record(
+        &mut self,
+        name: String,
+        measured: Result<DiffStat, ServiceError>,
+    ) -> Result<(), ServiceError> {
+        match measured {
+            Ok(diff) => {
+                self.diffs.insert(name, diff);
+                Ok(())
+            }
+            Err(error) => {
+                self.fail(name, &error);
+                Err(error)
+            }
+        }
+    }
+
+    fn fail(&mut self, name: String, error: &ServiceError) {
+        log::warn!("could not measure the diff of {name}: {error}");
+        if error.is_timeout_of(Tool::Git) {
+            self.diffs.remove(&name);
+            self.timed_out.insert(name);
+        }
+    }
+
+    fn is_due(&self, now: Instant, visible: &[String]) -> bool {
+        !visible.is_empty() && self.next_refresh.is_none_or(|due| now >= due)
+    }
+
     fn queue_unqueued(&mut self, visible: &[String]) {
         for name in visible {
-            if !self.queued.contains(name) && !self.timed_out.contains(name) {
+            if self.awaits_queueing(name) {
                 self.queued.push_back(name.clone());
             }
         }
     }
 
-    fn measure(&mut self, name: &str, service: &SessionService) -> Result<(), ServiceError> {
-        for (name, result) in service.diff_stats(&[name.to_string()]) {
-            match result {
-                Ok(diff) => {
-                    self.diffs.insert(name, diff);
-                }
-                Err(error) => {
-                    log::warn!("could not measure the diff of {name}: {error}");
-                    if error.is_timeout_of(Tool::Git) {
-                        self.diffs.remove(&name);
-                        self.timed_out.insert(name);
-                    }
-                    return Err(error);
-                }
+    fn awaits_queueing(&self, name: &String) -> bool {
+        let measuring = self
+            .measuring
+            .iter()
+            .any(|measurement| measurement.is_current_for(name));
+        !measuring && !self.queued.contains(name) && !self.timed_out.contains(name)
+    }
+
+    fn start_measurements(&mut self, service: &SessionService) {
+        while self.measuring.len() < Self::IN_FLIGHT {
+            let Some(name) = self.queued.pop_front() else {
+                return;
+            };
+            if let Some(pending) = service.start_diff(&name) {
+                self.measuring.push(Measurement::new(name, pending));
             }
         }
-        Ok(())
+    }
+}
+
+struct Measurement {
+    name: String,
+    pending: Pending<DiffStat>,
+    superseded: bool,
+}
+
+impl Measurement {
+    fn new(name: String, pending: Pending<DiffStat>) -> Self {
+        Self {
+            name,
+            pending,
+            superseded: false,
+        }
+    }
+
+    fn supersede(&mut self) {
+        self.superseded = true;
+    }
+
+    fn is_current_for(&self, name: &str) -> bool {
+        !self.superseded && self.name == name
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
     use super::*;
     use crate::application::ports::WorkspaceError;
-    use crate::test_support::ServiceFixture;
+    use crate::domain::Session;
+    use crate::test_support::{Deadline, FakeWorkspace, HeldCalls, ServiceFixture};
 
     struct QueueFixture;
 
@@ -94,18 +164,31 @@ mod tests {
         const NAMES: [&'static str; 3] = ["alpha", "beta", "gamma"];
 
         fn fixture() -> ServiceFixture {
-            let sessions: Vec<_> = Self::NAMES
+            Self::with_workspace(Self::workspace())
+        }
+
+        fn holding(held: &Arc<HeldCalls>) -> ServiceFixture {
+            Self::with_workspace(Self::workspace().on_call("diff_stat", held.hook()))
+        }
+
+        fn workspace() -> FakeWorkspace {
+            ServiceFixture::workspace_for(&Self::sessions().iter().collect::<Vec<_>>()).with_diff(
+                &ServiceFixture::worktree_path("alpha"),
+                DiffStat::from_changes([], 4),
+            )
+        }
+
+        fn with_workspace(workspace: FakeWorkspace) -> ServiceFixture {
+            ServiceFixture::new()
+                .with_sessions(&Self::sessions())
+                .with_workspace(workspace)
+        }
+
+        fn sessions() -> Vec<Session> {
+            Self::NAMES
                 .iter()
                 .map(|name| ServiceFixture::session(name))
-                .collect();
-            let workspace = ServiceFixture::workspace_for(&sessions.iter().collect::<Vec<_>>())
-                .with_diff(
-                    &ServiceFixture::worktree_path("alpha"),
-                    DiffStat::from_changes([], 4),
-                );
-            ServiceFixture::new()
-                .with_sessions(&sessions)
-                .with_workspace(workspace)
+                .collect()
         }
 
         fn visible(names: &[&str]) -> Vec<String> {
@@ -119,96 +202,130 @@ mod tests {
                 .filter(|call| call.starts_with("diff_stat"))
                 .count()
         }
+
+        fn wait_for_diff_calls(fixture: &ServiceFixture, count: usize) -> bool {
+            Deadline::for_background_work().wait_until(|| Self::diff_calls(fixture) == count)
+        }
+
+        fn settle_at(
+            queue: &mut DiffQueue,
+            now: Instant,
+            visible: &[String],
+            service: &SessionService,
+        ) -> Result<(), ServiceError> {
+            let mut outcome = Ok(());
+            Deadline::for_background_work().wait_until(|| {
+                let polled = queue.poll(now, visible, service);
+                if outcome.is_ok() {
+                    outcome = polled;
+                }
+                !queue.awaits_results()
+            });
+            outcome
+        }
     }
 
     #[test]
-    fn a_tick_measures_at_most_two_visible_rows() {
+    fn finished_measurements_make_room_for_the_rest_of_the_queue() {
         let fixture = QueueFixture::fixture();
         let service = fixture.service();
         let mut queue = DiffQueue::default();
+        let visible = QueueFixture::visible(&QueueFixture::NAMES);
 
-        queue
-            .tick(
-                Instant::now(),
-                &QueueFixture::visible(&QueueFixture::NAMES),
-                &service,
-            )
-            .unwrap();
+        QueueFixture::settle_at(&mut queue, Instant::now(), &visible, &service).unwrap();
 
-        assert_eq!(QueueFixture::diff_calls(&fixture), 2);
+        assert_eq!(QueueFixture::diff_calls(&fixture), 3);
+        assert_eq!(queue.diffs().len(), 3);
         assert_eq!(queue.diffs()["alpha"].untracked(), 4);
     }
 
     #[test]
-    fn the_next_tick_measures_the_rest_of_the_queue() {
-        let fixture = QueueFixture::fixture();
+    fn no_more_than_two_measurements_run_at_once() {
+        let held = HeldCalls::all();
+        let fixture = QueueFixture::holding(&held);
         let service = fixture.service();
         let mut queue = DiffQueue::default();
         let visible = QueueFixture::visible(&QueueFixture::NAMES);
 
-        queue.tick(Instant::now(), &visible, &service).unwrap();
-        queue.tick(Instant::now(), &visible, &service).unwrap();
+        for _ in 0..3 {
+            queue.poll(Instant::now(), &visible, &service).unwrap();
+            queue.refresh_soon();
+        }
+        let two_started = held.wait_for(2);
+        let only_two = held.stays_at(2);
+        held.release();
+
+        assert!(two_started);
+        assert!(only_two);
+    }
+
+    #[test]
+    fn a_row_that_leaves_the_view_before_its_turn_is_not_measured() {
+        let fixture = QueueFixture::fixture();
+        let service = fixture.service();
+        let mut queue = DiffQueue::default();
+        let start = Instant::now();
+        queue
+            .poll(
+                start,
+                &QueueFixture::visible(&QueueFixture::NAMES),
+                &service,
+            )
+            .unwrap();
+
+        QueueFixture::settle_at(
+            &mut queue,
+            start,
+            &QueueFixture::visible(&["alpha"]),
+            &service,
+        )
+        .unwrap();
+
+        assert_eq!(QueueFixture::diff_calls(&fixture), 2);
+        assert!(!queue.diffs().contains_key("gamma"));
+    }
+
+    #[test]
+    fn a_queued_or_measuring_row_is_not_queued_twice() {
+        let held = HeldCalls::all();
+        let fixture = QueueFixture::holding(&held);
+        let service = fixture.service();
+        let mut queue = DiffQueue::default();
+        let visible = QueueFixture::visible(&QueueFixture::NAMES);
+        let start = Instant::now();
+
+        let later = start + Duration::from_secs(4);
+        queue.poll(start, &visible, &service).unwrap();
+        queue.poll(later, &visible, &service).unwrap();
+        held.release();
+        QueueFixture::settle_at(&mut queue, later, &visible, &service).unwrap();
 
         assert_eq!(QueueFixture::diff_calls(&fixture), 3);
-        assert_eq!(queue.diffs().len(), 3);
     }
 
     #[test]
-    fn no_call_starts_once_fifty_milliseconds_of_the_tick_passed() {
-        let fixture = QueueFixture::fixture();
+    fn a_refresh_replaces_a_measurement_that_was_in_flight() {
+        let held = HeldCalls::first(1);
+        let fixture = QueueFixture::holding(&held);
         let service = fixture.service();
         let mut queue = DiffQueue::default();
-        let late_start = Instant::now() - Duration::from_millis(60);
+        let visible = QueueFixture::visible(&["alpha"]);
+        let start = Instant::now();
+        queue.poll(start, &visible, &service).unwrap();
+        held.wait_for(1);
 
-        queue
-            .tick(
-                late_start,
-                &QueueFixture::visible(&QueueFixture::NAMES),
-                &service,
-            )
-            .unwrap();
-
-        assert_eq!(QueueFixture::diff_calls(&fixture), 0);
-    }
-
-    #[test]
-    fn a_row_that_leaves_the_view_leaves_the_queue() {
-        let fixture = QueueFixture::fixture();
-        let service = fixture.service();
-        let mut queue = DiffQueue::default();
-        let late_start = Instant::now() - Duration::from_millis(60);
-        queue
-            .tick(
-                late_start,
-                &QueueFixture::visible(&QueueFixture::NAMES),
-                &service,
-            )
-            .unwrap();
-
-        queue
-            .tick(Instant::now(), &QueueFixture::visible(&["gamma"]), &service)
-            .unwrap();
-        queue
-            .tick(Instant::now(), &QueueFixture::visible(&["gamma"]), &service)
-            .unwrap();
-
-        assert_eq!(QueueFixture::diff_calls(&fixture), 1);
-        assert_eq!(queue.diffs().keys().collect::<Vec<_>>(), ["gamma"]);
-    }
-
-    #[test]
-    fn a_queued_row_is_not_queued_twice() {
-        let fixture = QueueFixture::fixture();
-        let service = fixture.service();
-        let mut queue = DiffQueue::default();
-        let late_start = Instant::now() - Duration::from_millis(60);
-        let visible = QueueFixture::visible(&QueueFixture::NAMES);
-
-        queue.tick(late_start, &visible, &service).unwrap();
+        fixture.workspace().change_diff(
+            &ServiceFixture::worktree_path("alpha"),
+            DiffStat::from_changes([], 9),
+        );
         queue.refresh_soon();
-        queue.tick(late_start, &visible, &service).unwrap();
+        queue.poll(start, &visible, &service).unwrap();
+        QueueFixture::wait_for_diff_calls(&fixture, 1);
+        queue.poll(start, &visible, &service).unwrap();
+        held.release();
+        QueueFixture::settle_at(&mut queue, start, &visible, &service).unwrap();
 
-        assert_eq!(queue.queued.len(), 3);
+        assert_eq!(queue.diffs()["alpha"].untracked(), 9);
     }
 
     #[test]
@@ -219,17 +336,40 @@ mod tests {
         let start = Instant::now();
         let visible = QueueFixture::visible(&["alpha"]);
 
-        queue.tick(start, &visible, &service).unwrap();
-        queue
-            .tick(start + Duration::from_secs(1), &visible, &service)
-            .unwrap();
+        QueueFixture::settle_at(&mut queue, start, &visible, &service).unwrap();
+        QueueFixture::settle_at(
+            &mut queue,
+            start + Duration::from_secs(1),
+            &visible,
+            &service,
+        )
+        .unwrap();
         let before_the_interval = QueueFixture::diff_calls(&fixture);
-        queue
-            .tick(Instant::now() + Duration::from_secs(4), &visible, &service)
-            .unwrap();
+        QueueFixture::settle_at(
+            &mut queue,
+            Instant::now() + Duration::from_secs(4),
+            &visible,
+            &service,
+        )
+        .unwrap();
 
         assert_eq!(before_the_interval, 1);
         assert_eq!(QueueFixture::diff_calls(&fixture), 2);
+    }
+
+    #[test]
+    fn an_empty_view_leaves_the_refresh_due() {
+        let fixture = QueueFixture::fixture();
+        let service = fixture.service();
+        let mut queue = DiffQueue::default();
+        let start = Instant::now();
+
+        queue.poll(start, &[], &service).unwrap();
+        queue
+            .poll(start, &QueueFixture::visible(&["alpha"]), &service)
+            .unwrap();
+
+        assert!(queue.awaits_results());
     }
 
     #[test]
@@ -249,13 +389,12 @@ mod tests {
         let mut queue = DiffQueue::default();
         let visible = QueueFixture::visible(&["alpha"]);
 
-        let outcome = queue.tick(Instant::now(), &visible, &service);
-        queue
-            .tick(Instant::now() + Duration::from_secs(4), &visible, &service)
-            .ok();
+        let outcome = QueueFixture::settle_at(&mut queue, Instant::now(), &visible, &service);
+        let later = Instant::now() + Duration::from_secs(4);
+        QueueFixture::settle_at(&mut queue, later, &visible, &service).ok();
         let before_r = QueueFixture::diff_calls(&fixture);
         queue.refresh_soon();
-        queue.tick(Instant::now(), &visible, &service).ok();
+        QueueFixture::settle_at(&mut queue, Instant::now(), &visible, &service).ok();
 
         assert!(outcome.unwrap_err().is_timeout_of(Tool::Git));
         assert!(queue.diffs().is_empty());
@@ -268,11 +407,51 @@ mod tests {
         let fixture = QueueFixture::fixture();
         let service = fixture.service();
         let mut queue = DiffQueue::default();
-        queue
-            .tick(Instant::now(), &QueueFixture::visible(&["alpha"]), &service)
-            .unwrap();
+        let visible = QueueFixture::visible(&["alpha"]);
+        QueueFixture::settle_at(&mut queue, Instant::now(), &visible, &service).unwrap();
 
         queue.keep_only(&QueueFixture::visible(&["beta"]));
+
+        assert!(queue.diffs().is_empty());
+    }
+
+    #[test]
+    fn a_measurement_of_a_session_that_is_gone_keeps_its_slot() {
+        let held = HeldCalls::all();
+        let fixture = QueueFixture::holding(&held);
+        let service = fixture.service();
+        let mut queue = DiffQueue::default();
+        let start = Instant::now();
+        queue
+            .poll(
+                start,
+                &QueueFixture::visible(&QueueFixture::NAMES),
+                &service,
+            )
+            .unwrap();
+        held.wait_for(2);
+
+        let remaining = QueueFixture::visible(&["beta", "gamma"]);
+        queue.keep_only(&remaining);
+        queue.poll(start, &remaining, &service).unwrap();
+        let only_two = held.stays_at(2);
+        held.release();
+
+        assert!(only_two);
+    }
+
+    #[test]
+    fn a_measurement_of_a_session_that_is_gone_is_dropped() {
+        let held = HeldCalls::all();
+        let fixture = QueueFixture::holding(&held);
+        let service = fixture.service();
+        let mut queue = DiffQueue::default();
+        let visible = QueueFixture::visible(&["alpha"]);
+        queue.poll(Instant::now(), &visible, &service).unwrap();
+
+        queue.keep_only(&QueueFixture::visible(&["beta"]));
+        held.release();
+        QueueFixture::settle_at(&mut queue, Instant::now(), &[], &service).unwrap();
 
         assert!(queue.diffs().is_empty());
     }
