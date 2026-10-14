@@ -205,6 +205,8 @@ pub enum WorkspaceError {
     StartedElsewhere { upstream: String },
     #[error("{worktree} has staged changes, commit them before merging")]
     StagedChanges { worktree: PathBuf },
+    #[error("origin has no branch {branch}, push it or merge by hand")]
+    NotOnOrigin { branch: String },
     #[error("{cause}; the merge commit had already landed, so it stays")]
     MergeLanded { cause: String },
     #[error("{cause}; undid the unfinished merge, so the worktree is back where it was")]

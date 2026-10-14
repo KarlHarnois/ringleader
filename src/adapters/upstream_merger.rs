@@ -13,18 +13,46 @@ pub struct UpstreamMerger<'a> {
 impl<'a> UpstreamMerger<'a> {
     const MERGE_HEAD: &'static str = "MERGE_HEAD";
     const HEAD: &'static str = "HEAD";
+    const NO_MATCHING_REFS: i32 = 2;
 
     pub fn new(git: &'a GitRunner) -> Self {
         Self { git }
     }
 
     pub fn fetch(&self, worktree: &Path, branch: &BaseBranch) -> Result<(), WorkspaceError> {
-        let origin_branch = BranchRef::new(&Branch::Local(branch.to_string())).full_name();
-        let refspec = format!("+{origin_branch}:{}", Self::origin_ref(branch));
+        let refspec = format!(
+            "+{}:{}",
+            Self::ref_on_origin(branch),
+            Self::origin_ref(branch)
+        );
         let fetch = GitInvocation::in_worktree(worktree, "fetch")
             .writing()
             .args([Branch::ORIGIN, &refspec]);
-        self.git.run_checked(&fetch).map(drop)
+        self.git
+            .run_checked(&fetch)
+            .map(drop)
+            .map_err(|failure| self.explain_failed_fetch(worktree, branch, failure))
+    }
+
+    fn explain_failed_fetch(
+        &self,
+        worktree: &Path,
+        branch: &BaseBranch,
+        failure: WorkspaceError,
+    ) -> WorkspaceError {
+        let listing = GitInvocation::in_worktree(worktree, "ls-remote").args([
+            "--exit-code",
+            Branch::ORIGIN,
+            &Self::ref_on_origin(branch),
+        ]);
+        match self.git.run(&listing) {
+            Ok(output) if output.exit_code() == Some(Self::NO_MATCHING_REFS) => {
+                WorkspaceError::NotOnOrigin {
+                    branch: branch.to_string(),
+                }
+            }
+            _ => failure,
+        }
     }
 
     pub fn merge(
@@ -128,6 +156,10 @@ impl<'a> UpstreamMerger<'a> {
 
     fn origin_ref(branch: &BaseBranch) -> String {
         BranchRef::new(&branch.origin_copy()).full_name()
+    }
+
+    fn ref_on_origin(branch: &BaseBranch) -> String {
+        BranchRef::new(&Branch::Local(branch.to_string())).full_name()
     }
 
     fn head_contains(&self, worktree: &Path, commit: &str) -> Result<bool, WorkspaceError> {
@@ -671,6 +703,20 @@ mod tests {
             }
         );
         assert!(!fixture.has_merged(&upstream_tip));
+    }
+
+    #[test]
+    fn a_branch_origin_does_not_have_is_refused_by_name() {
+        let fixture = MergeFixture::new();
+
+        let error = fixture.merge_from("part1").unwrap_err();
+
+        assert_eq!(
+            error,
+            WorkspaceError::NotOnOrigin {
+                branch: "part1".to_string()
+            }
+        );
     }
 
     #[test]
