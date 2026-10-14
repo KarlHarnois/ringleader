@@ -27,11 +27,9 @@ impl KeySwitch {
 
     pub fn script(&self) -> TmuxSequence {
         let previous = self.previous.to_string();
-        TmuxServerConfig::return_tables()
-            .filter(|table| !self.restored.holds(table))
-            .fold(self.displaced.saving(), |sequence, table| {
-                sequence.command(["unbind-key", "-q", "-T", table, &previous])
-            })
+        TmuxServerConfig::return_tables().fold(self.displaced.saving(), |sequence, table| {
+            sequence.command(["unbind-key", "-q", "-T", table, &previous])
+        })
     }
 
     pub fn restoring_lines(&self) -> String {
@@ -80,10 +78,6 @@ impl DisplacedBindings {
             .iter()
             .map(|(_, line)| format!("{line}\n"))
             .collect()
-    }
-
-    fn holds(&self, table: &str) -> bool {
-        self.line(table).is_some()
     }
 
     fn per_copy_table(
