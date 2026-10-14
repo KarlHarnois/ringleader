@@ -10,11 +10,15 @@ pub struct AppLog {
 }
 
 impl AppLog {
-    pub const FILE_NAME: &'static str = "app.log";
+    const FILE_NAME: &'static str = "app.log";
     pub const MAX_SIZE: u64 = 5 * 1024 * 1024;
 
+    pub fn path_in(state_directory: &Path) -> PathBuf {
+        state_directory.join(Self::FILE_NAME)
+    }
+
     pub fn open(state_directory: &Path) -> Result<Self, String> {
-        let path = state_directory.join(Self::FILE_NAME);
+        let path = Self::path_in(state_directory);
         let file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -68,7 +72,7 @@ mod tests {
         }
 
         fn path(&self) -> PathBuf {
-            self.directory.path().join(AppLog::FILE_NAME)
+            AppLog::path_in(self.directory.path())
         }
     }
 
@@ -124,7 +128,7 @@ mod tests {
 
         assert!(error.starts_with(&format!(
             "logging disabled: {}: ",
-            missing.join(AppLog::FILE_NAME).display()
+            AppLog::path_in(&missing).display()
         )));
     }
 }

@@ -2,6 +2,7 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use super::bounded_command::BoundedCommand;
+use super::branch_marker::BranchMarker;
 use super::diff_base_resolver::DiffBaseResolver;
 use super::git_branches::GitBranches;
 use super::git_invocation::GitInvocation;
@@ -10,8 +11,10 @@ use super::git_runner::GitRunner;
 use super::host_path::HostPath;
 use super::start_point_resolver::StartPointResolver;
 use super::submodule_commits::SubmoduleCommits;
+use super::upstream_merger::UpstreamMerger;
 use crate::application::ports::{
-    DiffBase, DirtyState, StartPoint, UnmergedCommits, Workspace, WorkspaceError, WorktreeEntry,
+    DiffBase, DirtyState, StartPoint, UnmergedCommits, UpstreamMerge, Workspace, WorkspaceError,
+    WorktreeEntry,
 };
 use crate::domain::{BaseBranch, DiffStat};
 
@@ -175,6 +178,10 @@ impl Workspace for GitWorkspace {
         GitBranches::new(&self.git).list_managed(repo)
     }
 
+    fn branch_marking_command(&self, repo: &Path, branch: &str) -> String {
+        BranchMarker::new(branch).marking_command(repo)
+    }
+
     fn is_branch_published(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError> {
         GitBranches::new(&self.git).is_published(repo, branch)
     }
@@ -232,6 +239,23 @@ impl Workspace for GitWorkspace {
         Ok(DiffStat::from_changes(changes, untracked_count))
     }
 
+    fn fetch_upstream(
+        &self,
+        worktree: &Path,
+        base_branch: Option<&BaseBranch>,
+    ) -> Result<BaseBranch, WorkspaceError> {
+        UpstreamMerger::new(&self.git).fetch(worktree, base_branch)
+    }
+
+    fn merge_upstream(
+        &self,
+        worktree: &Path,
+        branch_on_origin: &BaseBranch,
+        started_from: &str,
+    ) -> Result<UpstreamMerge, WorkspaceError> {
+        UpstreamMerger::new(&self.git).merge(worktree, branch_on_origin, started_from)
+    }
+
     fn validate_repo(&self, path: &Path) -> Result<PathBuf, WorkspaceError> {
         let check = GitInvocation::in_repo(path, "rev-parse").args([
             "--path-format=absolute",
@@ -267,7 +291,6 @@ mod tests {
 
     use super::*;
     use crate::adapters::Deadlines;
-    use crate::application::ports::BranchMarker;
     use crate::domain::SessionName;
     use crate::test_support::GitTestRepo;
 
@@ -1518,7 +1541,7 @@ mod tests {
         let repo = fixture.init_repo("example's project");
         let branch = "feat(ui)";
         fixture.git(&repo, &["branch", branch]);
-        let command = BranchMarker::new(branch).marking_command(&repo);
+        let command = fixture.workspace().branch_marking_command(&repo, branch);
 
         fixture.shell(&command);
 

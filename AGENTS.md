@@ -45,26 +45,32 @@ When no rule covers a case, choose what these values favor. When two conflict, t
 nix develop -c cargo fmt --check
 nix develop -c cargo clippy --all-targets -- -D warnings
 nix develop -c cargo test
+nix build --no-link .#checks.x86_64-linux.readme-version-badge
 nix build .#
 nix flake check
 ```
 
-These are the commands `.github/workflows/ci.yml` runs. All of them run on pushes to `master` and on merge-queue runs, and the first three also run on pull requests. A change is done when all of them pass. If a change edits a file under `src/`, the change is done only when the completion steps in Metrics also pass.
+These are the commands `.github/workflows/ci.yml` runs. All of them run on pushes to `master` and on merge-queue runs, and the first four also run on pull requests. A change is done when all of them pass. If a change edits a file under `src/`, the change is done only when the completion steps in Metrics also pass.
 
 ## Architecture
 
-Ringleader follows hexagonal architecture, also called ports and adapters. The core holds the domain and the use cases. It never imports an adapter, `crossterm`, `ratatui`, or `std::process`. It never runs tmux or git or touches the filesystem or the terminal itself, and reaches them through traits it owns, which adapters outside the core implement.
+Ringleader follows hexagonal architecture, also called ports and adapters. The core holds the domain and the use cases. It never imports an adapter, `crossterm`, `ratatui`, or `std::process`. It never runs tmux or git or touches the filesystem or the terminal itself, and reaches them through traits it owns, which adapters outside the core implement. It never spells out their syntax either: git refs and config keys, tmux targets, and command lines belong to the adapters. When the core shows the user a command, it asks a port for it, the way `BranchOwnership` asks `Workspace::branch_marking_command`.
 
 Dependencies point inward only. An inner layer never imports an outer one.
 
 - `domain` holds the entities, value types, and pure rules. It imports nothing else from the crate.
-- `application` holds the use cases and the ports, and imports only `domain`. It never shells out, never touches the filesystem directly, and never reads the system clock. Ports are traits in `application/ports/`, named after the role they play, such as `Workspace` and `Multiplexer`, with any error type in the same file.
+- `application` holds the use cases and the ports, and imports only `domain`. It never shells out, never touches the filesystem directly, and never reads the system clock. Its errors say what kind of failure happened, and `CliExit` in `cli` alone turns them into exit codes. Ports are traits in `application/ports/`, named after the role they play, such as `Workspace` and `Multiplexer`, with any error type in the same file. A port's error describes the failure in the port's terms, with no field for the tool's subcommand, exit status, or output, and nothing outside the adapters branches on which tool failed.
 - `adapters` holds the driven adapters, which implement the ports with git, tmux, files, and `/proc`, and the process-level types `CompositionRoot` uses directly, such as `ProcessEnvironment`, `XdgPaths`, and `AgentLauncher`. They import `application` and `domain`, never `ui` or `cli`. Each port adapter is named after its technology and the port it implements, such as `GitWorkspace` and `TmuxMultiplexer`.
-- `ui` and `cli` are the driving adapters. They import `application` and `domain`, never `adapters` or each other. They reach the use cases only through the `SessionService` facade, which composes `SessionLifecycle`, `SessionMonitor`, `SessionAccess`, `RepoCatalog`, `PullRequestCatalog`, and `Doctor`, so `ui` and `cli` never call those directly. A port handed to a `ui` or `cli` type, like `Lock`, is called by that type.
-- `main.rs` is the composition root and the only production code that imports every layer. The Wiring section says what it builds.
+- `ui` and `cli` are the driving adapters. They import `application` and `domain`, never `adapters` or each other. They reach the use cases only through the `SessionService` facade, which composes `SessionLifecycle`, `SessionMonitor`, `SessionAccess`, `RepoCatalog`, `PullRequestCatalog`, and `Doctor`, so `ui` and `cli` never call those directly. A port handed to a `ui` or `cli` type, like `Lock`, is called by that type. They hold no business rules: what each session state allows is decided in `domain` or `application`, so the TUI and the CLI cannot disagree.
+- `main.rs` is the composition root and the only production code that imports every layer. The Wiring section says what it builds. It builds and wires, and leaves the use cases a run starts with to the driving adapter, the way `Cli::execute` does for the CLI.
 - `src/test_support/` may import any layer, because it fakes the ports and drives the outer layers under test. Inline `#[cfg(test)]` modules follow their layer's rule, except that any of them may also import `src/test_support/`.
 
-The code breaks the `ui` and `cli` rule in four places today: `SignalFlags` in `ui/event_loop.rs`, `cli/cli_session.rs`, and a test in `cli/session_commands.rs`, and `AppLog` in `ui/dialogs/dialog.rs`. They are violations to fix, not precedent to copy.
+The code breaks these rules in four places today. They are violations to fix, not precedent to copy.
+
+- Advice in `domain/session_summary.rs`, `application/busy_worktree.rs`, `application/server_audit.rs`, `application/delete_outcome.rs`, `application/deletion_guards.rs`, and `application/session_renaming.rs` spells out tmux and git command lines. The tmux ones repeat the exact-target syntax that `TmuxScripts::exact` owns.
+- `WorkspaceError`, `MultiplexerError`, and `PullRequestError` name the git, tmux, or gh subcommand that failed, and `WorkspaceError` and `PullRequestError` keep its exit status and stderr in fields. `ServiceError::TimedOut` names the tool, and `ui/diff_queue.rs` and `ui/home_state.rs` branch on it.
+- `ui/action_gate.rs` decides which actions each session state allows, such as restart only for an Exited or Stopped session, and `StatusNote` in `ui/status_bar.rs` repeats that an Unmanaged session can only be attached. The use cases enforce their own versions of those rules.
+- `CompositionRoot::run_tui` in `main.rs` calls the TUI's startup use cases itself: `restore_server_socket`, `refuse_own_pane`, `load_registry`, and `reapply_server_config`.
 
 A new capability that `application`, `ui`, or `cli` needs from outside the process goes through a port, because none of them may import `adapters`. `CompositionRoot` and the types in `adapters` reach the outside directly. Logging needs no port: every layer writes through the `log` macros, and `CompositionRoot` installs `AppLog` behind them. The steps for a port:
 
@@ -258,6 +264,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     ├── cli.rs              # Cli struct, clap definitions, dispatch
     ├── cli/
     │   ├── cli_output.rs         # CliOutput, writeln! output that stops at a broken pipe
+    │   ├── cli_exit.rs           # CliExit, the exit of one command and the exit code of each service and lock error
     │   ├── cli_session.rs        # CliSession, signal checks, worker waits, the startup input wait the CLI and TUI end with, and the exit of one command
     │   ├── session_commands.rs   # SessionCommands: list, new, delete, attach, rename, restart
     │   ├── list_report.rs        # ListReport, the list text and JSON
@@ -292,8 +299,8 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── session_service.rs    # SessionService, the facade the UI and CLI call
     │   ├── service_context.rs    # ServiceContext and LoadedConfig, what main injects into the facade
     │   ├── service_ports.rs      # ServicePorts with the StatePorts, RepoPorts, and TmuxPorts bundles
-    │   ├── service_error.rs      # ServiceError and its exit codes
-    │   ├── session_lifecycle.rs  # SessionLifecycle: create, delete, rename, restart
+    │   ├── service_error.rs      # ServiceError, the kinds of failure the use cases report
+    │   ├── session_lifecycle.rs  # SessionLifecycle: create, delete, rename, restart, merge
     │   ├── busy_worktree.rs      # BusyWorktree, the tmux server processes that keep a stopped entry from restarting, with the advice for each case
     │   ├── session_creation.rs   # SessionCreation: create_session with its rollbacks
     │   ├── worktree_rollback.rs  # WorktreeRollback, removes the worktree and branch of a failed create
@@ -304,6 +311,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── rename_request.rs     # RenameRequest, the old and new names
     │   ├── branch_availability.rs # BranchAvailability, refuses a branch name that exists or holds other branches, for create and rename
     │   ├── session_restart.rs    # SessionRestart: restart of an Exited or Stopped session
+    │   ├── session_merge.rs      # SessionMerge: merge of origin's copy of the base branch into a Waiting session, with MergeReport
     │   ├── agent_hooks.rs        # AgentHooks, schedules an agent's startup input in the background and types its rename input
     │   ├── worktree_inspection.rs # WorktreeInspection, the worktree checks restart, delete, and doctor share
     │   ├── session_deletion.rs   # SessionDeletion: delete_session steps 5 to 8 and forget
@@ -325,7 +333,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── repo_overrides.rs     # RepoOverrides: the add_repo and remove_repo workers
     │   ├── pending.rs            # Pending, a worker result the TUI polls and the CLI waits on
     │   ├── doctor.rs             # Doctor
-    │   ├── diagnostic_paths.rs   # DiagnosticPaths, the program, state, and private tmux server paths doctor and help report
+    │   ├── diagnostic_paths.rs   # DiagnosticPaths, the program, state, and private tmux server paths doctor and help report, and the log file help shows
     │   ├── tool_version.rs       # ToolVersion, the major and minor numbers of a tmux or git version
     │   ├── doctor_report.rs      # DoctorReport, the doctor's info, warning, and problem lines
     │   ├── registry_audit.rs     # RegistryAudit, the doctor's checks of each registry entry
@@ -336,9 +344,9 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │       ├── session_registry.rs   # SessionRegistry trait
     │       ├── workspace.rs          # Workspace trait
     │       ├── diff_base.rs          # DiffBase, the recorded commit and configured base branch a session diff measures from
-    │       ├── branch_marker.rs      # BranchMarker, the git config entry that marks a branch Ringleader created
     │       ├── dirty_state.rs        # DirtyState, the uncommitted files and nested repos of a worktree
     │       ├── unmerged_commits.rs   # UnmergedCommits, commits on no other ref with the tip and HEAD
+    │       ├── upstream_merge.rs     # UpstreamMerge and MergeOutcome, the origin branch a worktree merged and whether it was up to date, merged, or conflicted
     │       ├── multiplexer.rs        # Multiplexer trait
     │       ├── agent_launch.rs       # AgentLaunch, the argv, environment, and worktree an agent starts with
     │       ├── config_source.rs      # ConfigSource trait
@@ -346,7 +354,8 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │       ├── pull_requests.rs      # PullRequests trait
     │       ├── host_probe.rs         # HostProbe trait
     │       ├── clock.rs              # Clock trait
-    │       └── lock.rs               # Lock trait
+    │       ├── lock.rs               # Lock trait
+    │       └── interrupts.rs         # Interrupts trait
     ├── adapters/
     │   ├── mod.rs
     │   ├── agent_launcher.rs     # AgentLauncher, the hidden __exec-agent mode, owns AgentHandoff and the exec seam
@@ -374,16 +383,19 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── git_invocation.rs     # GitInvocation, one git call with its child environment
     │   ├── git_porcelain.rs      # GitPorcelain, parses git's machine-readable output
     │   ├── git_branches.rs       # GitBranches: compare-and-swap delete, rename, the managed-branch marker, and whether a branch has been pushed
+    │   ├── branch_marker.rs      # BranchMarker, the git config entry that marks a branch Ringleader created, and the command that sets it by hand
     │   ├── branch_section.rs     # BranchSection, the git config section and upstream keys of one branch
     │   ├── start_point_resolver.rs # StartPointResolver, the commit a new worktree starts from
     │   ├── base_branch_ladder.rs # BaseBranchLadder, the origin default, main, and master refs tried when no base branch is set
+    │   ├── base_branch_refs.rs   # BaseBranchRefs, the local, remote-tracking, and origin refs a configured base branch is looked up by
     │   ├── diff_base_resolver.rs # DiffBaseResolver, the merge base of a worktree's HEAD with its base branch, which its diff measures from
+    │   ├── upstream_merger.rs    # UpstreamMerger, fetches origin's copy of the base branch and merges it into a worktree, listing any conflicted paths
     │   ├── submodule_commits.rs  # SubmoduleCommits, the submodule walk of unmerged_commits
     │   ├── system_clock.rs       # SystemClock, reads `SystemTime`
     │   ├── system_host_probe.rs  # SystemHostProbe
     │   ├── live_process.rs       # LiveProcess, one /proc entry, whether it is the tmux server of a socket, and signals to it
     │   ├── metadata_json.rs      # MetadataJson, the @ringleader_meta JSON each session carries
-    │   ├── signal_flags.rs       # SignalFlags, the SIGHUP, SIGINT, SIGTERM, and SIGQUIT flags
+    │   ├── signal_hook_interrupts.rs # SignalHookInterrupts, the SIGHUP, SIGINT, SIGTERM, and SIGQUIT flags
     │   ├── durable_file.rs       # DurableFile, synced temp file renamed over the target
     │   ├── tmux_command.rs       # TmuxCommand, the private server's `-S` and `-f`, `-u` and `-N`, a child environment without `TMUX` and `TMUX_PANE`, the caller's identity
     │   ├── server_files.rs       # ServerFiles, the private server's socket and generated config, and the 0700 socket directory
@@ -413,7 +425,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── pull_request_feed.rs    # PullRequestFeed, the pull requests of visible rows and their timer
     │   ├── bell.rs                 # Bell, rings on a Working to Waiting edge
     │   ├── shell_runner.rs         # ShellRunner, runs the ephemeral t shell
-    │   ├── blocking_operation.rs   # BlockingOperation, a create, delete, rename, or restart run behind a busy message
+    │   ├── blocking_operation.rs   # BlockingOperation, a create, delete, rename, restart, or merge run behind a busy message
     │   ├── status_report.rs        # StatusReport, the status bar message and how outcomes become one
     │   ├── text_fit.rs             # TextFit, padding and ellipsis truncation
     │   ├── event_loop.rs           # EventLoop
@@ -481,7 +493,8 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
         ├── recording_screen_mode.rs # RecordingScreenMode, the screen mode that records each switch
         ├── ui_harness.rs            # UiHarness: scripted input and a TestBackend wrapper for EventLoop tests
         ├── cli_harness.rs           # CliHarness: a Cli run against the fakes with captured output
-        └── fake_lock.rs             # FakeLock
+        ├── fake_lock.rs             # FakeLock
+        └── fake_interrupts.rs       # FakeInterrupts
 ```
 
 ## Layout rules
@@ -502,11 +515,12 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
 - The TUI takes the lifetime lock, and the mutating commands (`new`, `delete`, `rename`, `restart`, `repo add`, `repo remove`) take the write lock. `list`, `doctor`, `attach`, `repo list`, and `__exec-agent` take no lock.
 - A session's branch is its name, and its tmux session is the tmux prefix followed by its name. Create and rename never record a branch that differs from the name, and rename always moves the branch with the name. Rename refuses a branch that has been pushed, because the remote branch and any pull request keep the old name, and it never moves the worktree, because the running agent and its transcripts are keyed by that path. A session recorded on another branch, from before the branch prefix was dropped, from an adopted tmux session, or from a tmux session renamed by hand, keeps working. When its branch is marked and not pushed, `doctor` warns about it, and renaming it to a new name moves its branch.
 - Key bindings come only from the generated config of the private tmux server, which `create_session` writes, and which the TUI at start and after `r`, `new`, and `restart` re-source on the running server when its `@ringleader_config` hash differs from the current render. Only lock holders do either, so only one process ever writes that config, and the reapply is skipped while the config failed to load. Every tmux call passes `-S <private socket>` and `-f`, so Ringleader never reads or writes the user's tmux server. An entry recorded on another socket is checked only through `/proc`. The TUI and the CLI attach through the same foreground child.
-- Blocking TUI operations (create, delete, rename, restart, and the delete measurement) run behind a busy message, and the event loop drops the key and paste events queued while they ran.
+- Blocking TUI operations (create, delete, rename, restart, merge, and the delete measurement) run behind a busy message, and the event loop drops the key and paste events queued while they ran.
 - The TUI's polling (state, preview, diffs, and pull requests) runs in `Pending` workers and never blocks input. The event loop collects finished jobs on every wake, and wakes every 16ms while a state, preview, or diff job runs. Pull request lookups do not shorten the wait, because one may run up to its 20 second deadline. A capture is shown only under the row it was taken for. The TUI observes once synchronously before its first frame, so that frame and the keys typed at launch already see the sessions. The synchronous observe at start and after attach, shell, reload, and every blocking operation drops any in-flight observation, so a listing taken before a delete never brings the session back.
+- `p` pulls: it merges origin's copy of a session's base branch into its worktree. It runs only on a `Waiting` session whose agent is at its prompt, by the conditions below, and whose worktree has no uncommitted changes and is on the session's branch, so the merge never changes files under a turn that is still running. The branch is the repo's configured `base_branch` without any `origin/` prefix, or else the first of origin's default, `origin/main`, and `origin/master` that exists. It fetches only that branch, refuses when it does not hold the commit the session started from, which catches a session created with its own `--base-branch` only once that branch has moved away from the merged one, since a session records its start commit and not its base branch, observes the session again and checks the guards on that fresh state, so the fetch's network time stays outside the window they close, merges it with `--no-edit`, and when the merge stops on conflicts it leaves the merge in progress and types one line into the agent naming the first 20 conflicted paths, counting the rest, and asking it to resolve them and commit. It refuses a worktree with staged changes or a merge already in progress, so a merge that then fails without conflicts, such as a merge commit a hook refuses or a merge killed at its deadline before git recorded it, is undone with `git merge --abort` or `git reset --merge HEAD`, unless its merge commit had already landed, as when a slow `post-merge` hook is killed, which is kept and reported as landed. The line goes through `type_if_ready`, so an agent that left its prompt is not typed into, and the status bar says so as an error.
 - A dialog's hint line lists only keys whose meaning is Ringleader's own, such as `Enter create`, `Ctrl-S create`, and `Esc cancel`, and the keys that choose from a list, such as `↑ ↓ j k choose`. It never lists text-editing keys like cursor movement, Ctrl-U, or Ctrl-W, because every terminal user already expects them. A new editing key goes into `TextField` with its usual terminal meaning, not into a hint.
 - Logs go to `$XDG_STATE_HOME/ringleader/app.log` through `env_logger`, never to the terminal.
-- `AgentHooks` schedules an agent's `startup_input` in the background after create and restart, so the use case returns once the tmux session exists. One typing job runs per session at a time, and a second start for the same session is skipped. The job finds the agent pane once when it starts, then checks only the prompt conditions below before each line. It never rechecks the session's name or registry entry, so a rename during its wait does not reach it. The job waits up to 60 seconds for the first prompt, and each later line waits up to 2 seconds for the prompt to come back, after a short pause that lets the agent take the line before it. The TUI polls the job while it runs. On exit, the CLI after its command and the TUI after restoring the screen release the lock, note the wait on stderr, and wait for the job unless a signal arrives. Its `rename_input` is typed after a rename only when the agent is at its prompt at that moment. An agent is at its prompt when its pane is out of copy mode, shows the cursor, and the text before the cursor on its row is a bare prompt marker and a blank, with no letters or digits. Copy mode would take the keys instead of the agent. Claude hides the cursor in its trust and permission dialogs, an agent still starting has drawn no marker, and an unsent draft puts its text before the cursor. A skipped or failed typing is logged and never fails the use case.
+- `AgentHooks` schedules an agent's `startup_input` in the background after create and restart, so the use case returns once the tmux session exists. One typing job runs per session at a time, and a second start for the same session is skipped. The job finds the agent pane once when it starts, then checks only the prompt conditions below before each line. It never rechecks the session's name or registry entry, so a rename during its wait does not reach it. The job waits up to 60 seconds for the first prompt, and each later line waits up to 2 seconds for the prompt to come back, after a short pause that lets the agent take the line before it. Every typed line is sent as its text, then Enter 300 milliseconds later: an agent reads text and an Enter that arrive together as a paste and keeps the Enter in its draft, so the line is never submitted. The TUI polls the job while it runs. On exit, the CLI after its command and the TUI after restoring the screen release the lock, note the wait on stderr, and wait for the job unless a signal arrives. Its `rename_input` is typed after a rename only when the agent is at its prompt at that moment. An agent is at its prompt when its pane is out of copy mode, shows the cursor, and the text before the cursor on its row is a bare prompt marker and a blank, with no letters or digits. Copy mode would take the keys instead of the agent. Claude hides the cursor in its trust and permission dialogs, an agent still starting has drawn no marker, and an unsent draft puts its text before the cursor. A skipped or failed typing is logged and never fails the use case.
 
 ## CLI exit codes
 

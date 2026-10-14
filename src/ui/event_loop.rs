@@ -10,7 +10,7 @@ use super::app::{App, AppRequest};
 use super::blocking_operation::BlockingOperation;
 use super::shell_runner::{ChildShell, ShellRunner};
 use super::terminal_guard::TerminalState;
-use crate::adapters::signal_flags::SignalFlags;
+use crate::application::ports::Interrupts;
 
 pub trait InputSource {
     fn next_event(&mut self, timeout: Duration) -> io::Result<Option<Event>>;
@@ -30,7 +30,7 @@ impl InputSource for CrosstermInput {
 pub struct EventLoop<B: Backend, I: InputSource> {
     terminal: Terminal<B>,
     input: I,
-    signals: SignalFlags,
+    signals: Box<dyn Interrupts>,
     screen: Arc<TerminalState>,
     shells: Box<dyn ShellRunner>,
 }
@@ -47,7 +47,7 @@ where
     pub fn new(
         terminal: Terminal<B>,
         input: I,
-        signals: SignalFlags,
+        signals: Box<dyn Interrupts>,
         screen: Arc<TerminalState>,
     ) -> Self {
         Self {

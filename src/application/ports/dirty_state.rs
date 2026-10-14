@@ -23,7 +23,6 @@ impl DirtyState {
         }
     }
 
-    #[cfg(test)]
     pub fn is_missing(&self) -> bool {
         self.missing
     }

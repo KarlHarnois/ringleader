@@ -5,7 +5,7 @@ use super::{
     FakeClock, FakeConfigSource, FakeHostProbe, FakeMultiplexer, FakePullRequests, FakeRepoScanner,
     FakeSessionRegistry, FakeWorkspace,
 };
-use crate::application::ports::{ConfigError, WorktreeEntry};
+use crate::application::ports::{ConfigError, MergeOutcome, MultiplexerError, WorktreeEntry};
 use crate::application::{
     CorruptRegistry, DiagnosticPaths, LoadedConfig, RepoPorts, ServiceContext, ServicePorts,
     SessionService, StatePorts, TmuxPorts,
@@ -45,6 +45,7 @@ impl ServiceFixture {
     pub const WORKTREE_PROCESS: u32 = 4_000_042;
     pub const STATE_DIRECTORY: &'static str = "/state/ringleader";
     pub const TMUX_CONFIG: &'static str = "/state/ringleader/tmux.conf";
+    pub const LOG_FILE: &'static str = "/state/ringleader/app.log";
 
     pub fn new() -> Self {
         Self {
@@ -140,10 +141,12 @@ impl ServiceFixture {
     }
 
     pub fn diagnostics() -> DiagnosticPaths {
-        DiagnosticPaths::new("tmux", "git", Path::new(Self::STATE_DIRECTORY)).with_tmux_server(
-            Path::new(FakeMultiplexer::SOCKET),
-            Path::new(Self::TMUX_CONFIG),
-        )
+        DiagnosticPaths::new("tmux", "git", Path::new(Self::STATE_DIRECTORY))
+            .with_tmux_server(
+                Path::new(FakeMultiplexer::SOCKET),
+                Path::new(Self::TMUX_CONFIG),
+            )
+            .with_log_file(Path::new(Self::LOG_FILE))
     }
 
     pub fn launched_in(self, directory: &Path) -> Self {
@@ -296,6 +299,22 @@ impl ServiceFixture {
             Path::new(FakeMultiplexer::SOCKET),
         );
         Session::new(name, metadata, Registration::new(tmux, naming, created_at))
+    }
+
+    pub fn merging(name: &str, outcome: MergeOutcome, multiplexer: FakeMultiplexer) -> Self {
+        let session = Self::session(name);
+        Self::new()
+            .with_sessions(std::slice::from_ref(&session))
+            .with_workspace(Self::workspace_for(&[&session]).with_upstream_merge(outcome))
+            .with_host(Self::host_for(&[&session]))
+            .with_multiplexer(multiplexer.with_live(Self::waiting(&session)))
+    }
+
+    pub fn refusing_typing(name: &str) -> FakeMultiplexer {
+        let not_ready = MultiplexerError::AgentNotReady {
+            tmux_name: Self::session(name).tmux_name().to_string(),
+        };
+        FakeMultiplexer::new().failing("type_if_ready", not_ready)
     }
 
     pub fn with_worktree_agent(session: &Session) -> FakeHostProbe {

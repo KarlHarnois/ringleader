@@ -20,6 +20,7 @@ use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
 use super::session_access::{SessionAccess, ShellOutcome};
 use super::session_lifecycle::SessionLifecycle;
+use super::session_merge::MergeReport;
 use super::session_monitor::SessionMonitor;
 use crate::domain::{
     Config, DiffStat, KeyBindings, PullRequest, Repo, Session, SessionObservation, SessionSummary,
@@ -261,6 +262,12 @@ impl SessionService {
         Ok(())
     }
 
+    pub fn merge_upstream(&mut self, name: &str) -> Result<MergeReport, ServiceError> {
+        let reconciliation = self.reconcile()?;
+        self.lifecycle
+            .merge_upstream(&reconciliation, name, self.config())
+    }
+
     pub fn attach(&mut self, name: &str) -> Result<(), ServiceError> {
         let reconciliation = self.reconcile()?;
         self.access.attach(reconciliation.row(name)?)
@@ -392,7 +399,7 @@ mod tests {
 
         let error = fixture.service().refuse_own_pane().unwrap_err();
 
-        assert_eq!(error.exit_code(), 3);
+        assert!(matches!(error, ServiceError::Conflict(_)));
     }
 
     #[test]
@@ -479,7 +486,7 @@ mod tests {
 
         let error = service.load_registry(CorruptRegistry::Report).unwrap_err();
 
-        assert_eq!(error.exit_code(), 1);
+        assert!(matches!(error, ServiceError::Failed(_)));
         assert!(!fixture.registry().was_moved_aside());
     }
 

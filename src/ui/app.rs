@@ -126,11 +126,12 @@ impl App {
         self.observe();
         match outcome {
             OperationOutcome::Done { message, select } => {
-                self.dialogs.close();
-                if let Some(name) = select {
-                    self.home.select(&name, &self.service);
-                }
+                self.settle(select);
                 self.status.info(message);
+            }
+            OperationOutcome::Warned { message, select } => {
+                self.settle(select);
+                self.status.error(message);
             }
             OperationOutcome::ConfirmDelete {
                 name,
@@ -218,6 +219,14 @@ impl App {
         self.status.outcome(outcome, reloaded);
     }
 
+    fn settle(&mut self, select: Option<String>) {
+        self.dialogs.close();
+        self.home.refresh_diffs_soon();
+        if let Some(name) = select {
+            self.home.select(&name, &self.service);
+        }
+    }
+
     fn report_failure(&mut self, error: ServiceError) {
         self.home.pause_after(&error);
         match self.dialogs.fail(error.to_string()) {
@@ -248,7 +257,9 @@ mod tests {
     use ratatui::backend::TestBackend;
 
     use super::*;
-    use crate::application::ports::{ConfigError, MultiplexerError, UnmergedCommits};
+    use ratatui::style::Color;
+
+    use crate::application::ports::{ConfigError, MergeOutcome, MultiplexerError, UnmergedCommits};
     use crate::domain::{Config, ConfigDraft, DiffStat, PullRequestState, Session};
     use crate::test_support::{
         Deadline, FakeMultiplexer, FakePullRequests, HeldCalls, ServiceFixture, UiHarness,
@@ -259,6 +270,8 @@ mod tests {
     impl AppFixture {
         const LIMIT: Duration = Duration::from_secs(2);
         const POLL_INTERVAL: Duration = Duration::from_millis(5);
+        const HELP_PAST_THE_END: usize = 50;
+        const LOG_FILE_OUTSIDE_THE_STATE_DIRECTORY: &'static str = "/logs/ringleader/app.log";
 
         fn two_waiting_sessions() -> ServiceFixture {
             Self::waiting_sessions(&[
@@ -313,6 +326,12 @@ mod tests {
                         .with_live(ServiceFixture::waiting(&docs))
                         .with_live(ServiceFixture::waiting(&fix_auth)),
                 )
+        }
+
+        fn log_file_outside_the_state_directory() -> ServiceFixture {
+            let log_file = Path::new(Self::LOG_FILE_OUTSIDE_THE_STATE_DIRECTORY);
+            ServiceFixture::new()
+                .with_diagnostics(ServiceFixture::diagnostics().with_log_file(log_file))
         }
 
         fn blocked_startup_input() -> ServiceFixture {
@@ -383,6 +402,22 @@ mod tests {
                 .join("\n")
         }
 
+        fn status_color(app: &App, width: u16) -> Option<Color> {
+            let mut terminal = Terminal::new(TestBackend::new(width, 28)).unwrap();
+            terminal.draw(|frame| app.render(frame)).unwrap();
+            let first_letter = terminal.backend().buffer().cell((1, 27)).unwrap();
+            first_letter.style().fg
+        }
+
+        fn merge_missing_the_agent() -> ServiceFixture {
+            let conflicts = MergeOutcome::Conflicted(vec!["src/auth.rs".to_string()]);
+            ServiceFixture::merging(
+                "fix-auth",
+                conflicts,
+                ServiceFixture::refusing_typing("fix-auth"),
+            )
+        }
+
         fn status_line(app: &App, width: u16) -> String {
             let screen = Self::screen(app, width, 28);
             screen.lines().last().unwrap().trim_end().to_string()
@@ -404,6 +439,15 @@ mod tests {
 
         fn press(app: &mut App, character: char) {
             app.handle_event(&UiHarness::character(character));
+        }
+
+        fn help_scrolled_past_its_end(app: &mut App, width: u16, height: u16) -> String {
+            Self::press(app, '?');
+            Self::screen(app, width, height);
+            for _ in 0..Self::HELP_PAST_THE_END {
+                Self::press(app, 'j');
+            }
+            Self::screen(app, width, height)
         }
 
         fn request_create(app: &mut App, name: &str) -> AppRequest {
@@ -718,6 +762,47 @@ mod tests {
             AppFixture::flattened_screen(&app, 100, 28)
                 .contains("Inspect it, then end it with tmux -S")
         );
+    }
+
+    #[test]
+    fn p_on_a_waiting_session_asks_for_a_pull_behind_a_busy_message() {
+        let fixture = AppFixture::deletable();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        let request = app.handle_event(&UiHarness::character('p'));
+
+        assert_eq!(
+            request,
+            AppRequest::Block(BlockingOperation::Merge("fix-auth".to_string()))
+        );
+        assert_eq!(
+            AppFixture::status_line(&app, 100),
+            " Fetching origin and merging it into fix-auth…"
+        );
+    }
+
+    #[test]
+    fn a_clean_merge_reports_in_the_plain_status_color() {
+        let fixture = AppFixture::deletable();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        app.perform(BlockingOperation::Merge("fix-auth".to_string()));
+
+        assert_eq!(
+            AppFixture::status_line(&app, 100),
+            " merged origin/main into fix-auth"
+        );
+        assert_ne!(AppFixture::status_color(&app, 100), Theme.error().fg);
+    }
+
+    #[test]
+    fn conflicts_the_agent_was_not_told_about_show_as_an_error() {
+        let fixture = AppFixture::merge_missing_the_agent();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        app.perform(BlockingOperation::Merge("fix-auth".to_string()));
+
+        assert_eq!(AppFixture::status_color(&app, 100), Theme.error().fg);
     }
 
     #[test]
@@ -1298,6 +1383,19 @@ mod tests {
         assert!(opened.contains("┌ Help "));
         assert!(opened.contains("n            create a session"));
         assert!(!app.dialogs.is_open());
+    }
+
+    #[test]
+    fn the_help_shows_the_log_file_of_the_diagnostic_paths() {
+        let fixture = AppFixture::log_file_outside_the_state_directory();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        let help = AppFixture::help_scrolled_past_its_end(&mut app, 100, 28);
+
+        assert!(help.contains(&format!(
+            "Log          {}",
+            AppFixture::LOG_FILE_OUTSIDE_THE_STATE_DIRECTORY
+        )));
     }
 
     #[test]

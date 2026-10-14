@@ -13,6 +13,7 @@ use crate::domain::{Config, Session, SessionState};
 pub struct RegistryAudit {
     inspection: WorktreeInspection,
     orphans: OrphanAudit,
+    ownership: BranchOwnership,
     workspace: Arc<dyn Workspace>,
     multiplexer: Arc<dyn Multiplexer>,
     host: Arc<dyn HostProbe>,
@@ -23,6 +24,7 @@ impl RegistryAudit {
         Self {
             inspection: WorktreeInspection::new(ports),
             orphans: OrphanAudit::new(ports),
+            ownership: BranchOwnership::new(ports),
             workspace: ports.repos().workspace(),
             multiplexer: ports.tmux().multiplexer(),
             host: ports.repos().host(),
@@ -122,7 +124,7 @@ impl RegistryAudit {
                 "session {}: branch {} has no Ringleader marker, so delete and rename refuse it; {}",
                 session.name(),
                 session.branch(),
-                BranchOwnership::marking_advice(session)
+                self.ownership.marking_advice(session)
             )),
             Err(_) => {}
         }

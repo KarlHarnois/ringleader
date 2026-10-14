@@ -9,8 +9,7 @@ use ratatui::backend::{Backend, ClearType, TestBackend, WindowSize};
 use ratatui::buffer::Cell;
 use ratatui::layout::{Position, Size};
 
-use super::{FakeMultiplexer, RecordingScreenMode, ServiceFixture};
-use crate::adapters::signal_flags::SignalFlags;
+use super::{FakeInterrupts, FakeMultiplexer, RecordingScreenMode, ServiceFixture};
 use crate::application::EphemeralShell;
 use crate::ui::App;
 use crate::ui::event_loop::{EventLoop, InputSource};
@@ -18,7 +17,7 @@ use crate::ui::shell_runner::ShellRunner;
 use crate::ui::terminal_guard::{TerminalGuard, TerminalState};
 
 pub struct UiHarness {
-    signals: SignalFlags,
+    signals: FakeInterrupts,
     mode: RecordingScreenMode,
     guard: TerminalGuard,
 }
@@ -33,7 +32,7 @@ impl UiHarness {
         let mode = RecordingScreenMode::default();
         let guard = TerminalGuard::enter(Box::new(mode.clone())).expect("a recording screen mode");
         Self {
-            signals: SignalFlags::unregistered(),
+            signals: FakeInterrupts::default(),
             mode,
             guard,
         }
@@ -61,7 +60,7 @@ impl UiHarness {
         }
     }
 
-    pub fn signals(&self) -> &SignalFlags {
+    pub fn signals(&self) -> &FakeInterrupts {
         &self.signals
     }
 
@@ -83,7 +82,12 @@ impl UiHarness {
         backend: FixtureBackend,
     ) -> EventLoop<FixtureBackend, ScriptedInput> {
         let terminal = Terminal::new(backend).expect("a fixture terminal");
-        EventLoop::new(terminal, input, self.signals.clone(), self.screen())
+        EventLoop::new(
+            terminal,
+            input,
+            Box::new(self.signals.clone()),
+            self.screen(),
+        )
     }
 
     pub fn key(code: KeyCode) -> Event {

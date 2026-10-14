@@ -10,7 +10,6 @@ use super::home_path::HomePath;
 use super::new_session_dialog::NewSessionDialog;
 use super::rename_session_dialog::RenameSessionDialog;
 use super::session_finder::SessionFinder;
-use crate::adapters::app_log::AppLog;
 use crate::application::{DeleteImpact, SessionService};
 use crate::domain::{Session, SessionSummary};
 use crate::ui::app::AppRequest;
@@ -29,7 +28,7 @@ pub enum Dialog {
 impl Dialog {
     const WIDTH: u16 = 76;
     const HEIGHT: u16 = 22;
-    const HELP_HEIGHT: u16 = 28;
+    const HELP_HEIGHT: u16 = 29;
 
     pub fn open(opening: DialogOpening, service: &SessionService) -> Self {
         match opening {
@@ -64,10 +63,9 @@ impl Dialog {
     fn help(service: &SessionService) -> Self {
         let paths = service.paths();
         let config_path = service.config_path();
-        let log_path = paths.state_directory().join(AppLog::FILE_NAME);
         let files = [
             ("Config", config_path.as_path()),
-            ("Log", log_path.as_path()),
+            ("Log", paths.log_file()),
             ("tmux socket", paths.tmux_socket()),
             ("tmux config", paths.tmux_config()),
         ];
@@ -241,11 +239,11 @@ mod tests {
 
     #[test]
     fn the_help_stands_taller_than_the_other_dialogs() {
-        let help = PlacementFixture::render(DialogOpening::Help, 100, 30);
-        let new_session = PlacementFixture::render(DialogOpening::NewSession, 100, 30);
+        let help = PlacementFixture::render(DialogOpening::Help, 100, 31);
+        let new_session = PlacementFixture::render(DialogOpening::NewSession, 100, 31);
 
         assert_eq!(PlacementFixture::symbol(&help, 12, 1), "┌");
-        assert_eq!(PlacementFixture::symbol(&help, 12, 28), "└");
+        assert_eq!(PlacementFixture::symbol(&help, 12, 29), "└");
         assert_eq!(PlacementFixture::symbol(&new_session, 12, 4), "┌");
         assert_eq!(PlacementFixture::symbol(&new_session, 12, 25), "└");
     }

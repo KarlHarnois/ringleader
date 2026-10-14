@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -44,6 +44,9 @@ struct MultiplexerState {
     config_current: bool,
     server_key_bindings: Option<KeyBindings>,
     socket_lost: bool,
+    away_from_prompt: Vec<String>,
+    prompt_checks: HashMap<String, VecDeque<bool>>,
+    later_observations: VecDeque<SessionObservation>,
 }
 
 impl FakeMultiplexer {
@@ -83,6 +86,9 @@ impl FakeMultiplexer {
                 config_current: true,
                 server_key_bindings: Some(KeyBindings::default()),
                 socket_lost: false,
+                away_from_prompt: Vec::new(),
+                prompt_checks: HashMap::new(),
+                later_observations: VecDeque::new(),
             }),
         }
     }
@@ -113,6 +119,25 @@ impl FakeMultiplexer {
                 .captures
                 .insert(tmux_name.to_string(), text.to_string())
         });
+        self
+    }
+
+    pub fn with_observation_after_next_look(self, observation: SessionObservation) -> Self {
+        self.edit(|state| state.later_observations.push_back(observation));
+        self
+    }
+
+    pub fn with_prompt_checks(self, tmux_name: &str, answers: &[bool]) -> Self {
+        self.edit(|state| {
+            state
+                .prompt_checks
+                .insert(tmux_name.to_string(), answers.iter().copied().collect())
+        });
+        self
+    }
+
+    pub fn with_agent_away_from_prompt(self, tmux_name: &str) -> Self {
+        self.edit(|state| state.away_from_prompt.push(tmux_name.to_string()));
         self
     }
 
@@ -290,6 +315,23 @@ impl MultiplexerState {
         }));
     }
 
+    fn apply_later_observation(&mut self) {
+        let Some(next) = self.later_observations.pop_front() else {
+            return;
+        };
+        self.live
+            .retain(|live| live.tmux_name() != next.tmux_name());
+        self.live.push(next);
+    }
+
+    fn prompt_answer(&mut self, tmux_name: &str) -> bool {
+        let scripted = self
+            .prompt_checks
+            .get_mut(tmux_name)
+            .and_then(VecDeque::pop_front);
+        scripted.unwrap_or_else(|| !self.away_from_prompt.iter().any(|name| name == tmux_name))
+    }
+
     fn find_live(&self, tmux_name: &str) -> Option<&SessionObservation> {
         self.live.iter().find(|live| live.tmux_name() == tmux_name)
     }
@@ -338,6 +380,7 @@ impl Multiplexer for FakeMultiplexer {
     fn observe_all(&self) -> Result<Vec<SessionObservation>, MultiplexerError> {
         let listing = self.edit(|state| state.live.clone());
         self.call("observe_all", "")?;
+        self.edit(MultiplexerState::apply_later_observation);
         Ok(listing)
     }
 
@@ -389,6 +432,11 @@ impl Multiplexer for FakeMultiplexer {
         self.call("type_if_ready", tmux_name)?;
         self.edit(|state| state.type_lines("type_if_ready", tmux_name, lines));
         Ok(())
+    }
+
+    fn agent_at_prompt(&self, tmux_name: &str) -> Result<bool, MultiplexerError> {
+        self.call("agent_at_prompt", tmux_name)?;
+        Ok(self.edit(|state| state.prompt_answer(tmux_name)))
     }
 
     fn ensure_shell_window(

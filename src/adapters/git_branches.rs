@@ -1,9 +1,10 @@
 use std::path::Path;
 
+use super::branch_marker::BranchMarker;
 use super::branch_section::BranchSection;
 use super::git_invocation::GitInvocation;
 use super::git_runner::GitRunner;
-use crate::application::ports::{BranchMarker, WorkspaceError};
+use crate::application::ports::WorkspaceError;
 
 pub struct GitBranches<'a> {
     git: &'a GitRunner,

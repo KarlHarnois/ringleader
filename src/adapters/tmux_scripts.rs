@@ -167,9 +167,14 @@ impl TmuxScripts {
             })
     }
 
-    pub fn type_line(pane: &str, line: &str) -> TmuxSequence {
+    pub fn type_text(pane: &str, text: &str) -> TmuxSequence {
         TmuxSequence::new()
-            .command(["send-keys", "-t", pane, "-l", "--", line])
+            .command(["send-keys", "-t", pane, "-l", "--", text])
+            .command(["display-message", "-p", "-t", pane, TmuxLaunch::DONE_LABEL])
+    }
+
+    pub fn press_enter(pane: &str) -> TmuxSequence {
+        TmuxSequence::new()
             .command(["send-keys", "-t", pane, "Enter"])
             .command(["display-message", "-p", "-t", pane, TmuxLaunch::DONE_LABEL])
     }

@@ -115,12 +115,24 @@
         };
 
       forEachSystemWithMetricsTools = build: forEachSystem (pkgs: build pkgs (metricsTools pkgs));
+
+      crateVersion = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).package.version;
+
+      readmeVersionBadge =
+        pkgs:
+        pkgs.runCommand "readme-version-badge" { } ''
+          grep --fixed-strings --quiet 'badge/version-${crateVersion}-' ${./README.md} || {
+            echo "The README version badge does not show ${crateVersion} from Cargo.toml" >&2
+            exit 1
+          }
+          touch $out
+        '';
     in
     {
       packages = forEachSystem (pkgs: {
         default = pkgs.rustPlatform.buildRustPackage {
           pname = "ringleader";
-          version = "0.1.0";
+          version = crateVersion;
           src = self;
           cargoLock.lockFile = ./Cargo.lock;
           nativeBuildInputs = [ pkgs.makeWrapper ];
@@ -190,6 +202,7 @@
 
       checks = nixpkgs.lib.genAttrs supportedSystems (system: {
         default = self.packages.${system}.default;
+        readme-version-badge = readmeVersionBadge nixpkgs.legacyPackages.${system};
       });
     };
 }
