@@ -4,6 +4,7 @@ use std::iter::once;
 use super::list_selection::ListSelection;
 use super::repo_group::RepoGroup;
 use super::repo_heading::RepoHeading;
+use super::viewport::Viewport;
 use crate::domain::SessionSummary;
 
 pub struct SessionTree<'a> {
@@ -48,10 +49,11 @@ impl<'a> SessionTree<'a> {
     pub fn visible(
         &self,
         selection: Option<&ListSelection>,
-        room: usize,
+        viewport: Viewport,
     ) -> impl Iterator<Item = &TreeLine<'a>> {
-        let first = (self.selected_line(selection) + 1).saturating_sub(room);
-        self.lines.iter().skip(first).take(room)
+        let line_count = self.lines.len();
+        let scrolled = viewport.scrolled_to(self.selected_line(selection), line_count);
+        self.lines[scrolled.lines(line_count)].iter()
     }
 
     pub fn selected_line(&self, selection: Option<&ListSelection>) -> usize {
@@ -256,7 +258,7 @@ mod tests {
         let docs = ListSelection::Session("docs".to_string());
 
         let visible: Vec<String> = tree
-            .visible(Some(&docs), 2)
+            .visible(Some(&docs), Viewport::default().with_room(2))
             .map(TreeFixture::shape)
             .collect();
 

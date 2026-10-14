@@ -10,6 +10,8 @@ use crate::domain::{Agent, ConfigDraft, RepoDraft};
 pub struct RawConfig {
     worktree_root: Option<PathBuf>,
     return_key: Option<String>,
+    next_session_keys: Option<Vec<String>>,
+    previous_session_keys: Option<Vec<String>>,
     state_poll_ms: Option<u64>,
     preview_refresh_ms: Option<u64>,
     diff_refresh_ms: Option<u64>,
@@ -33,12 +35,9 @@ impl RawConfig {
     }
 
     fn expanded_draft(self, defaults: ConfigDraft, home: &HomeExpansion) -> ConfigDraft {
-        let mut draft = self.timing_into(defaults);
+        let mut draft = self.keys_into(self.timing_into(defaults));
         if let Some(root) = &self.worktree_root {
             draft = draft.worktree_root(&home.path(root));
-        }
-        if let Some(key) = &self.return_key {
-            draft = draft.return_key(key);
         }
         for repo in self.repos {
             draft = draft.repo(repo.into_draft(home));
@@ -46,6 +45,19 @@ impl RawConfig {
         self.agents
             .into_iter()
             .fold(draft, |draft, agent| draft.agent(agent.into_agent(home)))
+    }
+
+    fn keys_into(&self, mut draft: ConfigDraft) -> ConfigDraft {
+        if let Some(key) = &self.return_key {
+            draft = draft.return_key(key);
+        }
+        if let Some(keys) = &self.next_session_keys {
+            draft = draft.next_session_keys(keys);
+        }
+        if let Some(keys) = &self.previous_session_keys {
+            draft = draft.previous_session_keys(keys);
+        }
+        draft
     }
 
     fn timing_into(&self, mut draft: ConfigDraft) -> ConfigDraft {

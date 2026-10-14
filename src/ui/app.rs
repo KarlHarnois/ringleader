@@ -150,6 +150,9 @@ impl App {
             KeyAction::Move(offset) => self.home.move_selection(offset, &self.service),
             KeyAction::SelectFirst => self.home.select_first(&self.service),
             KeyAction::SelectLast => self.home.select_last(&self.service),
+            KeyAction::SelectHigh => self.home.select_high(&self.service),
+            KeyAction::SelectMiddle => self.home.select_middle(&self.service),
+            KeyAction::SelectLow => self.home.select_low(&self.service),
             KeyAction::Fold => self.home.toggle_fold(&self.service),
             KeyAction::JumpToRepo(number) => self.home.jump_to_repo(number, &self.service),
             KeyAction::Open(opening) => {
@@ -552,6 +555,30 @@ mod tests {
             AppFixture::captures(&fixture).last().unwrap(),
             "capture_pane ringleader-dark-mode"
         );
+    }
+
+    #[test]
+    fn capital_m_selects_the_middle_session_on_screen() {
+        let fixture = AppFixture::three_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press(&mut app, 'M');
+
+        assert_eq!(AppFixture::selected(&app).as_deref(), Some("fix-auth"));
+        assert_eq!(
+            AppFixture::captures(&fixture).last().unwrap(),
+            "capture_pane ringleader-fix-auth"
+        );
+    }
+
+    #[test]
+    fn capital_l_selects_the_bottom_session_on_screen() {
+        let fixture = AppFixture::three_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press(&mut app, 'L');
+
+        assert_eq!(AppFixture::selected(&app).as_deref(), Some("spike-tui"));
     }
 
     #[test]

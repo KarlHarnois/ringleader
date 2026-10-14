@@ -48,6 +48,9 @@ impl<'a> ActionGate<'a> {
             KeyCode::Down | KeyCode::Right | KeyCode::Char('j' | 'l') => KeyAction::Move(1),
             KeyCode::Up | KeyCode::Left | KeyCode::Char('k' | 'h') => KeyAction::Move(-1),
             KeyCode::Char('G') => KeyAction::SelectLast,
+            KeyCode::Char('H') => KeyAction::SelectHigh,
+            KeyCode::Char('M') => KeyAction::SelectMiddle,
+            KeyCode::Char('L') => KeyAction::SelectLow,
             KeyCode::Char('n') => KeyAction::from(
                 self.writable()
                     .map(|()| KeyAction::Open(DialogOpening::NewSession)),
@@ -166,6 +169,9 @@ pub enum KeyAction {
     Move(isize),
     SelectFirst,
     SelectLast,
+    SelectHigh,
+    SelectMiddle,
+    SelectLow,
     Fold,
     JumpToRepo(usize),
     Open(DialogOpening),
@@ -426,6 +432,16 @@ mod tests {
             ActionGate::new(None, None).action_for(&key),
             KeyAction::SelectLast
         );
+    }
+
+    #[test]
+    fn capital_h_m_and_l_select_the_top_middle_and_bottom_rows_on_screen() {
+        let gate = ActionGate::new(None, None);
+        let action = |character| gate.action_for(&KeyEvent::from(KeyCode::Char(character)));
+
+        assert_eq!(action('H'), KeyAction::SelectHigh);
+        assert_eq!(action('M'), KeyAction::SelectMiddle);
+        assert_eq!(action('L'), KeyAction::SelectLow);
     }
 
     #[test]
