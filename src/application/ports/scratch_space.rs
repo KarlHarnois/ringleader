@@ -16,6 +16,4 @@ pub enum ScratchSpaceError {
         path: PathBuf,
         detail: String,
     },
-    #[error("{path} is not a private directory of this user")]
-    NotPrivate { path: PathBuf },
 }

@@ -298,7 +298,7 @@ impl CompositionRoot {
             Arc::new(registry),
             Arc::new(config_source),
             clock,
-            Arc::new(DirectoryScratchSpace::for_user(SystemHostProbe::user_id())),
+            Arc::new(DirectoryScratchSpace::new(&self.paths.scratch_root())),
         )
     }
 

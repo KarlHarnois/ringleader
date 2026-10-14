@@ -1,7 +1,7 @@
-use std::fs::{self, DirBuilder, Metadata};
+use std::fs::{self, DirBuilder};
 use std::io;
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 
 use super::fnv_hash::FnvHash;
@@ -9,64 +9,14 @@ use crate::application::ports::{ScratchSpace, ScratchSpaceError};
 
 pub struct DirectoryScratchSpace {
     root: PathBuf,
-    user_id: u32,
 }
 
 impl DirectoryScratchSpace {
-    const TEMP_BASE: &'static str = "/tmp";
-    const ROOT_PREFIX: &'static str = "ringleader-";
     const PRIVATE_MODE: u32 = 0o700;
-    const GROUP_AND_OTHER_BITS: u32 = 0o077;
 
-    pub fn for_user(user_id: u32) -> Self {
-        Self::under(Path::new(Self::TEMP_BASE), user_id)
-    }
-
-    fn under(temp_base: &Path, user_id: u32) -> Self {
+    pub fn new(root: &Path) -> Self {
         Self {
-            root: temp_base.join(format!("{}{user_id}", Self::ROOT_PREFIX)),
-            user_id,
-        }
-    }
-
-    fn refuse_shared_root(&self) -> Result<(), ScratchSpaceError> {
-        let metadata = fs::symlink_metadata(&self.root)
-            .map_err(|error| Self::failure("inspect", &self.root, &error))?;
-        if self.owns_privately(&metadata) {
-            return Ok(());
-        }
-        Err(ScratchSpaceError::NotPrivate {
-            path: self.root.clone(),
-        })
-    }
-
-    fn owns_privately(&self, metadata: &Metadata) -> bool {
-        metadata.is_dir()
-            && metadata.uid() == self.user_id
-            && metadata.mode() & Self::GROUP_AND_OTHER_BITS == 0
-    }
-
-    fn root_exists(&self) -> Result<bool, ScratchSpaceError> {
-        self.root
-            .try_exists()
-            .map_err(|error| Self::failure("inspect", &self.root, &error))
-    }
-
-    fn make_private_directory(path: &Path) -> Result<(), ScratchSpaceError> {
-        match DirBuilder::new().mode(Self::PRIVATE_MODE).create(path) {
-            Err(error) if error.kind() != io::ErrorKind::AlreadyExists => {
-                Err(Self::failure("create", path, &error))
-            }
-            _ => Ok(()),
-        }
-    }
-
-    fn remove_if_present(path: &Path) -> Result<(), ScratchSpaceError> {
-        match fs::remove_dir_all(path) {
-            Err(error) if error.kind() != io::ErrorKind::NotFound => {
-                Err(Self::failure("remove", path, &error))
-            }
-            _ => Ok(()),
+            root: root.to_path_buf(),
         }
     }
 
@@ -86,17 +36,22 @@ impl ScratchSpace for DirectoryScratchSpace {
     }
 
     fn create(&self, worktree: &Path) -> Result<(), ScratchSpaceError> {
-        Self::make_private_directory(&self.root)?;
-        self.refuse_shared_root()?;
-        Self::make_private_directory(&self.directory(worktree))
+        let directory = self.directory(worktree);
+        DirBuilder::new()
+            .recursive(true)
+            .mode(Self::PRIVATE_MODE)
+            .create(&directory)
+            .map_err(|error| Self::failure("create", &directory, &error))
     }
 
     fn remove(&self, worktree: &Path) -> Result<(), ScratchSpaceError> {
-        if !self.root_exists()? {
-            return Ok(());
+        let directory = self.directory(worktree);
+        match fs::remove_dir_all(&directory) {
+            Err(error) if error.kind() != io::ErrorKind::NotFound => {
+                Err(Self::failure("remove", &directory, &error))
+            }
+            _ => Ok(()),
         }
-        self.refuse_shared_root()?;
-        Self::remove_if_present(&self.directory(worktree))
     }
 }
 
@@ -106,7 +61,6 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     use super::*;
-    use crate::adapters::system_host_probe::SystemHostProbe;
 
     struct ScratchFixture {
         base: tempfile::TempDir,
@@ -117,22 +71,13 @@ mod tests {
         const WORKTREE: &'static str = "/data/ringleader/worktrees/example-project/fix-auth";
         const OTHER_WORKTREE: &'static str = "/data/ringleader/worktrees/example-project/fix-ui";
         const WORKTREE_HASH: &'static str = "779a3f80f082ab8d";
-        const USER_ID: u32 = 1000;
-        const SHARED_MODE: u32 = 0o755;
+        const ROOT: &'static str = "cache/ringleader/scratch";
         const SEALED_MODE: u32 = 0o500;
         const ACCESS_BITS: u32 = 0o777;
 
         fn new() -> Self {
-            Self::for_user(SystemHostProbe::user_id())
-        }
-
-        fn owned_by_another_user() -> Self {
-            Self::for_user(SystemHostProbe::user_id() + 1)
-        }
-
-        fn for_user(user_id: u32) -> Self {
             let base = tempfile::tempdir().unwrap();
-            let space = DirectoryScratchSpace::under(base.path(), user_id);
+            let space = DirectoryScratchSpace::new(&base.path().join(Self::ROOT));
             Self { base, space }
         }
 
@@ -141,9 +86,7 @@ mod tests {
         }
 
         fn root(&self) -> PathBuf {
-            self.base
-                .path()
-                .join(format!("ringleader-{}", SystemHostProbe::user_id()))
+            self.base.path().join(Self::ROOT)
         }
 
         fn scratch(&self) -> PathBuf {
@@ -157,11 +100,6 @@ mod tests {
 
         fn with_file(self) -> Self {
             fs::write(self.scratch().join("notes.md"), "draft").unwrap();
-            self
-        }
-
-        fn shared(self) -> Self {
-            fs::set_permissions(self.root(), Permissions::from_mode(Self::SHARED_MODE)).unwrap();
             self
         }
 
@@ -187,18 +125,14 @@ mod tests {
         fn mode(path: &Path) -> u32 {
             fs::metadata(path).unwrap().permissions().mode() & Self::ACCESS_BITS
         }
-
-        fn is_refused(result: Result<(), ScratchSpaceError>) -> bool {
-            matches!(result, Err(ScratchSpaceError::NotPrivate { .. }))
-        }
     }
 
     #[test]
-    fn create_makes_a_private_directory_inside_a_private_root() {
+    fn create_makes_a_private_directory_and_the_root_above_it() {
         let fixture = ScratchFixture::new().created();
 
         assert_eq!(ScratchFixture::mode(&fixture.scratch()), 0o700);
-        assert_eq!(ScratchFixture::mode(&fixture.root()), 0o700);
+        assert!(fixture.root().is_dir());
     }
 
     #[test]
@@ -261,61 +195,16 @@ mod tests {
     }
 
     #[test]
-    fn a_root_open_to_others_refuses_create_and_remove() {
-        let fixture = ScratchFixture::new().created().with_file().shared();
-
-        assert!(ScratchFixture::is_refused(
-            fixture.space.create(ScratchFixture::worktree())
-        ));
-        assert!(ScratchFixture::is_refused(
-            fixture.space.remove(ScratchFixture::worktree())
-        ));
-        assert!(fixture.scratch().join("notes.md").exists());
-    }
-
-    #[test]
-    fn a_root_that_is_a_symlink_is_refused() {
+    fn a_file_in_place_of_the_root_reports_the_failed_create() {
         let fixture = ScratchFixture::new();
-        let target = fixture.base.path().join("elsewhere");
-        DirBuilder::new().mode(0o700).create(&target).unwrap();
-        std::os::unix::fs::symlink(&target, fixture.root()).unwrap();
-
-        assert!(ScratchFixture::is_refused(
-            fixture.space.create(ScratchFixture::worktree())
-        ));
-    }
-
-    #[test]
-    fn a_root_owned_by_another_user_is_refused() {
-        let fixture = ScratchFixture::owned_by_another_user();
-
-        assert!(ScratchFixture::is_refused(
-            fixture.space.create(ScratchFixture::worktree())
-        ));
-    }
-
-    #[test]
-    fn a_root_that_is_a_file_is_refused() {
-        let fixture = ScratchFixture::new();
+        fs::create_dir_all(fixture.root().parent().unwrap()).unwrap();
         fs::write(fixture.root(), "not a directory").unwrap();
-
-        assert!(ScratchFixture::is_refused(
-            fixture.space.create(ScratchFixture::worktree())
-        ));
-    }
-
-    #[test]
-    fn a_temp_base_without_write_access_reports_the_failed_create() {
-        let fixture = ScratchFixture::new();
-        let sealed = Permissions::from_mode(ScratchFixture::SEALED_MODE);
-        fs::set_permissions(fixture.base.path(), sealed).unwrap();
 
         let result = fixture.space.create(ScratchFixture::worktree());
 
-        ScratchFixture::unseal(fixture.base.path());
         assert_eq!(
             ScratchFixture::failed_operation(result),
-            Some(("create", fixture.root()))
+            Some(("create", fixture.scratch()))
         );
     }
 
@@ -334,15 +223,5 @@ mod tests {
             ScratchFixture::failed_operation(result),
             Some(("remove", fixture.scratch()))
         );
-    }
-
-    #[test]
-    fn the_scratch_root_is_the_user_folder_in_tmp() {
-        let space = DirectoryScratchSpace::for_user(ScratchFixture::USER_ID);
-
-        let scratch = space.directory(ScratchFixture::worktree());
-
-        let user_root = Path::new("/tmp/ringleader-1000");
-        assert_eq!(scratch, user_root.join(ScratchFixture::WORKTREE_HASH));
     }
 }

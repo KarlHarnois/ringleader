@@ -8,6 +8,7 @@ pub struct XdgPaths {
     config_home: PathBuf,
     state_home: PathBuf,
     data_home: PathBuf,
+    cache_home: PathBuf,
     runtime_directory: Option<PathBuf>,
 }
 
@@ -30,6 +31,7 @@ impl XdgPaths {
             config_home: base("XDG_CONFIG_HOME", ".config"),
             state_home: base("XDG_STATE_HOME", ".local/state"),
             data_home: base("XDG_DATA_HOME", ".local/share"),
+            cache_home: base("XDG_CACHE_HOME", ".cache"),
             runtime_directory: environment
                 .get("XDG_RUNTIME_DIR")
                 .map(PathBuf::from)
@@ -52,6 +54,10 @@ impl XdgPaths {
 
     pub fn worktree_root(&self) -> PathBuf {
         self.data_home.join(Self::APPLICATION).join("worktrees")
+    }
+
+    pub fn scratch_root(&self) -> PathBuf {
+        self.cache_home.join(Self::APPLICATION).join("scratch")
     }
 
     pub fn handoff_directory(&self) -> PathBuf {
@@ -132,6 +138,26 @@ mod tests {
         assert_eq!(
             paths.tmux_config(),
             Path::new("/example-state/ringleader/tmux.conf")
+        );
+    }
+
+    #[test]
+    fn scratch_directories_live_in_the_cache_directory() {
+        let paths = PathsFixture::with(&[("XDG_CACHE_HOME", "/example-cache")]);
+
+        assert_eq!(
+            paths.scratch_root(),
+            Path::new("/example-cache/ringleader/scratch")
+        );
+    }
+
+    #[test]
+    fn an_unset_cache_directory_falls_back_to_the_one_in_home() {
+        let paths = PathsFixture::with(&[("HOME", "/home/example")]);
+
+        assert_eq!(
+            paths.scratch_root(),
+            Path::new("/home/example/.cache/ringleader/scratch")
         );
     }
 

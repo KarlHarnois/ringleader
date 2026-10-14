@@ -38,7 +38,7 @@ impl SystemHostProbe {
         })
     }
 
-    pub fn user_id() -> u32 {
+    fn user_id() -> u32 {
         // SAFETY: geteuid takes no arguments, reads no memory of this process, and cannot fail.
         unsafe { libc::geteuid() }
     }

@@ -73,7 +73,7 @@ mod tests {
 
     impl LaunchFixture {
         const WORKTREE: &'static str = "/data/ringleader/worktrees/example-project/fix-auth";
-        const SCRATCH: &'static str = "/tmp/ringleader-1000/779a3f80f082ab8d";
+        const SCRATCH: &'static str = "/home/example/.cache/ringleader/scratch/779a3f80f082ab8d";
 
         fn assigning(assignments: &[(&str, &str)]) -> AgentLaunch {
             let assignments: Vec<(String, String)> = assignments
