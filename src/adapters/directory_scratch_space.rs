@@ -27,7 +27,9 @@ impl DirectoryScratchSpace {
 
     fn refuse_mounts_within(&self, directory: &Path) -> Result<(), ScratchSpaceError> {
         let canonical = HostPath::new(directory).canonical_lenient();
-        if MountTable::read(&self.mount_table).has_mount_within(&canonical) {
+        let mounts = MountTable::read(&self.mount_table)
+            .map_err(|error| Self::failure("check for mounts in", directory, &error))?;
+        if mounts.has_mount_within(&canonical) {
             return Err(ScratchSpaceError::HoldsMount {
                 path: directory.to_path_buf(),
             });
@@ -114,11 +116,15 @@ mod tests {
 
         fn new() -> Self {
             let base = tempfile::tempdir().unwrap();
-            let space = DirectoryScratchSpace::new(
-                &base.path().join(Self::ROOT),
-                &base.path().join(Self::MOUNT_TABLE),
-            );
+            let mount_table = base.path().join(Self::MOUNT_TABLE);
+            fs::write(&mount_table, "").unwrap();
+            let space = DirectoryScratchSpace::new(&base.path().join(Self::ROOT), &mount_table);
             Self { base, space }
+        }
+
+        fn without_mount_table(self) -> Self {
+            fs::remove_file(self.base.path().join(Self::MOUNT_TABLE)).unwrap();
+            self
         }
 
         fn with_mount_inside(self) -> Self {
@@ -324,5 +330,18 @@ mod tests {
             })
         );
         assert!(fixture.scratch().join("notes.md").exists());
+    }
+
+    #[test]
+    fn an_unreadable_mount_table_keeps_the_directory() {
+        let fixture = ScratchFixture::new().created().without_mount_table();
+
+        let result = fixture.space.remove(ScratchFixture::worktree());
+
+        assert_eq!(
+            ScratchFixture::failed_operation(result),
+            Some(("check for mounts in", fixture.scratch()))
+        );
+        assert!(fixture.scratch().exists());
     }
 }

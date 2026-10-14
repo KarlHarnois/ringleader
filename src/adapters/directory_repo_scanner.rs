@@ -137,7 +137,7 @@ impl RepoScanner for DirectoryRepoScanner {
     }
 
     fn scan(&self, scope: &RepoScope, depth: usize) -> Result<ScanOutcome, ScanError> {
-        let mounts = MountTable::read(&self.mount_table);
+        let mounts = MountTable::read_or_empty(&self.mount_table);
         let root = scope.root();
         if Self::sorted_entries(root).is_none() {
             return Err(ScanError::Unreadable {

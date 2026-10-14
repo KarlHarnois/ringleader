@@ -1,4 +1,5 @@
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
 pub struct MountTable {
@@ -25,11 +26,16 @@ impl MountTable {
     const OPTIONAL_FIELDS_END: &'static str = "-";
     const MOUNT_POINT_FIELD: usize = 4;
 
-    pub fn read(path: &Path) -> Self {
-        let text = fs::read_to_string(path).unwrap_or_default();
-        Self {
+    pub fn read(path: &Path) -> io::Result<Self> {
+        let bytes = fs::read(path)?;
+        let text = String::from_utf8_lossy(&bytes);
+        Ok(Self {
             mounts: text.lines().filter_map(Self::mount).collect(),
-        }
+        })
+    }
+
+    pub fn read_or_empty(path: &Path) -> Self {
+        Self::read(path).unwrap_or(Self { mounts: Vec::new() })
     }
 
     pub fn is_remote_mount(&self, path: &Path) -> bool {
@@ -99,7 +105,7 @@ mod tests {
             let directory = tempfile::tempdir().unwrap();
             let path = directory.path().join("mountinfo");
             fs::write(&path, TABLE).unwrap();
-            MountTable::read(&path)
+            MountTable::read(&path).unwrap()
         }
     }
 
@@ -130,8 +136,21 @@ mod tests {
 
     #[test]
     fn an_unreadable_table_skips_nothing() {
-        let table = MountTable::read(Path::new("/nonexistent/mountinfo"));
+        let table = MountTable::read_or_empty(Path::new("/nonexistent/mountinfo"));
 
         assert!(!table.is_remote_mount(Path::new("/mnt/share")));
+    }
+
+    #[test]
+    fn a_line_that_is_not_utf8_hides_no_other_mount() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("mountinfo");
+        let mut bytes = b"40 30 0:39 / /home/user/donn\xe9es rw - fuse.sshfs host: rw\n".to_vec();
+        bytes.extend_from_slice(TABLE.as_bytes());
+        fs::write(&path, bytes).unwrap();
+
+        let table = MountTable::read(&path).unwrap();
+
+        assert!(table.is_remote_mount(Path::new("/mnt/share")));
     }
 }
