@@ -1,5 +1,5 @@
 use crate::application::{
-    CreateRequest, DeleteConfirmation, DeleteImpact, ServiceError, SessionService,
+    CreateRequest, DeleteConfirmation, DeleteImpact, DeleteOutcome, ServiceError, SessionService,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,8 +54,15 @@ impl BlockingOperation {
 
     fn restart(service: &mut SessionService, name: String) -> OperationOutcome {
         match service.restart_session(&name) {
-            Ok(()) => OperationOutcome::done(format!("Restarted {name}."), Some(name)),
+            Ok(recovery) => OperationOutcome::done(Self::restarted(&name, recovery), Some(name)),
             Err(error) => OperationOutcome::Failed(error),
+        }
+    }
+
+    fn restarted(name: &str, recovery: Option<String>) -> String {
+        match recovery {
+            Some(note) => format!("Restarted {name}. Also {note}."),
+            None => format!("Restarted {name}."),
         }
     }
 
@@ -83,9 +90,20 @@ impl BlockingOperation {
         }
     }
 
+    fn deleted(name: &str, outcome: &DeleteOutcome) -> OperationOutcome {
+        let summary = outcome.summary(name);
+        match outcome.stray_session() {
+            Some(warning) => OperationOutcome::Warned {
+                message: format!("{summary}; {warning}"),
+                select: None,
+            },
+            None => OperationOutcome::done(summary, None),
+        }
+    }
+
     fn delete(service: &mut SessionService, name: String, seen: DeleteImpact) -> OperationOutcome {
         match service.delete_session(&name, &DeleteConfirmation::confirmed(seen)) {
-            Ok(outcome) => OperationOutcome::done(outcome.summary(&name), None),
+            Ok(outcome) => Self::deleted(&name, &outcome),
             Err(ServiceError::GuardsChanged { impact, .. }) => OperationOutcome::ConfirmDelete {
                 name,
                 impact: *impact,

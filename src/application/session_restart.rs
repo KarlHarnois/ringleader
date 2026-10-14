@@ -6,6 +6,7 @@ use super::ports::{AgentLaunch, HostProbe, Multiplexer, SessionRegistry, Session
 use super::reconciliation::{ManagedRow, Reconciliation};
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
+use super::session_scratch::SessionScratch;
 use super::use_checks::UseChecks;
 use super::worktree_inspection::WorktreeInspection;
 use crate::domain::{Agent, Config, Session};
@@ -15,6 +16,7 @@ pub struct SessionRestart {
     multiplexer: Arc<dyn Multiplexer>,
     host: Arc<dyn HostProbe>,
     registry: Arc<dyn SessionRegistry>,
+    scratch: SessionScratch,
     hooks: Arc<AgentHooks>,
 }
 
@@ -25,6 +27,7 @@ impl SessionRestart {
             multiplexer: ports.tmux().multiplexer(),
             host: ports.repos().host(),
             registry: ports.state().registry(),
+            scratch: SessionScratch::new(ports),
             hooks,
         }
     }
@@ -46,7 +49,8 @@ impl SessionRestart {
         let checks = UseChecks::new(self.host.as_ref(), config, config_path);
         let agent = checks.agent_for_restart(session.agent())?;
         self.check_worktree(session)?;
-        let restarted = self.revive(row, Self::launch(agent, session), reconciliation, config)?;
+        let launch = self.scratch.prepare(Self::launch(agent, session));
+        let restarted = self.revive(row, launch, reconciliation, config)?;
         self.hooks.after_start(&restarted, agent);
         Ok(restarted)
     }
@@ -140,6 +144,14 @@ mod tests {
             )
         }
 
+        fn exited_behind_a_lost_socket() -> ServiceFixture {
+            Self::stopped().with_multiplexer(
+                FakeMultiplexer::new()
+                    .with_live(ServiceFixture::exited(&Self::session()))
+                    .with_lost_socket(),
+            )
+        }
+
         fn tmux_failure() -> MultiplexerError {
             MultiplexerError::Failed {
                 subcommand: "new-session".to_string(),
@@ -148,7 +160,7 @@ mod tests {
         }
 
         fn restart(fixture: &ServiceFixture) -> Result<(), ServiceError> {
-            fixture.service().restart_session("fix-auth")
+            fixture.service().restart_session("fix-auth").map(drop)
         }
     }
 
@@ -166,6 +178,46 @@ mod tests {
                 .calls()
                 .iter()
                 .any(|call| call.starts_with("respawn_agent"))
+        );
+    }
+
+    #[test]
+    fn an_exited_session_behind_a_lost_socket_is_respawned_once_the_socket_is_back() {
+        let fixture = RestartFixture::exited_behind_a_lost_socket();
+
+        RestartFixture::restart(&fixture).unwrap();
+
+        let calls = fixture.multiplexer().state_changing_calls();
+        assert!(calls.iter().any(|call| call.starts_with("respawn_agent")));
+        assert!(calls.iter().all(|call| !call.starts_with("create_session")));
+    }
+
+    #[test]
+    fn a_restart_that_recreates_the_socket_says_so() {
+        let fixture = RestartFixture::exited_behind_a_lost_socket();
+
+        let recovery = fixture.service().restart_session("fix-auth").unwrap();
+
+        assert!(recovery.unwrap().contains("recreated the socket"));
+    }
+
+    #[test]
+    fn a_restart_applies_a_drifted_server_config_before_it_recreates_the_session() {
+        let fixture = RestartFixture::stopped()
+            .with_multiplexer(FakeMultiplexer::new().with_drifted_config("M-x"));
+
+        RestartFixture::restart(&fixture).unwrap();
+
+        let calls = fixture.multiplexer().calls();
+        let applied = calls
+            .iter()
+            .position(|call| call == "apply_config C-q M-j M-Down M-k M-Up");
+        let created = calls
+            .iter()
+            .position(|call| call.starts_with("create_session"));
+        assert!(
+            applied.is_some_and(|applied| Some(applied) < created),
+            "{calls:?}"
         );
     }
 
@@ -274,7 +326,20 @@ mod tests {
         RestartFixture::restart(&fixture).unwrap();
 
         let launch = fixture.multiplexer().launches().pop().unwrap();
-        assert_eq!(launch.env_assignments(), assignments);
+        assert!(launch.env_assignments().starts_with(&assignments));
+    }
+
+    #[test]
+    fn restart_points_the_agent_tmpdir_at_the_session_scratch_directory() {
+        let fixture = RestartFixture::exited();
+
+        RestartFixture::restart(&fixture).unwrap();
+
+        let launch = fixture.multiplexer().launches().pop().unwrap();
+        assert_eq!(
+            launch.env_assignments(),
+            [fixture.tmpdir_assignment("fix-auth")]
+        );
     }
 
     #[test]
@@ -503,6 +568,22 @@ mod tests {
                 .contains(&format!("tmux -S {} kill-session", recorded.display()))
         );
         assert!(fixture.multiplexer().state_changing_calls().is_empty());
+    }
+
+    #[test]
+    fn a_stopped_session_whose_recorded_server_still_runs_is_recreated_here() {
+        let recorded = Path::new(ServiceFixture::OTHER_RUNTIME_SOCKET);
+        let session = RestartFixture::session().on_socket(recorded);
+        let fixture = RestartFixture::stopped()
+            .with_sessions(std::slice::from_ref(&session))
+            .with_host(ServiceFixture::host_for(&[&session]).with_tmux_server_on(recorded));
+
+        RestartFixture::restart(&fixture).unwrap();
+
+        assert_eq!(
+            fixture.registry().sessions()[0].socket_path(),
+            Path::new(FakeMultiplexer::SOCKET)
+        );
     }
 
     #[test]

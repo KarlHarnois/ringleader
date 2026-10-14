@@ -88,6 +88,13 @@ impl SessionLifecycle {
         }
     }
 
+    pub fn reload_server_config(&self, key_bindings: &KeyBindings) -> Result<(), ServiceError> {
+        match self.multiplexer.server_config(key_bindings)? {
+            Some(_) => Ok(self.multiplexer.apply_config(key_bindings)?),
+            None => Ok(()),
+        }
+    }
+
     pub fn delete_impact(
         &self,
         reconciliation: &Reconciliation,

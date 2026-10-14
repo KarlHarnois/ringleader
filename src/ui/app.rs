@@ -42,8 +42,13 @@ impl App {
         }
     }
 
-    pub fn with_message(mut self, message: Option<String>) -> Self {
-        self.status.show(message.map(StatusMessage::Error));
+    pub fn with_startup_messages(mut self, warnings: &[String], note: Option<String>) -> Self {
+        if warnings.is_empty() {
+            self.status.show(note.map(StatusMessage::Info));
+            return self;
+        }
+        let reported: Vec<String> = warnings.iter().cloned().chain(note).collect();
+        self.status.error(reported.join("; "));
         self
     }
 
@@ -65,13 +70,15 @@ impl App {
     }
 
     pub fn resize(&mut self, width: u16, height: u16) {
-        self.home.resize(width, height, &self.service);
+        let status = Self::status_bar(self.theme, &self.status, &self.home);
+        self.home.resize(width, height, &status, &self.service);
     }
 
     pub fn on_tick(&mut self, now: Instant) {
         self.tick = self.tick.wrapping_add(1);
         self.service.poll_startup_input();
-        let outcome = self.home.tick(now, &mut self.service);
+        let status = Self::status_bar(self.theme, &self.status, &self.home);
+        let outcome = self.home.tick(now, &mut self.service, &status);
         self.status.failure(outcome);
         self.dialogs.poll();
     }
@@ -96,6 +103,7 @@ impl App {
 
     pub fn attach(&mut self, name: &str) {
         let outcome = self.service.attach(name);
+        self.home.returned_from(name);
         self.observe();
         self.home.select(name, &self.service);
         if let Err(error) = outcome {
@@ -105,6 +113,7 @@ impl App {
 
     pub fn open_shell(&mut self, name: &str) -> Option<EphemeralShell> {
         let outcome = self.service.open_shell(name);
+        self.home.returned_from(name);
         self.observe();
         match outcome {
             Ok(ShellOutcome::Ephemeral(shell)) => return Some(shell),
@@ -148,12 +157,16 @@ impl App {
     }
 
     pub fn render(&self, frame: &mut Frame) {
-        let status = StatusBar::new(self.theme)
-            .with_message(self.status.message())
-            .with_note(self.home.note());
+        let status = Self::status_bar(self.theme, &self.status, &self.home);
         let table = self.home.table(self.tick, self.theme);
         HomeView::new(table, self.home.preview_panel(self.theme), status).render(frame);
         self.dialogs.render(frame, &self.theme);
+    }
+
+    fn status_bar<'s>(theme: Theme, status: &'s StatusReport, home: &HomeState) -> StatusBar<'s> {
+        StatusBar::new(theme)
+            .with_message(status.message())
+            .with_note(home.note())
     }
 
     fn handle_key(&mut self, key: &KeyEvent) -> AppRequest {
@@ -213,7 +226,7 @@ impl App {
             .and_then(|()| restored.map(|_| ()).map_err(|error| error.to_string()))
             .and_then(|()| {
                 self.service
-                    .reapply_server_config()
+                    .reload_server_config()
                     .map_err(|error| error.to_string())
             });
         self.status.outcome(outcome, reloaded);
@@ -259,10 +272,12 @@ mod tests {
     use super::*;
     use ratatui::style::Color;
 
+    use crate::application::DeleteImpact;
     use crate::application::ports::{ConfigError, MergeOutcome, MultiplexerError, UnmergedCommits};
     use crate::domain::{Config, ConfigDraft, DiffStat, PullRequestState, Session};
     use crate::test_support::{
-        Deadline, FakeMultiplexer, FakePullRequests, HeldCalls, ServiceFixture, UiHarness,
+        CapturedWriter, Deadline, FakeMultiplexer, FakePullRequests, HeldCalls, ServiceFixture,
+        UiHarness,
     };
 
     struct AppFixture;
@@ -344,6 +359,38 @@ mod tests {
                         .with_live(ServiceFixture::waiting(&second))
                         .blocking_typing(),
                 )
+        }
+
+        fn two_working_sessions_that_ring() -> ServiceFixture {
+            let first = ServiceFixture::session("dark-mode");
+            let second = ServiceFixture::session("fix-auth");
+            let draft = ConfigDraft::new(Path::new(ServiceFixture::WORKTREE_ROOT))
+                .bell_on_waiting(true)
+                .agent(ServiceFixture::agent());
+            ServiceFixture::new()
+                .with_config(Config::new(&draft).unwrap())
+                .with_sessions(&[first.clone(), second.clone()])
+                .with_workspace(ServiceFixture::workspace_for(&[&first, &second]))
+                .with_host(ServiceFixture::host_for(&[&first, &second]))
+                .with_multiplexer(
+                    FakeMultiplexer::new()
+                        .with_live(ServiceFixture::working(&first))
+                        .with_live(ServiceFixture::working(&second)),
+                )
+        }
+
+        fn ringing(fixture: &ServiceFixture, bell: &CapturedWriter) -> App {
+            let mut app = App::new(fixture.service(), Box::new(bell.clone()), Instant::now());
+            app.resize(100, 28);
+            UiHarness::settle(&mut app);
+            app
+        }
+
+        fn finish_working(fixture: &ServiceFixture, name: &str) {
+            let session = ServiceFixture::session(name);
+            fixture
+                .multiplexer()
+                .replace_live(ServiceFixture::waiting(&session));
         }
 
         fn started(fixture: &ServiceFixture, width: u16, height: u16) -> App {
@@ -893,6 +940,58 @@ mod tests {
     }
 
     #[test]
+    fn a_restart_that_recreates_the_server_socket_says_so() {
+        let fixture = UiHarness::exited_session_fixture("fix-auth");
+        fixture.multiplexer().lose_socket();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        app.perform(BlockingOperation::Restart("fix-auth".to_string()));
+
+        assert!(
+            AppFixture::flattened_screen(&app, 100, 28)
+                .contains("Restarted fix-auth. Also recreated the socket")
+        );
+    }
+
+    #[test]
+    fn returning_from_an_attach_does_not_ring_for_the_session_just_left() {
+        let fixture = AppFixture::two_working_sessions_that_ring();
+        let bell = CapturedWriter::default();
+        let mut app = AppFixture::ringing(&fixture, &bell);
+        AppFixture::finish_working(&fixture, "fix-auth");
+
+        app.attach("fix-auth");
+
+        assert_eq!(bell.text(), "");
+    }
+
+    #[test]
+    fn returning_from_an_attach_still_rings_for_another_session_that_finished() {
+        let fixture = AppFixture::two_working_sessions_that_ring();
+        let bell = CapturedWriter::default();
+        let mut app = AppFixture::ringing(&fixture, &bell);
+        AppFixture::finish_working(&fixture, "fix-auth");
+        AppFixture::finish_working(&fixture, "dark-mode");
+
+        app.attach("fix-auth");
+
+        assert_eq!(bell.text(), "\u{7}");
+    }
+
+    #[test]
+    fn returning_from_a_shell_window_does_not_ring_for_its_session() {
+        let fixture = AppFixture::two_working_sessions_that_ring();
+        let bell = CapturedWriter::default();
+        let mut app = AppFixture::ringing(&fixture, &bell);
+        AppFixture::finish_working(&fixture, "fix-auth");
+
+        let shell = app.open_shell("fix-auth");
+
+        assert!(shell.is_none());
+        assert_eq!(bell.text(), "");
+    }
+
+    #[test]
     fn s_on_a_waiting_session_explains_the_refusal() {
         let fixture = AppFixture::two_waiting_sessions();
         let mut app = AppFixture::started(&fixture, 100, 28);
@@ -931,6 +1030,21 @@ mod tests {
         assert!(
             AppFixture::flattened_screen(&app, 100, 28)
                 .contains("Reloaded the config and the registry. Also recreated the socket")
+        );
+    }
+
+    #[test]
+    fn r_resources_the_server_config_even_when_its_hash_matches() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press(&mut app, 'r');
+
+        assert!(
+            fixture
+                .multiplexer()
+                .calls()
+                .contains(&"apply_config C-q M-j M-Down M-k M-Up".to_string())
         );
     }
 
@@ -1181,6 +1295,27 @@ mod tests {
     }
 
     #[test]
+    fn a_delete_that_leaves_a_stray_session_reports_it_as_an_error() {
+        let recorded = Path::new(ServiceFixture::OTHER_RUNTIME_SOCKET);
+        let session = ServiceFixture::session("fix-auth").on_socket(recorded);
+        let fixture = ServiceFixture::new()
+            .with_sessions(std::slice::from_ref(&session))
+            .with_workspace(ServiceFixture::workspace_for(&[&session]))
+            .with_host(ServiceFixture::host_for(&[&session]).with_tmux_server_on(recorded));
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        app.perform(BlockingOperation::Delete {
+            name: "fix-auth".to_string(),
+            seen: DeleteImpact::default(),
+        });
+
+        assert!(matches!(
+            app.status.message(),
+            Some(StatusMessage::Error(text)) if text.contains("kill-session")
+        ));
+    }
+
+    #[test]
     fn changed_guards_reopen_the_dialog_with_the_new_impact() {
         let session = ServiceFixture::session("fix-auth");
         let workspace = ServiceFixture::workspace_for(&[&session]).with_unmerged(
@@ -1337,6 +1472,32 @@ mod tests {
     }
 
     #[test]
+    fn rows_hidden_under_a_wrapped_status_bar_get_no_pull_request_lookup() {
+        let sessions =
+            ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot"].map(ServiceFixture::session);
+        let multiplexer = sessions
+            .iter()
+            .fold(FakeMultiplexer::new(), |multiplexer, session| {
+                multiplexer.with_live(ServiceFixture::waiting(session))
+            });
+        let fixture = ServiceFixture::new()
+            .with_sessions(&sessions)
+            .with_multiplexer(multiplexer);
+        let mut app = UiHarness::app(&fixture).with_startup_messages(&["word ".repeat(40)], None);
+        app.resize(100, 8);
+
+        UiHarness::settle(&mut app);
+
+        let looked_up = Deadline::after(Duration::from_secs(2))
+            .wait_until(|| !fixture.pull_requests().calls().is_empty());
+        assert!(looked_up);
+        assert_eq!(
+            fixture.pull_requests().calls(),
+            [format!("lookup {} 4", ServiceFixture::REPO)]
+        );
+    }
+
+    #[test]
     fn a_session_with_a_pull_request_shows_its_number() {
         let session = ServiceFixture::session("fix-auth");
         let fixture = ServiceFixture::new()
@@ -1413,6 +1574,35 @@ mod tests {
         assert!(opened.contains("┌ Help "));
         assert!(opened.contains("n            create a session"));
         assert!(!app.dialogs.is_open());
+    }
+
+    #[test]
+    fn a_startup_note_without_warnings_shows_as_information() {
+        let fixture = AppFixture::two_waiting_sessions();
+
+        let app = AppFixture::started(&fixture, 100, 28)
+            .with_startup_messages(&[], Some("recreated the socket".to_string()));
+
+        assert_eq!(
+            app.status.message(),
+            Some(&StatusMessage::Info("recreated the socket".to_string()))
+        );
+    }
+
+    #[test]
+    fn a_startup_note_follows_the_warnings_it_comes_with() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let warnings = ["the config failed".to_string()];
+
+        let app = AppFixture::started(&fixture, 100, 28)
+            .with_startup_messages(&warnings, Some("recreated the socket".to_string()));
+
+        assert_eq!(
+            app.status.message(),
+            Some(&StatusMessage::Error(
+                "the config failed; recreated the socket".to_string()
+            ))
+        );
     }
 
     #[test]
@@ -1508,7 +1698,7 @@ mod tests {
     fn a_key_press_clears_a_shown_message() {
         let fixture = AppFixture::two_waiting_sessions();
         let mut app = AppFixture::started(&fixture, 100, 28)
-            .with_message(Some("the config failed".to_string()));
+            .with_startup_messages(&["the config failed".to_string()], None);
 
         AppFixture::press(&mut app, 'j');
 

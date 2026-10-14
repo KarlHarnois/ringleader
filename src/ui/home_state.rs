@@ -9,7 +9,7 @@ use super::preview_panel::PreviewPanel;
 use super::pull_request_feed::PullRequestFeed;
 use super::session_list::SessionList;
 use super::session_table::SessionTable;
-use super::status_bar::StatusNote;
+use super::status_bar::{StatusBar, StatusNote};
 use super::theme::Theme;
 use crate::application::{ServiceError, SessionService, Tool};
 use crate::domain::SessionSummary;
@@ -21,6 +21,7 @@ pub struct HomeState {
     preview: PreviewFeed,
     diffs: DiffQueue,
     pull_requests: PullRequestFeed,
+    screen: (u16, u16),
     tmux_paused_until: Option<Instant>,
 }
 
@@ -35,6 +36,7 @@ impl HomeState {
             preview: PreviewFeed::new(now),
             diffs: DiffQueue::default(),
             pull_requests: PullRequestFeed::default(),
+            screen: (0, 0),
             tmux_paused_until: None,
         }
     }
@@ -57,10 +59,16 @@ impl HomeState {
         StatusNote::new(row).text()
     }
 
-    pub fn resize(&mut self, width: u16, height: u16, service: &SessionService) {
-        let tier = LayoutTier::for_size(width, height);
-        self.sessions.resize(tier.table_rows(height));
-        self.preview.resize(tier);
+    pub fn resize(
+        &mut self,
+        width: u16,
+        height: u16,
+        status: &StatusBar,
+        service: &SessionService,
+    ) {
+        self.screen = (width, height);
+        self.fit_rows(status);
+        self.preview.resize(LayoutTier::for_size(width, height));
         self.refresh_preview(service);
     }
 
@@ -86,7 +94,13 @@ impl HomeState {
             || self.diffs.awaits_results()
     }
 
-    pub fn tick(&mut self, now: Instant, service: &mut SessionService) -> Result<(), ServiceError> {
+    pub fn tick(
+        &mut self,
+        now: Instant,
+        service: &mut SessionService,
+        status: &StatusBar,
+    ) -> Result<(), ServiceError> {
+        self.fit_rows(status);
         let polled = self.poll(now, service);
         let visible = self.sessions.visible_managed();
         self.pull_requests.tick(now, &visible, service);
@@ -113,6 +127,10 @@ impl HomeState {
             .inspect_err(|error| self.pause_after(error))?;
         self.show(rows, service);
         Ok(())
+    }
+
+    pub fn returned_from(&mut self, name: &str) {
+        self.bell.forget(name);
     }
 
     pub fn select(&mut self, name: &str, service: &SessionService) {
@@ -222,6 +240,15 @@ impl HomeState {
 
     fn persists_observations(service: &SessionService) -> bool {
         service.read_only_reason().is_none()
+    }
+
+    fn fit_rows(&mut self, status: &StatusBar) {
+        self.sessions.resize(self.table_rows(status));
+    }
+
+    fn table_rows(&self, status: &StatusBar) -> usize {
+        let (width, height) = self.screen;
+        LayoutTier::for_size(width, height).table_rows(height, status.height(width, height))
     }
 
     fn is_tmux_paused(&self) -> bool {

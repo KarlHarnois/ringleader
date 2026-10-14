@@ -164,8 +164,12 @@ impl FakeMultiplexer {
     }
 
     pub fn with_lost_socket(self) -> Self {
-        self.edit(|state| state.socket_lost = true);
+        self.lose_socket();
         self
+    }
+
+    pub fn lose_socket(&self) {
+        self.edit(|state| state.socket_lost = true);
     }
 
     pub fn with_drifted_config(self, server_return_key: &str) -> Self {
@@ -211,6 +215,11 @@ impl FakeMultiplexer {
 
     pub fn fail(&self, operation: &'static str, error: MultiplexerError) {
         self.edit(|state| state.failures.insert(operation, error));
+    }
+
+    pub fn replace_live(&self, observation: SessionObservation) {
+        self.end_session(observation.tmux_name());
+        self.edit(|state| state.live.push(observation));
     }
 
     pub fn end_session(&self, tmux_name: &str) {
@@ -315,6 +324,19 @@ impl MultiplexerState {
         }));
     }
 
+    fn listing(&mut self) -> Vec<SessionObservation> {
+        if self.socket_lost {
+            return Vec::new();
+        }
+        self.live.clone()
+    }
+
+    fn apply_later_observation_unless_lost(&mut self) {
+        if !self.socket_lost {
+            self.apply_later_observation();
+        }
+    }
+
     fn apply_later_observation(&mut self) {
         let Some(next) = self.later_observations.pop_front() else {
             return;
@@ -378,9 +400,9 @@ impl Multiplexer for FakeMultiplexer {
     }
 
     fn observe_all(&self) -> Result<Vec<SessionObservation>, MultiplexerError> {
-        let listing = self.edit(|state| state.live.clone());
+        let listing = self.edit(MultiplexerState::listing);
         self.call("observe_all", "")?;
-        self.edit(MultiplexerState::apply_later_observation);
+        self.edit(MultiplexerState::apply_later_observation_unless_lost);
         Ok(listing)
     }
 

@@ -15,7 +15,6 @@ pub struct HomeView<'a> {
 
 impl<'a> HomeView<'a> {
     const TOO_SMALL: &'static str = "Terminal too small";
-    const STATUS_SHARE: u16 = 4;
 
     pub fn new(table: SessionTable<'a>, preview: PreviewPanel<'a>, status: StatusBar<'a>) -> Self {
         Self {
@@ -32,8 +31,7 @@ impl<'a> HomeView<'a> {
             CenteredText::new([Self::TOO_SMALL]).render(frame, area);
             return;
         }
-        let status_room = (area.height / Self::STATUS_SHARE).max(1);
-        let status_rows = self.status.rows(area.width).min(status_room);
+        let status_rows = self.status.height(area.width, area.height);
         let [main, status] =
             Layout::vertical([Constraint::Min(1), Constraint::Length(status_rows)]).areas(area);
         self.status.render(frame, status);
@@ -71,7 +69,6 @@ impl LayoutTier {
     const FULL: (u16, u16) = (80, 24);
     const COMPACT: (u16, u16) = (60, 12);
     const MINIMAL: (u16, u16) = (36, 8);
-    const STATUS_BAR: usize = 1;
     const BORDERS: usize = 2;
     const HEADER: usize = 1;
 
@@ -100,13 +97,13 @@ impl LayoutTier {
         self == Self::Full
     }
 
-    pub fn table_rows(self, height: u16) -> usize {
-        let chrome = match self {
+    pub fn table_rows(self, height: u16, status_rows: u16) -> usize {
+        let frame = match self {
             Self::TooSmall => return 0,
-            Self::Minimal => Self::STATUS_BAR + Self::BORDERS,
-            Self::Full | Self::Compact => Self::STATUS_BAR + Self::BORDERS + Self::HEADER,
+            Self::Minimal => Self::BORDERS,
+            Self::Full | Self::Compact => Self::BORDERS + Self::HEADER,
         };
-        usize::from(height).saturating_sub(chrome)
+        usize::from(height).saturating_sub(usize::from(status_rows) + frame)
     }
 }
 
@@ -218,9 +215,10 @@ mod tests {
 
     #[test]
     fn the_table_shows_the_rows_left_by_the_status_bar_borders_and_header() {
-        assert_eq!(LayoutTier::Full.table_rows(28), 24);
-        assert_eq!(LayoutTier::Minimal.table_rows(8), 5);
-        assert_eq!(LayoutTier::TooSmall.table_rows(7), 0);
+        assert_eq!(LayoutTier::Full.table_rows(28, 1), 24);
+        assert_eq!(LayoutTier::Full.table_rows(28, 3), 22);
+        assert_eq!(LayoutTier::Minimal.table_rows(8, 2), 4);
+        assert_eq!(LayoutTier::TooSmall.table_rows(7, 1), 0);
     }
 
     #[test]

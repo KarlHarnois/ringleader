@@ -17,7 +17,6 @@ pub struct DirectoryRepoScanner {
 
 impl DirectoryRepoScanner {
     pub const VISIT_CAP: usize = 5000;
-    pub const MOUNT_TABLE: &'static str = "/proc/self/mountinfo";
     const PRUNED_NAMES: [&'static str; 4] = ["node_modules", "target", "vendor", "dist"];
     const SYSTEM_DIRECTORIES: [&'static str; 4] = ["/proc", "/sys", "/dev", "/nix/store"];
     const GIT_MARKER: &'static str = ".git";
@@ -138,7 +137,7 @@ impl RepoScanner for DirectoryRepoScanner {
     }
 
     fn scan(&self, scope: &RepoScope, depth: usize) -> Result<ScanOutcome, ScanError> {
-        let mounts = MountTable::read(&self.mount_table);
+        let mounts = MountTable::read_or_empty(&self.mount_table);
         let root = scope.root();
         if Self::sorted_entries(root).is_none() {
             return Err(ScanError::Unreadable {
@@ -555,6 +554,19 @@ mod tests {
         let scope = scanner.resolve_scope(&fixture.scope()).unwrap();
 
         assert!(scanner.scan(&scope, 3).unwrap().cut_short());
+    }
+
+    #[test]
+    fn a_tree_exactly_the_size_of_the_cap_is_scanned_whole() {
+        let fixture = ScanFixture::new();
+        for index in 0..3 {
+            fs::create_dir_all(fixture.scope().join(format!("directory-{index:02}"))).unwrap();
+        }
+        let scope_and_children = 4;
+        let scanner = fixture.scanner_with(scope_and_children, Path::new("/nonexistent/mountinfo"));
+        let scope = scanner.resolve_scope(&fixture.scope()).unwrap();
+
+        assert!(!scanner.scan(&scope, 3).unwrap().cut_short());
     }
 
     #[test]

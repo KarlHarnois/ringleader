@@ -22,10 +22,12 @@ use adapters::agent_handoff::AgentHandoff;
 use adapters::agent_launcher::{AgentLauncher, LauncherCommand, ProcessExec};
 use adapters::app_log::AppLog;
 use adapters::directory_repo_scanner::DirectoryRepoScanner;
+use adapters::directory_scratch_space::DirectoryScratchSpace;
 use adapters::file_lock::FileLock;
 use adapters::gh_pull_requests::GhPullRequests;
 use adapters::git_runner::GitRunner;
 use adapters::json_session_registry::JsonSessionRegistry;
+use adapters::mount_table::MountTable;
 use adapters::null_pull_requests::NullPullRequests;
 use adapters::process_environment::{ProcessEnvironment, ProgramPaths};
 use adapters::server_files::ServerFiles;
@@ -182,9 +184,7 @@ impl CompositionRoot {
             .map(|error| format!("config error, running read-only: {error}"))
             .or(template_warning);
         let mut service = self.service(config_source, loaded);
-        let socket_message = service
-            .restore_server_socket()
-            .unwrap_or_else(|error| Some(error.to_string()));
+        let socket_recovery = service.restore_server_socket();
         let pane_warning = match service.refuse_own_pane() {
             Ok(()) => None,
             Err(error @ ServiceError::Conflict(_)) => return Self::refuse(&error),
@@ -201,7 +201,7 @@ impl CompositionRoot {
             log.err(),
             registry_warning,
             startup_message,
-            socket_message,
+            socket_recovery.as_ref().err().map(ToString::to_string),
             pane_warning,
             config_warning,
         ]
@@ -209,7 +209,7 @@ impl CompositionRoot {
         .flatten()
         .collect();
         let mut app = App::new(service, Box::new(io::stdout()), Instant::now())
-            .with_message((!warnings.is_empty()).then(|| warnings.join("; ")));
+            .with_startup_messages(&warnings, socket_recovery.ok().flatten());
         let signals = match SignalHookInterrupts::register() {
             Ok(signals) => signals,
             Err(error) => return Self::fail(&error.to_string()),
@@ -266,24 +266,18 @@ impl CompositionRoot {
         let env_names = loaded.config().agent_env_union();
         let tmux = self.tmux(&env_names);
         let bounded = BoundedCommand::new(Deadlines::standard());
-        let clock = Arc::new(SystemClock);
-        let state_directory = self.paths.state_directory();
-        let state = StatePorts::new(
-            Arc::new(JsonSessionRegistry::new(
-                &state_directory.join("sessions.json"),
-                clock.clone(),
-            )),
-            Arc::new(config_source),
-            clock,
-        );
-        let host = Arc::new(SystemHostProbe::new(&self.environment));
+        let state = self.state_ports(config_source);
+        let host = Arc::new(SystemHostProbe::new(
+            &self.environment,
+            self.programs.tmux(),
+        ));
         let pull_requests = Self::pull_requests(&host, bounded);
         let repos = RepoPorts::new(
             Arc::new(GitWorkspace::new(self.programs.git(), bounded)),
             Arc::new(DirectoryRepoScanner::new(
                 GitRunner::new(self.programs.git(), bounded),
                 DirectoryRepoScanner::VISIT_CAP,
-                Path::new(DirectoryRepoScanner::MOUNT_TABLE),
+                Path::new(MountTable::PROCESS_TABLE),
             )),
             host,
             pull_requests,
@@ -294,6 +288,23 @@ impl CompositionRoot {
             .with_diagnostics(self.diagnostics())
             .with_shell(&self.shell());
         SessionService::new(ServicePorts::new(state, repos, tmux_ports), context)
+    }
+
+    fn state_ports(&self, config_source: TomlConfigSource) -> StatePorts {
+        let clock = Arc::new(SystemClock);
+        let registry = JsonSessionRegistry::new(
+            &self.paths.state_directory().join("sessions.json"),
+            clock.clone(),
+        );
+        StatePorts::new(
+            Arc::new(registry),
+            Arc::new(config_source),
+            clock,
+            Arc::new(DirectoryScratchSpace::new(
+                &self.paths.scratch_root(),
+                Path::new(MountTable::PROCESS_TABLE),
+            )),
+        )
     }
 
     fn pull_requests(host: &SystemHostProbe, bounded: BoundedCommand) -> Arc<dyn PullRequests> {

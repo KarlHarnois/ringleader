@@ -4,6 +4,7 @@ use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use super::key_switch::KeySwitch;
 use super::live_process::LiveProcess;
 use super::running_config::RunningConfig;
 use super::tmux_command::TmuxCommand;
@@ -54,12 +55,7 @@ impl<'a> PrivateServer<'a> {
         if servers.is_empty() {
             return Ok(false);
         }
-        self.tmux
-            .server()
-            .prepare_socket_directory()
-            .map_err(|error| MultiplexerError::ServerFiles {
-                detail: error.to_string(),
-            })?;
+        self.tmux.server().prepare_socket_directory()?;
         let failures: Vec<String> = servers
             .iter()
             .filter_map(|server| {
@@ -83,9 +79,9 @@ impl<'a> PrivateServer<'a> {
     }
 
     fn servers_without_socket(&self) -> Vec<LiveProcess> {
-        let socket = self.tmux.server().socket();
-        match Self::is_missing(socket) {
-            true => LiveProcess::tmux_servers_on(socket),
+        let files = self.tmux.server();
+        match Self::is_missing(files.socket()) && !files.server_is_starting() {
+            true => LiveProcess::tmux_servers_on(files.socket()),
             false => Vec::new(),
         }
     }
@@ -137,12 +133,14 @@ impl<'a> PrivateServer<'a> {
     pub fn apply(&self, key_bindings: &KeyBindings) -> Result<(), MultiplexerError> {
         let running = self.running_config()?;
         let previous = running.as_ref().and_then(RunningConfig::key_bindings);
+        let switch = KeySwitch::read(self.tmux, previous, key_bindings)?;
         let render = self.render_for(key_bindings);
         self.write_render(&render)?;
-        let sequence = TmuxServerConfig::reapply_script(previous, key_bindings);
-        let output = self
-            .tmux
-            .change_with_input(&sequence, render.render().as_bytes())?;
+        let sequence = switch
+            .saving()
+            .then(TmuxServerConfig::reapply_script(previous, key_bindings));
+        let input = format!("{}{}", switch.restoring_lines(), render.render());
+        let output = self.tmux.change_with_input(&sequence, input.as_bytes())?;
         if output.succeeded() {
             return Ok(());
         }
@@ -154,12 +152,7 @@ impl<'a> PrivateServer<'a> {
     }
 
     fn write_render(&self, render: &TmuxServerConfig) -> Result<(), MultiplexerError> {
-        self.tmux
-            .server()
-            .prepare(&render.render())
-            .map_err(|error| MultiplexerError::ServerFiles {
-                detail: error.to_string(),
-            })
+        self.tmux.server().prepare(&render.render())
     }
 
     fn binds_return_key(&self) -> Result<bool, MultiplexerError> {
@@ -202,6 +195,12 @@ mod tests {
             KeyBindings::default().with_next_session_keys(HotKey::parse_valid(["M-n", "M-Down"]))
         }
 
+        fn start_lock(server: &TmuxTestServer) -> fs::File {
+            let mut path = server.socket().as_os_str().to_os_string();
+            path.push(".lock");
+            fs::File::create(path).unwrap()
+        }
+
         fn detach_keys(server: &TmuxTestServer) -> Vec<String> {
             Self::detach_keys_in(server, "root")
         }
@@ -221,6 +220,16 @@ mod tests {
                 .collect();
             keys.sort();
             keys
+        }
+
+        fn binding_of(server: &TmuxTestServer, table: &str, key: &str) -> String {
+            let listed = server.text(&["list-keys", "-T", table]);
+            let line = listed
+                .lines()
+                .map(|line| line.split_whitespace().collect::<Vec<_>>())
+                .find(|words| words.get(3) == Some(&key))
+                .unwrap_or_default();
+            line.join(" ")
         }
 
         fn option(server: &TmuxTestServer, name: &str) -> String {
@@ -307,6 +316,34 @@ mod tests {
     }
 
     #[test]
+    fn a_server_starting_under_the_start_lock_is_left_to_bind_its_socket() {
+        let server = TmuxTestServer::with_session("holder");
+        let tmux = server.command();
+        let private = PrivateServer::new(&tmux);
+        fs::remove_file(server.socket()).unwrap();
+        let lock = ServerFixture::start_lock(&server);
+        lock.lock().unwrap();
+
+        let lost = private.socket_lost();
+        let restored = private.restore_socket().unwrap();
+
+        drop(lock);
+        private.restore_socket().unwrap();
+        assert!(!lost);
+        assert!(!restored);
+    }
+
+    #[test]
+    fn a_start_lock_left_behind_does_not_stop_the_recovery() {
+        let server = TmuxTestServer::with_session("holder");
+        let tmux = server.command();
+        fs::remove_file(server.socket()).unwrap();
+        drop(ServerFixture::start_lock(&server));
+
+        assert!(PrivateServer::new(&tmux).restore_socket().unwrap());
+    }
+
+    #[test]
     fn a_server_still_on_its_socket_needs_no_restore() {
         let server = TmuxTestServer::with_session("holder");
         let tmux = server.command();
@@ -334,6 +371,94 @@ mod tests {
 
         assert!(running.is_current());
         assert_eq!(running.key_bindings(), Some(&KeyBindings::default()));
+    }
+
+    #[test]
+    fn moving_the_return_key_off_a_key_copy_mode_binds_gives_that_binding_back() {
+        let server = TmuxTestServer::with_session("holder");
+        let tmux = server.command();
+        let private = PrivateServer::new(&tmux);
+
+        private.apply(&ServerFixture::alt_x()).unwrap();
+        private.apply(&KeyBindings::default()).unwrap();
+
+        for table in ["copy-mode", "copy-mode-vi"] {
+            assert_eq!(
+                ServerFixture::binding_of(&server, table, "M-x"),
+                format!("bind-key -T {table} M-x send-keys -X jump-to-mark")
+            );
+        }
+        assert_eq!(ServerFixture::detach_keys(&server), ["C-q"]);
+    }
+
+    #[test]
+    fn moving_the_return_key_off_a_key_with_a_braced_binding_replays_it_whole() {
+        let server = TmuxTestServer::with_session("holder");
+        let tmux = server.command();
+        let private = PrivateServer::new(&tmux);
+        let original = ServerFixture::binding_of(&server, "copy-mode", "C-r");
+        assert!(!original.is_empty());
+        let alt_r = KeyBindings::default().with_return_key(HotKey::parse("C-r").unwrap());
+
+        private.apply(&alt_r).unwrap();
+        private.apply(&KeyBindings::default()).unwrap();
+
+        assert_eq!(
+            ServerFixture::binding_of(&server, "copy-mode", "C-r"),
+            original
+        );
+    }
+
+    #[test]
+    fn moving_the_return_key_off_page_up_gives_copy_mode_its_page_key_back() {
+        let server = TmuxTestServer::with_session("holder");
+        let tmux = server.command();
+        let private = PrivateServer::new(&tmux);
+        let original = ServerFixture::binding_of(&server, "copy-mode", "PPage");
+        assert!(!original.is_empty());
+        let page_up = KeyBindings::default().with_return_key(HotKey::parse("PageUp").unwrap());
+
+        private.apply(&page_up).unwrap();
+        private.apply(&KeyBindings::default()).unwrap();
+
+        assert_eq!(
+            ServerFixture::binding_of(&server, "copy-mode", "PPage"),
+            original
+        );
+    }
+
+    #[test]
+    fn a_return_key_parse_now_refuses_is_still_unbound_when_the_key_changes() {
+        let recorded = HotKey::recorded("M-BSpace").unwrap();
+        let older = KeyBindings::default().with_return_key(recorded);
+        let server = TmuxTestServer::with_config(&TmuxServerConfig::new(&older).render());
+        server.start_session("holder");
+        let tmux = server.command();
+
+        PrivateServer::new(&tmux)
+            .apply(&KeyBindings::default())
+            .unwrap();
+
+        assert_eq!(ServerFixture::detach_keys(&server), ["C-q"]);
+    }
+
+    #[test]
+    fn dropping_a_session_key_copy_mode_binds_gives_that_binding_back() {
+        let server = TmuxTestServer::with_session("holder");
+        let tmux = server.command();
+        let private = PrivateServer::new(&tmux);
+        let original = ServerFixture::binding_of(&server, "copy-mode", "M-x");
+        assert!(!original.is_empty());
+        let next_on_alt_x =
+            KeyBindings::default().with_next_session_keys(HotKey::parse_valid(["M-x"]));
+
+        private.apply(&next_on_alt_x).unwrap();
+        private.apply(&KeyBindings::default()).unwrap();
+
+        assert_eq!(
+            ServerFixture::binding_of(&server, "copy-mode", "M-x"),
+            original
+        );
     }
 
     #[test]

@@ -29,6 +29,11 @@ impl TmuxSequence {
         self
     }
 
+    pub fn then(mut self, next: TmuxSequence) -> Self {
+        self.commands.extend(next.commands);
+        self
+    }
+
     pub fn first_subcommand(&self) -> String {
         self.commands
             .first()

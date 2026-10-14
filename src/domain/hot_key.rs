@@ -17,22 +17,26 @@ impl HotKey {
         [("Up", "↑"), ("Down", "↓"), ("Left", "←"), ("Right", "→")];
     const UNMODIFIABLE_KEYS: [&'static str; 6] =
         ["Enter", "Tab", "BTab", "Escape", "BSpace", "Space"];
+    const KEYS_THAT_LOSE_META: [&'static str; 2] = ["BSpace", "BTab"];
     const SPACE: &'static str = "Space";
     const REFUSED_CHARACTERS: [char; 3] = ['\'', '"', '\\'];
     const CONTROL_PUNCTUATION: [char; 3] = [']', '^', '_'];
     const LETTERS_READ_AS_TAB_AND_ENTER: [char; 2] = ['i', 'm'];
-    const AGENT_KEYS: [&'static str; 13] = [
+    const AGENT_KEYS: [&'static str; 18] = [
         "C-c", "C-d", "C-z", "C-j", "C-h", "Enter", "Escape", "Tab", "BTab", "BSpace", "Space",
-        "Up", "Down",
+        "Up", "Down", "Left", "Right", "Home", "End", "DC",
     ];
 
     pub fn parse(text: &str) -> Option<Self> {
+        Self::recorded(text).filter(Self::is_reachable)
+    }
+
+    pub fn recorded(text: &str) -> Option<Self> {
         let (modifiers, rest) = Modifier::split(text);
-        let key = Self {
+        (!rest.is_empty()).then(|| Self {
             key: Self::normalized(&modifiers, rest),
             modifiers,
-        };
-        key.is_reachable().then_some(key)
+        })
     }
 
     pub fn parse_valid<T: AsRef<str>>(texts: impl IntoIterator<Item = T>) -> Vec<Self> {
@@ -125,7 +129,8 @@ impl HotKey {
             return true;
         }
         let control_reaches = !self.has(Modifier::Control) || key == Self::SPACE;
-        control_reaches && !self.has(Modifier::Shift)
+        let meta_reaches = !self.has(Modifier::Meta) || !Self::KEYS_THAT_LOSE_META.contains(&key);
+        control_reaches && meta_reaches && !self.has(Modifier::Shift)
     }
 
     fn single_character(&self) -> Option<char> {
@@ -268,6 +273,22 @@ mod tests {
     }
 
     #[test]
+    fn a_recorded_key_skips_only_the_reachability_rule() {
+        assert_eq!(
+            HotKey::recorded("M-BSpace").map(|key| key.to_string()),
+            Some("M-BSpace".to_string())
+        );
+        assert_eq!(HotKey::parse("M-BSpace"), None);
+        assert_eq!(HotKey::recorded(""), None);
+    }
+
+    #[test]
+    fn meta_with_backspace_or_backtab_is_refused_because_the_bytes_lose_the_meta() {
+        KeyFixture::assert_parse(&["M-Enter", "M-Tab", "M-Escape", "M-Space"]);
+        KeyFixture::assert_refused(&["M-BSpace", "M-BTab"]);
+    }
+
+    #[test]
     fn the_tmux_spelling_is_single_quoted() {
         let key = HotKey::parse("M-}").unwrap();
 
@@ -285,6 +306,15 @@ mod tests {
     #[test]
     fn keys_agents_need_and_typed_characters_shadow_agent_input() {
         for text in ["C-c", "C-d", "Enter", "Escape", "~", "x"] {
+            let key = HotKey::parse(text).unwrap();
+
+            assert!(key.shadows_agent_input(), "{text}");
+        }
+    }
+
+    #[test]
+    fn the_cursor_keys_agents_edit_their_prompt_with_shadow_agent_input() {
+        for text in ["Up", "Down", "Left", "Right", "Home", "End", "DC"] {
             let key = HotKey::parse(text).unwrap();
 
             assert!(key.shadows_agent_input(), "{text}");

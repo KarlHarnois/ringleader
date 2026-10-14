@@ -81,10 +81,8 @@ impl<'a> SessionCommands<'a> {
         let report = DeleteReport::new(&args.name);
         match self.service.delete_session(&args.name, &confirmation) {
             Ok(outcome) => {
-                if outcome.kept().is_none() {
-                    for warning in report.warnings(outcome.impact()) {
-                        self.session.output().note(&warning);
-                    }
+                for warning in report.warnings(&outcome) {
+                    self.session.output().note(&warning);
                 }
                 self.session.output().line(&report.success(&outcome));
                 Ok(0)
@@ -117,7 +115,9 @@ impl<'a> SessionCommands<'a> {
     pub fn restart(&mut self, name: &str) -> Result<u8, CommandStop> {
         self.service.observe(true)?;
         self.session.stop_if_signaled()?;
-        self.service.restart_session(name)?;
+        if let Some(note) = self.service.restart_session(name)? {
+            self.session.output().note(&note);
+        }
         self.session.output().line(&format!("restarted {name}"));
         Ok(0)
     }
@@ -481,6 +481,26 @@ mod tests {
                 .contains("warning: 2 uncommitted files will be lost")
         );
         assert!(harness.stdout().contains(ServiceFixture::TIP));
+    }
+
+    #[test]
+    fn a_delete_that_leaves_a_stray_session_warns_on_stderr() {
+        let recorded = Path::new(ServiceFixture::OTHER_RUNTIME_SOCKET);
+        let session = CommandFixture::session().on_socket(recorded);
+        let fixture = ServiceFixture::new()
+            .with_sessions(std::slice::from_ref(&session))
+            .with_workspace(ServiceFixture::workspace_for(&[&session]))
+            .with_host(ServiceFixture::host_for(&[&session]).with_tmux_server_on(recorded));
+        let harness = CliHarness::new(fixture);
+
+        let exit = harness.run(&["delete", "fix-auth", "--force"]);
+
+        assert_eq!(exit, CliExit::Code(0));
+        assert!(harness.stderr().contains(&format!(
+            "warning: the tmux server at {} still runs",
+            recorded.display()
+        )));
+        assert!(!harness.stdout().contains("kill-session"));
     }
 
     #[test]
