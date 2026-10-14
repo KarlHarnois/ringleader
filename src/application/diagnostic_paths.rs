@@ -7,6 +7,7 @@ pub struct DiagnosticPaths {
     state_directory: PathBuf,
     tmux_socket: PathBuf,
     tmux_config: PathBuf,
+    log_file: PathBuf,
     socket_in_state_directory: bool,
 }
 
@@ -22,6 +23,7 @@ impl DiagnosticPaths {
             state_directory: state_directory.to_path_buf(),
             tmux_socket: PathBuf::new(),
             tmux_config: PathBuf::new(),
+            log_file: PathBuf::new(),
             socket_in_state_directory: false,
         }
     }
@@ -30,6 +32,13 @@ impl DiagnosticPaths {
         Self {
             tmux_socket: socket.to_path_buf(),
             tmux_config: config.to_path_buf(),
+            ..self
+        }
+    }
+
+    pub fn with_log_file(self, log_file: &Path) -> Self {
+        Self {
+            log_file: log_file.to_path_buf(),
             ..self
         }
     }
@@ -63,6 +72,10 @@ impl DiagnosticPaths {
 
     pub fn tmux_config(&self) -> &Path {
         &self.tmux_config
+    }
+
+    pub fn log_file(&self) -> &Path {
+        &self.log_file
     }
 
     pub fn socket_problem(&self) -> Option<String> {

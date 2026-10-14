@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use super::base_branch_ladder::BaseBranchLadder;
+use super::base_branch_refs::BaseBranchRefs;
 use super::git_invocation::GitInvocation;
 use super::git_runner::GitRunner;
 use crate::application::ports::{StartPoint, WorkspaceError};
@@ -31,15 +32,16 @@ impl<'a> StartPointResolver<'a> {
         repo: &Path,
         base: &BaseBranch,
     ) -> Result<StartPoint, WorkspaceError> {
-        if let Some(sha) = self.first_commit(repo, base.candidate_refs())? {
+        let refs = BaseBranchRefs::new(base);
+        if let Some(sha) = self.first_commit(repo, refs.candidate_refs())? {
             return Ok(StartPoint::Commit(sha));
         }
-        let origin_exists = self.commit_of(repo, &base.origin_ref())?.is_some();
+        let origin_exists = self.commit_of(repo, &refs.origin_ref())?.is_some();
         Err(WorkspaceError::BaseBranchNotFound {
             base: base.to_string(),
-            local_ref: base.local_ref(),
-            remote_ref: base.remote_tracking_ref(),
-            suggestion: origin_exists.then(|| base.origin_suggestion()),
+            local_ref: refs.local_ref(),
+            remote_ref: refs.remote_tracking_ref(),
+            suggestion: origin_exists.then(|| refs.origin_suggestion()),
         })
     }
 

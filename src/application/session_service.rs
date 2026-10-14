@@ -367,7 +367,7 @@ mod tests {
 
         let error = fixture.service().refuse_own_pane().unwrap_err();
 
-        assert_eq!(error.exit_code(), 3);
+        assert!(matches!(error, ServiceError::Conflict(_)));
     }
 
     #[test]
@@ -454,7 +454,7 @@ mod tests {
 
         let error = service.load_registry(CorruptRegistry::Report).unwrap_err();
 
-        assert_eq!(error.exit_code(), 1);
+        assert!(matches!(error, ServiceError::Failed(_)));
         assert!(!fixture.registry().was_moved_aside());
     }
 

@@ -4,15 +4,14 @@ use std::sync::{Arc, Mutex};
 
 use clap::Parser;
 
-use super::{FakeLock, ServiceFixture};
-use crate::adapters::signal_flags::SignalFlags;
+use super::{FakeInterrupts, FakeLock, ServiceFixture};
 use crate::cli::{Cli, CliExit, CliOutput, CliSession};
 
 pub struct CliHarness {
     fixture: ServiceFixture,
     stdout: CapturedWriter,
     stderr: CapturedWriter,
-    signals: SignalFlags,
+    signals: FakeInterrupts,
     lock: RefCell<FakeLock>,
 }
 
@@ -22,7 +21,7 @@ impl CliHarness {
             fixture,
             stdout: CapturedWriter::default(),
             stderr: CapturedWriter::default(),
-            signals: SignalFlags::unregistered(),
+            signals: FakeInterrupts::default(),
             lock: RefCell::new(FakeLock::free()),
         }
     }
@@ -46,16 +45,12 @@ impl CliHarness {
         Self { stderr, ..self }
     }
 
-    pub fn with_signals(self, signals: SignalFlags) -> Self {
-        Self { signals, ..self }
-    }
-
     pub fn run(&self, arguments: &[&str]) -> CliExit {
         let cli =
             Cli::try_parse_from(std::iter::once("ringleader").chain(arguments.iter().copied()))
                 .expect("the arguments parse");
         let output = CliOutput::new(Box::new(self.stdout.clone()), Box::new(self.stderr.clone()));
-        let mut session = CliSession::new(output, self.signals.clone());
+        let mut session = CliSession::new(output, Box::new(self.signals.clone()));
         if let Err(exit) = cli.take_write_lock(&mut *self.lock.borrow_mut(), &mut session) {
             return exit;
         }
@@ -70,7 +65,7 @@ impl CliHarness {
         &self.fixture
     }
 
-    pub fn signals(&self) -> &SignalFlags {
+    pub fn signals(&self) -> &FakeInterrupts {
         &self.signals
     }
 
