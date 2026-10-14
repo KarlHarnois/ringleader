@@ -77,7 +77,8 @@ where
             if let Err(error) = self.draw(app) {
                 return self.unless_signaled(error);
             }
-            let event = match self.input.next_event(Self::wait_limit(app, next_tick)) {
+            let wait = Self::wait_limit(app, next_tick, Instant::now());
+            let event = match self.input.next_event(wait) {
                 Ok(event) => event,
                 Err(error) => return self.unless_signaled(error),
             };
@@ -109,8 +110,8 @@ where
         now + Self::TICK
     }
 
-    fn wait_limit(app: &App, next_tick: Instant) -> Duration {
-        let until_tick = next_tick.saturating_duration_since(Instant::now());
+    fn wait_limit(app: &App, next_tick: Instant, now: Instant) -> Duration {
+        let until_tick = next_tick.saturating_duration_since(now);
         match app.awaits_results() {
             true => until_tick.min(Self::RESULT_POLL),
             false => until_tick,
@@ -295,14 +296,14 @@ mod tests {
     }
 
     #[test]
-    fn an_idle_loop_waits_for_the_next_tick() {
-        let harness = UiHarness::new();
+    fn an_idle_app_waits_for_the_next_tick() {
         let mut app = UiHarness::app(&ServiceFixture::new());
-        let mut event_loop = harness.event_loop(ScriptedInput::events(Vec::new()));
+        app.observe();
+        let now = Instant::now();
 
-        event_loop.run(&mut app).unwrap();
+        let wait = FixtureLoop::wait_limit(&app, now + FixtureLoop::TICK, now);
 
-        assert!(event_loop.input().timeouts()[0] > FixtureLoop::RESULT_POLL);
+        assert_eq!(wait, FixtureLoop::TICK);
     }
 
     #[test]
