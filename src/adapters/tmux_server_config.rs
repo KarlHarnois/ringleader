@@ -213,12 +213,12 @@ mod tests {
             attached && inner.wait_for(|| Self::clients(inner) == 0)
         }
 
-        fn nested_client_switches_to_beta(typed: &[&str]) -> bool {
-            let inner = Self::alpha_and_beta();
-            let outer = Self::nested_client(&inner, "=alpha:");
-            let attached = inner.wait_for(|| Self::client_session(&inner) == "alpha");
+        fn nested_client_on_beta_lands_on(typed: &[&str], expected: &str) -> bool {
+            let inner = Self::alpha_beta_and_gamma();
+            let outer = Self::nested_client(&inner, "=beta:");
+            let attached = inner.wait_for(|| Self::client_session(&inner) == "beta");
             Self::type_bytes(&outer, typed);
-            attached && inner.wait_for(|| Self::client_session(&inner) == "beta")
+            attached && inner.wait_for(|| Self::client_session(&inner) == expected)
         }
 
         fn nested_client(inner: &TmuxTestServer, target: &str) -> TmuxTestServer {
@@ -254,9 +254,10 @@ mod tests {
             outer.text(&typing);
         }
 
-        fn alpha_and_beta() -> TmuxTestServer {
+        fn alpha_beta_and_gamma() -> TmuxTestServer {
             let server = TmuxTestServer::with_session("alpha");
             server.start_session("beta");
+            server.start_session("gamma");
             server
         }
 
@@ -507,16 +508,16 @@ mod tests {
 
     #[test]
     fn the_next_session_key_moves_the_client_to_the_next_session() {
-        let server = ConfigFixture::alpha_and_beta();
+        let server = ConfigFixture::alpha_beta_and_gamma();
 
-        let session = ConfigFixture::session_after_pressing(&server, "=alpha:", "M-j");
+        let session = ConfigFixture::session_after_pressing(&server, "=beta:", "M-j");
 
-        assert_eq!(session, "beta");
+        assert_eq!(session, "gamma");
     }
 
     #[test]
     fn the_previous_session_key_moves_the_client_back() {
-        let server = ConfigFixture::alpha_and_beta();
+        let server = ConfigFixture::alpha_beta_and_gamma();
 
         let session = ConfigFixture::session_after_pressing(&server, "=beta:", "M-k");
 
@@ -525,20 +526,20 @@ mod tests {
 
     #[test]
     fn the_next_session_key_on_the_last_session_wraps_to_the_first() {
-        let server = ConfigFixture::alpha_and_beta();
+        let server = ConfigFixture::alpha_beta_and_gamma();
 
-        let session = ConfigFixture::session_after_pressing(&server, "=beta:", "M-Down");
+        let session = ConfigFixture::session_after_pressing(&server, "=gamma:", "M-Down");
 
         assert_eq!(session, "alpha");
     }
 
     #[test]
     fn the_previous_session_key_on_the_first_session_wraps_to_the_last() {
-        let server = ConfigFixture::alpha_and_beta();
+        let server = ConfigFixture::alpha_beta_and_gamma();
 
         let session = ConfigFixture::session_after_pressing(&server, "=alpha:", "M-Up");
 
-        assert_eq!(session, "beta");
+        assert_eq!(session, "gamma");
     }
 
     #[test]
@@ -549,13 +550,13 @@ mod tests {
             ("vi", "M-j"),
             ("vi", "M-Down"),
         ] {
-            let server = ConfigFixture::alpha_and_beta();
+            let server = ConfigFixture::alpha_beta_and_gamma();
             server.text(&["set-option", "-g", "mode-keys", mode_keys]);
-            server.text(&["copy-mode", "-t", "=alpha:"]);
+            server.text(&["copy-mode", "-t", "=beta:"]);
 
-            let session = ConfigFixture::session_after_pressing(&server, "=alpha:", key);
+            let session = ConfigFixture::session_after_pressing(&server, "=beta:", key);
 
-            assert_eq!(session, "beta", "{mode_keys} {key}");
+            assert_eq!(session, "gamma", "{mode_keys} {key}");
         }
     }
 
@@ -576,14 +577,14 @@ mod tests {
 
     #[test]
     fn the_bytes_a_terminal_sends_for_the_session_keys_switch_a_nested_client() {
-        for (key, typed) in [
-            ("M-j", ["1b", "6a"].as_slice()),
-            ("M-Down", &["1b", "5b", "31", "3b", "33", "42"]),
-            ("M-k", &["1b", "6b"]),
-            ("M-Up", &["1b", "5b", "31", "3b", "33", "41"]),
+        for (key, typed, expected) in [
+            ("M-j", ["1b", "6a"].as_slice(), "gamma"),
+            ("M-Down", &["1b", "5b", "31", "3b", "33", "42"], "gamma"),
+            ("M-k", &["1b", "6b"], "alpha"),
+            ("M-Up", &["1b", "5b", "31", "3b", "33", "41"], "alpha"),
         ] {
             assert!(
-                ConfigFixture::nested_client_switches_to_beta(typed),
+                ConfigFixture::nested_client_on_beta_lands_on(typed, expected),
                 "{key}"
             );
         }
