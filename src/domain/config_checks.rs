@@ -281,6 +281,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+    use crate::domain::Config;
     use crate::domain::repo_draft::RepoDraft;
 
     struct ChecksFixture;
@@ -344,7 +345,7 @@ mod tests {
 
     #[test]
     fn the_return_key_defaults_to_ctrl_q() {
-        let config = crate::domain::Config::new(&ChecksFixture::draft()).unwrap();
+        let config = Config::new(&ChecksFixture::draft()).unwrap();
 
         assert_eq!(config.key_bindings().return_key().to_string(), "C-q");
     }
@@ -402,7 +403,7 @@ mod tests {
     fn a_written_key_takes_itself_out_of_a_default_list_it_would_repeat() {
         let draft = ChecksFixture::draft().next_session_keys(&["M-k"]);
 
-        let config = crate::domain::Config::new(&draft).unwrap();
+        let config = Config::new(&draft).unwrap();
 
         let previous = config.key_bindings().previous_session_keys();
         assert_eq!(previous, HotKey::parse_valid(["M-Up"]));
@@ -471,7 +472,7 @@ mod tests {
 
     #[test]
     fn a_missing_shell_toggle_list_keeps_alt_l() {
-        let config = crate::domain::Config::new(&ChecksFixture::draft()).unwrap();
+        let config = Config::new(&ChecksFixture::draft()).unwrap();
 
         let toggle = config.key_bindings().shell_toggle_keys();
         assert_eq!(toggle, HotKey::parse_valid(["M-l"]));
@@ -482,7 +483,7 @@ mod tests {
         let none: [&str; 0] = [];
         let draft = ChecksFixture::draft().shell_toggle_keys(&none);
 
-        let config = crate::domain::Config::new(&draft).unwrap();
+        let config = Config::new(&draft).unwrap();
 
         assert!(config.key_bindings().shell_toggle_keys().is_empty());
     }
@@ -491,7 +492,7 @@ mod tests {
     fn every_listed_shell_toggle_key_is_kept() {
         let draft = ChecksFixture::draft().shell_toggle_keys(&["M-o", "F8"]);
 
-        let config = crate::domain::Config::new(&draft).unwrap();
+        let config = Config::new(&draft).unwrap();
 
         let toggle = config.key_bindings().shell_toggle_keys();
         assert_eq!(toggle, HotKey::parse_valid(["M-o", "F8"]));
@@ -501,7 +502,7 @@ mod tests {
     fn a_written_shell_toggle_key_takes_itself_out_of_a_default_session_list() {
         let draft = ChecksFixture::draft().shell_toggle_keys(&["M-j"]);
 
-        let config = crate::domain::Config::new(&draft).unwrap();
+        let config = Config::new(&draft).unwrap();
 
         let next = config.key_bindings().next_session_keys();
         assert_eq!(next, HotKey::parse_valid(["M-Down"]));
