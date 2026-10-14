@@ -216,22 +216,26 @@ mod tests {
 
         fn keys_running(server: &TmuxTestServer, table: &str, command: &str) -> Vec<String> {
             let ending = format!(" {command}");
-            let mut keys: Vec<String> = server
-                .text(&["list-keys", "-T", table])
-                .lines()
-                .filter(|line| line.ends_with(&ending))
-                .filter_map(|line| line.split_whitespace().nth(3))
-                .map(str::to_string)
-                .collect();
+            let mut keys = Self::keys_bound_where(server, table, |line| line.ends_with(&ending));
             keys.sort();
             keys
         }
 
         fn toggle_keys_in(server: &TmuxTestServer, table: &str) -> Vec<String> {
+            Self::keys_bound_where(server, table, |line| {
+                line.contains(Self::SHELL_TOGGLE_MARKER)
+            })
+        }
+
+        fn keys_bound_where(
+            server: &TmuxTestServer,
+            table: &str,
+            matches: impl Fn(&str) -> bool,
+        ) -> Vec<String> {
             server
                 .text(&["list-keys", "-T", table])
                 .lines()
-                .filter(|line| line.contains(Self::SHELL_TOGGLE_MARKER))
+                .filter(|line| matches(line))
                 .filter_map(|line| line.split_whitespace().nth(3))
                 .map(str::to_string)
                 .collect()
