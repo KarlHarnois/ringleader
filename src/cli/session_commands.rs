@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use super::delete_report::DeleteReport;
 use super::list_report::ListReport;
 use super::repo_argument::RepoArgument;
-use super::{CliSession, CommandStop, DeleteArgs, ListArgs, NewArgs, RenameArgs};
+use super::{CliExit, CliSession, CommandStop, DeleteArgs, ListArgs, NewArgs, RenameArgs};
 use crate::application::{
     CreateRequest, DeleteConfirmation, DeleteImpact, ServiceError, SessionService,
 };
@@ -91,7 +91,7 @@ impl<'a> SessionCommands<'a> {
                 for line in report.refusal(&impact) {
                     self.session.output().note(&line);
                 }
-                Ok(ServiceError::CONFLICT_EXIT)
+                Ok(CliExit::CONFLICT)
             }
             Err(error) => Err(error.into()),
         }
@@ -412,15 +412,11 @@ mod tests {
 
     #[test]
     fn a_hangup_during_the_use_case_lets_it_finish_and_reports_the_signal() {
-        let harness_signals = crate::adapters::signal_flags::SignalFlags::unregistered();
-        let raised = harness_signals.clone();
-        let session = CommandFixture::session();
-        let fixture = CommandFixture::live().with_multiplexer(
-            FakeMultiplexer::new()
-                .with_live(ServiceFixture::waiting(&session))
-                .on_call("kill_session", move || raised.raise(SIGHUP)),
-        );
-        let harness = CliHarness::new(fixture).with_signals(harness_signals);
+        let fixture = CommandFixture::live();
+        let multiplexer = fixture.shared_multiplexer();
+        let harness = CliHarness::new(fixture);
+        let signals = harness.signals().clone();
+        multiplexer.add_call_hook("kill_session", move || signals.raise(SIGHUP));
 
         let exit = harness.run(&["delete", "fix-auth", "--force"]);
 

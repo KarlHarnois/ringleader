@@ -186,7 +186,7 @@ mod tests {
     use std::path::Path;
 
     use super::*;
-    use crate::application::ports::{BranchMarker, MultiplexerError, WorkspaceError};
+    use crate::application::ports::{MultiplexerError, Workspace, WorkspaceError};
     use crate::domain::Agent;
     use crate::test_support::{FakeMultiplexer, FakeSessionRegistry, ServiceFixture};
 
@@ -304,7 +304,7 @@ mod tests {
             .rename_session("fix-auth", "fix-login")
             .unwrap_err();
 
-        assert_eq!(error.exit_code(), 3);
+        assert!(matches!(error, ServiceError::Conflict(_)));
         assert!(error.to_string().contains("press r in a running TUI"));
         assert!(fixture.workspace().state_changing_calls().is_empty());
     }
@@ -458,8 +458,9 @@ mod tests {
     fn rename_refuses_an_unmarked_branch_with_the_marking_command() {
         let fixture = RenameFixture::unmarked("fix-auth");
         let session = ServiceFixture::session("fix-auth");
-        let command =
-            BranchMarker::new(session.branch()).marking_command(Path::new(ServiceFixture::REPO));
+        let command = fixture
+            .workspace()
+            .branch_marking_command(Path::new(ServiceFixture::REPO), session.branch());
 
         let error = fixture
             .service()
@@ -619,7 +620,7 @@ mod tests {
             .rename_session("fix-auth", "fix-login")
             .unwrap_err();
 
-        assert_eq!(error.exit_code(), 3);
+        assert!(matches!(error, ServiceError::Conflict(_)));
         assert!(
             error
                 .to_string()
@@ -815,7 +816,7 @@ mod tests {
             .rename_session("fix-auth", "fix-login")
             .unwrap_err();
 
-        assert_eq!(error.exit_code(), 3);
+        assert!(matches!(error, ServiceError::Conflict(_)));
     }
 
     #[test]
@@ -851,7 +852,7 @@ mod tests {
             .rename_session("nope", "fix-login")
             .unwrap_err();
 
-        assert_eq!(error.exit_code(), 2);
+        assert!(matches!(error, ServiceError::NotFound(_)));
     }
 
     #[test]
@@ -866,7 +867,7 @@ mod tests {
             .rename_session("mystery", "known")
             .unwrap_err();
 
-        assert_eq!(error.exit_code(), 3);
+        assert!(matches!(error, ServiceError::Conflict(_)));
     }
 
     #[test]
@@ -880,7 +881,7 @@ mod tests {
             .rename_session("fix-auth", "fix-login")
             .unwrap_err();
 
-        assert_eq!(error.exit_code(), 3);
+        assert!(matches!(error, ServiceError::Conflict(_)));
         assert!(
             error
                 .to_string()

@@ -469,6 +469,10 @@ impl Workspace for FakeWorkspace {
         }))
     }
 
+    fn branch_marking_command(&self, repo: &Path, branch: &str) -> String {
+        format!("mark-managed {} {branch}", repo.display())
+    }
+
     fn is_branch_published(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError> {
         self.call("is_branch_published", branch.to_string())?;
         Ok(self.edit(|state| {

@@ -162,7 +162,7 @@ mod tests {
 
         let error = fixture.service().attach("fix-auth").unwrap_err();
 
-        assert_eq!(error.exit_code(), 3);
+        assert!(matches!(error, ServiceError::Conflict(_)));
         assert!(
             error
                 .to_string()
@@ -204,7 +204,7 @@ mod tests {
 
         let error = fixture.service().open_shell("fix-auth").unwrap_err();
 
-        assert_eq!(error.exit_code(), 3);
+        assert!(matches!(error, ServiceError::Conflict(_)));
         assert!(fixture.multiplexer().state_changing_calls().is_empty());
         assert!(fixture.multiplexer().attached().is_empty());
     }

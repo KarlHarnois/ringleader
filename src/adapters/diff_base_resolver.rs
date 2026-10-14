@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use super::base_branch_ladder::BaseBranchLadder;
+use super::base_branch_refs::BaseBranchRefs;
 use super::git_invocation::GitInvocation;
 use super::git_runner::GitRunner;
 use crate::application::ports::{DiffBase, StartPoint, WorkspaceError};
@@ -77,9 +78,9 @@ impl<'a> DiffBaseResolver<'a> {
     }
 
     fn configured_refs(branch: &BaseBranch) -> Vec<String> {
-        let origin_copy = branch.origin_ref();
-        branch
-            .candidate_refs()
+        let refs = BaseBranchRefs::new(branch);
+        let origin_copy = refs.origin_ref();
+        refs.candidate_refs()
             .into_iter()
             .chain([origin_copy])
             .collect()
@@ -238,7 +239,8 @@ mod tests {
             let repo = Self::repo_on_new_branch("develop");
             repo.commit(repo.path(), "unreleased-1.md");
             let develop = repo.commit(repo.path(), "unreleased-2.md");
-            let origin_copy = BaseBranch::new("develop").unwrap().origin_ref();
+            let origin_copy =
+                BaseBranchRefs::new(&BaseBranch::new("develop").unwrap()).origin_ref();
             repo.git(repo.path(), &["update-ref", &origin_copy, &develop]);
             repo.git(
                 repo.path(),
@@ -278,7 +280,7 @@ mod tests {
         fn leave_a_pruned_origin_default_beside_its_local_branch(&self, branch: &str) {
             let repo = self.repo.path();
             self.repo.git(repo, &["branch", branch]);
-            let pruned = BaseBranch::new(branch).unwrap().origin_ref();
+            let pruned = BaseBranchRefs::new(&BaseBranch::new(branch).unwrap()).origin_ref();
             self.repo.git(
                 repo,
                 &["symbolic-ref", BaseBranchLadder::ORIGIN_HEAD, &pruned],
@@ -327,7 +329,7 @@ mod tests {
 
         fn commit_only_on_the_origin_copy_of(&self, branch: &str, file: &str) {
             let fetched = self.commit_beside_the_checked_out_branch(file);
-            let origin_copy = BaseBranch::new(branch).unwrap().origin_ref();
+            let origin_copy = BaseBranchRefs::new(&BaseBranch::new(branch).unwrap()).origin_ref();
             self.repo
                 .git(self.repo.path(), &["update-ref", &origin_copy, &fetched]);
         }

@@ -1,5 +1,6 @@
 use std::iter;
 
+use super::base_branch_refs::BaseBranchRefs;
 use crate::domain::BaseBranch;
 
 pub struct BaseBranchLadder {
@@ -62,14 +63,14 @@ impl BaseBranchLadder {
         local_ref
             .strip_prefix(Self::LOCAL_BRANCH_PREFIX)
             .and_then(BaseBranch::new)
-            .map(|branch| branch.origin_ref())
+            .map(|branch| BaseBranchRefs::new(&branch).origin_ref())
     }
 
     fn local_counterpart(origin_ref: &str) -> Option<String> {
         origin_ref
             .strip_prefix(Self::ORIGIN_BRANCH_PREFIX)
             .and_then(BaseBranch::new)
-            .map(|branch| branch.local_ref())
+            .map(|branch| BaseBranchRefs::new(&branch).local_ref())
     }
 }
 

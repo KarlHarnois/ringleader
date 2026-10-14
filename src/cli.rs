@@ -1,3 +1,4 @@
+mod cli_exit;
 mod cli_output;
 mod cli_session;
 mod delete_report;
@@ -12,14 +13,15 @@ use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand};
 
+pub use cli_exit::CliExit;
 pub use cli_output::CliOutput;
+pub use cli_session::CliSession;
 use cli_session::CommandStop;
-pub use cli_session::{CliExit, CliSession};
 use repo_commands::RepoCommands;
 use session_commands::SessionCommands;
 
-use crate::application::ports::{Lock, LockError};
-use crate::application::{CorruptRegistry, ServiceError, SessionService};
+use crate::application::ports::Lock;
+use crate::application::{CorruptRegistry, SessionService};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -131,9 +133,6 @@ struct RenameArgs {
 }
 
 impl Cli {
-    const INVALID_ARGUMENTS_EXIT: u8 = 1;
-    const FAILURE_EXIT: u8 = 1;
-
     pub fn parse_arguments<I, A>(arguments: I) -> Result<Self, ExitCode>
     where
         I: IntoIterator<Item = A>,
@@ -193,10 +192,7 @@ impl Cli {
         }
         lock.acquire_for_write().map_err(|error| {
             session.output().error(&error.to_string());
-            match error {
-                LockError::Held { .. } => CliExit::Code(ServiceError::CONFLICT_EXIT),
-                LockError::Io { .. } => CliExit::Code(Self::FAILURE_EXIT),
-            }
+            CliExit::Code(CliExit::lock_error_code(&error))
         })
     }
 
@@ -211,7 +207,7 @@ impl Cli {
         }
         if let Some(error) = service.read_only_reason() {
             session.output().error(&error.to_string());
-            return CliExit::Code(Self::FAILURE_EXIT);
+            return CliExit::Code(CliExit::FAILURE);
         }
         Self::restore_server_socket(service, session);
         let recovery = if self.is_mutating() {
@@ -224,7 +220,7 @@ impl Cli {
             Ok(None) => {}
             Err(error) => {
                 session.output().error(&error.to_string());
-                return CliExit::Code(Self::FAILURE_EXIT);
+                return CliExit::Code(CliExit::FAILURE);
             }
         }
         let result = self.dispatch(service, session);
@@ -279,7 +275,7 @@ impl Cli {
 
     fn exit_code_for(error: &clap::Error) -> u8 {
         if error.use_stderr() {
-            Self::INVALID_ARGUMENTS_EXIT
+            CliExit::FAILURE
         } else {
             0
         }
@@ -342,7 +338,7 @@ mod tests {
 
         let exit = harness.run(&["delete", "fix-auth"]);
 
-        assert_eq!(exit.code(), ServiceError::CONFLICT_EXIT);
+        assert_eq!(exit.code(), CliExit::CONFLICT);
         assert!(
             harness
                 .stderr()

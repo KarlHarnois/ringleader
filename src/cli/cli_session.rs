@@ -1,17 +1,16 @@
-use super::CliOutput;
-use crate::adapters::signal_flags::SignalFlags;
-use crate::application::ports::Lock;
+use super::{CliExit, CliOutput};
+use crate::application::ports::{Interrupts, Lock};
 use crate::application::{Pending, ServiceError, SessionService};
 
 pub struct CliSession {
     output: CliOutput,
-    signals: SignalFlags,
+    signals: Box<dyn Interrupts>,
 }
 
 impl CliSession {
     const SIGNAL_EXIT_BASE: u8 = 128;
 
-    pub fn new(output: CliOutput, signals: SignalFlags) -> Self {
+    pub fn new(output: CliOutput, signals: Box<dyn Interrupts>) -> Self {
         Self { output, signals }
     }
 
@@ -50,7 +49,7 @@ impl CliSession {
             Ok(code) => code,
             Err(CommandStop::Failed(error)) => {
                 self.output.error(&error.to_string());
-                error.exit_code()
+                CliExit::error_code(&error)
             }
             Err(CommandStop::Interrupted(signal)) => {
                 return CliExit::Interrupted {
@@ -71,20 +70,6 @@ impl CliSession {
 
     fn is_signaled(&self) -> bool {
         self.signals.raised().is_some()
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CliExit {
-    Code(u8),
-    Interrupted { signal: i32, code: u8 },
-}
-
-impl CliExit {
-    pub fn code(&self) -> u8 {
-        match self {
-            CliExit::Code(code) | CliExit::Interrupted { code, .. } => *code,
-        }
     }
 }
 
