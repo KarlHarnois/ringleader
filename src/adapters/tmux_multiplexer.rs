@@ -56,7 +56,8 @@ impl TmuxMultiplexer {
         let server = PrivateServer::new(&self.tmux);
         server.restore_socket()?;
         server.write_files(spec.key_bindings())?;
-        let sequence = TmuxScripts::create_session(spec, prepared.words());
+        let sequence =
+            TmuxScripts::create_session(spec, prepared.words(), &self.tmux.caller_shell());
         let output = self.tmux.create(&sequence, spec.removed_env_names())?;
         let launched = TmuxLaunch::new(&self.tmux).run(&sequence, output)?;
         let socket = self.finish_creation(&launched)?;
@@ -475,6 +476,12 @@ mod tests {
 
         fn created_pane(&self, tmux_name: &str) -> String {
             self.server.pane_of(&format!("={tmux_name}:0.0"))
+        }
+
+        fn recorded_shell(&self, tmux_name: &str) -> String {
+            let target = format!("={tmux_name}:");
+            self.server
+                .text(&["show-options", "-t", &target, "-v", "default-command"])
         }
 
         fn on_terminal(&self, terminal: Option<&str>) -> TmuxMultiplexer {
@@ -1364,6 +1371,35 @@ mod tests {
         assert!(!global.contains(secret));
         assert!(!String::from_utf8_lossy(&environ).contains(secret));
         assert!(!String::from_utf8_lossy(&cmdline).contains(secret));
+    }
+
+    #[test]
+    fn a_created_session_records_the_creators_shell_whatever_the_agent_sets() {
+        let fixture = MultiplexerFixture::new();
+        let environment = fixture
+            .server
+            .environment_with(&[("SHELL", "/bin/example-shell")]);
+        let agent_env = vec!["SHELL".to_string()];
+        let multiplexer = TmuxMultiplexer::new(
+            fixture
+                .server
+                .command_with(&environment)
+                .removing_env_names(&agent_env),
+            fixture.server.stand_in(),
+        );
+        let agent_shell = [("SHELL".to_string(), "/bin/agent-shell".to_string())];
+        let launch = fixture
+            .launch("fix-auth")
+            .with_env_assignments(&agent_shell);
+        let spec = SessionSpec::new("ringleader-fix-auth", fixture.metadata("fix-auth"), launch)
+            .removing_env_names(&agent_env);
+
+        multiplexer.create_session(&spec).unwrap();
+
+        assert_eq!(
+            fixture.recorded_shell("ringleader-fix-auth"),
+            "/bin/example-shell"
+        );
     }
 
     #[test]

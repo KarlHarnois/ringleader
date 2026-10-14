@@ -18,7 +18,7 @@ impl TmuxScripts {
         format!("={tmux_name}:")
     }
 
-    pub fn create_session(spec: &SessionSpec, launcher: &[OsString]) -> TmuxSequence {
+    pub fn create_session(spec: &SessionSpec, launcher: &[OsString], shell: &str) -> TmuxSequence {
         let target = Self::exact(spec.tmux_name());
         let size = spec.size();
         let mut new_session = Self::words(&[
@@ -46,6 +46,7 @@ impl TmuxScripts {
             ])
             .command(["set-option", "-p", "-t", &target, "remain-on-exit", "on"])
             .command(["set-option", "-t", &target, "destroy-unattached", "off"])
+            .command(["set-option", "-t", &target, "default-command", shell])
             .command(Self::metadata_option(&target, spec.metadata()))
             .command([
                 "display-message",
