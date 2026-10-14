@@ -566,6 +566,23 @@ mod tests {
     }
 
     #[test]
+    fn a_row_passed_over_during_a_capture_is_captured_once_that_capture_lands() {
+        let fixture = AppFixture::three_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        let held = HeldCalls::all();
+        fixture
+            .multiplexer()
+            .add_call_hook("capture_pane", held.hook());
+        AppFixture::press(&mut app, 'j');
+        AppFixture::press(&mut app, 'j');
+
+        held.release();
+        UiHarness::settle(&mut app);
+
+        assert!(AppFixture::screen(&app, 100, 28).contains("spike tui output"));
+    }
+
+    #[test]
     fn a_late_capture_of_a_row_left_behind_keeps_the_current_preview() {
         let fixture = AppFixture::two_waiting_sessions();
         let mut app = AppFixture::started(&fixture, 100, 28);
