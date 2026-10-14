@@ -1,167 +1,99 @@
+use std::iter;
 use std::path::Path;
 
-use super::base_branch_ladder::BaseBranchLadder;
-use super::base_branch_refs::BaseBranchRefs;
-use super::git_invocation::GitInvocation;
+use super::git_diffs::GitDiffs;
+use super::git_refs::GitRefs;
 use super::git_runner::GitRunner;
-use crate::application::ports::{DiffBase, StartPoint, WorkspaceError};
-use crate::domain::BaseBranch;
+use crate::application::ports::{StartPoint, WorkspaceError};
+use crate::domain::{BaseBranch, BaseBranchLadder, Branch, BranchTips};
 
 pub struct DiffBaseResolver<'a> {
-    git: &'a GitRunner,
+    refs: GitRefs<'a>,
+    diffs: GitDiffs<'a>,
 }
 
 impl<'a> DiffBaseResolver<'a> {
-    const HEAD: &'static str = "HEAD";
-    const NAME_AND_TARGET_FORMAT: &'static str = "--format=%(refname) %(symref)";
-
     pub fn new(git: &'a GitRunner) -> Self {
-        Self { git }
-    }
-
-    pub fn resolve(&self, worktree: &Path, base: &DiffBase) -> Result<String, WorkspaceError> {
-        match base.start() {
-            StartPoint::Commit(recorded) => {
-                self.merge_base_or_recorded(worktree, recorded, base.base_branch())
-            }
-            StartPoint::Orphan => self.empty_tree(worktree),
+        Self {
+            refs: GitRefs::new(git),
+            diffs: GitDiffs::new(git),
         }
     }
 
-    fn merge_base_or_recorded(
+    pub fn resolve(
+        &self,
+        worktree: &Path,
+        recorded: &StartPoint,
+        base_branch: Option<&BaseBranch>,
+    ) -> Result<StartPoint, WorkspaceError> {
+        match recorded {
+            StartPoint::Commit(commit) => self
+                .measured_from(worktree, commit, base_branch)
+                .map(StartPoint::Commit),
+            StartPoint::Orphan => Ok(StartPoint::Orphan),
+        }
+    }
+
+    fn measured_from(
         &self,
         worktree: &Path,
         recorded: &str,
         base_branch: Option<&BaseBranch>,
     ) -> Result<String, WorkspaceError> {
-        let merge_base = self.merge_base(worktree, recorded, base_branch)?;
-        Ok(merge_base.unwrap_or_else(|| recorded.to_string()))
-    }
-
-    fn merge_base(
-        &self,
-        worktree: &Path,
-        recorded: &str,
-        base_branch: Option<&BaseBranch>,
-    ) -> Result<Option<String>, WorkspaceError> {
-        let Some(checked_out) = self.checked_out_ref(worktree)? else {
-            return Ok(None);
-        };
-        let branch_refs = self.branch_refs(worktree, base_branch, &checked_out)?;
-        let commits = self.existing_commits(worktree, recorded, &branch_refs)?;
-        if commits.is_empty() {
-            return Ok(None);
+        let head = self.refs.head(worktree)?;
+        if head.is_unborn() {
+            return Ok(recorded.to_string());
         }
-        let bases = self.best_common_ancestors(worktree, &commits)?;
-        Ok(Self::preferred_base(bases, recorded))
+        let base_commits = self.base_branch_commits(worktree, base_branch, head.branch())?;
+        let candidates: Vec<String> = iter::once(recorded.to_string())
+            .chain(base_commits)
+            .collect();
+        let bases = self.diffs.merge_bases(worktree, &candidates)?;
+        Ok(bases.measured_from(recorded).to_string())
     }
 
-    fn checked_out_ref(&self, worktree: &Path) -> Result<Option<String>, WorkspaceError> {
-        let verify = GitInvocation::in_worktree(worktree, "rev-parse")
-            .diffing()
-            .args(["--verify", "-q", "--symbolic-full-name", Self::HEAD]);
-        self.git.resolved_from(&verify)
-    }
-
-    fn branch_refs(
+    fn base_branch_commits(
         &self,
         worktree: &Path,
         base_branch: Option<&BaseBranch>,
-        checked_out: &str,
+        checked_out: Option<&Branch>,
     ) -> Result<Vec<String>, WorkspaceError> {
-        let mut branch_refs = match base_branch {
-            Some(branch) => Self::configured_refs(branch),
-            None => self.ladder_rung(worktree, checked_out)?,
-        };
-        branch_refs.retain(|branch_ref| branch_ref != checked_out);
-        Ok(branch_refs)
+        match base_branch {
+            Some(base) => self.configured_commits(worktree, base, checked_out),
+            None => self.ladder_commits(worktree, checked_out),
+        }
     }
 
-    fn configured_refs(branch: &BaseBranch) -> Vec<String> {
-        let refs = BaseBranchRefs::new(branch);
-        let origin_copy = refs.origin_ref();
-        refs.candidate_refs()
-            .into_iter()
-            .chain([origin_copy])
-            .collect()
-    }
-
-    fn ladder_rung(
+    fn configured_commits(
         &self,
         worktree: &Path,
-        checked_out: &str,
+        base: &BaseBranch,
+        checked_out: Option<&Branch>,
     ) -> Result<Vec<String>, WorkspaceError> {
-        let listed = self.listed_rung_refs(worktree)?;
-        let origin_default = Self::symbolic_origin_head_target(&listed);
-        let existing_branches: Vec<&str> = listed
-            .iter()
-            .map(|(name, _)| name.as_str())
-            .filter(|name| *name != checked_out)
-            .collect();
-        Ok(BaseBranchLadder::new(origin_default).first_rung(&existing_branches))
+        let rung = base.branches_and_origin_copy();
+        let tips = self.refs.branch_tips(worktree, &rung)?;
+        Ok(Self::commits_besides(&tips, rung, checked_out))
     }
 
-    fn symbolic_origin_head_target(listed: &[(String, String)]) -> Option<String> {
-        listed
-            .iter()
-            .find(|(name, target)| name == BaseBranchLadder::ORIGIN_HEAD && !target.is_empty())
-            .map(|(_, target)| target.clone())
-    }
-
-    fn listed_rung_refs(&self, worktree: &Path) -> Result<Vec<(String, String)>, WorkspaceError> {
-        let list = GitInvocation::in_worktree(worktree, "for-each-ref")
-            .diffing()
-            .arg(Self::NAME_AND_TARGET_FORMAT)
-            .args(BaseBranchLadder::rung_lookup_refs());
-        let listing = self.git.run_checked(&list)?;
-        Ok(listing
-            .lines()
-            .into_iter()
-            .filter_map(|line| line.split_once(' '))
-            .map(|(name, target)| (name.to_string(), target.to_string()))
-            .collect())
-    }
-
-    fn existing_commits(
+    fn ladder_commits(
         &self,
         worktree: &Path,
-        recorded: &str,
-        branch_refs: &[String],
+        checked_out: Option<&Branch>,
     ) -> Result<Vec<String>, WorkspaceError> {
-        let filter = GitInvocation::in_worktree(worktree, "rev-list")
-            .diffing()
-            .args(["--no-walk", "--ignore-missing", recorded])
-            .args(branch_refs)
-            .arg("--");
-        let commits = self.git.run_checked(&filter)?;
-        Ok(commits.lines().into_iter().map(str::to_string).collect())
+        let origin_default = self.refs.remote_default_branch(worktree, Branch::ORIGIN)?;
+        let ladder = BaseBranchLadder::new(origin_default);
+        let tips = self.refs.branch_tips(worktree, &ladder.diff_lookups())?;
+        let rung = ladder.diff_rung(&tips, checked_out);
+        Ok(Self::commits_besides(&tips, rung, checked_out))
     }
 
-    fn best_common_ancestors(
-        &self,
-        worktree: &Path,
-        commits: &[String],
-    ) -> Result<Vec<String>, WorkspaceError> {
-        let find = GitInvocation::in_worktree(worktree, "merge-base")
-            .diffing()
-            .args(["--all", Self::HEAD])
-            .args(commits);
-        let bases = self.git.lookup(&find)?;
-        Ok(bases
-            .map(|found| found.lines().into_iter().map(str::to_string).collect())
-            .unwrap_or_default())
-    }
-
-    fn preferred_base(bases: Vec<String>, recorded: &str) -> Option<String> {
-        let through_the_base_branch = bases.iter().find(|base| *base != recorded).cloned();
-        through_the_base_branch.or_else(|| bases.into_iter().next())
-    }
-
-    fn empty_tree(&self, worktree: &Path) -> Result<String, WorkspaceError> {
-        let hash = GitInvocation::in_worktree(worktree, "hash-object")
-            .diffing()
-            .args(["-t", "tree", "/dev/null"]);
-        Ok(self.git.run_checked(&hash)?.first_line().to_string())
+    fn commits_besides(
+        tips: &BranchTips,
+        mut rung: Vec<Branch>,
+        checked_out: Option<&Branch>,
+    ) -> Vec<String> {
+        rung.retain(|branch| Some(branch) != checked_out);
+        tips.commits_of(&rung)
     }
 }
 
@@ -171,7 +103,8 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::application::ports::Workspace;
+    use crate::adapters::branch_ref::BranchRef;
+    use crate::application::ports::{DiffBase, Workspace};
     use crate::domain::DiffStat;
     use crate::test_support::GitTestRepo;
 
@@ -185,8 +118,13 @@ mod tests {
         const SESSION: &'static str = "fix-auth";
         const ORIGIN_DEFAULT: &'static str = "refs/remotes/origin/main";
         const ORIGIN_SHORT_NAME: &'static str = "origin/main";
+        const ORIGIN_HEAD: &'static str = "refs/remotes/origin/HEAD";
         const EARLIER: &'static str = "2080-01-01T00:00:00Z";
         const LATER: &'static str = "2090-01-01T00:00:00Z";
+
+        fn origin_ref(branch: &str) -> String {
+            BranchRef::new(&Branch::origin_copy_of(branch)).full_name()
+        }
 
         fn started() -> Self {
             Self::started_in(GitTestRepo::new())
@@ -239,12 +177,11 @@ mod tests {
             let repo = Self::repo_on_new_branch("develop");
             repo.commit(repo.path(), "unreleased-1.md");
             let develop = repo.commit(repo.path(), "unreleased-2.md");
-            let origin_copy =
-                BaseBranchRefs::new(&BaseBranch::new("develop").unwrap()).origin_ref();
+            let origin_copy = Self::origin_ref("develop");
             repo.git(repo.path(), &["update-ref", &origin_copy, &develop]);
             repo.git(
                 repo.path(),
-                &["symbolic-ref", BaseBranchLadder::ORIGIN_HEAD, &origin_copy],
+                &["symbolic-ref", Self::ORIGIN_HEAD, &origin_copy],
             );
             repo
         }
@@ -266,25 +203,16 @@ mod tests {
         fn make_origin_head_a_plain_ref(&self) {
             let repo = self.repo.path();
             let tip = self.repo.git(repo, &["rev-parse", "HEAD"]);
-            self.repo.git(
-                repo,
-                &[
-                    "update-ref",
-                    "--no-deref",
-                    BaseBranchLadder::ORIGIN_HEAD,
-                    &tip,
-                ],
-            );
+            self.repo
+                .git(repo, &["update-ref", "--no-deref", Self::ORIGIN_HEAD, &tip]);
         }
 
         fn leave_a_pruned_origin_default_beside_its_local_branch(&self, branch: &str) {
             let repo = self.repo.path();
             self.repo.git(repo, &["branch", branch]);
-            let pruned = BaseBranchRefs::new(&BaseBranch::new(branch).unwrap()).origin_ref();
-            self.repo.git(
-                repo,
-                &["symbolic-ref", BaseBranchLadder::ORIGIN_HEAD, &pruned],
-            );
+            let pruned = Self::origin_ref(branch);
+            self.repo
+                .git(repo, &["symbolic-ref", Self::ORIGIN_HEAD, &pruned]);
         }
 
         fn commit_on(&self, branch: &str, file: &str) {
@@ -329,7 +257,7 @@ mod tests {
 
         fn commit_only_on_the_origin_copy_of(&self, branch: &str, file: &str) {
             let fetched = self.commit_beside_the_checked_out_branch(file);
-            let origin_copy = BaseBranchRefs::new(&BaseBranch::new(branch).unwrap()).origin_ref();
+            let origin_copy = Self::origin_ref(branch);
             self.repo
                 .git(self.repo.path(), &["update-ref", &origin_copy, &fetched]);
         }
@@ -380,11 +308,7 @@ mod tests {
                 .git(repo, &["update-ref", Self::ORIGIN_DEFAULT, commit]);
             self.repo.git(
                 repo,
-                &[
-                    "symbolic-ref",
-                    BaseBranchLadder::ORIGIN_HEAD,
-                    Self::ORIGIN_DEFAULT,
-                ],
+                &["symbolic-ref", Self::ORIGIN_HEAD, Self::ORIGIN_DEFAULT],
             );
         }
 

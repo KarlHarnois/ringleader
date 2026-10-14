@@ -5,6 +5,7 @@ use super::bounded_command::BoundedCommand;
 use super::branch_marker::BranchMarker;
 use super::diff_base_resolver::DiffBaseResolver;
 use super::git_branches::GitBranches;
+use super::git_diffs::GitDiffs;
 use super::git_invocation::GitInvocation;
 use super::git_porcelain::GitPorcelain;
 use super::git_runner::GitRunner;
@@ -225,16 +226,9 @@ impl Workspace for GitWorkspace {
     }
 
     fn diff_stat(&self, worktree: &Path, base: &DiffBase) -> Result<DiffStat, WorkspaceError> {
-        let base_commit = DiffBaseResolver::new(&self.git).resolve(worktree, base)?;
-        let numstat = GitInvocation::in_worktree(worktree, "diff-index")
-            .diffing()
-            .args(["--numstat", "--no-renames", &base_commit]);
-        let untracked = GitInvocation::in_worktree(worktree, "ls-files")
-            .diffing()
-            .args(["--others", "--exclude-standard", "-z"]);
-        let changes = self.git.run_checked(&numstat)?.file_changes();
-        let untracked_count = self.git.run_checked(&untracked)?.record_count();
-        Ok(DiffStat::from_changes(changes, untracked_count))
+        let measured_from =
+            DiffBaseResolver::new(&self.git).resolve(worktree, base.start(), base.base_branch())?;
+        GitDiffs::new(&self.git).diff_stat(worktree, &measured_from)
     }
 
     fn validate_repo(&self, path: &Path) -> Result<PathBuf, WorkspaceError> {

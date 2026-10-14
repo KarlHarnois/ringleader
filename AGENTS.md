@@ -195,12 +195,16 @@ viewer exits.
     │   ├── session_observation.rs # SessionObservation
     │   ├── session_classifier.rs # SessionClassifier, the pure state classifier
     │   ├── diff_stat.rs          # DiffStat
+    │   ├── merge_bases.rs        # MergeBases, the best common ancestors a session diff may measure from, and the one it prefers
     │   ├── session_summary.rs    # SessionSummary
     │   ├── agent.rs              # Agent
     │   ├── repo.rs               # Repo
     │   ├── repo_name.rs          # RepoName
     │   ├── repo_draft.rs         # RepoDraft, a [[repos]] entry before the load checks
-    │   ├── base_branch.rs        # BaseBranch
+    │   ├── base_branch.rs        # BaseBranch, a configured base branch and the branches it is looked up as
+    │   ├── base_branch_ladder.rs # BaseBranchLadder, the origin default, main, and master branches tried when no base branch is set
+    │   ├── branch.rs             # Branch, a local or remote-tracking branch named as users type it, and origin's copy of a branch
+    │   ├── branch_tips.rs        # BranchTips, the commits the existing ones of some branches point at
     │   ├── config.rs             # Config, the parsed config.toml
     │   ├── config_draft.rs       # ConfigDraft, the raw config values the Config constructor checks
     │   ├── config_checks.rs      # ConfigChecks, the checks every config load runs
@@ -257,6 +261,7 @@ viewer exits.
     │       ├── workspace.rs          # Workspace trait
     │       ├── diff_base.rs          # DiffBase, the recorded commit and configured base branch a session diff measures from
     │       ├── dirty_state.rs        # DirtyState, the uncommitted files and nested repos of a worktree
+    │       ├── head.rs               # Head, whether a checkout's HEAD is unborn, detached, or on a branch
     │       ├── unmerged_commits.rs   # UnmergedCommits, commits on no other ref with the tip and HEAD
     │       ├── multiplexer.rs        # Multiplexer trait
     │       ├── agent_launch.rs       # AgentLaunch, the argv, environment, and worktree an agent starts with
@@ -292,13 +297,14 @@ viewer exits.
     │   ├── git_runner.rs         # GitRunner, runs a GitInvocation through BoundedCommand
     │   ├── git_invocation.rs     # GitInvocation, one git call with its child environment
     │   ├── git_porcelain.rs      # GitPorcelain, parses git's machine-readable output
+    │   ├── git_refs.rs           # GitRefs, HEAD, the default branch a remote's HEAD names, and the tips of branches
+    │   ├── git_diffs.rs          # GitDiffs, the merge bases of a worktree's HEAD and its diff stat
+    │   ├── branch_ref.rs         # BranchRef, the git ref name of a Branch and the Branch a ref name spells
     │   ├── git_branches.rs       # GitBranches: compare-and-swap delete, rename, the managed-branch marker, and whether a branch has been pushed
     │   ├── branch_marker.rs      # BranchMarker, the git config entry that marks a branch Ringleader created, and the command that sets it by hand
     │   ├── branch_section.rs     # BranchSection, the git config section and upstream keys of one branch
     │   ├── start_point_resolver.rs # StartPointResolver, the commit a new worktree starts from
-    │   ├── base_branch_ladder.rs # BaseBranchLadder, the origin default, main, and master refs tried when no base branch is set
-    │   ├── base_branch_refs.rs   # BaseBranchRefs, the local, remote-tracking, and origin refs a configured base branch is looked up by
-    │   ├── diff_base_resolver.rs # DiffBaseResolver, the merge base of a worktree's HEAD with its base branch, which its diff measures from
+    │   ├── diff_base_resolver.rs # DiffBaseResolver, the commit a session diff measures from
     │   ├── submodule_commits.rs  # SubmoduleCommits, the submodule walk of unmerged_commits
     │   ├── system_clock.rs       # SystemClock, reads `SystemTime`
     │   ├── system_host_probe.rs  # SystemHostProbe

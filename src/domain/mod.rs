@@ -1,9 +1,13 @@
 pub mod agent;
 pub mod base_branch;
+pub mod base_branch_ladder;
+pub mod branch;
+pub mod branch_tips;
 pub mod config;
 pub mod config_checks;
 pub mod config_draft;
 pub mod diff_stat;
+pub mod merge_bases;
 pub mod naming_scheme;
 pub mod pull_request;
 pub mod repo;
@@ -20,9 +24,13 @@ pub mod session_summary;
 
 pub use agent::Agent;
 pub use base_branch::BaseBranch;
+pub use base_branch_ladder::BaseBranchLadder;
+pub use branch::Branch;
+pub use branch_tips::BranchTips;
 pub use config::{Config, SessionSize};
 pub use config_draft::ConfigDraft;
 pub use diff_stat::{DiffStat, FileChange};
+pub use merge_bases::MergeBases;
 pub use naming_scheme::NamingScheme;
 pub use pull_request::{PullRequest, PullRequestState};
 pub use repo::{Repo, RepoScope};
