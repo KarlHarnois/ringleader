@@ -130,7 +130,7 @@ impl ServerAudit {
     }
 
     fn outer_key_rule(key_bindings: &KeyBindings) -> String {
-        let keys: Vec<String> = key_bindings.all().map(HotKey::display).collect();
+        let keys: Vec<String> = key_bindings.all().map(HotKey::to_string).collect();
         match keys.as_slice() {
             [key] => format!("{key} as its prefix or bind it"),
             _ => format!("any of {} as its prefix or bind them", keys.join(", ")),
@@ -380,7 +380,7 @@ mod tests {
         assert!(AuditFixture::line_with(
             &fixture,
             "info:",
-            "your tmux must not use any of Ctrl-Q, Alt-j, Alt-↓, Alt-k, Alt-↑ as its prefix or bind them in its root table"
+            "your tmux must not use any of C-q, M-j, M-Down, M-k, M-Up as its prefix or bind them in its root table"
         ));
     }
 
@@ -396,7 +396,7 @@ mod tests {
         assert!(AuditFixture::line_with(
             &fixture,
             "info:",
-            "your tmux must not use Ctrl-Q as its prefix or bind it in its root table"
+            "your tmux must not use C-q as its prefix or bind it in its root table"
         ));
     }
 
