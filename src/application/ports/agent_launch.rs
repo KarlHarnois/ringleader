@@ -34,7 +34,7 @@ impl AgentLaunch {
     }
 
     pub fn with_temp_directory(mut self, directory: &Path) -> Self {
-        if !self.assigns(Self::TEMP_DIRECTORY_VARIABLE) {
+        if !self.sets_temp_directory() {
             let value = directory.to_string_lossy().into_owned();
             self.env_assignments
                 .push((Self::TEMP_DIRECTORY_VARIABLE.to_string(), value));
@@ -42,10 +42,10 @@ impl AgentLaunch {
         self
     }
 
-    fn assigns(&self, variable: &str) -> bool {
+    pub fn sets_temp_directory(&self) -> bool {
         self.env_assignments
             .iter()
-            .any(|(name, _)| name == variable)
+            .any(|(name, _)| name == Self::TEMP_DIRECTORY_VARIABLE)
     }
 
     pub fn argv(&self) -> &[String] {

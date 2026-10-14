@@ -16,6 +16,9 @@ impl SessionScratch {
     }
 
     pub fn prepare(&self, launch: AgentLaunch) -> AgentLaunch {
+        if launch.sets_temp_directory() {
+            return launch;
+        }
         let worktree = launch.worktree().to_path_buf();
         match self.space.create(&worktree) {
             Ok(()) => launch.with_temp_directory(&self.space.directory(&worktree)),
@@ -70,6 +73,18 @@ mod tests {
             fixture.scratch_space().created(),
             [ServiceFixture::worktree_path("fix-auth")]
         );
+    }
+
+    #[test]
+    fn an_agent_that_sets_its_own_tmpdir_gets_no_scratch_directory() {
+        let (fixture, scratch) = ScratchFixture::scratch(FakeScratchSpace::default());
+        let own = [("TMPDIR".to_string(), "/dev/shm/example-agent".to_string())];
+        let launch = ScratchFixture::launch("fix-auth").with_env_assignments(&own);
+
+        let prepared = scratch.prepare(launch.clone());
+
+        assert_eq!(prepared, launch);
+        assert!(fixture.scratch_space().created().is_empty());
     }
 
     #[test]
