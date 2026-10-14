@@ -24,13 +24,15 @@ impl UnseenSession {
 
     pub fn refuse_rename(&self, row: &ManagedRow) -> Result<(), ServiceError> {
         self.refuse_behind_lost_socket(row)?;
-        match self.on_recorded_server(row) {
-            Some(finding) => Err(ServiceError::Conflict(format!(
-                "{finding} {}",
-                Self::RENAME_WAY_OUT
-            ))),
-            None => Ok(()),
+        if !self.recorded_server_still_runs(row) {
+            return Ok(());
         }
+        Err(ServiceError::Conflict(format!(
+            "{} {} {}",
+            Self::possible_holder(row),
+            BusyWorktree::recorded_server_advice(row.session()),
+            Self::RENAME_WAY_OUT
+        )))
     }
 
     pub fn refuse_behind_lost_socket(&self, row: &ManagedRow) -> Result<(), ServiceError> {
@@ -44,20 +46,30 @@ impl UnseenSession {
         )))
     }
 
-    pub fn on_recorded_server(&self, row: &ManagedRow) -> Option<String> {
-        let session = row.session();
-        let recorded = session.socket_path();
-        let unseen = Self::is_stopped(row)
-            && recorded != self.multiplexer.socket()
-            && self.host.tmux_server_serves(recorded);
-        unseen.then(|| {
+    pub fn stray_session_warning(&self, row: &ManagedRow) -> Option<String> {
+        self.recorded_server_still_runs(row).then(|| {
             format!(
-                "the tmux server at {} still runs and may hold the tmux session of {}. {}",
-                recorded.display(),
-                session.name(),
-                BusyWorktree::recorded_server_advice(session)
+                "{} {}.",
+                Self::possible_holder(row),
+                BusyWorktree::kill_advice(row.session())
             )
         })
+    }
+
+    fn recorded_server_still_runs(&self, row: &ManagedRow) -> bool {
+        let recorded = row.session().socket_path();
+        Self::is_stopped(row)
+            && recorded != self.multiplexer.socket()
+            && self.host.tmux_server_serves(recorded)
+    }
+
+    fn possible_holder(row: &ManagedRow) -> String {
+        let session = row.session();
+        format!(
+            "the tmux server at {} still runs and may hold the tmux session of {}.",
+            session.socket_path().display(),
+            session.name()
+        )
     }
 
     fn is_stopped(row: &ManagedRow) -> bool {

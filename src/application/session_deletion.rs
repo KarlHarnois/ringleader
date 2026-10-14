@@ -56,7 +56,7 @@ impl SessionDeletion {
         self.remove_worktree(session, &measurement)?;
         self.delete_branch(session, &measurement)?;
         self.registry.save(remaining)?;
-        let stray_session = self.unseen.on_recorded_server(row);
+        let stray_session = self.unseen.stray_session_warning(row);
         Ok(DeleteOutcome::deleted(measurement).with_stray_session(stray_session))
     }
 
@@ -318,6 +318,24 @@ mod tests {
             recorded.display()
         )));
         assert!(!outcome.summary("fix-auth").contains("kill-session"));
+    }
+
+    #[test]
+    fn a_stray_session_warning_never_sends_the_user_to_adopt_it_back() {
+        let recorded = Path::new(ServiceFixture::OTHER_RUNTIME_SOCKET);
+        let session = DeleteFixture::session().on_socket(recorded);
+        let fixture = DeleteFixture::stopped_fixture()
+            .with_registry(FakeSessionRegistry::with_sessions(vec![session.clone()]))
+            .with_host(ServiceFixture::host_for(&[&session]).with_tmux_server_on(recorded));
+
+        let outcome = DeleteFixture::force(&mut fixture.service()).unwrap();
+
+        assert!(
+            !outcome
+                .stray_session()
+                .unwrap()
+                .contains("run Ringleader again")
+        );
     }
 
     #[test]

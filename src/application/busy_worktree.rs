@@ -38,7 +38,14 @@ impl<'a> BusyWorktree<'a> {
 
     pub fn recorded_server_advice(session: &Session) -> String {
         format!(
-            "End the session with tmux -S {} kill-session -t '={}:', or run Ringleader again in the environment that started that server, which had another XDG_RUNTIME_DIR.",
+            "{}, or run Ringleader again in the environment that started that server, which had another XDG_RUNTIME_DIR.",
+            Self::kill_advice(session)
+        )
+    }
+
+    pub fn kill_advice(session: &Session) -> String {
+        format!(
+            "End the session with tmux -S {} kill-session -t '={}:'",
             session.socket_path().display(),
             session.tmux_name()
         )
