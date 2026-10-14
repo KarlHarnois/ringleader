@@ -8,6 +8,7 @@ impl<'a> BaseBranchRefs<'a> {
     const LOCAL_BRANCH_PREFIX: &'static str = "refs/heads/";
     const REMOTE_TRACKING_PREFIX: &'static str = "refs/remotes/";
     const ORIGIN_REMOTE: &'static str = "origin";
+    const ORIGIN_PREFIX: &'static str = "origin/";
 
     pub fn new(branch: &'a BaseBranch) -> Self {
         Self { branch }
@@ -35,6 +36,11 @@ impl<'a> BaseBranchRefs<'a> {
             Self::REMOTE_TRACKING_PREFIX,
             self.origin_suggestion()
         )
+    }
+
+    pub fn on_origin(&self) -> Option<BaseBranch> {
+        let name = self.branch.as_str();
+        BaseBranch::new(name.strip_prefix(Self::ORIGIN_PREFIX).unwrap_or(name))
     }
 }
 
@@ -85,6 +91,33 @@ mod tests {
             BaseBranchRefs::new(&branch).origin_suggestion(),
             "origin/develop"
         );
+    }
+
+    #[test]
+    fn a_local_name_keeps_its_name_on_origin() {
+        let branch = RefsFixture::branch("develop");
+
+        assert_eq!(
+            BaseBranchRefs::new(&branch).on_origin(),
+            BaseBranch::new("develop")
+        );
+    }
+
+    #[test]
+    fn an_origin_tracking_name_drops_the_remote_on_origin() {
+        let branch = RefsFixture::branch("origin/main");
+
+        assert_eq!(
+            BaseBranchRefs::new(&branch).on_origin(),
+            BaseBranch::new("main")
+        );
+    }
+
+    #[test]
+    fn the_bare_origin_prefix_names_no_branch_on_origin() {
+        let branch = RefsFixture::branch("origin/");
+
+        assert_eq!(BaseBranchRefs::new(&branch).on_origin(), None);
     }
 
     #[test]

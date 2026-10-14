@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use super::ports::HostProbe;
-use crate::domain::{InvalidName, Repo, RepoName, RepoScope};
+use crate::domain::{BaseBranch, InvalidName, Repo, RepoName, RepoScope, Session};
 
 pub struct RepoMerge<'a> {
     host: &'a dyn HostProbe,
@@ -40,6 +40,16 @@ impl<'a> RepoMerge<'a> {
         explicit
             .iter()
             .find(|repo| self.host.canonical_or_given(repo.path()) == top_level)
+    }
+
+    pub fn base_branch_of<'e>(
+        &self,
+        session: &Session,
+        explicit: &'e [Repo],
+    ) -> Option<&'e BaseBranch> {
+        let repo_path = self.host.canonical_or_given(session.repo_path());
+        self.configured(&repo_path, explicit)
+            .and_then(Repo::base_branch)
     }
 
     fn canonical(&self, repo: &Repo) -> Repo {

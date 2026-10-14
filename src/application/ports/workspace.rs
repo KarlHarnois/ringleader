@@ -5,6 +5,7 @@ use thiserror::Error;
 use super::diff_base::DiffBase;
 use super::dirty_state::DirtyState;
 use super::unmerged_commits::UnmergedCommits;
+use super::upstream_merge::UpstreamMerge;
 use crate::domain::{BaseBranch, DiffStat};
 
 pub trait Workspace: Send + Sync {
@@ -56,6 +57,17 @@ pub trait Workspace: Send + Sync {
         worktree: &Path,
     ) -> Result<UnmergedCommits, WorkspaceError>;
     fn diff_stat(&self, worktree: &Path, base: &DiffBase) -> Result<DiffStat, WorkspaceError>;
+    fn fetch_upstream(
+        &self,
+        worktree: &Path,
+        base_branch: Option<&BaseBranch>,
+    ) -> Result<BaseBranch, WorkspaceError>;
+    fn merge_upstream(
+        &self,
+        worktree: &Path,
+        branch_on_origin: &BaseBranch,
+        started_from: &str,
+    ) -> Result<UpstreamMerge, WorkspaceError>;
     fn validate_repo(&self, path: &Path) -> Result<PathBuf, WorkspaceError>;
     fn version(&self) -> Result<String, WorkspaceError>;
 }
@@ -176,6 +188,22 @@ pub enum WorkspaceError {
     Submodule { path: PathBuf },
     #[error("{repo} has no origin/HEAD, main, or master branch, set base_branch for it")]
     NoBaseBranch { repo: PathBuf },
+    #[error(
+        "{worktree} has no origin/HEAD, origin/main, or origin/master: add an origin remote, or set base_branch for its repo when origin's default has another name"
+    )]
+    NoUpstream { worktree: PathBuf },
+    #[error("{worktree} has a merge in progress, finish or abort it before merging again")]
+    MergeInProgress { worktree: PathBuf },
+    #[error(
+        "{upstream} does not hold the commit this session started from, so it is not the session's base; merge by hand"
+    )]
+    StartedElsewhere { upstream: String },
+    #[error("{worktree} has staged changes, commit them before merging")]
+    StagedChanges { worktree: PathBuf },
+    #[error("{cause}; the merge commit had already landed, so it stays")]
+    MergeLanded { cause: String },
+    #[error("{cause}; undid the unfinished merge, so the worktree is back where it was")]
+    MergeAborted { cause: String },
     #[error(
         "base branch {base} matches neither {local_ref} nor {remote_ref}{}",
         .suggestion.as_ref().map(|name| format!(", did you mean {name}?")).unwrap_or_default()

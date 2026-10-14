@@ -20,6 +20,7 @@ use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
 use super::session_access::{SessionAccess, ShellOutcome};
 use super::session_lifecycle::SessionLifecycle;
+use super::session_merge::MergeReport;
 use super::session_monitor::SessionMonitor;
 use crate::domain::{Config, DiffStat, KeyBindings, PullRequest, Repo, Session, SessionSummary};
 
@@ -239,6 +240,12 @@ impl SessionService {
                 .restart(&reconciliation, name, self.config(), &config_path)?;
         self.entries = reconciliation.entries_with(name, restarted);
         Ok(())
+    }
+
+    pub fn merge_upstream(&mut self, name: &str) -> Result<MergeReport, ServiceError> {
+        let reconciliation = self.reconcile()?;
+        self.lifecycle
+            .merge_upstream(&reconciliation, name, self.config())
     }
 
     pub fn attach(&mut self, name: &str) -> Result<(), ServiceError> {
