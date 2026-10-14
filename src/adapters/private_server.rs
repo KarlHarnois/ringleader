@@ -410,6 +410,24 @@ mod tests {
     }
 
     #[test]
+    fn moving_the_return_key_off_page_up_gives_copy_mode_its_page_key_back() {
+        let server = TmuxTestServer::with_session("holder");
+        let tmux = server.command();
+        let private = PrivateServer::new(&tmux);
+        let original = ServerFixture::binding_of(&server, "copy-mode", "PPage");
+        assert!(!original.is_empty());
+        let page_up = KeyBindings::default().with_return_key(HotKey::parse("PageUp").unwrap());
+
+        private.apply(&page_up).unwrap();
+        private.apply(&KeyBindings::default()).unwrap();
+
+        assert_eq!(
+            ServerFixture::binding_of(&server, "copy-mode", "PPage"),
+            original
+        );
+    }
+
+    #[test]
     fn dropping_a_session_key_copy_mode_binds_gives_that_binding_back() {
         let server = TmuxTestServer::with_session("holder");
         let tmux = server.command();

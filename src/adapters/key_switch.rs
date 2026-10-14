@@ -98,11 +98,10 @@ impl DisplacedBindings {
     }
 
     fn listed_binding(listing: &TmuxOutput, key: &HotKey) -> Option<String> {
-        let name = key.to_string();
         listing
             .stdout()
             .lines()
-            .find(|line| Self::listed_key(line) == Some(name.as_str()))
+            .find(|line| Self::listed_key(line).and_then(HotKey::parse).as_ref() == Some(key))
             .map(str::to_string)
     }
 
