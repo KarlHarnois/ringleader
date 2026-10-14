@@ -200,7 +200,7 @@ mod tests {
     use super::*;
     use crate::application::deletion_guards::BranchPresence;
     use crate::application::ports::{
-        BranchMarker, DirtyState, MultiplexerError, UnmergedCommits, WorkspaceError, WorktreeEntry,
+        DirtyState, MultiplexerError, UnmergedCommits, Workspace, WorkspaceError, WorktreeEntry,
     };
     use crate::application::session_service::SessionService;
     use crate::domain::{AgentPane, NamingScheme, Registration, TmuxAddress};
@@ -249,8 +249,10 @@ mod tests {
                 .without_marker(Self::repo(), session.branch())
         }
 
-        fn marking_command() -> String {
-            BranchMarker::new(Self::session().branch()).marking_command(Self::repo())
+        fn marking_command(fixture: &ServiceFixture) -> String {
+            fixture
+                .workspace()
+                .branch_marking_command(Self::repo(), Self::session().branch())
         }
 
         fn dirty_workspace(files: u64) -> FakeWorkspace {
@@ -333,7 +335,7 @@ mod tests {
 
         let error = DeleteFixture::unconfirmed(&mut fixture.service()).unwrap_err();
 
-        assert_eq!(error.exit_code(), 3);
+        assert!(matches!(error, ServiceError::GuardsChanged { .. }));
         assert!(
             error
                 .to_string()
@@ -433,7 +435,7 @@ mod tests {
             .delete_session("fix-auth", &DeleteConfirmation::confirmed(seen))
             .unwrap_err();
 
-        assert_eq!(error.exit_code(), 3);
+        assert!(matches!(error, ServiceError::GuardsChanged { .. }));
     }
 
     #[test]
@@ -646,7 +648,7 @@ mod tests {
 
         let error = fixture.service().delete_impact("fix-auth").unwrap_err();
 
-        assert_eq!(error.exit_code(), 3);
+        assert!(matches!(error, ServiceError::Conflict(_)));
     }
 
     #[test]
@@ -735,7 +737,7 @@ mod tests {
 
         let error = DeleteFixture::force(&mut fixture.service()).unwrap_err();
 
-        assert_eq!(error.exit_code(), 3);
+        assert!(matches!(error, ServiceError::Conflict(_)));
         assert!(fixture.multiplexer().state_changing_calls().is_empty());
     }
 
@@ -746,7 +748,7 @@ mod tests {
 
         let error = DeleteFixture::force(&mut fixture.service()).unwrap_err();
 
-        assert_eq!(error.exit_code(), 3);
+        assert!(matches!(error, ServiceError::Conflict(_)));
         assert!(
             error
                 .to_string()
@@ -762,11 +764,11 @@ mod tests {
 
         let error = DeleteFixture::force(&mut fixture.service()).unwrap_err();
 
-        assert_eq!(error.exit_code(), ServiceError::CONFLICT_EXIT);
+        assert!(matches!(error, ServiceError::Conflict(_)));
         assert!(
             error
                 .to_string()
-                .contains(&DeleteFixture::marking_command())
+                .contains(&DeleteFixture::marking_command(&fixture))
         );
     }
 
@@ -810,7 +812,7 @@ mod tests {
         assert!(
             error
                 .to_string()
-                .contains(&DeleteFixture::marking_command())
+                .contains(&DeleteFixture::marking_command(&fixture))
         );
     }
 

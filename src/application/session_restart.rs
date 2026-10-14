@@ -334,7 +334,7 @@ mod tests {
 
         let error = RestartFixture::restart(&fixture).unwrap_err();
 
-        assert_eq!(error.exit_code(), 3);
+        assert!(matches!(error, ServiceError::Conflict(_)));
     }
 
     #[test]
@@ -343,10 +343,9 @@ mod tests {
         let fixture = RestartFixture::stopped()
             .with_multiplexer(FakeMultiplexer::new().with_live(ServiceFixture::waiting(&session)));
 
-        assert_eq!(
-            RestartFixture::restart(&fixture).unwrap_err().exit_code(),
-            3
-        );
+        let error = RestartFixture::restart(&fixture).unwrap_err();
+
+        assert!(matches!(error, ServiceError::Conflict(_)));
     }
 
     #[test]
@@ -358,7 +357,7 @@ mod tests {
 
         let error = fixture.service().restart_session("mystery").unwrap_err();
 
-        assert_eq!(error.exit_code(), 3);
+        assert!(matches!(error, ServiceError::Conflict(_)));
     }
 
     #[test]
@@ -450,7 +449,7 @@ mod tests {
 
         let error = RestartFixture::restart(&fixture).unwrap_err();
 
-        assert_eq!(error.exit_code(), 1);
+        assert!(matches!(error, ServiceError::Invalid(_)));
         assert!(fixture.multiplexer().state_changing_calls().is_empty());
     }
 
@@ -477,7 +476,7 @@ mod tests {
 
         let error = RestartFixture::restart(&fixture).unwrap_err();
 
-        assert_eq!(error.exit_code(), 3);
+        assert!(matches!(error, ServiceError::Conflict(_)));
         assert!(
             error
                 .to_string()
@@ -538,14 +537,9 @@ mod tests {
     fn an_unknown_name_is_not_found() {
         let fixture = RestartFixture::stopped();
 
-        assert_eq!(
-            fixture
-                .service()
-                .restart_session("nope")
-                .unwrap_err()
-                .exit_code(),
-            2
-        );
+        let error = fixture.service().restart_session("nope").unwrap_err();
+
+        assert!(matches!(error, ServiceError::NotFound(_)));
     }
 
     #[test]

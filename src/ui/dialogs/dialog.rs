@@ -10,7 +10,6 @@ use super::home_path::HomePath;
 use super::new_session_dialog::NewSessionDialog;
 use super::rename_session_dialog::RenameSessionDialog;
 use super::session_finder::SessionFinder;
-use crate::adapters::app_log::AppLog;
 use crate::application::{DeleteImpact, SessionService};
 use crate::domain::{Session, SessionSummary};
 use crate::ui::app::AppRequest;
@@ -64,10 +63,9 @@ impl Dialog {
     fn help(service: &SessionService) -> Self {
         let paths = service.paths();
         let config_path = service.config_path();
-        let log_path = paths.state_directory().join(AppLog::FILE_NAME);
         let files = [
             ("Config", config_path.as_path()),
-            ("Log", log_path.as_path()),
+            ("Log", paths.log_file()),
             ("tmux socket", paths.tmux_socket()),
             ("tmux config", paths.tmux_config()),
         ];

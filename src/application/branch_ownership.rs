@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use super::ports::{BranchMarker, Workspace};
+use super::ports::Workspace;
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
 use crate::domain::Session;
@@ -28,12 +28,14 @@ impl BranchOwnership {
             "branch {} has no Ringleader marker, refusing to {} it; {}",
             session.branch(),
             mutation.verb(),
-            mutation.advice(session)
+            mutation.advice(&self.marking_advice(session))
         )))
     }
 
-    pub fn marking_advice(session: &Session) -> String {
-        let command = BranchMarker::new(session.branch()).marking_command(session.repo_path());
+    pub fn marking_advice(&self, session: &Session) -> String {
+        let command = self
+            .workspace
+            .branch_marking_command(session.repo_path(), session.branch());
         format!("if Ringleader created it, run {command}")
     }
 
@@ -59,8 +61,7 @@ impl BranchMutation {
         }
     }
 
-    fn advice(self, session: &Session) -> String {
-        let marking = BranchOwnership::marking_advice(session);
+    fn advice(self, marking: &str) -> String {
         match self {
             BranchMutation::Delete => {
                 format!("{marking}, or delete with --forget to drop only the session")

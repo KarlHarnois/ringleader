@@ -42,6 +42,7 @@ pub trait Workspace: Send + Sync {
     fn mark_branch_managed(&self, repo: &Path, branch: &str) -> Result<(), WorkspaceError>;
     fn is_branch_managed(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError>;
     fn list_managed_branches(&self, repo: &Path) -> Result<Vec<String>, WorkspaceError>;
+    fn branch_marking_command(&self, repo: &Path, branch: &str) -> String;
     fn is_branch_published(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError>;
     fn resolve_start_point(
         &self,

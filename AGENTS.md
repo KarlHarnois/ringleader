@@ -53,18 +53,23 @@ These are the commands `.github/workflows/ci.yml` runs. All of them run on pushe
 
 ## Architecture
 
-Ringleader follows hexagonal architecture, also called ports and adapters. The core holds the domain and the use cases. It never imports an adapter, `crossterm`, `ratatui`, or `std::process`. It never runs tmux or git or touches the filesystem or the terminal itself, and reaches them through traits it owns, which adapters outside the core implement.
+Ringleader follows hexagonal architecture, also called ports and adapters. The core holds the domain and the use cases. It never imports an adapter, `crossterm`, `ratatui`, or `std::process`. It never runs tmux or git or touches the filesystem or the terminal itself, and reaches them through traits it owns, which adapters outside the core implement. It never spells out their syntax either: git refs and config keys, tmux targets, and command lines belong to the adapters. When the core shows the user a command, it asks a port for it, the way `BranchOwnership` asks `Workspace::branch_marking_command`.
 
 Dependencies point inward only. An inner layer never imports an outer one.
 
 - `domain` holds the entities, value types, and pure rules. It imports nothing else from the crate.
-- `application` holds the use cases and the ports, and imports only `domain`. It never shells out, never touches the filesystem directly, and never reads the system clock. Ports are traits in `application/ports/`, named after the role they play, such as `Workspace` and `Multiplexer`, with any error type in the same file.
+- `application` holds the use cases and the ports, and imports only `domain`. It never shells out, never touches the filesystem directly, and never reads the system clock. Its errors say what kind of failure happened, and `CliExit` in `cli` alone turns them into exit codes. Ports are traits in `application/ports/`, named after the role they play, such as `Workspace` and `Multiplexer`, with any error type in the same file. A port's error describes the failure in the port's terms, with no field for the tool's subcommand, exit status, or output, and nothing outside the adapters branches on which tool failed.
 - `adapters` holds the driven adapters, which implement the ports with git, tmux, files, and `/proc`, and the process-level types `CompositionRoot` uses directly, such as `ProcessEnvironment`, `XdgPaths`, and `AgentLauncher`. They import `application` and `domain`, never `ui` or `cli`. Each port adapter is named after its technology and the port it implements, such as `GitWorkspace` and `TmuxMultiplexer`.
-- `ui` and `cli` are the driving adapters. They import `application` and `domain`, never `adapters` or each other. They reach the use cases only through the `SessionService` facade, which composes `SessionLifecycle`, `SessionMonitor`, `SessionAccess`, `RepoCatalog`, `PullRequestCatalog`, and `Doctor`, so `ui` and `cli` never call those directly. A port handed to a `ui` or `cli` type, like `Lock`, is called by that type.
-- `main.rs` is the composition root and the only production code that imports every layer. The Wiring section says what it builds.
+- `ui` and `cli` are the driving adapters. They import `application` and `domain`, never `adapters` or each other. They reach the use cases only through the `SessionService` facade, which composes `SessionLifecycle`, `SessionMonitor`, `SessionAccess`, `RepoCatalog`, `PullRequestCatalog`, and `Doctor`, so `ui` and `cli` never call those directly. A port handed to a `ui` or `cli` type, like `Lock`, is called by that type. They hold no business rules: what each session state allows is decided in `domain` or `application`, so the TUI and the CLI cannot disagree.
+- `main.rs` is the composition root and the only production code that imports every layer. The Wiring section says what it builds. It builds and wires, and leaves the use cases a run starts with to the driving adapter, the way `Cli::execute` does for the CLI.
 - `src/test_support/` may import any layer, because it fakes the ports and drives the outer layers under test. Inline `#[cfg(test)]` modules follow their layer's rule, except that any of them may also import `src/test_support/`.
 
-The code breaks the `ui` and `cli` rule in four places today: `SignalFlags` in `ui/event_loop.rs`, `cli/cli_session.rs`, and a test in `cli/session_commands.rs`, and `AppLog` in `ui/dialogs/dialog.rs`. They are violations to fix, not precedent to copy.
+The code breaks these rules in four places today. They are violations to fix, not precedent to copy.
+
+- Advice in `domain/session_summary.rs`, `application/busy_worktree.rs`, `application/server_audit.rs`, `application/delete_outcome.rs`, `application/deletion_guards.rs`, and `application/session_renaming.rs` spells out tmux and git command lines. The tmux ones repeat the exact-target syntax that `TmuxScripts::exact` owns.
+- `WorkspaceError`, `MultiplexerError`, and `PullRequestError` name the git, tmux, or gh subcommand that failed, and `WorkspaceError` and `PullRequestError` keep its exit status and stderr in fields. `ServiceError::TimedOut` names the tool, and `ui/diff_queue.rs` and `ui/home_state.rs` branch on it.
+- `ui/action_gate.rs` decides which actions each session state allows, such as restart only for an Exited or Stopped session, and `StatusNote` in `ui/status_bar.rs` repeats that an Unmanaged session can only be attached. The use cases enforce their own versions of those rules.
+- `CompositionRoot::run_tui` in `main.rs` calls the TUI's startup use cases itself: `restore_server_socket`, `refuse_own_pane`, `load_registry`, and `reapply_server_config`.
 
 A new capability that `application`, `ui`, or `cli` needs from outside the process goes through a port, because none of them may import `adapters`. `CompositionRoot` and the types in `adapters` reach the outside directly. Logging needs no port: every layer writes through the `log` macros, and `CompositionRoot` installs `AppLog` behind them. The steps for a port:
 
@@ -258,6 +263,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     ├── cli.rs              # Cli struct, clap definitions, dispatch
     ├── cli/
     │   ├── cli_output.rs         # CliOutput, writeln! output that stops at a broken pipe
+    │   ├── cli_exit.rs           # CliExit, the exit of one command and the exit code of each service and lock error
     │   ├── cli_session.rs        # CliSession, signal checks, worker waits, the startup input wait the CLI and TUI end with, and the exit of one command
     │   ├── session_commands.rs   # SessionCommands: list, new, delete, attach, rename, restart
     │   ├── list_report.rs        # ListReport, the list text and JSON
@@ -292,7 +298,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── session_service.rs    # SessionService, the facade the UI and CLI call
     │   ├── service_context.rs    # ServiceContext and LoadedConfig, what main injects into the facade
     │   ├── service_ports.rs      # ServicePorts with the StatePorts, RepoPorts, and TmuxPorts bundles
-    │   ├── service_error.rs      # ServiceError and its exit codes
+    │   ├── service_error.rs      # ServiceError, the kinds of failure the use cases report
     │   ├── session_lifecycle.rs  # SessionLifecycle: create, delete, rename, restart, merge
     │   ├── busy_worktree.rs      # BusyWorktree, the tmux server processes that keep a stopped entry from restarting, with the advice for each case
     │   ├── session_creation.rs   # SessionCreation: create_session with its rollbacks
@@ -326,7 +332,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── repo_overrides.rs     # RepoOverrides: the add_repo and remove_repo workers
     │   ├── pending.rs            # Pending, a worker result the TUI polls and the CLI waits on
     │   ├── doctor.rs             # Doctor
-    │   ├── diagnostic_paths.rs   # DiagnosticPaths, the program, state, and private tmux server paths doctor and help report
+    │   ├── diagnostic_paths.rs   # DiagnosticPaths, the program, state, and private tmux server paths doctor and help report, and the log file help shows
     │   ├── tool_version.rs       # ToolVersion, the major and minor numbers of a tmux or git version
     │   ├── doctor_report.rs      # DoctorReport, the doctor's info, warning, and problem lines
     │   ├── registry_audit.rs     # RegistryAudit, the doctor's checks of each registry entry
@@ -337,7 +343,6 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │       ├── session_registry.rs   # SessionRegistry trait
     │       ├── workspace.rs          # Workspace trait
     │       ├── diff_base.rs          # DiffBase, the recorded commit and configured base branch a session diff measures from
-    │       ├── branch_marker.rs      # BranchMarker, the git config entry that marks a branch Ringleader created
     │       ├── dirty_state.rs        # DirtyState, the uncommitted files and nested repos of a worktree
     │       ├── unmerged_commits.rs   # UnmergedCommits, commits on no other ref with the tip and HEAD
     │       ├── upstream_merge.rs     # UpstreamMerge and MergeOutcome, the origin branch a worktree merged and whether it was up to date, merged, or conflicted
@@ -348,7 +353,8 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │       ├── pull_requests.rs      # PullRequests trait
     │       ├── host_probe.rs         # HostProbe trait
     │       ├── clock.rs              # Clock trait
-    │       └── lock.rs               # Lock trait
+    │       ├── lock.rs               # Lock trait
+    │       └── interrupts.rs         # Interrupts trait
     ├── adapters/
     │   ├── mod.rs
     │   ├── agent_launcher.rs     # AgentLauncher, the hidden __exec-agent mode, owns AgentHandoff and the exec seam
@@ -375,9 +381,11 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── git_invocation.rs     # GitInvocation, one git call with its child environment
     │   ├── git_porcelain.rs      # GitPorcelain, parses git's machine-readable output
     │   ├── git_branches.rs       # GitBranches: compare-and-swap delete, rename, the managed-branch marker, and whether a branch has been pushed
+    │   ├── branch_marker.rs      # BranchMarker, the git config entry that marks a branch Ringleader created, and the command that sets it by hand
     │   ├── branch_section.rs     # BranchSection, the git config section and upstream keys of one branch
     │   ├── start_point_resolver.rs # StartPointResolver, the commit a new worktree starts from
     │   ├── base_branch_ladder.rs # BaseBranchLadder, the origin default, main, and master refs tried when no base branch is set
+    │   ├── base_branch_refs.rs   # BaseBranchRefs, the local, remote-tracking, and origin refs a configured base branch is looked up by
     │   ├── diff_base_resolver.rs # DiffBaseResolver, the merge base of a worktree's HEAD with its base branch, which its diff measures from
     │   ├── upstream_merger.rs    # UpstreamMerger, fetches origin's copy of the base branch and merges it into a worktree, listing any conflicted paths
     │   ├── submodule_commits.rs  # SubmoduleCommits, the submodule walk of unmerged_commits
@@ -385,7 +393,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── system_host_probe.rs  # SystemHostProbe
     │   ├── live_process.rs       # LiveProcess, one /proc entry, whether it is the tmux server of a socket, and signals to it
     │   ├── metadata_json.rs      # MetadataJson, the @ringleader_meta JSON each session carries
-    │   ├── signal_flags.rs       # SignalFlags, the SIGHUP, SIGINT, SIGTERM, and SIGQUIT flags
+    │   ├── signal_hook_interrupts.rs # SignalHookInterrupts, the SIGHUP, SIGINT, SIGTERM, and SIGQUIT flags
     │   ├── durable_file.rs       # DurableFile, synced temp file renamed over the target
     │   ├── tmux_command.rs       # TmuxCommand, the private server's `-S` and `-f`, `-u` and `-N`, a child environment without `TMUX` and `TMUX_PANE`, the caller's identity
     │   ├── server_files.rs       # ServerFiles, the private server's socket and generated config, and the 0700 socket directory
@@ -480,7 +488,8 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
         ├── recording_screen_mode.rs # RecordingScreenMode, the screen mode that records each switch
         ├── ui_harness.rs            # UiHarness: scripted input and a TestBackend wrapper for EventLoop tests
         ├── cli_harness.rs           # CliHarness: a Cli run against the fakes with captured output
-        └── fake_lock.rs             # FakeLock
+        ├── fake_lock.rs             # FakeLock
+        └── fake_interrupts.rs       # FakeInterrupts
 ```
 
 ## Layout rules

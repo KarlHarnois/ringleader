@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use super::base_branch_ladder::BaseBranchLadder;
+use super::base_branch_refs::BaseBranchRefs;
 use super::git_invocation::GitInvocation;
 use super::git_runner::GitRunner;
 use super::start_point_resolver::StartPointResolver;
@@ -39,9 +40,12 @@ impl<'a> UpstreamMerger<'a> {
         self.refuse_merge_in_progress(worktree)?;
         self.refuse_staged_changes(worktree)?;
         self.refuse_another_start(worktree, branch, started_from)?;
-        let commit = self.commit_of(worktree, &branch.origin_ref())?;
+        let commit = self.commit_of(worktree, &BaseBranchRefs::new(branch).origin_ref())?;
         let outcome = self.merge_unless_contained(worktree, branch, &commit)?;
-        Ok(UpstreamMerge::new(&branch.origin_suggestion(), outcome))
+        Ok(UpstreamMerge::new(
+            &BaseBranchRefs::new(branch).origin_suggestion(),
+            outcome,
+        ))
     }
 
     fn refuse_merge_in_progress(&self, worktree: &Path) -> Result<(), WorkspaceError> {
@@ -69,12 +73,16 @@ impl<'a> UpstreamMerger<'a> {
         started_from: &str,
     ) -> Result<(), WorkspaceError> {
         let started_on_upstream = !started_from.is_empty()
-            && self.is_ancestor(worktree, started_from, &branch.origin_ref())?;
+            && self.is_ancestor(
+                worktree,
+                started_from,
+                &BaseBranchRefs::new(branch).origin_ref(),
+            )?;
         if started_on_upstream {
             return Ok(());
         }
         Err(WorkspaceError::StartedElsewhere {
-            upstream: branch.origin_suggestion(),
+            upstream: BaseBranchRefs::new(branch).origin_suggestion(),
         })
     }
 
@@ -84,7 +92,7 @@ impl<'a> UpstreamMerger<'a> {
         base_branch: Option<&BaseBranch>,
     ) -> Result<BaseBranch, WorkspaceError> {
         let branch = match base_branch {
-            Some(base) => base.on_origin(),
+            Some(base) => BaseBranchRefs::new(base).on_origin(),
             None => self.origin_default(worktree)?,
         };
         branch.ok_or_else(|| WorkspaceError::NoUpstream {
@@ -103,7 +111,11 @@ impl<'a> UpstreamMerger<'a> {
     }
 
     fn fetch_branch(&self, worktree: &Path, branch: &BaseBranch) -> Result<(), WorkspaceError> {
-        let refspec = format!("+{}:{}", branch.local_ref(), branch.origin_ref());
+        let refspec = format!(
+            "+{}:{}",
+            BaseBranchRefs::new(branch).local_ref(),
+            BaseBranchRefs::new(branch).origin_ref()
+        );
         let fetch = GitInvocation::in_worktree(worktree, "fetch")
             .writing()
             .args([Self::REMOTE, &refspec]);
@@ -134,7 +146,7 @@ impl<'a> UpstreamMerger<'a> {
                 "--no-overwrite-ignore",
                 "-m",
                 &message,
-                &branch.origin_ref(),
+                &BaseBranchRefs::new(branch).origin_ref(),
             ]);
         match self.git.run_checked(&merge) {
             Ok(_) => Ok(MergeOutcome::Merged),
@@ -149,7 +161,7 @@ impl<'a> UpstreamMerger<'a> {
     ) -> Result<String, WorkspaceError> {
         let message = format!(
             "Merge remote-tracking branch '{}'",
-            branch.origin_suggestion()
+            BaseBranchRefs::new(branch).origin_suggestion()
         );
         let checked_out = GitInvocation::in_worktree(worktree, "symbolic-ref").args([
             "--short",

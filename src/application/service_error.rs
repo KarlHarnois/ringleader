@@ -32,20 +32,6 @@ pub enum ServiceError {
 }
 
 impl ServiceError {
-    pub const INVALID_EXIT: u8 = 1;
-    pub const NOT_FOUND_EXIT: u8 = 2;
-    pub const CONFLICT_EXIT: u8 = 3;
-
-    pub fn exit_code(&self) -> u8 {
-        match self {
-            ServiceError::NotFound(_) => Self::NOT_FOUND_EXIT,
-            ServiceError::Conflict(_)
-            | ServiceError::Unmeasurable(_)
-            | ServiceError::GuardsChanged { .. } => Self::CONFLICT_EXIT,
-            _ => Self::INVALID_EXIT,
-        }
-    }
-
     pub fn is_timeout_of(&self, expected: Tool) -> bool {
         matches!(self, ServiceError::TimedOut { tool, .. } if *tool == expected)
     }

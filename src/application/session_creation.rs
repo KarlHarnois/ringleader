@@ -491,7 +491,7 @@ mod tests {
         let error =
             CreateFixture::create(&fixture, CreateFixture::request("FIX_AUTH")).unwrap_err();
 
-        assert_eq!(error.exit_code(), 3);
+        assert!(matches!(error, ServiceError::Conflict(_)));
         CreateFixture::assert_nothing_touched(&fixture);
     }
 
@@ -505,7 +505,7 @@ mod tests {
         let error =
             CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap_err();
 
-        assert_eq!(error.exit_code(), 3);
+        assert!(matches!(error, ServiceError::Conflict(_)));
         CreateFixture::assert_nothing_touched(&fixture);
     }
 
@@ -534,7 +534,7 @@ mod tests {
         let error =
             CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap_err();
 
-        assert_eq!(error.exit_code(), 3);
+        assert!(matches!(error, ServiceError::Conflict(_)));
         CreateFixture::assert_nothing_touched(&fixture);
     }
 
@@ -564,7 +564,7 @@ mod tests {
         let error =
             CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap_err();
 
-        assert_eq!(error.exit_code(), 3);
+        assert!(matches!(error, ServiceError::Conflict(_)));
         assert!(
             error
                 .to_string()
@@ -690,7 +690,7 @@ mod tests {
         let error =
             CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap_err();
 
-        assert_eq!(error.exit_code(), 1);
+        assert!(matches!(error, ServiceError::Invalid(_)));
         CreateFixture::assert_nothing_touched(&fixture);
     }
 
@@ -731,7 +731,7 @@ mod tests {
         )
         .unwrap_err();
 
-        assert_eq!(error.exit_code(), 1);
+        assert!(matches!(error, ServiceError::Invalid(_)));
         CreateFixture::assert_nothing_touched(&fixture);
     }
 

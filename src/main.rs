@@ -29,7 +29,7 @@ use adapters::json_session_registry::JsonSessionRegistry;
 use adapters::null_pull_requests::NullPullRequests;
 use adapters::process_environment::{ProcessEnvironment, ProgramPaths};
 use adapters::server_files::ServerFiles;
-use adapters::signal_flags::SignalFlags;
+use adapters::signal_hook_interrupts::SignalHookInterrupts;
 use adapters::system_clock::SystemClock;
 use adapters::system_host_probe::SystemHostProbe;
 use adapters::tmux_command::TmuxCommand;
@@ -58,9 +58,6 @@ struct CompositionRoot {
 }
 
 impl CompositionRoot {
-    const FAILURE: u8 = 1;
-    const CONFLICT: u8 = 3;
-
     fn capture() -> Self {
         let snapshot = ProcessEnvironment::capture();
         let (programs, environment) = snapshot.split_program_paths();
@@ -109,16 +106,17 @@ impl CompositionRoot {
         let log = match &state_ready {
             Ok(()) => self.start_log(cli),
             Err(error) => Err(AppLog::disabled(
-                &state_directory.join(AppLog::FILE_NAME),
+                &AppLog::path_in(&state_directory),
                 &error.to_string(),
             )),
         };
         self.handoff().delete_stale();
         let signals = match cli.is_mutating() {
-            true => SignalFlags::register().unwrap_or_else(|_| SignalFlags::unregistered()),
-            false => SignalFlags::unregistered(),
+            true => SignalHookInterrupts::register()
+                .unwrap_or_else(|_| SignalHookInterrupts::unregistered()),
+            false => SignalHookInterrupts::unregistered(),
         };
-        let mut session = CliSession::new(CliOutput::standard(), signals);
+        let mut session = CliSession::new(CliOutput::standard(), Box::new(signals));
         if let Err(message) = &log {
             session.output().error(message);
         }
@@ -212,24 +210,24 @@ impl CompositionRoot {
         .collect();
         let mut app = App::new(service, Box::new(io::stdout()), Instant::now())
             .with_message((!warnings.is_empty()).then(|| warnings.join("; ")));
-        let signals = match SignalFlags::register() {
+        let signals = match SignalHookInterrupts::register() {
             Ok(signals) => signals,
             Err(error) => return Self::fail(&error.to_string()),
         };
         if let Err(error) = Self::run_event_loop(&mut app, signals.clone()) {
             return Self::fail(&error.to_string());
         }
-        let mut session = CliSession::new(CliOutput::standard(), signals);
+        let mut session = CliSession::new(CliOutput::standard(), Box::new(signals));
         session.wait_for_startup_input(&app.into_service(), &mut lock);
         ExitCode::SUCCESS
     }
 
-    fn run_event_loop(app: &mut App, signals: SignalFlags) -> io::Result<()> {
+    fn run_event_loop(app: &mut App, signals: SignalHookInterrupts) -> io::Result<()> {
         let screen = TerminalGuard::enter(Box::new(CrosstermScreenMode))?;
         screen.state().install_panic_hook();
         let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
         Self::clear_alternate_screen_leftovers(&mut terminal)?;
-        EventLoop::new(terminal, CrosstermInput, signals, screen.state()).run(app)
+        EventLoop::new(terminal, CrosstermInput, Box::new(signals), screen.state()).run(app)
     }
 
     fn clear_alternate_screen_leftovers(
@@ -311,7 +309,8 @@ impl CompositionRoot {
             &self.programs.git().to_string_lossy(),
             &self.paths.state_directory(),
         )
-        .with_tmux_server(self.server.socket(), self.server.config());
+        .with_tmux_server(self.server.socket(), self.server.config())
+        .with_log_file(&AppLog::path_in(&self.paths.state_directory()));
         match self.paths.has_runtime_directory() {
             true => paths,
             false => paths.with_socket_in_state_directory(),
@@ -341,21 +340,17 @@ impl CompositionRoot {
     }
 
     fn lock_failure(error: &LockError) -> ExitCode {
-        let code = match error {
-            LockError::Held { .. } => Self::CONFLICT,
-            LockError::Io { .. } => Self::FAILURE,
-        };
         let _ = writeln!(io::stderr(), "ringleader: {error}");
-        ExitCode::from(code)
+        ExitCode::from(CliExit::lock_error_code(error))
     }
 
     fn refuse(error: &ServiceError) -> ExitCode {
         let _ = writeln!(io::stderr(), "ringleader: {error}");
-        ExitCode::from(error.exit_code())
+        ExitCode::from(CliExit::error_code(error))
     }
 
     fn fail(message: &str) -> ExitCode {
         let _ = writeln!(io::stderr(), "ringleader: {message}");
-        ExitCode::from(Self::FAILURE)
+        ExitCode::from(CliExit::FAILURE)
     }
 }

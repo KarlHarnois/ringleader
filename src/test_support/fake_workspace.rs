@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use crate::adapters::base_branch_refs::BaseBranchRefs;
 use crate::application::ports::{
     DiffBase, DirtyState, MergeOutcome, StartPoint, UnmergedCommits, UpstreamMerge, Workspace,
     WorkspaceError, WorktreeEntry,
@@ -481,6 +482,10 @@ impl Workspace for FakeWorkspace {
         }))
     }
 
+    fn branch_marking_command(&self, repo: &Path, branch: &str) -> String {
+        format!("mark-managed {} {branch}", repo.display())
+    }
+
     fn is_branch_published(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError> {
         self.call("is_branch_published", branch.to_string())?;
         Ok(self.edit(|state| {
@@ -533,7 +538,7 @@ impl Workspace for FakeWorkspace {
         self.call("fetch_upstream", format!("{} {base}", worktree.display()))?;
         let default_branch = BaseBranch::new(Self::UPSTREAM_BRANCH);
         Ok(base_branch
-            .and_then(BaseBranch::on_origin)
+            .and_then(|base| BaseBranchRefs::new(base).on_origin())
             .or(default_branch)
             .expect("the fake's upstream branch has a name"))
     }
