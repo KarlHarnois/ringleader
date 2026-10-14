@@ -290,7 +290,7 @@ impl CompositionRoot {
         let context = ServiceContext::new(loaded, &self.launch_directory)
             .with_home(self.paths.home())
             .with_diagnostics(self.diagnostics())
-            .with_shell(&self.shell());
+            .with_shell(&self.environment.shell());
         SessionService::new(ServicePorts::new(state, repos, tmux_ports), context)
     }
 
@@ -345,13 +345,6 @@ impl CompositionRoot {
 
     fn handoff(&self) -> AgentHandoff {
         AgentHandoff::new(&self.paths.handoff_directory(), &self.environment)
-    }
-
-    fn shell(&self) -> String {
-        self.environment
-            .get("SHELL")
-            .map(|shell| shell.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "sh".to_string())
     }
 
     fn lock_failure(error: &LockError) -> ExitCode {

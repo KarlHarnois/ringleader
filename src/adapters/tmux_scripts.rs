@@ -31,7 +31,7 @@ impl TmuxScripts {
         TmuxSequence::new().command(["list-sessions", "-F", TmuxListing::SESSION_ID_FORMAT])
     }
 
-    pub fn create_session(spec: &SessionSpec, launcher: &[OsString]) -> TmuxSequence {
+    pub fn create_session(spec: &SessionSpec, launcher: &[OsString], shell: &str) -> TmuxSequence {
         let target = Self::exact(spec.tmux_name());
         let size = spec.size();
         let mut new_session = Self::words(&[
@@ -49,9 +49,17 @@ impl TmuxScripts {
         new_session.extend(launcher.iter().cloned());
         TmuxSequence::new()
             .command(new_session)
-            .command(["set-option", "-p", "-t", &target, "@ringleader_agent", "1"])
+            .command([
+                "set-option",
+                "-p",
+                "-t",
+                &target,
+                TmuxListing::AGENT_TAG,
+                "1",
+            ])
             .command(["set-option", "-p", "-t", &target, "remain-on-exit", "on"])
             .command(["set-option", "-t", &target, "destroy-unattached", "off"])
+            .command(["set-option", "-t", &target, "default-command", shell])
             .command(Self::metadata_option(&target, spec.metadata()))
             .command([
                 "display-message",
@@ -74,7 +82,14 @@ impl TmuxScripts {
         new_window.extend(launcher.iter().cloned());
         TmuxSequence::new()
             .command(new_window)
-            .command(["set-option", "-p", "-t", &target, "@ringleader_agent", "1"])
+            .command([
+                "set-option",
+                "-p",
+                "-t",
+                &target,
+                TmuxListing::AGENT_TAG,
+                "1",
+            ])
             .command(["set-option", "-p", "-t", &target, "remain-on-exit", "on"])
             .command([
                 "display-message",
@@ -105,7 +120,14 @@ impl TmuxScripts {
         new_window.extend(Self::words(&["-P", "-F", Self::WINDOW_CREATED, shell]));
         TmuxSequence::new()
             .command(new_window)
-            .command(["set-option", "-w", "-t", &target, "@ringleader_shell", "1"])
+            .command([
+                "set-option",
+                "-w",
+                "-t",
+                &target,
+                TmuxListing::SHELL_TAG,
+                "1",
+            ])
             .command([
                 "display-message",
                 "-p",
@@ -121,7 +143,7 @@ impl TmuxScripts {
             "-t",
             &Self::exact(tmux_name),
             "-F",
-            TmuxListing::WINDOW_FORMAT,
+            &TmuxListing::window_format(),
         ])
     }
 
@@ -204,7 +226,13 @@ impl TmuxScripts {
 
     fn metadata_option(target: &str, metadata: &SessionMetadata) -> Vec<OsString> {
         let encoded = MetadataJson::encode(metadata);
-        Self::words(&["set-option", "-t", target, "@ringleader_meta", &encoded])
+        Self::words(&[
+            "set-option",
+            "-t",
+            target,
+            TmuxListing::METADATA_OPTION,
+            &encoded,
+        ])
     }
 
     fn start_in(directory: &Path) -> Vec<OsString> {

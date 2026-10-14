@@ -66,6 +66,10 @@ impl TmuxCommand {
         self.environment.terminal()
     }
 
+    pub fn caller_shell(&self) -> String {
+        self.caller.shell()
+    }
+
     pub fn query(&self, sequence: &TmuxSequence) -> Result<TmuxOutput, TmuxError> {
         self.run(
             sequence,
@@ -146,10 +150,11 @@ impl TmuxCommand {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 struct CallerIdentity {
     tmux: Option<OsString>,
     pane: Option<String>,
+    shell: String,
 }
 
 impl CallerIdentity {
@@ -166,6 +171,7 @@ impl CallerIdentity {
             pane: environment
                 .get(Self::TMUX_PANE)
                 .map(|pane| pane.to_string_lossy().into_owned()),
+            shell: environment.shell(),
         }
     }
 
@@ -177,6 +183,10 @@ impl CallerIdentity {
 
     fn pane(&self) -> Option<String> {
         self.pane.clone()
+    }
+
+    fn shell(&self) -> String {
+        self.shell.clone()
     }
 }
 

@@ -32,6 +32,7 @@ impl Config {
                 draft.return_key_value(),
                 draft.next_session_keys_value(),
                 draft.previous_session_keys_value(),
+                draft.shell_toggle_keys_value(),
             ),
             intervals: draft.intervals(),
             activity_idle_seconds: draft.activity_idle_seconds_value(),
@@ -240,5 +241,12 @@ mod tests {
         let config = Config::defaults(Path::new("/worktrees")).with_agents(agents);
 
         assert_eq!(config.default_agent().unwrap().name(), "claude");
+    }
+
+    #[test]
+    fn a_draft_that_leaves_the_bell_unset_keeps_it_off() {
+        let config = Config::new(&ConfigDraft::new(Path::new("/worktrees"))).unwrap();
+
+        assert!(!config.bell_on_waiting());
     }
 }

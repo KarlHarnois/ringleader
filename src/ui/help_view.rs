@@ -55,6 +55,8 @@ impl HelpView {
     const NEXT_SESSION_ACTION: &'static str = "switch to the next session by name while attached";
     const PREVIOUS_SESSION_ACTION: &'static str =
         "switch to the previous session by name while attached";
+    const SHELL_TOGGLE_ACTION: &'static str =
+        "switch between the agent and the shell while attached";
     const FIRST_SPINNER_TICK: u64 = 0;
     const PULL_REQUEST_SYMBOL: &'static str = "#n";
     const CLOSE_HINT: &'static str = "? Esc q close";
@@ -86,6 +88,10 @@ impl HelpView {
             (
                 Self::shown(key_bindings.previous_session_keys()),
                 Self::PREVIOUS_SESSION_ACTION,
+            ),
+            (
+                Self::shown(key_bindings.shell_toggle_keys()),
+                Self::SHELL_TOGGLE_ACTION,
             ),
         ];
         rows.into_iter()
@@ -234,8 +240,8 @@ mod tests {
         const SHORT_WIDTH: usize = 56;
         const SHORT_HEIGHT: usize = 8;
         const PAST_THE_END: usize = 50;
-        const ROWS_ABOVE_THE_SMALLEST_FULL_SIZE: u16 = 7;
-        const TALL_NARROW_SIZE: (u16, u16) = (79, 31);
+        const ROWS_ABOVE_THE_SMALLEST_FULL_SIZE: u16 = 8;
+        const TALL_NARROW_SIZE: (u16, u16) = (79, 32);
         const TMUX_CONFIG_ROW: &'static str = "tmux config  ~/.local/state/ringleader/tmux.conf";
 
         fn help() -> HelpView {
@@ -488,6 +494,36 @@ mod tests {
         let text = HelpFixture::text(&HelpFixture::help_for(&bindings));
 
         assert!(!text.contains("next session"));
+    }
+
+    #[test]
+    fn the_help_lists_the_default_shell_toggle_key() {
+        let rows = HelpFixture::rows(&HelpFixture::help(), HelpFixture::WIDE_WIDTH);
+
+        assert!(rows.contains(
+            &"Alt-l        switch between the agent and the shell while attached".to_string()
+        ));
+    }
+
+    #[test]
+    fn the_help_lists_the_configured_shell_toggle_keys() {
+        let bindings =
+            KeyBindings::default().with_shell_toggle_keys(HotKey::parse_valid(["M-o", "F8"]));
+
+        let text = HelpFixture::text(&HelpFixture::help_for(&bindings));
+
+        assert!(
+            text.contains("Alt-o F8     switch between the agent and the shell while attached")
+        );
+    }
+
+    #[test]
+    fn no_shell_toggle_keys_have_no_row() {
+        let bindings = KeyBindings::default().with_shell_toggle_keys(Vec::new());
+
+        let text = HelpFixture::text(&HelpFixture::help_for(&bindings));
+
+        assert!(!text.contains("the agent and the shell"));
     }
 
     #[test]

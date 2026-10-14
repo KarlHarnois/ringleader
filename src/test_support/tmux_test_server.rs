@@ -16,7 +16,8 @@ use crate::adapters::server_files::ServerFiles;
 use crate::adapters::tmux_command::TmuxCommand;
 use crate::adapters::tmux_multiplexer::TmuxMultiplexer;
 use crate::adapters::tmux_server_config::TmuxServerConfig;
-use crate::domain::KeyBindings;
+use crate::application::ports::{AgentLaunch, Multiplexer, SessionSpec};
+use crate::domain::{KeyBindings, RepoName, SessionMetadata, SessionRepo, SessionWorktree};
 
 pub struct TmuxTestServer {
     directory: TempDir,
@@ -28,6 +29,7 @@ impl TmuxTestServer {
     pub const STAND_IN: [&'static str; 4] = ["sh", "-c", "sleep 30", "--"];
     const SETTLE_LIMIT: Duration = Duration::from_secs(2);
     const POLL_INTERVAL: Duration = Duration::from_millis(20);
+    const OUTER_SESSION: &'static str = "outer";
 
     pub fn new() -> Self {
         Self::with_config(&TmuxServerConfig::new(&KeyBindings::default()).render())
@@ -189,6 +191,63 @@ impl TmuxTestServer {
         String::from_utf8_lossy(&output.stdout)
             .trim_end()
             .to_string()
+    }
+
+    pub fn managed_session(&self, name: &str) -> PathBuf {
+        self.managed_session_through(&self.multiplexer(), name)
+    }
+
+    pub fn managed_session_through(&self, multiplexer: &TmuxMultiplexer, name: &str) -> PathBuf {
+        let worktree = self.directory().join(name);
+        std::fs::create_dir_all(&worktree).expect("the worktree directory is created");
+        let metadata = SessionMetadata::new(
+            SessionRepo::new(
+                RepoName::parse("example-project").expect("a valid repo name"),
+                &worktree,
+            ),
+            SessionWorktree::new(&worktree, &format!("ringleader/{name}"), ""),
+            "stand-in",
+        );
+        let launch = AgentLaunch::new(Vec::new(), &[], &worktree);
+        let spec = SessionSpec::new(&format!("ringleader-{name}"), metadata, launch);
+        multiplexer
+            .create_session(&spec)
+            .expect("the managed session starts");
+        worktree
+    }
+
+    pub fn nested_client(&self, target: &str) -> TmuxTestServer {
+        let outer = TmuxTestServer::new();
+        let socket = self.socket().display().to_string();
+        let config = self.config().display().to_string();
+        outer.text(&[
+            "new-session",
+            "-d",
+            "-s",
+            Self::OUTER_SESSION,
+            "env",
+            "-u",
+            "TMUX",
+            "-u",
+            "TMUX_PANE",
+            "tmux",
+            "-u",
+            "-S",
+            &socket,
+            "-f",
+            &config,
+            "attach-session",
+            "-t",
+            target,
+        ]);
+        outer
+    }
+
+    pub fn type_bytes(&self, typed: &[&str]) {
+        let outer = format!("={}:", Self::OUTER_SESSION);
+        let mut typing = vec!["send-keys", "-t", &outer, "-H"];
+        typing.extend(typed);
+        self.text(&typing);
     }
 
     pub fn start_session(&self, name: &str) {
