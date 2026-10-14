@@ -61,7 +61,7 @@ impl<'a> ActionGate<'a> {
             KeyCode::Char('t') => KeyAction::from(self.shell().map(KeyAction::Request)),
             KeyCode::Char('s') => KeyAction::from(self.restart().map(KeyAction::Request)),
             KeyCode::Char('d') => KeyAction::from(self.delete().map(KeyAction::Request)),
-            KeyCode::Char('m') => KeyAction::from(self.merge().map(KeyAction::Request)),
+            KeyCode::Char('p') => KeyAction::from(self.pull().map(KeyAction::Request)),
             KeyCode::Char('R') => KeyAction::from(
                 self.rename()
                     .map(|session| KeyAction::Open(DialogOpening::Rename(Box::new(session)))),
@@ -133,7 +133,7 @@ impl<'a> ActionGate<'a> {
         }
     }
 
-    pub fn merge(&self) -> Result<AppRequest, String> {
+    pub fn pull(&self) -> Result<AppRequest, String> {
         self.writable()?;
         let row = self.selected()?;
         let name = row.name();
@@ -142,10 +142,10 @@ impl<'a> ActionGate<'a> {
                 name.to_string(),
             ))),
             SessionState::Unmanaged => {
-                Err(format!("{name} is unmanaged, so m cannot merge into it."))
+                Err(format!("{name} is unmanaged, so p cannot pull into it."))
             }
             state => Err(format!(
-                "{name} is {}, m only merges into a session waiting at its prompt.",
+                "{name} is {}, p only pulls into a session waiting at its prompt.",
                 state.label()
             )),
         }
@@ -288,11 +288,11 @@ mod tests {
     }
 
     #[test]
-    fn a_waiting_session_merges() {
+    fn a_waiting_session_pulls() {
         let row = GateFixture::row(SessionState::Waiting);
 
         assert_eq!(
-            ActionGate::new(Some(&row), None).merge(),
+            ActionGate::new(Some(&row), None).pull(),
             Ok(AppRequest::Block(BlockingOperation::Merge(
                 "fix-auth".to_string()
             )))
@@ -300,7 +300,7 @@ mod tests {
     }
 
     #[test]
-    fn a_session_away_from_its_prompt_cannot_merge() {
+    fn a_session_away_from_its_prompt_cannot_pull() {
         for state in [
             SessionState::Working,
             SessionState::Exited,
@@ -309,9 +309,9 @@ mod tests {
             let row = GateFixture::row(state);
 
             assert_eq!(
-                ActionGate::new(Some(&row), None).merge(),
+                ActionGate::new(Some(&row), None).pull(),
                 Err(format!(
-                    "fix-auth is {}, m only merges into a session waiting at its prompt.",
+                    "fix-auth is {}, p only pulls into a session waiting at its prompt.",
                     state.label()
                 ))
             );
@@ -319,7 +319,7 @@ mod tests {
     }
 
     #[test]
-    fn an_unmanaged_session_cannot_merge() {
+    fn an_unmanaged_session_cannot_pull() {
         let stranger = ServiceFixture::session("mystery");
         let row = SessionSummary::unmanaged(UnmanagedSession::new(
             "mystery",
@@ -327,18 +327,18 @@ mod tests {
         ));
 
         assert_eq!(
-            ActionGate::new(Some(&row), None).merge(),
-            Err("mystery is unmanaged, so m cannot merge into it.".to_string())
+            ActionGate::new(Some(&row), None).pull(),
+            Err("mystery is unmanaged, so p cannot pull into it.".to_string())
         );
     }
 
     #[test]
-    fn a_read_only_tui_refuses_a_merge_with_the_config_error() {
+    fn a_read_only_tui_refuses_a_pull_with_the_config_error() {
         let row = GateFixture::row(SessionState::Waiting);
         let error = GateFixture::config_error();
 
         let refusal = ActionGate::new(Some(&row), Some(&error))
-            .merge()
+            .pull()
             .unwrap_err();
 
         assert!(refusal.starts_with("config error, running read-only: "));

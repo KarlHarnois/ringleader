@@ -38,8 +38,8 @@ impl HelpView {
         ("t", "open a shell in the selected session's worktree"),
         ("s", "restart an exited or stopped session"),
         (
-            "m",
-            "merge the base branch from origin, the agent fixes conflicts",
+            "p",
+            "pull the base branch from origin, the agent fixes conflicts",
         ),
         (
             "r",

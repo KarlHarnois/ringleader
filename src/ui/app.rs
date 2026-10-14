@@ -659,11 +659,11 @@ mod tests {
     }
 
     #[test]
-    fn m_on_a_waiting_session_asks_for_a_merge_behind_a_busy_message() {
+    fn p_on_a_waiting_session_asks_for_a_pull_behind_a_busy_message() {
         let fixture = AppFixture::deletable();
         let mut app = AppFixture::started(&fixture, 100, 28);
 
-        let request = app.handle_event(&UiHarness::character('m'));
+        let request = app.handle_event(&UiHarness::character('p'));
 
         assert_eq!(
             request,

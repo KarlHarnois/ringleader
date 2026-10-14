@@ -98,12 +98,12 @@ impl KeyHints {
         ("Enter", "attach"),
         ("t", "shell"),
         ("s", "restart"),
-        ("m", "merge"),
+        ("p", "pull"),
         ("r", "refresh"),
         ("?", "help"),
         ("q", "quit"),
     ];
-    const DROP_ORDER: [&'static str; 6] = ["m", "r", "s", "t", "R", "d"];
+    const DROP_ORDER: [&'static str; 6] = ["p", "r", "s", "t", "R", "d"];
     const WIDE_GAP: &'static str = "   ";
     const NARROW_GAP: &'static str = "  ";
 
@@ -225,12 +225,12 @@ mod tests {
     }
 
     #[test]
-    fn a_hundred_and_ten_column_bar_also_lists_merge() {
+    fn a_hundred_and_ten_column_bar_also_lists_pull() {
         let text = BarFixture::render(StatusBar::new(Theme), 110);
 
         assert_eq!(
             text,
-            " n new   d delete   R rename   Enter attach   t shell   s restart   m merge   r refresh   ? help   q quit"
+            " n new   d delete   R rename   Enter attach   t shell   s restart   p pull   r refresh   ? help   q quit"
         );
     }
 
