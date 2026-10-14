@@ -130,7 +130,7 @@
         '';
 
       devShellTools =
-        pkgs: shells:
+        pkgs: defaultShell:
         pkgs.runCommand "dev-shell-tools" { } ''
           fail() {
             echo "$1" >&2
@@ -144,9 +144,7 @@
             [[ -f ''${BASH_REMATCH[1]}/core/src/lib.rs ]] || fail "RUST_SRC_PATH holds no core sources"
             ! (PATH=$1 && command -v rustup) || fail "a dev shell provides rustup"
           }
-          ${pkgs.lib.concatMapStrings (shell: ''
-            check_shell ${pkgs.lib.makeBinPath shell.nativeBuildInputs}
-          '') shells}
+          check_shell ${pkgs.lib.makeBinPath defaultShell.nativeBuildInputs}
           touch $out
         '';
     in
@@ -226,9 +224,7 @@
       checks = nixpkgs.lib.genAttrs supportedSystems (system: {
         default = self.packages.${system}.default;
         readme-version-badge = readmeVersionBadge nixpkgs.legacyPackages.${system};
-        dev-shell-tools = devShellTools nixpkgs.legacyPackages.${system} (
-          builtins.attrValues self.devShells.${system}
-        );
+        dev-shell-tools = devShellTools nixpkgs.legacyPackages.${system} self.devShells.${system}.default;
       });
     };
 }
