@@ -50,8 +50,8 @@ impl Session {
         self.metadata.base_commit()
     }
 
-    pub fn base_branch(&self) -> Option<&BaseBranch> {
-        self.metadata.base_branch()
+    pub fn requested_base_branch(&self) -> Option<&BaseBranch> {
+        self.metadata.requested_base_branch()
     }
 
     pub fn agent(&self) -> &str {

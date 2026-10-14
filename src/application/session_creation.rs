@@ -351,7 +351,7 @@ mod tests {
 
         let session = CreateFixture::create(&fixture, request).unwrap();
 
-        assert_eq!(session.base_branch(), Some(&develop));
+        assert_eq!(session.requested_base_branch(), Some(&develop));
     }
 
     #[test]
@@ -366,7 +366,7 @@ mod tests {
 
         let session = CreateFixture::create(&fixture, request).unwrap();
 
-        assert_eq!(session.base_branch(), None);
+        assert_eq!(session.requested_base_branch(), None);
     }
 
     #[test]

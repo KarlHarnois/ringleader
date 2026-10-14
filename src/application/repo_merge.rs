@@ -48,7 +48,7 @@ impl<'a> RepoMerge<'a> {
         explicit: &'s [Repo],
     ) -> Option<&'s BaseBranch> {
         session
-            .base_branch()
+            .requested_base_branch()
             .or_else(|| self.configured_base_branch(session, explicit))
     }
 

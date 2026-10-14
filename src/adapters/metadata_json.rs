@@ -23,7 +23,7 @@ impl MetadataJson {
             repo_path: metadata.repo_path().to_path_buf(),
             branch: metadata.branch().to_string(),
             base_commit: metadata.base_commit().to_string(),
-            base_branch: metadata.base_branch().map(ToString::to_string),
+            base_branch: metadata.requested_base_branch().map(ToString::to_string),
             worktree_path: metadata.worktree_path().to_path_buf(),
             agent: metadata.agent().to_string(),
         };
@@ -74,7 +74,10 @@ mod tests {
 
         let decoded = MetadataJson::decode(&MetadataJson::encode(session.metadata())).unwrap();
 
-        assert_eq!(decoded.base_branch(), BaseBranch::new("develop").as_ref());
+        assert_eq!(
+            decoded.requested_base_branch(),
+            BaseBranch::new("develop").as_ref()
+        );
     }
 
     #[test]

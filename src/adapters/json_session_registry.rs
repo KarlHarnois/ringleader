@@ -135,7 +135,7 @@ impl SessionEntry {
             worktree_path: session.worktree_path().to_path_buf(),
             branch: session.branch().to_string(),
             base_commit: session.base_commit().to_string(),
-            base_branch: session.base_branch().map(ToString::to_string),
+            base_branch: session.requested_base_branch().map(ToString::to_string),
             agent: session.agent().to_string(),
             tmux_session_name: session.tmux_name().to_string(),
             socket_path: session.socket_path().to_path_buf(),
@@ -230,7 +230,10 @@ mod tests {
         fixture.registry().save(&[session]).unwrap();
 
         let loaded = fixture.registry().load().unwrap();
-        assert_eq!(loaded[0].base_branch(), BaseBranch::new("develop").as_ref());
+        assert_eq!(
+            loaded[0].requested_base_branch(),
+            BaseBranch::new("develop").as_ref()
+        );
     }
 
     #[test]
@@ -255,7 +258,7 @@ mod tests {
 
         let sessions = fixture.registry().load().unwrap();
 
-        assert_eq!(sessions[0].base_branch(), None);
+        assert_eq!(sessions[0].requested_base_branch(), None);
     }
 
     #[test]

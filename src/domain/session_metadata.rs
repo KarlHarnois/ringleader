@@ -9,7 +9,7 @@ pub struct SessionMetadata {
     repo_path: PathBuf,
     branch: String,
     base_commit: String,
-    base_branch: Option<BaseBranch>,
+    requested_base_branch: Option<BaseBranch>,
     worktree_path: PathBuf,
     agent: String,
 }
@@ -21,7 +21,7 @@ impl SessionMetadata {
             repo_path: repo.path,
             branch: worktree.branch,
             base_commit: worktree.base_commit,
-            base_branch: worktree.base_branch,
+            requested_base_branch: worktree.requested_base_branch,
             worktree_path: worktree.path,
             agent: agent.to_string(),
         }
@@ -43,8 +43,8 @@ impl SessionMetadata {
         &self.base_commit
     }
 
-    pub fn base_branch(&self) -> Option<&BaseBranch> {
-        self.base_branch.as_ref()
+    pub fn requested_base_branch(&self) -> Option<&BaseBranch> {
+        self.requested_base_branch.as_ref()
     }
 
     pub fn worktree_path(&self) -> &Path {
@@ -87,7 +87,7 @@ pub struct SessionWorktree {
     path: PathBuf,
     branch: String,
     base_commit: String,
-    base_branch: Option<BaseBranch>,
+    requested_base_branch: Option<BaseBranch>,
 }
 
 impl SessionWorktree {
@@ -96,13 +96,13 @@ impl SessionWorktree {
             path: path.to_path_buf(),
             branch: branch.to_string(),
             base_commit: base_commit.to_string(),
-            base_branch: None,
+            requested_base_branch: None,
         }
     }
 
-    pub fn based_on(self, base_branch: Option<BaseBranch>) -> Self {
+    pub fn based_on(self, requested_base_branch: Option<BaseBranch>) -> Self {
         Self {
-            base_branch,
+            requested_base_branch,
             ..self
         }
     }
