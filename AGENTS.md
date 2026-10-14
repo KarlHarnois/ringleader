@@ -310,6 +310,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── unseen_session.rs     # UnseenSession, a tmux server Ringleader cannot see that may still hold a stopped entry's session, which rename refuses and delete refuses or warns about
     │   ├── session_creation.rs   # SessionCreation: create_session with its rollbacks
     │   ├── start_point_resolver.rs # StartPointResolver, the commit a new worktree starts from, or why there is none
+    │   ├── base_branch_ladders.rs # BaseBranchLadders, the base branch ladder of a checkout, led by origin's default and skipping the repo's session branches, which the start point, diff base, and upstream resolvers share
     │   ├── worktree_rollback.rs  # WorktreeRollback, removes the worktree and branch of a failed create
     │   ├── creation_plan.rs      # CreationPlan and CreateRequest
     │   ├── use_checks.rs         # UseChecks, the checks a create or a restart runs before acting

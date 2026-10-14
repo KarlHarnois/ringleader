@@ -1,25 +1,26 @@
 use std::iter;
 use std::path::Path;
 
+use super::base_branch_ladders::BaseBranchLadders;
 use super::ports::{StartPoint, Workspace, WorkspaceError};
-use crate::domain::{BaseBranch, BaseBranchLadder, Branch, BranchTips};
+use crate::domain::{BaseBranch, Branch, BranchTips};
 
 pub struct DiffBaseResolver<'a> {
     workspace: &'a dyn Workspace,
-    session_branches: Vec<Branch>,
+    ladders: BaseBranchLadders<'a>,
 }
 
 impl<'a> DiffBaseResolver<'a> {
     pub fn new(workspace: &'a dyn Workspace) -> Self {
         Self {
             workspace,
-            session_branches: Vec::new(),
+            ladders: BaseBranchLadders::new(workspace),
         }
     }
 
     pub fn skipping(self, session_branches: Vec<Branch>) -> Self {
         Self {
-            session_branches,
+            ladders: self.ladders.skipping(session_branches),
             ..self
         }
     }
@@ -84,10 +85,7 @@ impl<'a> DiffBaseResolver<'a> {
         worktree: &Path,
         checked_out: Option<&Branch>,
     ) -> Result<Vec<String>, WorkspaceError> {
-        let origin_default = self
-            .workspace
-            .remote_default_branch(worktree, Branch::ORIGIN)?;
-        let ladder = BaseBranchLadder::new(origin_default).skipping(&self.session_branches);
+        let ladder = self.ladders.at(worktree)?;
         let tips = self
             .workspace
             .branch_tips(worktree, &ladder.diff_lookups())?;

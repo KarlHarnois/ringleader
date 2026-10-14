@@ -1,25 +1,26 @@
 use std::path::Path;
 
+use super::base_branch_ladders::BaseBranchLadders;
 use super::ports::{StartPoint, Workspace};
 use super::service_error::ServiceError;
-use crate::domain::{BaseBranch, BaseBranchLadder, Branch};
+use crate::domain::{BaseBranch, Branch};
 
 pub struct StartPointResolver<'a> {
     workspace: &'a dyn Workspace,
-    session_branches: Vec<Branch>,
+    ladders: BaseBranchLadders<'a>,
 }
 
 impl<'a> StartPointResolver<'a> {
     pub fn new(workspace: &'a dyn Workspace) -> Self {
         Self {
             workspace,
-            session_branches: Vec::new(),
+            ladders: BaseBranchLadders::new(workspace),
         }
     }
 
     pub fn skipping(self, session_branches: Vec<Branch>) -> Self {
         Self {
-            session_branches,
+            ladders: self.ladders.skipping(session_branches),
             ..self
         }
     }
@@ -57,10 +58,7 @@ impl<'a> StartPointResolver<'a> {
     }
 
     fn resolve_ladder(&self, repo: &Path) -> Result<StartPoint, ServiceError> {
-        let origin_default = self.workspace.remote_default_branch(repo, Branch::ORIGIN)?;
-        let candidates = BaseBranchLadder::new(origin_default)
-            .skipping(&self.session_branches)
-            .start_candidates();
+        let candidates = self.ladders.at(repo)?.start_candidates();
         let tips = self.workspace.branch_tips(repo, &candidates)?;
         if let Some(commit) = tips.first_of(&candidates) {
             return Ok(StartPoint::Commit(commit.to_string()));
