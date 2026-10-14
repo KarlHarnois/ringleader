@@ -329,6 +329,22 @@ mod tests {
     }
 
     #[test]
+    fn a_stopped_session_on_the_private_socket_renames_while_that_server_runs() {
+        let session = ServiceFixture::session("fix-auth");
+        let fixture = RenameFixture::registered(session.clone()).with_host(
+            ServiceFixture::host_for(&[&session])
+                .with_tmux_server_on(Path::new(FakeMultiplexer::SOCKET)),
+        );
+
+        let renamed = fixture
+            .service()
+            .rename_session("fix-auth", "fix-login")
+            .unwrap();
+
+        assert_eq!(renamed.name().as_str(), "fix-login");
+    }
+
+    #[test]
     fn rename_moves_the_branch_and_the_tmux_session() {
         let fixture = RenameFixture::live(&["fix-auth"]);
 

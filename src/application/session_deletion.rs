@@ -321,6 +321,19 @@ mod tests {
     }
 
     #[test]
+    fn a_delete_on_the_private_socket_warns_of_no_stray_session_while_that_server_runs() {
+        let session = DeleteFixture::session();
+        let fixture = DeleteFixture::stopped_fixture().with_host(
+            ServiceFixture::host_for(&[&session])
+                .with_tmux_server_on(Path::new(FakeMultiplexer::SOCKET)),
+        );
+
+        let outcome = DeleteFixture::force(&mut fixture.service()).unwrap();
+
+        assert_eq!(outcome.stray_session(), None);
+    }
+
+    #[test]
     fn a_stray_session_warning_never_sends_the_user_to_adopt_it_back() {
         let recorded = Path::new(ServiceFixture::OTHER_RUNTIME_SOCKET);
         let session = DeleteFixture::session().on_socket(recorded);
