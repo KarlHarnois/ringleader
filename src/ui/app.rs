@@ -358,11 +358,7 @@ mod tests {
         fn observed(fixture: &ServiceFixture) -> App {
             let mut app = UiHarness::app(fixture);
             app.resize(UiHarness::WIDTH, UiHarness::HEIGHT);
-            let deadline = Instant::now() + Self::LIMIT;
-            while Self::selected(&app).is_none() && Instant::now() < deadline {
-                app.on_tick(Instant::now());
-                std::thread::sleep(Self::POLL_INTERVAL);
-            }
+            app.observe();
             app
         }
 
