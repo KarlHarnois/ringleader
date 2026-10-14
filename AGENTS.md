@@ -293,7 +293,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── naming_scheme.rs      # NamingScheme, the worktree root and tmux prefix a session records
     │   ├── pull_request.rs       # PullRequest, its number, state, and opening time
     │   ├── hot_key.rs            # HotKey, a key a terminal can send, which every key binding is made of
-    │   └── key_bindings.rs       # KeyBindings, the return key that detaches back to Ringleader and the keys that switch to the next and previous session
+    │   └── key_bindings.rs       # KeyBindings, the return key that detaches back to Ringleader, the keys that switch to the next and previous session, and the keys that toggle between the agent and the shell
     ├── application/
     │   ├── mod.rs
     │   ├── session_service.rs    # SessionService, the facade the UI and CLI call
@@ -361,7 +361,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── agent_launcher.rs     # AgentLauncher, the hidden __exec-agent mode, owns AgentHandoff and the exec seam
     │   ├── agent_handoff.rs      # AgentHandoff, the handoff file a launch writes and the launcher takes
     │   ├── app_log.rs            # AppLog, the append-mode app.log behind env_logger
-    │   ├── process_environment.rs # ProcessEnvironment, the environment snapshot main captures once
+    │   ├── process_environment.rs # ProcessEnvironment, the environment snapshot main captures once, and the shell it names
     │   ├── xdg_paths.rs          # XdgPaths, the config, state, data, and runtime directories and the private tmux server's socket and config
     │   ├── directory_repo_scanner.rs # DirectoryRepoScanner
     │   ├── mount_table.rs        # MountTable, the network and FUSE mount points the scan skips
@@ -408,7 +408,8 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── tmux_multiplexer.rs   # TmuxMultiplexer
     │   ├── private_server.rs     # PrivateServer, the private server's config files, return binding check, state, config reapply that unbinds the keys the config dropped, and lost socket recovery
     │   ├── running_config.rs     # RunningConfig, the hash and key bindings a running server reports
-    │   └── tmux_server_config.rs # TmuxServerConfig, the generated config of the private tmux server with its return and session switch bindings, its hash, and the script that reapplies it
+    │   ├── tmux_server_config.rs # TmuxServerConfig, the generated config of the private tmux server with its return, session switch, and shell toggle bindings, its hash, and the script that reapplies it
+    │   └── tmux_shell_toggle.rs  # TmuxShellToggle, the tmux command a shell toggle key runs: the agent window from the shell window, else the shell window, opened in the worktree when missing
     ├── ui/
     │   ├── mod.rs
     │   ├── app.rs                  # App
@@ -472,7 +473,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │       └── session_finder.rs        # SessionFinder, the / and Ctrl-K search over session names that attaches to the pick
     └── test_support/               # #[cfg(test)] doubles and fixtures shared by unit tests
         ├── mod.rs
-        ├── tmux_test_server.rs      # TmuxTestServer: private socket, generated config, control-mode clients, kill-server on drop
+        ├── tmux_test_server.rs      # TmuxTestServer: private socket, generated config, managed sessions, control-mode and nested clients, kill-server on drop
         ├── git_test_repo.rs         # GitTestRepo: hermetic git environment and fixture repos
         ├── service_fixture.rs       # ServiceFixture: every fake wired into a SessionService
         ├── fake_session_registry.rs # FakeSessionRegistry

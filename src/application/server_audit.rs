@@ -364,6 +364,19 @@ mod tests {
     }
 
     #[test]
+    fn a_shell_toggle_key_agents_need_is_a_warning_naming_its_setting() {
+        let draft = AuditFixture::draft().shell_toggle_keys(&["M-l", "C-c"]);
+
+        let fixture = AuditFixture::with_draft(draft);
+
+        assert!(AuditFixture::line_with(
+            &fixture,
+            "warning:",
+            "shell_toggle_keys C-c is a key agents need"
+        ));
+    }
+
+    #[test]
     fn the_default_keys_draw_no_agent_key_warning() {
         assert!(!AuditFixture::line_with(
             &ServiceFixture::new(),
@@ -380,7 +393,7 @@ mod tests {
         assert!(AuditFixture::line_with(
             &fixture,
             "info:",
-            "your tmux must not use any of C-q, M-j, M-Down, M-k, M-Up as its prefix or bind them in its root table"
+            "your tmux must not use any of C-q, M-j, M-Down, M-k, M-Up, M-l as its prefix or bind them in its root table"
         ));
     }
 
@@ -389,7 +402,8 @@ mod tests {
         let none: [&str; 0] = [];
         let draft = AuditFixture::draft()
             .next_session_keys(&none)
-            .previous_session_keys(&none);
+            .previous_session_keys(&none)
+            .shell_toggle_keys(&none);
         let fixture = AuditFixture::with_draft(draft)
             .with_multiplexer(FakeMultiplexer::new().called_from_other_tmux());
 
@@ -417,11 +431,29 @@ mod tests {
         let none: [&str; 0] = [];
         let draft = AuditFixture::draft()
             .next_session_keys(&["F7"])
-            .previous_session_keys(&none);
+            .previous_session_keys(&none)
+            .shell_toggle_keys(&none);
         let fixture = AuditFixture::with_draft(draft)
             .with_multiplexer(FakeMultiplexer::new().called_from_other_tmux());
 
         assert!(!AuditFixture::line_with(&fixture, "info:", "escape-time"));
+    }
+
+    #[test]
+    fn inside_another_tmux_an_alt_shell_toggle_key_alone_needs_a_low_escape_time() {
+        let none: [&str; 0] = [];
+        let draft = AuditFixture::draft()
+            .next_session_keys(&["F7"])
+            .previous_session_keys(&none)
+            .shell_toggle_keys(&["M-l"]);
+        let fixture = AuditFixture::with_draft(draft)
+            .with_multiplexer(FakeMultiplexer::new().called_from_other_tmux());
+
+        assert!(AuditFixture::line_with(
+            &fixture,
+            "info:",
+            "set your tmux's escape-time low"
+        ));
     }
 
     #[test]

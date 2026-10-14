@@ -83,6 +83,10 @@ impl<'a> ConfigChecks<'a> {
                 KeyBindings::PREVIOUS_SESSION_SETTING,
                 draft.raw_previous_session_keys(),
             ))
+            .chain(listed(
+                KeyBindings::SHELL_TOGGLE_SETTING,
+                draft.raw_shell_toggle_keys(),
+            ))
             .collect()
     }
 
@@ -421,6 +425,86 @@ mod tests {
             .previous_session_keys(&none);
 
         assert!(ChecksFixture::failures(&draft).is_empty());
+    }
+
+    #[test]
+    fn shell_toggle_keys_no_keystroke_reaches_fail_with_their_setting_named() {
+        for key in ["", "C-", "'", "C-}", "S-x", "C-m"] {
+            let draft = ChecksFixture::draft().shell_toggle_keys(&[key]);
+
+            ChecksFixture::fails_on(draft, "shell_toggle_keys");
+        }
+    }
+
+    #[test]
+    fn a_shell_toggle_key_listed_twice_is_named_as_listed_twice() {
+        let draft = ChecksFixture::draft().shell_toggle_keys(&["M-l", "F8", "M-l"]);
+
+        let failures = ChecksFixture::failures(&draft);
+
+        assert_eq!(failures, ["shell_toggle_keys: `M-l` is listed twice"]);
+    }
+
+    #[test]
+    fn a_shell_toggle_key_bound_by_another_key_setting_fails_naming_both_settings() {
+        let written = ChecksFixture::draft()
+            .return_key("C-q")
+            .next_session_keys(&["M-j"])
+            .previous_session_keys(&["M-Up"]);
+        for (key, other_setting) in [
+            ("C-q", "return_key"),
+            ("M-j", "next_session_keys"),
+            ("M-Up", "previous_session_keys"),
+        ] {
+            let draft = written.clone().shell_toggle_keys(&[key]);
+
+            let failures = ChecksFixture::failures(&draft);
+
+            assert_eq!(
+                failures,
+                [format!(
+                    "shell_toggle_keys: `{key}` is already bound in {other_setting}, and each key can do only one thing"
+                )]
+            );
+        }
+    }
+
+    #[test]
+    fn a_missing_shell_toggle_list_keeps_alt_l() {
+        let config = crate::domain::Config::new(&ChecksFixture::draft()).unwrap();
+
+        let toggle = config.key_bindings().shell_toggle_keys();
+        assert_eq!(toggle, HotKey::parse_valid(["M-l"]));
+    }
+
+    #[test]
+    fn an_empty_shell_toggle_list_binds_no_toggle_key() {
+        let none: [&str; 0] = [];
+        let draft = ChecksFixture::draft().shell_toggle_keys(&none);
+
+        let config = crate::domain::Config::new(&draft).unwrap();
+
+        assert!(config.key_bindings().shell_toggle_keys().is_empty());
+    }
+
+    #[test]
+    fn every_listed_shell_toggle_key_is_kept() {
+        let draft = ChecksFixture::draft().shell_toggle_keys(&["M-o", "F8"]);
+
+        let config = crate::domain::Config::new(&draft).unwrap();
+
+        let toggle = config.key_bindings().shell_toggle_keys();
+        assert_eq!(toggle, HotKey::parse_valid(["M-o", "F8"]));
+    }
+
+    #[test]
+    fn a_written_shell_toggle_key_takes_itself_out_of_a_default_session_list() {
+        let draft = ChecksFixture::draft().shell_toggle_keys(&["M-j"]);
+
+        let config = crate::domain::Config::new(&draft).unwrap();
+
+        let next = config.key_bindings().next_session_keys();
+        assert_eq!(next, HotKey::parse_valid(["M-Down"]));
     }
 
     #[test]

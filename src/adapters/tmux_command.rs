@@ -66,6 +66,10 @@ impl TmuxCommand {
         self.environment.terminal()
     }
 
+    pub fn caller_shell(&self) -> String {
+        self.environment.shell()
+    }
+
     pub fn query(&self, sequence: &TmuxSequence) -> Result<TmuxOutput, TmuxError> {
         self.run(
             sequence,

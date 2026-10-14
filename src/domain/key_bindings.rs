@@ -7,15 +7,18 @@ pub struct KeyBindings {
     return_key: HotKey,
     next_session_keys: Vec<HotKey>,
     previous_session_keys: Vec<HotKey>,
+    shell_toggle_keys: Vec<HotKey>,
 }
 
 impl KeyBindings {
     pub const RETURN_KEY: &'static str = "C-q";
     pub const NEXT_SESSION_KEYS: [&'static str; 2] = ["M-j", "M-Down"];
     pub const PREVIOUS_SESSION_KEYS: [&'static str; 2] = ["M-k", "M-Up"];
+    pub const SHELL_TOGGLE_KEYS: [&'static str; 1] = ["M-l"];
     pub const RETURN_KEY_SETTING: &'static str = "return_key";
     pub const NEXT_SESSION_SETTING: &'static str = "next_session_keys";
     pub const PREVIOUS_SESSION_SETTING: &'static str = "previous_session_keys";
+    pub const SHELL_TOGGLE_SETTING: &'static str = "shell_toggle_keys";
 
     pub fn new(
         return_key: HotKey,
@@ -26,6 +29,14 @@ impl KeyBindings {
             return_key,
             next_session_keys,
             previous_session_keys,
+            shell_toggle_keys: Vec::new(),
+        }
+    }
+
+    pub fn with_shell_toggle_keys(self, shell_toggle_keys: Vec<HotKey>) -> Self {
+        Self {
+            shell_toggle_keys,
+            ..self
         }
     }
 
@@ -62,27 +73,40 @@ impl KeyBindings {
         &self.previous_session_keys
     }
 
+    pub fn shell_toggle_keys(&self) -> &[HotKey] {
+        &self.shell_toggle_keys
+    }
+
     pub fn all(&self) -> impl Iterator<Item = &HotKey> {
         self.by_setting().into_iter().map(|(_, key)| key)
     }
 
     pub fn by_setting(&self) -> Vec<(&'static str, &HotKey)> {
-        let next = self
-            .next_session_keys
-            .iter()
-            .map(|key| (Self::NEXT_SESSION_SETTING, key));
-        let previous = self
-            .previous_session_keys
-            .iter()
-            .map(|key| (Self::PREVIOUS_SESSION_SETTING, key));
         once((Self::RETURN_KEY_SETTING, &self.return_key))
-            .chain(next)
-            .chain(previous)
+            .chain(Self::named(
+                Self::NEXT_SESSION_SETTING,
+                &self.next_session_keys,
+            ))
+            .chain(Self::named(
+                Self::PREVIOUS_SESSION_SETTING,
+                &self.previous_session_keys,
+            ))
+            .chain(Self::named(
+                Self::SHELL_TOGGLE_SETTING,
+                &self.shell_toggle_keys,
+            ))
             .collect()
     }
 
     pub fn binds(&self, key: &HotKey) -> bool {
         self.all().any(|bound| bound == key)
+    }
+
+    fn named<'a>(
+        setting: &'static str,
+        keys: &'a [HotKey],
+    ) -> impl Iterator<Item = (&'static str, &'a HotKey)> {
+        keys.iter().map(move |key| (setting, key))
     }
 }
 
@@ -93,6 +117,7 @@ impl Default for KeyBindings {
             HotKey::parse_valid(Self::NEXT_SESSION_KEYS),
             HotKey::parse_valid(Self::PREVIOUS_SESSION_KEYS),
         )
+        .with_shell_toggle_keys(HotKey::parse_valid(Self::SHELL_TOGGLE_KEYS))
     }
 }
 
@@ -141,7 +166,18 @@ mod tests {
                 ("next_session_keys", "M-Down".to_string()),
                 ("previous_session_keys", "M-k".to_string()),
                 ("previous_session_keys", "M-Up".to_string()),
+                ("shell_toggle_keys", "M-l".to_string()),
             ]
+        );
+    }
+
+    #[test]
+    fn the_default_shell_toggle_key_is_alt_l() {
+        let defaults = KeyBindings::default();
+
+        assert_eq!(
+            BindingsFixture::names(defaults.shell_toggle_keys()),
+            ["M-l"]
         );
     }
 }

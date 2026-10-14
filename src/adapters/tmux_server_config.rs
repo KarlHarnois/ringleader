@@ -1,10 +1,12 @@
-use std::iter::once;
+use std::slice;
 
 use super::tmux_sequence::TmuxSequence;
+use super::tmux_shell_toggle::TmuxShellToggle;
 use crate::domain::{HotKey, KeyBindings};
 
 pub struct TmuxServerConfig {
     key_bindings: KeyBindings,
+    shell_toggle: TmuxShellToggle,
 }
 
 impl TmuxServerConfig {
@@ -38,13 +40,15 @@ impl TmuxServerConfig {
     pub const RETURN_KEY_OPTION: &'static str = "@ringleader_return_key";
     pub const NEXT_SESSION_KEYS_OPTION: &'static str = "@ringleader_next_session_keys";
     pub const PREVIOUS_SESSION_KEYS_OPTION: &'static str = "@ringleader_previous_session_keys";
+    pub const SHELL_TOGGLE_KEYS_OPTION: &'static str = "@ringleader_shell_toggle_keys";
     pub const HASH_OPTION: &'static str = "@ringleader_config";
     const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
     const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 
-    pub fn new(key_bindings: &KeyBindings) -> Self {
+    pub fn new(key_bindings: &KeyBindings, shell: &str) -> Self {
         Self {
             key_bindings: key_bindings.clone(),
+            shell_toggle: TmuxShellToggle::new(shell),
         }
     }
 
@@ -74,7 +78,7 @@ impl TmuxServerConfig {
         lines
     }
 
-    fn recorded_keys(&self) -> [String; 3] {
+    fn recorded_keys(&self) -> [String; 4] {
         let bindings = &self.key_bindings;
         [
             Self::option_line(
@@ -88,6 +92,10 @@ impl TmuxServerConfig {
             Self::option_line(
                 Self::PREVIOUS_SESSION_KEYS_OPTION,
                 &Self::key_list(bindings.previous_session_keys()),
+            ),
+            Self::option_line(
+                Self::SHELL_TOGGLE_KEYS_OPTION,
+                &Self::key_list(bindings.shell_toggle_keys()),
             ),
         ]
     }
@@ -148,20 +156,28 @@ impl TmuxServerConfig {
 
     fn table_bindings(&self, table: &str) -> Vec<String> {
         let bindings = &self.key_bindings;
-        let next = bindings
-            .next_session_keys()
-            .iter()
-            .map(|key| Self::binding(table, key, Self::NEXT_SESSION));
-        let previous = bindings
-            .previous_session_keys()
-            .iter()
-            .map(|key| Self::binding(table, key, Self::PREVIOUS_SESSION));
-        let return_binding = Self::binding(table, bindings.return_key(), Self::RETURN);
-        next.chain(previous).chain(once(return_binding)).collect()
+        let return_key = slice::from_ref(bindings.return_key());
+        [
+            Self::bound(table, bindings.next_session_keys(), Self::NEXT_SESSION),
+            Self::bound(
+                table,
+                bindings.previous_session_keys(),
+                Self::PREVIOUS_SESSION,
+            ),
+            Self::bound(
+                table,
+                bindings.shell_toggle_keys(),
+                &self.shell_toggle.command(),
+            ),
+            Self::bound(table, return_key, Self::RETURN),
+        ]
+        .concat()
     }
 
-    fn binding(table: &str, key: &HotKey, command: &str) -> String {
-        format!("bind-key -T {table} {} {command}", key.tmux_spelling())
+    fn bound(table: &str, keys: &[HotKey], command: &str) -> Vec<String> {
+        keys.iter()
+            .map(|key| format!("bind-key -T {table} {} {command}", key.tmux_spelling()))
+            .collect()
     }
 }
 
@@ -170,27 +186,27 @@ mod tests {
     use std::collections::BTreeSet;
     use std::ffi::OsStr;
     use std::fs;
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
     use std::time::Duration;
 
     use super::*;
     use crate::adapters::server_files::ServerFiles;
     use crate::adapters::tmux_command::TmuxCommand;
     use crate::adapters::tmux_sequence::TmuxSequence;
-    use crate::application::ports::{AgentLaunch, Multiplexer, SessionSpec};
-    use crate::domain::{RepoName, SessionMetadata, SessionRepo, SessionWorktree};
+    use crate::application::ports::Multiplexer;
     use crate::test_support::TmuxTestServer;
 
     const GOLDEN: &str = include_str!("../../tests/fixtures/tmux-server.conf");
     const KEY_CLASSES: [&str; 6] = ["C-q", "M-x", "F12", "~", "}", "M-}"];
     const DETACH_LIMIT: Duration = Duration::from_secs(2);
+    const SHELL: &str = "sh";
 
     struct ConfigFixture;
 
     impl ConfigFixture {
         fn render(key: &str) -> String {
             let bindings = KeyBindings::default().with_return_key(HotKey::parse(key).unwrap());
-            TmuxServerConfig::new(&bindings).render()
+            TmuxServerConfig::new(&bindings, SHELL).render()
         }
 
         fn binding(key: &str) -> String {
@@ -207,51 +223,18 @@ mod tests {
         }
 
         fn nested_client_detaches(inner: &TmuxTestServer, target: &str, typed: &[&str]) -> bool {
-            let outer = Self::nested_client(inner, target);
+            let outer = inner.nested_client(target);
             let attached = inner.wait_for(|| Self::clients(inner) == 1);
-            Self::type_bytes(&outer, typed);
+            outer.type_bytes(typed);
             attached && inner.wait_for(|| Self::clients(inner) == 0)
         }
 
         fn nested_client_on_beta_lands_on(typed: &[&str], expected: &str) -> bool {
             let inner = Self::alpha_beta_and_gamma();
-            let outer = Self::nested_client(&inner, "=beta:");
+            let outer = inner.nested_client("=beta:");
             let attached = inner.wait_for(|| Self::client_session(&inner) == "beta");
-            Self::type_bytes(&outer, typed);
+            outer.type_bytes(typed);
             attached && inner.wait_for(|| Self::client_session(&inner) == expected)
-        }
-
-        fn nested_client(inner: &TmuxTestServer, target: &str) -> TmuxTestServer {
-            let outer = TmuxTestServer::new();
-            let socket = inner.socket().display().to_string();
-            let config = inner.config().display().to_string();
-            outer.text(&[
-                "new-session",
-                "-d",
-                "-s",
-                "outer",
-                "env",
-                "-u",
-                "TMUX",
-                "-u",
-                "TMUX_PANE",
-                "tmux",
-                "-u",
-                "-S",
-                &socket,
-                "-f",
-                &config,
-                "attach-session",
-                "-t",
-                target,
-            ]);
-            outer
-        }
-
-        fn type_bytes(outer: &TmuxTestServer, typed: &[&str]) {
-            let mut typing = vec!["send-keys", "-t", "=outer:", "-H"];
-            typing.extend(typed);
-            outer.text(&typing);
         }
 
         fn alpha_beta_and_gamma() -> TmuxTestServer {
@@ -290,20 +273,6 @@ mod tests {
                 .collect()
         }
 
-        fn created(server: &TmuxTestServer, name: &str) -> PathBuf {
-            let worktree = server.directory().join(name);
-            fs::create_dir_all(&worktree).unwrap();
-            let metadata = SessionMetadata::new(
-                SessionRepo::new(RepoName::parse("example-project").unwrap(), &worktree),
-                SessionWorktree::new(&worktree, &format!("ringleader/{name}"), ""),
-                "stand-in",
-            );
-            let launch = AgentLaunch::new(Vec::new(), &[], &worktree);
-            let spec = SessionSpec::new(&format!("ringleader-{name}"), metadata, launch);
-            server.multiplexer().create_session(&spec).unwrap();
-            worktree
-        }
-
         fn returns_from(server: &TmuxTestServer, target: &str) -> bool {
             let mut client = server.control_client(target);
             server.press(&client, "C-q");
@@ -325,7 +294,7 @@ mod tests {
 
     #[test]
     fn the_default_render_matches_the_golden_fixture() {
-        let render = TmuxServerConfig::new(&KeyBindings::default()).render();
+        let render = TmuxServerConfig::new(&KeyBindings::default(), SHELL).render();
 
         assert_eq!(render, GOLDEN);
     }
@@ -479,7 +448,7 @@ mod tests {
     #[test]
     fn the_return_key_detaches_a_client_from_an_agent_window() {
         let server = TmuxTestServer::new();
-        ConfigFixture::created(&server, "fix-auth");
+        server.managed_session("fix-auth");
 
         assert!(ConfigFixture::returns_from(
             &server,
@@ -490,7 +459,7 @@ mod tests {
     #[test]
     fn the_return_key_detaches_a_client_from_a_shell_window() {
         let server = TmuxTestServer::new();
-        let worktree = ConfigFixture::created(&server, "fix-auth");
+        let worktree = server.managed_session("fix-auth");
         let window = server
             .multiplexer()
             .ensure_shell_window("ringleader-fix-auth", &worktree, "sh")
@@ -563,8 +532,8 @@ mod tests {
     #[test]
     fn the_session_keys_switch_from_a_shell_window() {
         let server = TmuxTestServer::new();
-        let worktree = ConfigFixture::created(&server, "fix-auth");
-        ConfigFixture::created(&server, "other");
+        let worktree = server.managed_session("fix-auth");
+        server.managed_session("other");
         let window = server
             .multiplexer()
             .ensure_shell_window("ringleader-fix-auth", &worktree, "sh")
@@ -634,7 +603,7 @@ mod tests {
         fs::create_dir_all(&xdg).unwrap();
         fs::write(xdg.join("tmux.conf"), "set -g @example-marker xdg\n").unwrap();
 
-        ConfigFixture::created(&server, "fix-auth");
+        server.managed_session("fix-auth");
 
         assert_eq!(ConfigFixture::option(&server, "@example-marker"), "");
     }

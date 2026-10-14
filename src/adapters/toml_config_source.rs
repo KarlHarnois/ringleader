@@ -31,6 +31,10 @@ return_key = "C-q"
 # M-Up and M-Down, stays unbound there until Ringleader's tmux server restarts.
 next_session_keys = ["M-j", "M-Down"]
 previous_session_keys = ["M-k", "M-Up"]
+# Keys that switch between a session's agent and its shell, the one t opens,
+# while you are attached. [] turns the toggle off, and a missing list keeps
+# this default. Inside your own tmux, they follow the rules of the session keys.
+shell_toggle_keys = ["M-l"]
 state_poll_ms = 1000
 preview_refresh_ms = 750
 diff_refresh_ms = 3000
@@ -313,6 +317,35 @@ mod tests {
     }
 
     #[test]
+    fn the_shell_toggle_keys_in_a_file_reach_the_config() {
+        let fixture = SourceFixture::with_text("shell_toggle_keys = [\"M-o\", \"F8\"]\n");
+
+        let config = fixture.source().load().unwrap();
+
+        let toggle = config.key_bindings().shell_toggle_keys();
+        assert_eq!(SourceFixture::names(toggle), ["M-o", "F8"]);
+    }
+
+    #[test]
+    fn an_empty_shell_toggle_list_in_a_file_binds_no_toggle_key() {
+        let fixture = SourceFixture::with_text("shell_toggle_keys = []\n");
+
+        let config = fixture.source().load().unwrap();
+
+        assert!(config.key_bindings().shell_toggle_keys().is_empty());
+    }
+
+    #[test]
+    fn a_file_without_shell_toggle_keys_keeps_alt_l() {
+        let fixture = SourceFixture::with_text("return_key = \"C-q\"\n");
+
+        let config = fixture.source().load().unwrap();
+
+        let toggle = config.key_bindings().shell_toggle_keys();
+        assert_eq!(SourceFixture::names(toggle), ["M-l"]);
+    }
+
+    #[test]
     fn an_older_config_whose_return_key_is_a_default_session_key_still_loads() {
         let fixture = SourceFixture::with_text("return_key = \"M-k\"\n");
 
@@ -521,6 +554,15 @@ mod tests {
             TomlConfigSource::TEMPLATE
         );
         assert_eq!(fixture.source().load().unwrap().agents().len(), 2);
+    }
+
+    #[test]
+    fn the_first_run_template_writes_the_default_shell_toggle_keys() {
+        let written = TomlConfigSource::TEMPLATE
+            .lines()
+            .any(|line| line == r#"shell_toggle_keys = ["M-l"]"#);
+
+        assert!(written);
     }
 
     #[test]
