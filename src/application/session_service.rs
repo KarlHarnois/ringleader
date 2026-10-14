@@ -171,7 +171,10 @@ impl SessionService {
         names
             .iter()
             .filter_map(|name| self.entry(name))
-            .map(|session| (session.name().to_string(), self.monitor.diff_stat(session)))
+            .map(|session| {
+                let diff = self.monitor.diff_stat(session, self.config());
+                (session.name().to_string(), diff)
+            })
             .collect()
     }
 

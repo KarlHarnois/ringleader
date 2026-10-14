@@ -13,7 +13,7 @@ use crate::application::{
 use crate::domain::{
     Agent, AgentPane, Config, HotKey, KeyBindings, NamingScheme, PullRequest, PullRequestState,
     Registration, Repo, RepoName, Session, SessionMetadata, SessionName, SessionObservation,
-    SessionRepo, SessionWorktree, TmuxAddress,
+    SessionRepo, SessionState, SessionSummary, SessionWorktree, TmuxAddress,
 };
 
 pub struct ServiceFixture {
@@ -208,6 +208,7 @@ impl ServiceFixture {
         Agent::new("claude", "claude")
             .with_env_names(&["ANTHROPIC_API_KEY".to_string()])
             .with_prompt_args(&["{prompt}".to_string()])
+            .with_plan_args(&["--permission-mode".to_string(), "plan".to_string()])
     }
 
     pub fn agent_with_input() -> Agent {
@@ -253,6 +254,27 @@ impl ServiceFixture {
             session.metadata().with_branch(branch),
             tmux,
         )
+    }
+
+    pub fn summary_in(name: &str, repo_path: &str, state: SessionState) -> SessionSummary {
+        let session = Self::session_at(name, repo_path, Self::CREATED_AT);
+        SessionSummary::managed(session, state, false)
+    }
+
+    pub fn session_with_agent(name: &str, agent: &str) -> Session {
+        let session = Self::session(name);
+        let recorded = session.metadata();
+        let metadata = SessionMetadata::new(
+            SessionRepo::new(recorded.repo_name().clone(), recorded.repo_path()),
+            SessionWorktree::new(
+                recorded.worktree_path(),
+                recorded.branch(),
+                recorded.base_commit(),
+            ),
+            agent,
+        );
+        let tmux = TmuxAddress::new(session.tmux_name(), session.socket_path());
+        session.rekeyed(session.name().clone(), metadata, tmux)
     }
 
     pub fn session_at(name: &str, repo_path: &str, created_at: u64) -> Session {

@@ -2,8 +2,9 @@ use std::path::{Path, PathBuf};
 
 use super::ports::{AgentLaunch, SessionSpec, StartPoint};
 use crate::domain::{
-    Agent, BaseBranch, Config, InvalidName, KeyBindings, NamingScheme, Registration, Repo, Session,
-    SessionMetadata, SessionName, SessionRepo, SessionSize, SessionWorktree, TmuxAddress,
+    Agent, AgentMode, BaseBranch, Config, InvalidName, KeyBindings, NamingScheme, Registration,
+    Repo, Session, SessionMetadata, SessionName, SessionRepo, SessionSize, SessionWorktree,
+    TmuxAddress,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,6 +13,7 @@ pub struct CreateRequest {
     repo: Repo,
     agent: Option<String>,
     base_branch: Option<BaseBranch>,
+    mode: AgentMode,
     prompt: String,
 }
 
@@ -22,6 +24,7 @@ impl CreateRequest {
             repo,
             agent: None,
             base_branch: None,
+            mode: AgentMode::default(),
             prompt: String::new(),
         }
     }
@@ -38,6 +41,10 @@ impl CreateRequest {
             base_branch: Some(base_branch),
             ..self
         }
+    }
+
+    pub fn with_mode(self, mode: AgentMode) -> Self {
+        Self { mode, ..self }
     }
 
     pub fn with_prompt(self, prompt: &str) -> Self {
@@ -58,6 +65,10 @@ impl CreateRequest {
 
     pub fn agent(&self) -> Option<&str> {
         self.agent.as_deref()
+    }
+
+    pub fn mode(&self) -> AgentMode {
+        self.mode
     }
 
     pub fn prompt(&self) -> &str {
@@ -85,7 +96,7 @@ impl CreationPlan {
     ) -> Result<Self, InvalidName> {
         let name = SessionName::new(&request.name)?;
         Ok(Self {
-            argv: agent.launch_argv(&name, &request.prompt),
+            argv: agent.launch_argv(&name, request.mode, &request.prompt),
             name,
             repo: request.repo.clone(),
             base_branch: request

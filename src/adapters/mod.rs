@@ -1,10 +1,12 @@
 pub mod agent_handoff;
 pub mod agent_launcher;
 pub mod app_log;
+pub mod base_branch_ladder;
 pub mod bounded_command;
 pub mod branch_section;
 pub mod command_output;
 pub mod config_file_writer;
+pub mod diff_base_resolver;
 pub mod directory_repo_scanner;
 pub mod durable_file;
 pub mod file_lock;

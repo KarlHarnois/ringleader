@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod agent_mode;
 pub mod base_branch;
 pub mod config;
 pub mod config_checks;
@@ -20,6 +21,7 @@ pub mod session_state;
 pub mod session_summary;
 
 pub use agent::Agent;
+pub use agent_mode::AgentMode;
 pub use base_branch::BaseBranch;
 pub use config::{Config, SessionSize};
 pub use config_draft::ConfigDraft;

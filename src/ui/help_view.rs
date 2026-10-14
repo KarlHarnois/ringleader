@@ -25,11 +25,16 @@ pub struct HelpView {
 impl HelpView {
     pub const TITLE: &'static str = concat!(" Help · ringleader ", env!("CARGO_PKG_VERSION"), " ");
     const KEYS_HEADING: &'static str = "Keys";
-    const KEYS: [(&'static str, &'static str); 9] = [
+    const KEYS: [(&'static str, &'static str); 13] = [
         ("n", "create a session"),
         ("d", "delete the selected session"),
         ("R", "rename the selected session and its branch"),
-        ("Enter", "attach to the selected session"),
+        (
+            "Enter",
+            "attach to the selected session, or fold the selected repo",
+        ),
+        ("Space", "fold or unfold the selected repo"),
+        ("/ Ctrl-K", "find a session by name and attach to it"),
         ("t", "open a shell in the selected session's worktree"),
         ("s", "restart an exited or stopped session"),
         (
@@ -37,6 +42,8 @@ impl HelpView {
             "reload the config and the registry and refresh diffs and PRs",
         ),
         ("↑ ↓ j k h l", "move the selection"),
+        ("gg G", "select the first or the last row"),
+        ("1-9", "jump to a repo"),
         ("q", "quit, the sessions keep running"),
     ];
     const RETURN_ACTION: &'static str = "detach from a session and return here";
@@ -129,7 +136,6 @@ impl HelpView {
     fn content(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
         let mut content = self.keys(width, theme);
         content.extend(Self::legends(width, theme));
-        content.push(Line::default());
         content.extend(self.files(width, theme));
         content
     }
@@ -223,6 +229,9 @@ mod tests {
         const SHORT_WIDTH: usize = 56;
         const SHORT_HEIGHT: usize = 8;
         const PAST_THE_END: usize = 50;
+        const ROWS_ABOVE_THE_SMALLEST_FULL_SIZE: u16 = 5;
+        const TALL_NARROW_SIZE: (u16, u16) = (79, 30);
+        const TMUX_CONFIG_ROW: &'static str = "tmux config  ~/.local/state/ringleader/tmux.conf";
 
         fn help() -> HelpView {
             Self::help_for(&KeyBindings::default())
@@ -257,16 +266,28 @@ mod tests {
             )
         }
 
-        fn fitting_size() -> (u16, u16) {
-            let (width, _) = LayoutTier::smallest_full_size();
-            (width, Dialog::HELP_HEIGHT + 2)
+        fn smallest_size_that_fits() -> (u16, u16) {
+            let (width, height) = LayoutTier::smallest_full_size();
+            (width, height + Self::ROWS_ABOVE_THE_SMALLEST_FULL_SIZE)
         }
 
         fn screen(help: HelpView, width: u16, height: u16) -> String {
+            Self::dialog_screen(&Dialog::Help(Box::new(help)), width, height)
+        }
+
+        fn screen_scrolled_to_the_end(width: u16, height: u16) -> String {
+            let mut dialog = Dialog::Help(Box::new(Self::help()));
+            Self::dialog_screen(&dialog, width, height);
+            let Dialog::Help(help) = &mut dialog else {
+                unreachable!()
+            };
+            Self::press_times(help, KeyCode::Down, Self::PAST_THE_END);
+            Self::dialog_screen(&dialog, width, height)
+        }
+
+        fn dialog_screen(dialog: &Dialog, width: u16, height: u16) -> String {
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-            terminal
-                .draw(|frame| Dialog::Help(Box::new(help)).render(frame, &Theme))
-                .unwrap();
+            terminal.draw(|frame| dialog.render(frame, &Theme)).unwrap();
             let buffer = terminal.backend().buffer();
             buffer
                 .content()
@@ -339,11 +360,9 @@ mod tests {
 
     #[test]
     fn the_help_overlay_is_centered_and_lists_the_keys() {
-        let top_row = usize::from((28 - Dialog::HELP_HEIGHT) / 2);
-
         let screen = HelpFixture::screen(HelpFixture::help(), 100, 28);
 
-        assert!(screen.lines().nth(top_row).unwrap().contains("┌ Help "));
+        assert!(screen.lines().nth(1).unwrap().contains("┌ Help "));
         assert!(screen.contains("n            create a session"));
         assert!(screen.contains("q            quit, the sessions keep running"));
     }
@@ -357,18 +376,30 @@ mod tests {
     }
 
     #[test]
-    fn the_whole_help_fits_a_terminal_two_rows_taller_than_its_dialog() {
-        let (width, height) = HelpFixture::fitting_size();
+    fn the_smallest_full_size_dialog_scrolls_down_to_the_last_file() {
+        let (width, height) = LayoutTier::smallest_full_size();
+
+        let first_page = HelpFixture::screen(HelpFixture::help(), width, height);
+        let last_page = HelpFixture::screen_scrolled_to_the_end(width, height);
+
+        assert!(!first_page.contains(HelpFixture::TMUX_CONFIG_ROW));
+        assert!(last_page.contains(HelpFixture::TMUX_CONFIG_ROW));
+    }
+
+    #[test]
+    fn a_tall_enough_full_size_terminal_shows_the_whole_help() {
+        let (width, height) = HelpFixture::smallest_size_that_fits();
 
         let screen = HelpFixture::screen(HelpFixture::help(), width, height);
 
         assert!(screen.contains("Keys"));
-        assert!(screen.contains("tmux config  ~/.local/state/ringleader/tmux.conf"));
+        assert!(screen.contains(HelpFixture::TMUX_CONFIG_ROW));
+        assert!(!screen.contains("scroll"));
     }
 
     #[test]
     fn a_help_that_fits_offers_no_scroll_keys() {
-        let (width, height) = HelpFixture::fitting_size();
+        let (width, height) = HelpFixture::TALL_NARROW_SIZE;
 
         let screen = HelpFixture::screen(HelpFixture::help(), width, height);
 
@@ -377,7 +408,7 @@ mod tests {
     }
 
     #[test]
-    fn the_smallest_full_size_terminal_scrolls_the_help() {
+    fn the_smallest_full_size_offers_the_scroll_keys() {
         let (width, height) = LayoutTier::smallest_full_size();
 
         let screen = HelpFixture::screen(HelpFixture::help(), width, height);
@@ -410,6 +441,13 @@ mod tests {
         let text = HelpFixture::text(&HelpFixture::with_return_key("M-x"));
 
         assert!(text.contains("Alt-x        detach from a session and return here"));
+    }
+
+    #[test]
+    fn the_help_lists_the_session_finder_keys() {
+        let text = HelpFixture::text(&HelpFixture::help());
+
+        assert!(text.contains("/ Ctrl-K     find a session by name and attach to it"));
     }
 
     #[test]

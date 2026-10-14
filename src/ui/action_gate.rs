@@ -1,6 +1,7 @@
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::app::AppRequest;
+use super::back_key::BackKey;
 use super::blocking_operation::BlockingOperation;
 use super::dialogs::DialogOpening;
 use crate::application::ports::ConfigError;
@@ -9,6 +10,7 @@ use crate::domain::{Session, SessionState, SessionSummary};
 pub struct ActionGate<'a> {
     selected: Option<&'a SessionSummary>,
     config_error: Option<&'a ConfigError>,
+    heading_selected: bool,
 }
 
 impl<'a> ActionGate<'a> {
@@ -21,21 +23,38 @@ impl<'a> ActionGate<'a> {
         Self {
             selected,
             config_error,
+            heading_selected: false,
+        }
+    }
+
+    pub fn on_heading(config_error: Option<&'a ConfigError>) -> Self {
+        Self {
+            selected: None,
+            config_error,
+            heading_selected: true,
         }
     }
 
     pub fn action_for(&self, key: &KeyEvent) -> KeyAction {
         match key.code {
+            _ if BackKey::matches(key) => KeyAction::Ignore,
             KeyCode::Char('q') => KeyAction::Request(AppRequest::Quit),
             KeyCode::Char('r') => KeyAction::Reload,
             KeyCode::Char('?') => KeyAction::Open(DialogOpening::Help),
+            KeyCode::Char('/') => KeyAction::FindSession,
+            KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                KeyAction::FindSession
+            }
             KeyCode::Down | KeyCode::Right | KeyCode::Char('j' | 'l') => KeyAction::Move(1),
             KeyCode::Up | KeyCode::Left | KeyCode::Char('k' | 'h') => KeyAction::Move(-1),
+            KeyCode::Char('G') => KeyAction::SelectLast,
             KeyCode::Char('n') => KeyAction::from(
                 self.writable()
                     .map(|()| KeyAction::Open(DialogOpening::NewSession)),
             ),
-            KeyCode::Enter => KeyAction::from(self.attach().map(KeyAction::Request)),
+            KeyCode::Char(' ') => KeyAction::Fold,
+            KeyCode::Char(digit @ '1'..='9') => KeyAction::JumpToRepo(Self::repo_number(digit)),
+            KeyCode::Enter => self.enter(),
             KeyCode::Char('t') => KeyAction::from(self.shell().map(KeyAction::Request)),
             KeyCode::Char('s') => KeyAction::from(self.restart().map(KeyAction::Request)),
             KeyCode::Char('d') => KeyAction::from(self.delete().map(KeyAction::Request)),
@@ -45,6 +64,18 @@ impl<'a> ActionGate<'a> {
             ),
             _ => KeyAction::Ignore,
         }
+    }
+
+    fn repo_number(digit: char) -> usize {
+        let number = digit.to_digit(10).unwrap_or_default();
+        usize::try_from(number).unwrap_or_default()
+    }
+
+    fn enter(&self) -> KeyAction {
+        if self.heading_selected {
+            return KeyAction::Fold;
+        }
+        KeyAction::from(self.attach().map(KeyAction::Request))
     }
 
     pub fn attach(&self) -> Result<AppRequest, String> {
@@ -114,7 +145,12 @@ impl<'a> ActionGate<'a> {
 pub enum KeyAction {
     Request(AppRequest),
     Move(isize),
+    SelectFirst,
+    SelectLast,
+    Fold,
+    JumpToRepo(usize),
     Open(DialogOpening),
+    FindSession,
     Reload,
     Refuse(String),
     Ignore,
@@ -263,6 +299,39 @@ mod tests {
     }
 
     #[test]
+    fn slash_and_control_k_open_the_session_finder() {
+        let gate = ActionGate::new(None, None);
+        let slash = KeyEvent::from(KeyCode::Char('/'));
+        let control_k = KeyEvent::new(KeyCode::Char('k'), KeyModifiers::CONTROL);
+
+        assert_eq!(gate.action_for(&slash), KeyAction::FindSession);
+        assert_eq!(gate.action_for(&control_k), KeyAction::FindSession);
+    }
+
+    #[test]
+    fn a_plain_k_still_moves_the_selection_up() {
+        let key = KeyEvent::from(KeyCode::Char('k'));
+
+        assert_eq!(
+            ActionGate::new(None, None).action_for(&key),
+            KeyAction::Move(-1)
+        );
+    }
+
+    #[test]
+    fn only_a_plain_q_quits() {
+        let gate = ActionGate::new(None, None);
+        let plain_q = KeyEvent::from(KeyCode::Char('q'));
+        let control_q = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL);
+
+        assert_eq!(
+            gate.action_for(&plain_q),
+            KeyAction::Request(AppRequest::Quit)
+        );
+        assert_eq!(gate.action_for(&control_q), KeyAction::Ignore);
+    }
+
+    #[test]
     fn vim_keys_and_arrows_move_the_selection() {
         let gate = ActionGate::new(None, None);
         let action = |code| gate.action_for(&KeyEvent::from(code));
@@ -271,6 +340,16 @@ mod tests {
         assert_eq!(action(KeyCode::Right), KeyAction::Move(1));
         assert_eq!(action(KeyCode::Char('h')), KeyAction::Move(-1));
         assert_eq!(action(KeyCode::Left), KeyAction::Move(-1));
+    }
+
+    #[test]
+    fn capital_g_selects_the_last_session() {
+        let key = KeyEvent::from(KeyCode::Char('G'));
+
+        assert_eq!(
+            ActionGate::new(None, None).action_for(&key),
+            KeyAction::SelectLast
+        );
     }
 
     #[test]
@@ -340,6 +419,59 @@ mod tests {
             ActionGate::new(Some(&unmanaged), None).rename(),
             Err("mystery is unmanaged, so it cannot be renamed.".to_string())
         );
+    }
+
+    #[test]
+    fn enter_on_a_heading_folds_it() {
+        let key = KeyEvent::from(KeyCode::Enter);
+
+        assert_eq!(
+            ActionGate::on_heading(None).action_for(&key),
+            KeyAction::Fold
+        );
+    }
+
+    #[test]
+    fn enter_on_a_session_attaches() {
+        let row = GateFixture::row(SessionState::Waiting);
+        let key = KeyEvent::from(KeyCode::Enter);
+
+        assert_eq!(
+            ActionGate::new(Some(&row), None).action_for(&key),
+            KeyAction::Request(AppRequest::Attach("fix-auth".to_string()))
+        );
+    }
+
+    #[test]
+    fn space_folds() {
+        let key = KeyEvent::from(KeyCode::Char(' '));
+
+        assert_eq!(
+            ActionGate::on_heading(None).action_for(&key),
+            KeyAction::Fold
+        );
+    }
+
+    #[test]
+    fn a_digit_jumps_to_that_repo() {
+        let gate = ActionGate::new(None, None);
+        let action = |character| gate.action_for(&KeyEvent::from(KeyCode::Char(character)));
+
+        assert_eq!(action('3'), KeyAction::JumpToRepo(3));
+        assert_eq!(action('0'), KeyAction::Ignore);
+    }
+
+    #[test]
+    fn a_heading_refuses_the_session_actions() {
+        let gate = ActionGate::on_heading(None);
+        let refusal = |character| gate.action_for(&KeyEvent::from(KeyCode::Char(character)));
+
+        for character in ['d', 'R', 's', 't'] {
+            assert_eq!(
+                refusal(character),
+                KeyAction::Refuse("No session is selected.".to_string())
+            );
+        }
     }
 
     #[test]
