@@ -9,7 +9,7 @@ use ratatui::backend::{Backend, ClearType, TestBackend, WindowSize};
 use ratatui::buffer::Cell;
 use ratatui::layout::{Position, Size};
 
-use super::{FakeInterrupts, FakeMultiplexer, RecordingScreenMode, ServiceFixture};
+use super::{Deadline, FakeInterrupts, FakeMultiplexer, RecordingScreenMode, ServiceFixture};
 use crate::application::EphemeralShell;
 use crate::ui::App;
 use crate::ui::event_loop::{EventLoop, InputSource};
@@ -25,8 +25,6 @@ pub struct UiHarness {
 impl UiHarness {
     pub const WIDTH: u16 = 100;
     pub const HEIGHT: u16 = 28;
-    const SETTLE_LIMIT: Duration = Duration::from_secs(2);
-    const SETTLE_POLL: Duration = Duration::from_millis(5);
 
     pub fn new() -> Self {
         let mode = RecordingScreenMode::default();
@@ -52,12 +50,10 @@ impl UiHarness {
     }
 
     pub fn settle(app: &mut App) {
-        let deadline = Instant::now() + Self::SETTLE_LIMIT;
-        app.on_tick(Instant::now());
-        while app.awaits_results() && Instant::now() < deadline {
-            std::thread::sleep(Self::SETTLE_POLL);
+        Deadline::for_background_work().wait_until(|| {
             app.on_tick(Instant::now());
-        }
+            !app.awaits_results()
+        });
     }
 
     pub fn signals(&self) -> &FakeInterrupts {

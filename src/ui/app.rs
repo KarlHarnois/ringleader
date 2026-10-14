@@ -268,8 +268,6 @@ mod tests {
     struct AppFixture;
 
     impl AppFixture {
-        const LIMIT: Duration = Duration::from_secs(2);
-        const POLL_INTERVAL: Duration = Duration::from_millis(5);
         const HELP_PAST_THE_END: usize = 50;
         const LOG_FILE_OUTSIDE_THE_STATE_DIRECTORY: &'static str = "/logs/ringleader/app.log";
 
@@ -363,19 +361,18 @@ mod tests {
         }
 
         fn screens_until_settled(app: &mut App) -> Vec<String> {
-            let deadline = Instant::now() + Self::LIMIT;
             let mut screens = vec![Self::screen(app, UiHarness::WIDTH, UiHarness::HEIGHT)];
-            while app.awaits_results() && Instant::now() < deadline {
-                std::thread::sleep(Self::POLL_INTERVAL);
+            Deadline::for_background_work().wait_until(|| {
                 app.on_tick(Instant::now());
                 screens.push(Self::screen(app, UiHarness::WIDTH, UiHarness::HEIGHT));
-            }
+                !app.awaits_results()
+            });
             screens
         }
 
         fn wait_for_capture(fixture: &ServiceFixture, name: &str) -> bool {
             let call = format!("capture_pane ringleader-{name}");
-            Deadline::after(Self::LIMIT).wait_until(|| Self::captures(fixture).contains(&call))
+            Deadline::for_background_work().wait_until(|| Self::captures(fixture).contains(&call))
         }
 
         fn holding_captures(held: &Arc<HeldCalls>) -> ServiceFixture {
@@ -456,13 +453,10 @@ mod tests {
         }
 
         fn settle_dialog(app: &mut App) {
-            let deadline = Instant::now() + Self::LIMIT;
-            while Instant::now() < deadline
-                && Self::screen(app, 100, 28).contains("Finding the repo")
-            {
+            Deadline::for_background_work().wait_until(|| {
                 app.on_tick(Instant::now());
-                std::thread::sleep(Self::POLL_INTERVAL);
-            }
+                !Self::screen(app, 100, 28).contains("Finding the repo")
+            });
         }
 
         fn deletable() -> ServiceFixture {

@@ -12,7 +12,6 @@ pub struct HeldCalls {
 
 impl HeldCalls {
     const HOLD_LIMIT: Duration = Duration::from_secs(5);
-    const ARRIVAL_LIMIT: Duration = Duration::from_secs(2);
     const QUIET: Duration = Duration::from_millis(200);
 
     pub fn first(held: usize) -> Arc<Self> {
@@ -37,7 +36,7 @@ impl HeldCalls {
     }
 
     pub fn wait_for(&self, arrivals: usize) -> bool {
-        Deadline::after(Self::ARRIVAL_LIMIT).wait_until(|| self.arrivals() >= arrivals)
+        Deadline::for_background_work().wait_until(|| self.arrivals() >= arrivals)
     }
 
     pub fn stays_at(&self, arrivals: usize) -> bool {

@@ -151,7 +151,6 @@ impl Measurement {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
-    use std::thread;
     use std::time::Duration;
 
     use super::*;
@@ -163,8 +162,6 @@ mod tests {
 
     impl QueueFixture {
         const NAMES: [&'static str; 3] = ["alpha", "beta", "gamma"];
-        const LIMIT: Duration = Duration::from_secs(2);
-        const POLL_INTERVAL: Duration = Duration::from_millis(5);
 
         fn fixture() -> ServiceFixture {
             Self::with_workspace(Self::workspace())
@@ -207,7 +204,7 @@ mod tests {
         }
 
         fn wait_for_diff_calls(fixture: &ServiceFixture, count: usize) -> bool {
-            Deadline::after(Self::LIMIT).wait_until(|| Self::diff_calls(fixture) == count)
+            Deadline::for_background_work().wait_until(|| Self::diff_calls(fixture) == count)
         }
 
         fn settle_at(
@@ -216,12 +213,14 @@ mod tests {
             visible: &[String],
             service: &SessionService,
         ) -> Result<(), ServiceError> {
-            let deadline = Instant::now() + Self::LIMIT;
-            let mut outcome = queue.tick(now, visible, service);
-            while queue.awaits_results() && Instant::now() < deadline {
-                thread::sleep(Self::POLL_INTERVAL);
-                outcome = outcome.and(queue.tick(now, visible, service));
-            }
+            let mut outcome = Ok(());
+            Deadline::for_background_work().wait_until(|| {
+                let ticked = queue.tick(now, visible, service);
+                if outcome.is_ok() {
+                    outcome = ticked;
+                }
+                !queue.awaits_results()
+            });
             outcome
         }
     }

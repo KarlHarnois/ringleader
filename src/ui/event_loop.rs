@@ -204,8 +204,8 @@ mod tests {
     use crate::application::EphemeralShell;
     use crate::application::ports::AttachTarget;
     use crate::test_support::{
-        FakeMultiplexer, FixtureBackend, HeldCalls, RecordingShells, ScriptedInput, ServiceFixture,
-        UiHarness,
+        Deadline, FakeMultiplexer, FixtureBackend, HeldCalls, RecordingShells, ScriptedInput,
+        ServiceFixture, UiHarness,
     };
     use crate::ui::App;
 
@@ -214,17 +214,14 @@ mod tests {
     struct WakeFixture;
 
     impl WakeFixture {
-        const LIMIT: Duration = Duration::from_secs(2);
-        const POLL_INTERVAL: Duration = Duration::from_millis(5);
         const FAR_OFF: Duration = Duration::from_secs(3600);
 
         fn wake_until_collected(app: &mut App) {
             let next_tick = Instant::now() + Self::FAR_OFF;
-            let deadline = Instant::now() + Self::LIMIT;
-            while app.awaits_results() && Instant::now() < deadline {
-                std::thread::sleep(Self::POLL_INTERVAL);
+            Deadline::for_background_work().wait_until(|| {
                 FixtureLoop::advance(app, next_tick);
-            }
+                !app.awaits_results()
+            });
         }
     }
 

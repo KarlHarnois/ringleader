@@ -51,15 +51,14 @@ mod tests {
     struct FeedFixture;
 
     impl FeedFixture {
-        const LIMIT: Duration = Duration::from_secs(2);
-
         fn holding(held: &Arc<HeldCalls>) -> ServiceFixture {
             ServiceFixture::new()
                 .with_multiplexer(FakeMultiplexer::new().on_call("observe_all", held.hook()))
         }
 
         fn wait_for_the_listing(fixture: &ServiceFixture) {
-            Deadline::after(Self::LIMIT).wait_until(|| !fixture.multiplexer().calls().is_empty());
+            Deadline::for_background_work()
+                .wait_until(|| !fixture.multiplexer().calls().is_empty());
         }
     }
 
