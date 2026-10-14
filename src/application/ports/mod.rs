@@ -12,6 +12,7 @@ pub mod repo_scanner;
 pub mod scratch_space;
 pub mod session_registry;
 pub mod unmerged_commits;
+pub mod upstream_merge;
 pub mod workspace;
 
 pub use agent_launch::AgentLaunch;
@@ -30,4 +31,5 @@ pub use repo_scanner::{RepoScanner, ScanError, ScanOutcome};
 pub use scratch_space::{ScratchSpace, ScratchSpaceError};
 pub use session_registry::{RegistryError, SessionRegistry};
 pub use unmerged_commits::UnmergedCommits;
+pub use upstream_merge::{MergeOutcome, UpstreamMerge};
 pub use workspace::{StartPoint, Workspace, WorkspaceError, WorktreeEntry};

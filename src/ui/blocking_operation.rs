@@ -9,6 +9,7 @@ pub enum BlockingOperation {
     MeasureDelete(String),
     Delete { name: String, seen: DeleteImpact },
     Rename { old: String, new: String },
+    Merge(String),
 }
 
 impl BlockingOperation {
@@ -19,6 +20,7 @@ impl BlockingOperation {
             Self::MeasureDelete(name) => format!("Checking what deleting {name} would lose…"),
             Self::Delete { name, .. } => format!("Deleting {name}…"),
             Self::Rename { old, .. } => format!("Renaming {old}…"),
+            Self::Merge(name) => format!("Fetching origin and merging it into {name}…"),
         }
     }
 
@@ -35,6 +37,18 @@ impl BlockingOperation {
             Self::MeasureDelete(name) => Self::measure(service, name),
             Self::Delete { name, seen } => Self::delete(service, name, seen),
             Self::Rename { old, new } => Self::rename(service, &old, &new),
+            Self::Merge(name) => Self::merge(service, name),
+        }
+    }
+
+    fn merge(service: &mut SessionService, name: String) -> OperationOutcome {
+        match service.merge_upstream(&name) {
+            Ok(report) if report.needs_attention() => OperationOutcome::Warned {
+                message: report.summary(),
+                select: Some(name),
+            },
+            Ok(report) => OperationOutcome::done(report.summary(), Some(name)),
+            Err(error) => OperationOutcome::Failed(error),
         }
     }
 
@@ -88,6 +102,10 @@ pub enum OperationOutcome {
         message: String,
         select: Option<String>,
     },
+    Warned {
+        message: String,
+        select: Option<String>,
+    },
     ConfirmDelete {
         name: String,
         impact: DeleteImpact,
@@ -99,5 +117,66 @@ pub enum OperationOutcome {
 impl OperationOutcome {
     fn done(message: String, select: Option<String>) -> Self {
         Self::Done { message, select }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::application::ports::MergeOutcome;
+    use crate::test_support::{FakeMultiplexer, ServiceFixture};
+
+    struct MergeOperationFixture;
+
+    impl MergeOperationFixture {
+        const NAME: &'static str = "fix-auth";
+
+        fn conflicted(multiplexer: FakeMultiplexer) -> ServiceFixture {
+            let conflicts = MergeOutcome::Conflicted(vec!["src/auth.rs".to_string()]);
+            ServiceFixture::merging(Self::NAME, conflicts, multiplexer)
+        }
+
+        fn run(fixture: &ServiceFixture) -> OperationOutcome {
+            BlockingOperation::Merge(Self::NAME.to_string()).run(&mut fixture.service())
+        }
+    }
+
+    #[test]
+    fn a_merge_announces_the_fetch_while_it_runs() {
+        let operation = BlockingOperation::Merge(MergeOperationFixture::NAME.to_string());
+
+        assert_eq!(
+            operation.busy_message(),
+            "Fetching origin and merging it into fix-auth…"
+        );
+    }
+
+    #[test]
+    fn conflicts_handed_to_the_agent_are_done() {
+        let fixture = MergeOperationFixture::conflicted(FakeMultiplexer::new());
+
+        let outcome = MergeOperationFixture::run(&fixture);
+
+        assert_eq!(
+            outcome,
+            OperationOutcome::Done {
+                message: "merging origin/main into fix-auth stopped on a conflict in 1 file, asked its agent to finish the merge".to_string(),
+                select: Some("fix-auth".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn conflicts_the_agent_was_not_told_about_are_a_warning() {
+        let fixture = MergeOperationFixture::conflicted(ServiceFixture::refusing_typing(
+            MergeOperationFixture::NAME,
+        ));
+
+        let outcome = MergeOperationFixture::run(&fixture);
+
+        assert!(
+            matches!(outcome, OperationOutcome::Warned { .. }),
+            "{outcome:?}"
+        );
     }
 }

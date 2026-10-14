@@ -68,6 +68,10 @@ impl GitPorcelain {
             .collect()
     }
 
+    pub fn paths(&self) -> Vec<String> {
+        self.records().map(str::to_string).collect()
+    }
+
     pub fn record_count(&self) -> u64 {
         self.records().count() as u64
     }
@@ -170,6 +174,13 @@ mod tests {
     #[test]
     fn untracked_records_are_counted() {
         assert_eq!(GitPorcelain::new(UNTRACKED.as_bytes()).record_count(), 3);
+    }
+
+    #[test]
+    fn nul_separated_paths_are_listed_in_order() {
+        let listing = GitPorcelain::new(b"src/a.rs\0docs/b c.md\0");
+
+        assert_eq!(listing.paths(), ["src/a.rs", "docs/b c.md"]);
     }
 
     #[test]

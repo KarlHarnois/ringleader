@@ -11,8 +11,10 @@ use super::git_runner::GitRunner;
 use super::host_path::HostPath;
 use super::start_point_resolver::StartPointResolver;
 use super::submodule_commits::SubmoduleCommits;
+use super::upstream_merger::UpstreamMerger;
 use crate::application::ports::{
-    DiffBase, DirtyState, StartPoint, UnmergedCommits, Workspace, WorkspaceError, WorktreeEntry,
+    DiffBase, DirtyState, StartPoint, UnmergedCommits, UpstreamMerge, Workspace, WorkspaceError,
+    WorktreeEntry,
 };
 use crate::domain::{BaseBranch, DiffStat};
 
@@ -235,6 +237,23 @@ impl Workspace for GitWorkspace {
         let changes = self.git.run_checked(&numstat)?.file_changes();
         let untracked_count = self.git.run_checked(&untracked)?.record_count();
         Ok(DiffStat::from_changes(changes, untracked_count))
+    }
+
+    fn fetch_upstream(
+        &self,
+        worktree: &Path,
+        base_branch: Option<&BaseBranch>,
+    ) -> Result<BaseBranch, WorkspaceError> {
+        UpstreamMerger::new(&self.git).fetch(worktree, base_branch)
+    }
+
+    fn merge_upstream(
+        &self,
+        worktree: &Path,
+        branch_on_origin: &BaseBranch,
+        started_from: &str,
+    ) -> Result<UpstreamMerge, WorkspaceError> {
+        UpstreamMerger::new(&self.git).merge(worktree, branch_on_origin, started_from)
     }
 
     fn validate_repo(&self, path: &Path) -> Result<PathBuf, WorkspaceError> {
