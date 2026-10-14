@@ -550,6 +550,8 @@ mod tests {
 
     impl DirenvPane {
         const ENVRC: &'static str = "export EXAMPLE_FROM_ENVRC=loaded\n";
+        const IDLE_SECONDS: u64 = 3;
+        const NOW: u64 = 0;
 
         fn started(agent: &str) -> Self {
             let pane = Self {
@@ -584,6 +586,11 @@ mod tests {
                 .session_processes(&pane)
                 .iter()
                 .any(|process| process.command() == command)
+        }
+
+        fn state(&self) -> SessionState {
+            let observation = self.fixture.observation("ringleader-fix-auth");
+            SessionClassifier::new(Self::IDLE_SECONDS).classify(Some(&observation), Self::NOW)
         }
     }
 
@@ -1611,9 +1618,7 @@ mod tests {
                 .server
                 .wait_for(|| { fixture.observation("ringleader-fix-auth").pane_dead() })
         );
-        let observation = fixture.observation("ringleader-fix-auth");
-        let state = SessionClassifier::new(3).classify(Some(&observation), 0);
-        assert_eq!(state, SessionState::Exited);
+        assert_eq!(pane.state(), SessionState::Exited);
         let ran = fs::read_to_string(fixture.worktree("fix-auth").join("agent-ran")).unwrap();
         assert_eq!(ran, "loaded\n");
     }
