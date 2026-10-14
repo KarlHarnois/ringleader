@@ -397,6 +397,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── tmux_agent_input.rs   # TmuxAgentInput, waits for the agent's prompt and types lines into its pane
     │   ├── tmux_listing.rs       # TmuxListing, parses list-panes, list-windows, list-keys, and server rows
     │   ├── tmux_multiplexer.rs   # TmuxMultiplexer
+    │   ├── key_switch.rs         # KeySwitch, the copy-mode bindings each newly bound key displaces, saved in server options, and the ones each dropped key displaced, replayed
     │   ├── private_server.rs     # PrivateServer, the private server's config files, return binding check, state, config reapply that unbinds the keys the config dropped, and lost socket recovery
     │   ├── running_config.rs     # RunningConfig, the hash and key bindings a running server reports
     │   └── tmux_server_config.rs # TmuxServerConfig, the generated config of the private tmux server with its return and session switch bindings, its hash, and the script that reapplies it

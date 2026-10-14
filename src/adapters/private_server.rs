@@ -4,6 +4,7 @@ use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use super::key_switch::KeySwitch;
 use super::live_process::LiveProcess;
 use super::running_config::RunningConfig;
 use super::tmux_command::TmuxCommand;
@@ -132,12 +133,14 @@ impl<'a> PrivateServer<'a> {
     pub fn apply(&self, key_bindings: &KeyBindings) -> Result<(), MultiplexerError> {
         let running = self.running_config()?;
         let previous = running.as_ref().and_then(RunningConfig::key_bindings);
+        let switch = KeySwitch::read(self.tmux, previous, key_bindings)?;
         let render = self.render_for(key_bindings);
         self.write_render(&render)?;
-        let sequence = TmuxServerConfig::reapply_script(previous, key_bindings);
-        let output = self
-            .tmux
-            .change_with_input(&sequence, render.render().as_bytes())?;
+        let sequence = switch
+            .saving()
+            .then(TmuxServerConfig::reapply_script(previous, key_bindings));
+        let input = format!("{}{}", switch.restoring_lines(), render.render());
+        let output = self.tmux.change_with_input(&sequence, input.as_bytes())?;
         if output.succeeded() {
             return Ok(());
         }
@@ -217,6 +220,13 @@ mod tests {
                 .collect();
             keys.sort();
             keys
+        }
+
+        fn binding_of(server: &TmuxTestServer, table: &str, key: &str) -> String {
+            let listed = server.tmux(&["list-keys", "-T", table, key]);
+            String::from_utf8_lossy(&listed.stdout)
+                .trim_end()
+                .to_string()
         }
 
         fn option(server: &TmuxTestServer, name: &str) -> String {
@@ -358,6 +368,59 @@ mod tests {
 
         assert!(running.is_current());
         assert_eq!(running.key_bindings(), Some(&KeyBindings::default()));
+    }
+
+    #[test]
+    fn moving_the_return_key_off_a_key_copy_mode_binds_gives_that_binding_back() {
+        let server = TmuxTestServer::with_session("holder");
+        let tmux = server.command();
+        let private = PrivateServer::new(&tmux);
+
+        private.apply(&ServerFixture::alt_x()).unwrap();
+        private.apply(&KeyBindings::default()).unwrap();
+
+        for table in ["copy-mode", "copy-mode-vi"] {
+            assert_eq!(
+                ServerFixture::binding_of(&server, table, "M-x"),
+                format!("bind-key -T {table} M-x send-keys -X jump-to-mark")
+            );
+        }
+        assert_eq!(ServerFixture::detach_keys(&server), ["C-q"]);
+    }
+
+    #[test]
+    fn moving_the_return_key_off_a_key_with_a_braced_binding_replays_it_whole() {
+        let server = TmuxTestServer::with_session("holder");
+        let tmux = server.command();
+        let private = PrivateServer::new(&tmux);
+        let original = ServerFixture::binding_of(&server, "copy-mode", "C-r");
+        let alt_r = KeyBindings::default().with_return_key(HotKey::parse("C-r").unwrap());
+
+        private.apply(&alt_r).unwrap();
+        private.apply(&KeyBindings::default()).unwrap();
+
+        assert_eq!(
+            ServerFixture::binding_of(&server, "copy-mode", "C-r"),
+            original
+        );
+    }
+
+    #[test]
+    fn dropping_a_session_key_copy_mode_binds_gives_that_binding_back() {
+        let server = TmuxTestServer::with_session("holder");
+        let tmux = server.command();
+        let private = PrivateServer::new(&tmux);
+        let original = ServerFixture::binding_of(&server, "copy-mode", "M-x");
+        let next_on_alt_x =
+            KeyBindings::default().with_next_session_keys(HotKey::parse_valid(["M-x"]));
+
+        private.apply(&next_on_alt_x).unwrap();
+        private.apply(&KeyBindings::default()).unwrap();
+
+        assert_eq!(
+            ServerFixture::binding_of(&server, "copy-mode", "M-x"),
+            original
+        );
     }
 
     #[test]

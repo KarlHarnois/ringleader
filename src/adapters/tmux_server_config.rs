@@ -9,7 +9,10 @@ pub struct TmuxServerConfig {
 
 impl TmuxServerConfig {
     const RESET: &'static str = "set -su terminal-features";
-    const BINDING_TABLES: [&'static str; 3] = ["root", "copy-mode", "copy-mode-vi"];
+    pub const COPY_TABLES: [&'static str; 2] = ["copy-mode", "copy-mode-vi"];
+    const ROOT_TABLE: &'static str = "root";
+    const BINDING_TABLES: [&'static str; 3] =
+        [Self::ROOT_TABLE, Self::COPY_TABLES[0], Self::COPY_TABLES[1]];
     const SETTINGS: [&'static str; 16] = [
         "set -g prefix None",
         "set -g prefix2 None",
