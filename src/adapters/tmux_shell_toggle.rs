@@ -158,6 +158,25 @@ mod tests {
             Self::value(server, window, "#{pane_start_command}")
         }
 
+        fn runs_the_default_shell(server: &TmuxTestServer, window: &str) -> bool {
+            Self::start_command(server, window).is_empty()
+        }
+
+        fn managed_session_without_a_recorded_shell(server: &TmuxTestServer) {
+            server.managed_session("fix-auth");
+            server.text(&["set-option", "-u", "-t", Self::SESSION, "default-command"]);
+        }
+
+        fn set_fixture_default_shell(server: &TmuxTestServer) {
+            let shell = Self::shell_named(server, "default-shell");
+            server.text(&[
+                "set-option",
+                "-g",
+                "default-shell",
+                &shell.display().to_string(),
+            ]);
+        }
+
         fn multiplexer_with_shell(server: &TmuxTestServer, shell: &Path) -> TmuxMultiplexer {
             let shell = shell.display().to_string();
             let environment = server.environment_with(&[("SHELL", &shell)]);
@@ -241,6 +260,18 @@ mod tests {
             ToggleFixture::start_command(&server, &toggled),
             creators_shell.display().to_string()
         );
+    }
+
+    #[test]
+    fn in_a_session_with_no_recorded_shell_the_toggle_key_runs_the_default_shell() {
+        let server = TmuxTestServer::new();
+        ToggleFixture::managed_session_without_a_recorded_shell(&server);
+        ToggleFixture::set_fixture_default_shell(&server);
+        let client = server.control_client(ToggleFixture::SESSION);
+
+        let toggled = ToggleFixture::toggled(&server, &client);
+
+        assert!(ToggleFixture::runs_the_default_shell(&server, &toggled));
     }
 
     #[test]
