@@ -43,13 +43,8 @@ impl SessionRestart {
         config: &Config,
         config_path: &Path,
     ) -> Result<StartOutcome, ServiceError> {
+        Self::refuse_running(row)?;
         let session = row.session();
-        if row.state().runs_agent() {
-            return Err(ServiceError::Conflict(format!(
-                "session {} is running, restart only revives an exited or stopped agent",
-                session.name()
-            )));
-        }
         let checks = UseChecks::new(self.host.as_ref(), config, config_path);
         let agent = checks.agent_for_restart(session.agent())?;
         self.check_worktree(session)?;
@@ -60,6 +55,16 @@ impl SessionRestart {
         let restarted = self.revive(row, launch, reconciliation, config)?;
         self.hooks.after_start(&restarted, agent);
         Ok(StartOutcome::new(restarted, envrc.warning()))
+    }
+
+    fn refuse_running(row: &ManagedRow) -> Result<(), ServiceError> {
+        if row.state().runs_agent() {
+            return Err(ServiceError::Conflict(format!(
+                "session {} is running, restart only revives an exited or stopped agent",
+                row.session().name()
+            )));
+        }
+        Ok(())
     }
 
     fn launch(agent: &Agent, session: &Session) -> AgentLaunch {
