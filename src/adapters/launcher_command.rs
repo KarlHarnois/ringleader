@@ -22,8 +22,8 @@ impl LauncherCommand {
         Ok(self.handing_off(self.handoff.write(launch)?))
     }
 
-    pub fn prepare_contents(&self, contents: &HandoffContents) -> io::Result<PreparedLaunch> {
-        Ok(self.handing_off(self.handoff.write_contents(contents)?))
+    pub fn prepare_relay(&self, contents: &HandoffContents) -> io::Result<PreparedLaunch> {
+        Ok(self.handing_off(self.handoff.write_relay(contents)?))
     }
 
     fn handing_off(&self, handoff: PathBuf) -> PreparedLaunch {

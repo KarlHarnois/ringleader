@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime};
 
 use super::handoff_contents::HandoffContents;
+use super::live_process::LiveProcess;
 use super::process_environment::ProcessEnvironment;
 use crate::application::ports::AgentLaunch;
 use crate::domain::Agent;
@@ -23,6 +24,9 @@ impl AgentHandoff {
     const DIRECTORY_MODE: u32 = 0o700;
     const FILE_MODE: u32 = 0o600;
     const ROOT: &'static str = "/";
+    const LAUNCH_PREFIX: &'static str = "handoff";
+    const RELAY_PREFIX: &'static str = "relay";
+    const NAME_SEPARATOR: char = '-';
 
     pub fn new(directory: &Path, environment: &ProcessEnvironment) -> Self {
         Self {
@@ -40,16 +44,21 @@ impl AgentHandoff {
         let named = self.named_variables(launch);
         let inherited = [self.baseline_variables(), named.clone()].concat();
         let explicit = Self::overridden(named, Self::assigned_variables(launch));
-        self.write_contents(&HandoffContents::for_launch(launch, &inherited, &explicit))
+        let contents = HandoffContents::for_launch(launch, &inherited, &explicit);
+        self.write_file(Self::LAUNCH_PREFIX, &contents)
     }
 
-    pub fn write_contents(&self, contents: &HandoffContents) -> io::Result<PathBuf> {
+    pub fn write_relay(&self, contents: &HandoffContents) -> io::Result<PathBuf> {
+        self.write_file(Self::RELAY_PREFIX, contents)
+    }
+
+    fn write_file(&self, prefix: &str, contents: &HandoffContents) -> io::Result<PathBuf> {
         DirBuilder::new()
             .recursive(true)
             .mode(Self::DIRECTORY_MODE)
             .create(&self.directory)?;
         self.delete_stale();
-        let path = self.next_path();
+        let path = self.next_path(prefix);
         let mut file = OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -84,10 +93,25 @@ impl AgentHandoff {
                 .modified()
                 .ok()
                 .and_then(|modified| now.duration_since(modified).ok());
-            if metadata.is_file() && age.is_some_and(|age| age > Self::STALE_AFTER) {
+            let stale = metadata.is_file() && age.is_some_and(|age| age > Self::STALE_AFTER);
+            if stale && !Self::relay_writer_runs(&entry.path()) {
                 Self::delete(&entry.path());
             }
         }
+    }
+
+    fn relay_writer_runs(path: &Path) -> bool {
+        Self::relay_writer(path)
+            .and_then(LiveProcess::read)
+            .is_some_and(|writer| writer.is_alive())
+    }
+
+    fn relay_writer(path: &Path) -> Option<u32> {
+        let name = path.file_name()?.to_str()?;
+        let numbers = name
+            .strip_prefix(Self::RELAY_PREFIX)?
+            .strip_prefix(Self::NAME_SEPARATOR)?;
+        numbers.split(Self::NAME_SEPARATOR).next()?.parse().ok()
     }
 
     pub fn take(path: &Path) -> io::Result<HandoffContents> {
@@ -140,10 +164,13 @@ impl AgentHandoff {
             .collect()
     }
 
-    fn next_path(&self) -> PathBuf {
+    fn next_path(&self, prefix: &str) -> PathBuf {
         let sequence = HANDOFF_COUNTER.fetch_add(1, Ordering::Relaxed);
-        self.directory
-            .join(format!("handoff-{}-{sequence}.json", std::process::id()))
+        let separator = Self::NAME_SEPARATOR;
+        let writer = std::process::id();
+        self.directory.join(format!(
+            "{prefix}{separator}{writer}{separator}{sequence}.json"
+        ))
     }
 }
 
@@ -158,6 +185,9 @@ mod tests {
     }
 
     impl HandoffFixture {
+        const STALE: Duration = Duration::from_secs(61);
+        const NO_SUCH_PROCESS: u32 = u32::MAX;
+
         fn new() -> Self {
             Self {
                 directory: tempfile::tempdir().unwrap(),
@@ -204,9 +234,36 @@ mod tests {
         fn aged_file(&self, name: &str, age: Duration) -> PathBuf {
             fs::create_dir_all(self.handoff_directory()).unwrap();
             let path = self.handoff_directory().join(name);
-            let file = File::create(&path).unwrap();
-            file.set_modified(SystemTime::now() - age).unwrap();
+            File::create(&path).unwrap();
+            Self::age(&path, age);
             path
+        }
+
+        fn age(path: &Path, age: Duration) {
+            let file = File::options().write(true).open(path).unwrap();
+            file.set_modified(SystemTime::now() - age).unwrap();
+        }
+
+        fn stale_launch_handoff(&self) -> PathBuf {
+            let path = self.handoff(&[]).write(&Self::launch(&[])).unwrap();
+            Self::age(&path, Self::STALE);
+            path
+        }
+
+        fn stale_relay(&self) -> PathBuf {
+            let contents = self.handed(&[], &Self::launch(&[])).inside_envrc();
+            let path = self.handoff(&[]).write_relay(&contents).unwrap();
+            Self::age(&path, Self::STALE);
+            path
+        }
+
+        fn relay_of_an_ended_launcher(&self) -> PathBuf {
+            let name = format!(
+                "{}-{}-0.json",
+                AgentHandoff::RELAY_PREFIX,
+                Self::NO_SUCH_PROCESS
+            );
+            self.aged_file(&name, Self::STALE)
         }
     }
 
@@ -282,7 +339,7 @@ mod tests {
         let contents = AgentHandoff::take(&first).unwrap();
 
         let second = AgentHandoff::beside(&first, &ProcessEnvironment::default())
-            .write_contents(&contents.inside_envrc())
+            .write_relay(&contents.inside_envrc())
             .unwrap();
 
         assert_eq!(second.parent(), Some(fixture.handoff_directory().as_path()));
@@ -345,6 +402,36 @@ mod tests {
         fixture.handoff(&[]).delete_stale();
 
         assert!(fresh.exists());
+    }
+
+    #[test]
+    fn a_stale_relay_is_kept_while_the_launcher_that_wrote_it_runs() {
+        let fixture = HandoffFixture::new();
+        let relay = fixture.stale_relay();
+
+        fixture.handoff(&[]).delete_stale();
+
+        assert!(relay.exists());
+    }
+
+    #[test]
+    fn a_stale_relay_is_deleted_once_the_launcher_that_wrote_it_ended() {
+        let fixture = HandoffFixture::new();
+        let relay = fixture.relay_of_an_ended_launcher();
+
+        fixture.handoff(&[]).delete_stale();
+
+        assert!(!relay.exists());
+    }
+
+    #[test]
+    fn a_stale_launch_handoff_is_deleted_while_its_writer_runs() {
+        let fixture = HandoffFixture::new();
+        let handoff = fixture.stale_launch_handoff();
+
+        fixture.handoff(&[]).delete_stale();
+
+        assert!(!handoff.exists());
     }
 
     #[test]

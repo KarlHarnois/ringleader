@@ -84,7 +84,7 @@ impl AgentLauncher {
     }
 
     fn exec_through_envrc(&mut self, contents: &HandoffContents) -> LaunchError {
-        let prepared = match self.reentry.prepare_contents(&contents.inside_envrc()) {
+        let prepared = match self.reentry.prepare_relay(&contents.inside_envrc()) {
             Ok(prepared) => prepared,
             Err(error) => {
                 return LaunchError::EnvrcHandoff {
@@ -431,7 +431,7 @@ mod tests {
             let contents = AgentHandoff::take(&first).unwrap().inside_envrc();
             let envrc = Self::envrc_snapshot();
             let handoff = AgentHandoff::beside(&first, &envrc)
-                .write_contents(&contents)
+                .write_relay(&contents)
                 .unwrap();
             let seam = CapturingExec::default();
             Self::launcher(&envrc, Box::new(seam.clone()), &handoff, &Self::REENTRY)
