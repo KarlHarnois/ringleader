@@ -461,6 +461,16 @@ mod tests {
     }
 
     #[test]
+    fn the_session_spec_carries_the_configured_key_bindings() {
+        let fixture = ServiceFixture::new().with_config(ServiceFixture::config_with_alt_n());
+
+        CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap();
+
+        let spec = fixture.multiplexer().specs().pop().unwrap();
+        assert_eq!(spec.key_bindings(), &ServiceFixture::alt_n_bindings());
+    }
+
+    #[test]
     fn create_never_stores_the_prompt() {
         let fixture = ServiceFixture::new();
 

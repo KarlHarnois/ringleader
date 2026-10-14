@@ -21,7 +21,7 @@ use super::service_ports::ServicePorts;
 use super::session_access::{SessionAccess, ShellOutcome};
 use super::session_lifecycle::SessionLifecycle;
 use super::session_monitor::SessionMonitor;
-use crate::domain::{Config, DiffStat, PullRequest, Repo, ReturnKey, Session, SessionSummary};
+use crate::domain::{Config, DiffStat, KeyBindings, PullRequest, Repo, Session, SessionSummary};
 
 pub struct SessionService {
     config: LoadedConfig,
@@ -136,15 +136,15 @@ impl SessionService {
             return Ok(());
         }
         self.lifecycle
-            .sync_server_config(self.config().return_key())
+            .sync_server_config(self.config().key_bindings())
     }
 
-    pub fn shown_return_key(&self) -> ReturnKey {
-        let configured = self.config().return_key().clone();
+    pub fn shown_key_bindings(&self) -> KeyBindings {
+        let configured = self.config().key_bindings().clone();
         if self.read_only_reason().is_none() {
             return configured;
         }
-        self.monitor.server_return_key().unwrap_or(configured)
+        self.monitor.server_key_bindings().unwrap_or(configured)
     }
 
     pub fn refuse_own_pane(&self) -> Result<(), ServiceError> {
@@ -371,8 +371,9 @@ mod tests {
     }
 
     #[test]
-    fn a_drifted_server_config_is_reapplied_with_the_configured_key() {
+    fn a_drifted_server_config_is_reapplied_with_the_configured_keys() {
         let fixture = ServiceFixture::new()
+            .with_config(ServiceFixture::config_with_alt_n())
             .with_multiplexer(FakeMultiplexer::new().with_drifted_config("C-q"));
 
         fixture.service().reapply_server_config().unwrap();
@@ -381,7 +382,7 @@ mod tests {
             fixture
                 .multiplexer()
                 .calls()
-                .contains(&"apply_config C-q".to_string())
+                .contains(&"apply_config C-q M-n M-k M-Up".to_string())
         );
     }
 
@@ -423,7 +424,8 @@ mod tests {
             })
             .with_multiplexer(FakeMultiplexer::new().with_drifted_config("M-x"));
 
-        assert_eq!(fixture.service().shown_return_key().to_string(), "M-x");
+        let shown = fixture.service().shown_key_bindings();
+        assert_eq!(shown.return_key().to_string(), "M-x");
     }
 
     #[test]
