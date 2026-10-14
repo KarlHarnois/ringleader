@@ -572,6 +572,29 @@ mod tests {
     }
 
     #[test]
+    fn a_late_capture_of_a_row_left_behind_keeps_the_current_preview() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, 'j');
+        UiHarness::settle(&mut app);
+        let held = HeldCalls::all();
+        fixture
+            .multiplexer()
+            .add_call_hook("capture_pane", held.hook());
+        AppFixture::press(&mut app, 'k');
+        AppFixture::press(&mut app, 'j');
+
+        held.release();
+        let screens = AppFixture::screens_until_settled(&mut app);
+
+        assert!(
+            screens
+                .iter()
+                .all(|screen| screen.contains("fix auth output"))
+        );
+    }
+
+    #[test]
     fn a_shown_capture_leaves_the_preview_when_the_selection_moves() {
         let fixture = AppFixture::two_waiting_sessions();
         let mut app = AppFixture::started(&fixture, 100, 28);
