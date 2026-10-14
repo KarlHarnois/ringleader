@@ -97,7 +97,7 @@ impl SessionRestart {
         let spec = SessionSpec::new(session.tmux_name(), session.metadata().clone(), launch)
             .sized(config.session_size())
             .removing_env_names(&config.agent_env_union())
-            .with_return_key(config.return_key());
+            .with_key_bindings(config.key_bindings());
         let socket = self.multiplexer.create_session(&spec)?;
         let recreated = session.on_socket(&socket);
         let entries = reconciliation.entries_with(session.name().as_str(), recreated.clone());
@@ -205,7 +205,9 @@ mod tests {
         RestartFixture::restart(&fixture).unwrap();
 
         let calls = fixture.multiplexer().calls();
-        let applied = calls.iter().position(|call| call == "apply_config C-q");
+        let applied = calls
+            .iter()
+            .position(|call| call == "apply_config C-q M-j M-Down M-k M-Up");
         let created = calls
             .iter()
             .position(|call| call.starts_with("create_session"));
@@ -359,6 +361,16 @@ mod tests {
             ServiceFixture::CREATED_AT
         );
         assert!(fixture.workspace().state_changing_calls().is_empty());
+    }
+
+    #[test]
+    fn a_recreated_session_carries_the_configured_key_bindings() {
+        let fixture = RestartFixture::stopped().with_config(ServiceFixture::config_with_alt_n());
+
+        RestartFixture::restart(&fixture).unwrap();
+
+        let spec = fixture.multiplexer().specs().pop().unwrap();
+        assert_eq!(spec.key_bindings(), &ServiceFixture::alt_n_bindings());
     }
 
     #[test]

@@ -9,7 +9,7 @@ When no rule covers a case, choose what these values favor. When two conflict, t
 - **The user's own setup stays untouched.** Ringleader runs its own tmux server and never changes the user's tmux server, tmux config, or key bindings. It deletes or renames only the branches it marked as its own, and it assumes no particular personal setup. The private socket on every tmux call, the throwaway state for manual runs, the `ringleaderManaged` marker, and the consumer-agnostic repository all come from this.
 - **Refuse before losing work.** When an action could destroy work, Ringleader stops and says why instead of guessing. Delete measures uncommitted files and unmerged commits and asks first, rename refuses a branch that has been pushed, a failed create or rename undoes what it did, and a refused action exits with code 3.
 - **Intuitive, with several ways to do each thing.** Each way comes from an ecosystem users already know and keeps the meaning it has there, so a user who guesses a key is right.
-  - Vim: `j k` move, `gg G` jump to the ends, and `/` would open a session finder.
+  - Vim: `j k` move, `gg G` jump to the ends, `H M L` select the top, middle, or bottom row on screen, and `/` would open a session finder.
   - fzf and readline: `Ctrl-J Ctrl-K` and `Ctrl-N Ctrl-P` move in the repo search, and `Ctrl-W Ctrl-U` edit text.
   - Command palettes: `Ctrl-K` would also open the session finder.
   - The arrows work wherever `j k` do, `?` `Esc` `q` all close the help, and create, delete, rename, restart, and attach work from both the TUI and the CLI.
@@ -49,7 +49,7 @@ nix build .#
 nix flake check
 ```
 
-These are the commands `.github/workflows/ci.yml` runs. All of them run on pushes to `master` and on merge-queue runs, and the first three also run on pull requests. A change is done when all of them pass.
+These are the commands `.github/workflows/ci.yml` runs. All of them run on pushes to `master` and on merge-queue runs, and the first three also run on pull requests. A change is done when all of them pass. If a change edits a file under `src/`, the change is done only when the completion steps in Metrics also pass.
 
 ## Architecture
 
@@ -78,13 +78,15 @@ The one exception is a driving adapter's own channel to the user: the terminal f
 
 ## Metrics
 
-Local, on-demand code-health tools. CI never builds or runs them. Do not add them
-to `checks`, to the default dev shell, or to `.github/workflows/ci.yml`. The flake
-builds them as `apps` so `nix flake check` only evaluates them, and puts them in
-the `metrics` dev shell, which extends the default one. That evaluation still
-downloads the four upstream inputs, so if one can no longer be fetched, CI's
-flake check fails until its input is repinned or removed. `dryer`, `crapper`, and
-`mutator` write snapshots under `.metrics/`, which is gitignored.
+The metrics tools are `dryer`, `crapper`, and `mutator`, local code-health tools
+that agents run in the completion steps below. CI never builds or runs them. Do
+not add them to `checks`, to the default dev shell, or to
+`.github/workflows/ci.yml`. The flake builds them as `apps` so `nix flake check`
+only evaluates them, and puts them in the `metrics` dev shell, which extends the
+default one. That evaluation still downloads the four upstream inputs, so if one
+can no longer be fetched, CI's flake check fails until its input is repinned or
+removed. `dryer`, `crapper`, and `mutator` write snapshots under `.metrics/`,
+which is gitignored.
 Run them from the repository root, and pass `dryer` and `crapper` the `src` path.
 A pathless run also walks nested checkouts such as `.claude/worktrees` and scores
 every copy under the same namespaces, and `crapper` reruns coverage for each.
@@ -153,6 +155,88 @@ at once. It still looks for a companion with `tmux has-session`, so the `env`
 prefix sends those lookups to an empty private directory, removed after the
 viewer exits.
 
+### Completion steps
+
+**The completion steps are the four numbered steps below.** Run them after the
+Commands pass. A `crapper` run takes about a minute, and a step 4 run takes two
+to three minutes.
+
+| Term | Meaning |
+| --- | --- |
+| Test code | `#[cfg(test)]` code and every file under `src/test_support/` |
+| Production code | Every other line under `src/` |
+| Changed function | A production function the change's diff adds or edits |
+| Changed file | A file under `src/` that holds a changed function |
+| Added line | A line the change's diff adds |
+| Untestable function | A production function that needs a terminal or reads the process environment, which the Tests rules keep out of every test |
+| Step edit | Any change to a file under `src/` after step 1 first runs, including one made to pass a later Commands run |
+
+**Never run a completion step alongside another command:** the tests start real
+tmux servers and share `target/`.
+
+**Only changed functions decide whether step 1 or step 4 passes.** Never work on
+the score or the mutants of a function the change did not touch.
+
+**If a command in these steps fails to run, or exits with a code this section
+does not name, stop and show its output to the project owner.**
+
+1. Run `nix develop .#metrics -c crapper src`. Step 1 passes when every changed
+   function scores 8 or less.
+   - If the output contains `Rust coverage will score 0%`, the coverage run
+     failed and no score is real: fix the cause, then rerun step 1.
+   - If a changed function scores above 8, reduce the function's complexity or
+     add tests for it.
+2. Run `nix develop .#metrics -c dryer src`. Step 2 passes when every candidate
+   that includes an added line is resolved.
+   - A candidate whose two sides are both builders, each with one
+     `Self { field: value, ..self }` expression as its whole body, is resolved:
+     these builders configure fakes and plans across the codebase and make up
+     most candidates.
+   - If any other candidate that includes an added line is real duplication,
+     remove the duplication.
+   - Otherwise, tell the project owner why the pair is not real duplication,
+     which resolves the candidate.
+3. For each changed file, run `nix develop .#metrics -c mutator --scan <file>`.
+   The first output line, `Scan: N mutation sites in <file>`, gives the file's
+   site count. If N is over 50, tell the project owner and offer to split the
+   file. Step 3 always passes.
+4. For each changed file, run
+   `nix develop .#metrics -c mutator --reuse-coverage --max-workers 2 --timeout-factor 60 <file>`.
+   `--reuse-coverage` reads the coverage step 1 wrote. Step 4 passes when every
+   changed function's row reads 0 under `Survived` and `Uncovered`, apart from
+   survivors and uncovered sites this section has you report to the project
+   owner.
+   - Never judge step 4 by its exit code: exit 3 means a mutant survived
+     anywhere in the file, and a run with uncovered sites exits 0.
+   - If the run exits 2, the baseline tests failed: fix them, which is a step
+     edit.
+   - If a changed function has an uncovered site, add a test that runs the
+     site, unless the function is untestable.
+   - If a test can kill a survivor, add or strengthen that test.
+   - If no test can kill a survivor and removing the code it mutates keeps the
+     behavior, remove that code.
+   - Otherwise, tell the project owner which mutant survived and why no test
+     can kill it.
+
+**If a change edits an untestable function, move its logic into functions that
+tests reach until the untestable function has complexity 2 or less**, the most
+that scores 8 or less at 0% coverage. Then tell the project owner which of the
+untestable function's sites step 4 reports as uncovered.
+
+**After a step edit, run `nix develop -c cargo fmt`, then restart the completion
+steps from step 1.** Restart even when the step edit touched test code only:
+`crapper` is the only coverage check for a function with no mutation sites.
+
+- If the step edit changed only test code, skip each step 3 or step 4 run that
+  passed with the current production code, unless the step 4 run is for a
+  changed file the edited tests cover.
+- If the step edit rewrote or deleted an existing test, add `--mutate-all` to
+  the next step 4 run of each changed file that test covered: a rerun keeps
+  every kill recorded for a function whose text did not change.
+
+**If a step edit happened since the Commands last passed, run the Commands again
+once the completion steps pass:** none of the metrics tools runs `clippy`.
+
 ## Layout
 
 ```
@@ -202,7 +286,8 @@ viewer exits.
     │   ├── config_checks.rs      # ConfigChecks, the checks every config load runs
     │   ├── naming_scheme.rs      # NamingScheme, the worktree root and tmux prefix a session records
     │   ├── pull_request.rs       # PullRequest, its number, state, and opening time
-    │   └── return_key.rs         # ReturnKey, the key that detaches from a session back to Ringleader
+    │   ├── hot_key.rs            # HotKey, a key a terminal can send, which every key binding is made of
+    │   └── key_bindings.rs       # KeyBindings, the return key that detaches back to Ringleader and the keys that switch to the next and previous session
     ├── application/
     │   ├── mod.rs
     │   ├── session_service.rs    # SessionService, the facade the UI and CLI call
@@ -247,7 +332,7 @@ viewer exits.
     │   ├── doctor_report.rs      # DoctorReport, the doctor's info, warning, and problem lines
     │   ├── registry_audit.rs     # RegistryAudit, the doctor's checks of each registry entry
     │   ├── orphan_audit.rs       # OrphanAudit, the doctor's search for worktrees and marked branches no session claims
-    │   ├── server_audit.rs       # ServerAudit, the doctor's checks of Ringleader's tmux server and the return key
+    │   ├── server_audit.rs       # ServerAudit, the doctor's checks of Ringleader's tmux server and the key bindings
     │   └── ports/
     │       ├── mod.rs
     │       ├── session_registry.rs   # SessionRegistry trait
@@ -312,10 +397,9 @@ viewer exits.
     │   ├── tmux_agent_input.rs   # TmuxAgentInput, waits for the agent's prompt and types lines into its pane
     │   ├── tmux_listing.rs       # TmuxListing, parses list-panes, list-windows, list-keys, and server rows
     │   ├── tmux_multiplexer.rs   # TmuxMultiplexer
-    │   ├── key_switch.rs         # KeySwitch, the reapply steps of a return key change: the copy-mode bindings the new key displaces saved in server options, the old key unbound, and the bindings it had displaced replayed
-    │   ├── private_server.rs     # PrivateServer, the private server's config files, return binding check, state, config reapply, and lost socket recovery
-    │   ├── running_config.rs     # RunningConfig, the hash and return key a running server reports
-    │   └── tmux_server_config.rs # TmuxServerConfig, the generated config of the private tmux server, its hash, and the script that reapplies it
+    │   ├── private_server.rs     # PrivateServer, the private server's config files, return binding check, state, config reapply that unbinds the keys the config dropped, and lost socket recovery
+    │   ├── running_config.rs     # RunningConfig, the hash and key bindings a running server reports
+    │   └── tmux_server_config.rs # TmuxServerConfig, the generated config of the private tmux server with its return and session switch bindings, its hash, and the script that reapplies it
     ├── ui/
     │   ├── mod.rs
     │   ├── app.rs                  # App
@@ -323,7 +407,7 @@ viewer exits.
     │   ├── back_key.rs             # BackKey, Ctrl-Q, which closes any dialog and never quits
     │   ├── key_sequence.rs         # KeySequence, the g that waits for a second g to make gg
     │   ├── home_state.rs           # HomeState, the polled rows, selection, and preview
-    │   ├── session_list.rs         # SessionList, rows sorted by repo, state, and name, the selected session or heading, and the folded repos
+    │   ├── session_list.rs         # SessionList, rows sorted by repo, state, and name, the selected session or heading, the folded repos, and the viewport
     │   ├── list_selection.rs       # ListSelection, the selected session or repo heading
     │   ├── preview_feed.rs         # PreviewFeed, the preview capture and its timer
     │   ├── diff_queue.rs           # DiffQueue, round-robin diffs of visible rows
@@ -338,7 +422,8 @@ viewer exits.
     │   ├── home_view.rs            # HomeView
     │   ├── empty_state.rs          # EmptyState, the no-sessions message with the logo above it when it fits
     │   ├── session_table.rs        # SessionTable, the home screen's session list, drawn as a tree of repos
-    │   ├── session_tree.rs         # SessionTree, the sorted rows as repo headings and branch lines, and the scroll rule
+    │   ├── session_tree.rs         # SessionTree, the sorted rows as repo headings and branch lines, and the lines a viewport shows
+    │   ├── viewport.rs             # Viewport, the lines the session table shows, which move only to keep the selection in view, and the lines H M L select
     │   ├── repo_heading.rs         # RepoHeading, a repo's heading line with its number, fold arrow, and state counts
     │   ├── repo_group.rs           # RepoGroup, the repo a row is listed under, or other
     │   ├── colored_row.rs          # ColoredRow, a row's text split around its coloured cells
@@ -442,7 +527,7 @@ A command interrupted by a signal before its use case starts never runs it, and 
 
 ## Commits
 
-- One commit per finished change, after every command in Commands passes.
+- Give each change one commit, made after the change is done as Commands defines it.
 - The title starts with a capital letter, uses the imperative mood, and stays under 72 characters. The body says what changed in plain language.
 - Push only when the project owner asks.
 

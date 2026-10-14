@@ -158,15 +158,19 @@ impl TmuxScripts {
     }
 
     pub fn server_state() -> TmuxSequence {
-        Self::server_value(TmuxListing::SERVER_FORMAT).command([
+        Self::server_values(&[TmuxListing::SERVER_FORMAT]).command([
             "list-sessions",
             "-F",
             TmuxListing::SESSION_FORMAT,
         ])
     }
 
-    pub fn server_value(format: &str) -> TmuxSequence {
-        TmuxSequence::new().command(["display-message", "-p", format])
+    pub fn server_values(formats: &[impl AsRef<str>]) -> TmuxSequence {
+        formats
+            .iter()
+            .fold(TmuxSequence::new(), |sequence, format| {
+                sequence.command(["display-message", "-p", format.as_ref()])
+            })
     }
 
     pub fn type_line(pane: &str, line: &str) -> TmuxSequence {

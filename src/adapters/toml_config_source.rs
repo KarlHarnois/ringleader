@@ -23,6 +23,14 @@ impl TomlConfigSource {
 # prefix key, so this is the only way back. Inside your own tmux, it must not be
 # your tmux's prefix or bound in its root table.
 return_key = "C-q"
+# Keys that switch to the next or previous session in name order, wrapping at
+# either end. [] turns a direction off, and a missing list keeps these defaults.
+# Inside your own tmux, they must not be bound in its root table, and its
+# escape-time must be low, such as 10, or Esc followed by j, k, or an arrow
+# switches sessions. A removed key that tmux binds in copy mode, other than
+# M-Up and M-Down, stays unbound there until Ringleader's tmux server restarts.
+next_session_keys = ["M-j", "M-Down"]
+previous_session_keys = ["M-k", "M-Up"]
 state_poll_ms = 1000
 preview_refresh_ms = 750
 diff_refresh_ms = 3000
@@ -56,8 +64,9 @@ env = ["ANTHROPIC_API_KEY"]
 # written: only a leading ~/ expands. Keep secrets in env.
 # set_env = { CLAUDE_CONFIG_DIR = "~/.claude-work" }
 prompt_args = ["{prompt}"]
-# Added after args when a new session starts in plan mode, which Shift-Tab
-# picks in the new session dialog. An agent without plan_args has no plan mode.
+# Added after args when a new session starts in plan mode. The new session
+# dialog opens in plan mode when the first agent has plan_args, and Shift-Tab
+# switches modes. An agent without plan_args has no plan mode.
 plan_args = ["--permission-mode", "plan"]
 # Lines typed into the agent once its prompt is ready, each followed by Enter.
 # startup_input is typed at every start, rename_input after a rename.
@@ -209,7 +218,7 @@ impl ConfigSource for TomlConfigSource {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{Agent, AgentMode, SessionName};
+    use crate::domain::{Agent, AgentMode, HotKey, KeyBindings, SessionName};
 
     const FIXTURE: &str = include_str!("../../tests/fixtures/config.toml");
 
@@ -258,6 +267,10 @@ mod tests {
             fs::write(fixture.path(), text).unwrap();
             fixture
         }
+
+        fn names(keys: &[HotKey]) -> Vec<String> {
+            keys.iter().map(HotKey::to_string).collect()
+        }
     }
 
     #[test]
@@ -283,6 +296,46 @@ mod tests {
         assert_eq!(agents, ["claude", "opencode"]);
         assert_eq!(config.repos()[0].name().as_str(), "example-project");
         assert_eq!(config.session_size().width(), 160);
+    }
+
+    #[test]
+    fn the_session_keys_in_a_file_reach_the_config() {
+        let fixture = SourceFixture::with_text(FIXTURE);
+
+        let config = fixture.source().load().unwrap();
+
+        let bindings = config.key_bindings();
+        assert_eq!(SourceFixture::names(bindings.next_session_keys()), ["M-n"]);
+        assert_eq!(
+            SourceFixture::names(bindings.previous_session_keys()),
+            ["M-p", "F7"]
+        );
+    }
+
+    #[test]
+    fn an_older_config_whose_return_key_is_a_default_session_key_still_loads() {
+        let fixture = SourceFixture::with_text("return_key = \"M-k\"\n");
+
+        let config = fixture.source().load().unwrap();
+
+        let bindings = config.key_bindings();
+        assert_eq!(bindings.return_key().to_string(), "M-k");
+        assert_eq!(
+            SourceFixture::names(bindings.previous_session_keys()),
+            ["M-Up"]
+        );
+    }
+
+    #[test]
+    fn the_first_run_template_loads_the_default_key_bindings() {
+        let fixture = SourceFixture::new();
+
+        fixture.source().write_first_run_template().unwrap();
+
+        assert_eq!(
+            fixture.source().load().unwrap().key_bindings(),
+            &KeyBindings::default()
+        );
     }
 
     #[test]

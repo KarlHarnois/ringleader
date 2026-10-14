@@ -5,7 +5,7 @@ use super::doctor_report::DoctorReport;
 use super::ports::{HostProbe, Multiplexer, ServerState};
 use super::service_ports::ServicePorts;
 use super::tool_version::ToolVersion;
-use crate::domain::ReturnKey;
+use crate::domain::{HotKey, KeyBindings};
 
 pub struct ServerAudit {
     multiplexer: Arc<dyn Multiplexer>,
@@ -26,16 +26,16 @@ impl ServerAudit {
 
     pub fn audit(
         &self,
-        return_key: Option<&ReturnKey>,
+        key_bindings: Option<&KeyBindings>,
         client_version: Option<&str>,
         report: &mut DoctorReport,
     ) {
         self.check_location(report);
         self.check_directory(report);
         self.check_state(client_version, report);
-        if let Some(return_key) = return_key {
-            self.check_return_key(return_key, report);
-            self.check_drift(return_key, report);
+        if let Some(key_bindings) = key_bindings {
+            self.check_keys(key_bindings, report);
+            self.check_drift(key_bindings, report);
         }
     }
 
@@ -107,22 +107,39 @@ impl ServerAudit {
         }
     }
 
-    fn check_return_key(&self, return_key: &ReturnKey, report: &mut DoctorReport) {
-        let key = return_key.display();
-        if return_key.shadows_agent_input() {
-            report.warning(format!(
-                "return_key {return_key} is a key agents need, and in a session it detaches instead of reaching the agent; pick a key such as C-q"
-            ));
+    fn check_keys(&self, key_bindings: &KeyBindings, report: &mut DoctorReport) {
+        for (setting, key) in key_bindings.by_setting() {
+            if key.shadows_agent_input() {
+                report.warning(format!(
+                    "{setting} {key} is a key agents need, and in a session Ringleader's tmux takes it before the agent sees it; pick a key agents leave alone, such as a function key"
+                ));
+            }
         }
         if self.multiplexer.caller_in_other_tmux() {
-            report.info(format!(
-                "this runs inside your own tmux, so sessions open nested; your tmux must not use {key} as its prefix or bind it in its root table, which doctor cannot check without reading your tmux server"
-            ));
+            Self::report_nested_keys(key_bindings, report);
         }
     }
 
-    fn check_drift(&self, return_key: &ReturnKey, report: &mut DoctorReport) {
-        let Ok(Some(running)) = self.multiplexer.server_config(return_key) else {
+    fn report_nested_keys(key_bindings: &KeyBindings, report: &mut DoctorReport) {
+        report.info(format!(
+            "this runs inside your own tmux, so sessions open nested; your tmux must not use {} in its root table, which doctor cannot check without reading your tmux server",
+            Self::outer_key_rule(key_bindings)
+        ));
+        if key_bindings.all().any(HotKey::has_alt) {
+            report.info("Alt keys are bound, so set your tmux's escape-time low, such as tmux 3.5's default of 10; your tmux reads Esc and a key typed within its escape-time as one Alt key, so Esc then another key could fire one of these bindings instead of reaching the agent");
+        }
+    }
+
+    fn outer_key_rule(key_bindings: &KeyBindings) -> String {
+        let keys: Vec<String> = key_bindings.all().map(HotKey::to_string).collect();
+        match keys.as_slice() {
+            [key] => format!("{key} as its prefix or bind it"),
+            _ => format!("any of {} as its prefix or bind them", keys.join(", ")),
+        }
+    }
+
+    fn check_drift(&self, key_bindings: &KeyBindings, report: &mut DoctorReport) {
+        let Ok(Some(running)) = self.multiplexer.server_config(key_bindings) else {
             return;
         };
         if !running.is_current() {
@@ -136,6 +153,7 @@ mod tests {
     use std::path::Path;
 
     use crate::application::ports::{DirectoryAccess, MultiplexerError};
+    use crate::domain::{Config, ConfigDraft};
     use crate::test_support::{FakeHostProbe, FakeMultiplexer, ServiceFixture};
 
     struct AuditFixture;
@@ -160,11 +178,13 @@ mod tests {
             )
         }
 
-        fn with_return_key(key: &str) -> ServiceFixture {
-            let draft = crate::domain::ConfigDraft::new(Path::new(ServiceFixture::WORKTREE_ROOT))
-                .return_key(key)
-                .agent(ServiceFixture::agent());
-            ServiceFixture::new().with_config(crate::domain::Config::new(&draft).unwrap())
+        fn with_draft(draft: ConfigDraft) -> ServiceFixture {
+            let draft = draft.agent(ServiceFixture::agent());
+            ServiceFixture::new().with_config(Config::new(&draft).unwrap())
+        }
+
+        fn draft() -> ConfigDraft {
+            ConfigDraft::new(Path::new(ServiceFixture::WORKTREE_ROOT))
         }
 
         fn with_socket(socket: &str) -> ServiceFixture {
@@ -338,7 +358,7 @@ mod tests {
 
     #[test]
     fn a_return_key_agents_need_is_a_warning() {
-        let fixture = AuditFixture::with_return_key("C-c");
+        let fixture = AuditFixture::with_draft(AuditFixture::draft().return_key("C-c"));
 
         assert!(AuditFixture::line_with(
             &fixture,
@@ -348,15 +368,77 @@ mod tests {
     }
 
     #[test]
-    fn inside_another_tmux_the_return_key_needs_an_unbound_outer_key() {
+    fn a_next_session_key_agents_need_is_a_warning_naming_its_setting() {
+        let draft = AuditFixture::draft().next_session_keys(&["M-j", "C-c"]);
+
+        let fixture = AuditFixture::with_draft(draft);
+
+        assert!(AuditFixture::line_with(
+            &fixture,
+            "warning:",
+            "next_session_keys C-c is a key agents need"
+        ));
+    }
+
+    #[test]
+    fn the_default_keys_draw_no_agent_key_warning() {
+        assert!(!AuditFixture::line_with(
+            &ServiceFixture::new(),
+            "warning:",
+            "is a key agents need"
+        ));
+    }
+
+    #[test]
+    fn inside_another_tmux_every_bound_key_needs_an_unbound_outer_key() {
         let fixture =
             ServiceFixture::new().with_multiplexer(FakeMultiplexer::new().called_from_other_tmux());
 
         assert!(AuditFixture::line_with(
             &fixture,
             "info:",
-            "your tmux must not use Ctrl-Q as its prefix or bind it in its root table"
+            "your tmux must not use any of C-q, M-j, M-Down, M-k, M-Up as its prefix or bind them in its root table"
         ));
+    }
+
+    #[test]
+    fn inside_another_tmux_a_lone_return_key_reads_as_one_key() {
+        let none: [&str; 0] = [];
+        let draft = AuditFixture::draft()
+            .next_session_keys(&none)
+            .previous_session_keys(&none);
+        let fixture = AuditFixture::with_draft(draft)
+            .with_multiplexer(FakeMultiplexer::new().called_from_other_tmux());
+
+        assert!(AuditFixture::line_with(
+            &fixture,
+            "info:",
+            "your tmux must not use C-q as its prefix or bind it in its root table"
+        ));
+    }
+
+    #[test]
+    fn inside_another_tmux_alt_keys_need_a_low_escape_time() {
+        let fixture =
+            ServiceFixture::new().with_multiplexer(FakeMultiplexer::new().called_from_other_tmux());
+
+        assert!(AuditFixture::line_with(
+            &fixture,
+            "info:",
+            "set your tmux's escape-time low"
+        ));
+    }
+
+    #[test]
+    fn inside_another_tmux_keys_without_alt_draw_no_escape_time_note() {
+        let none: [&str; 0] = [];
+        let draft = AuditFixture::draft()
+            .next_session_keys(&["F7"])
+            .previous_session_keys(&none);
+        let fixture = AuditFixture::with_draft(draft)
+            .with_multiplexer(FakeMultiplexer::new().called_from_other_tmux());
+
+        assert!(!AuditFixture::line_with(&fixture, "info:", "escape-time"));
     }
 
     #[test]

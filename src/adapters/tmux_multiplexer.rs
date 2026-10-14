@@ -16,7 +16,7 @@ use crate::application::ports::{
     AgentLaunch, AttachTarget, Multiplexer, MultiplexerError, ServerConfig, ServerState,
     SessionSpec,
 };
-use crate::domain::{ReturnKey, SessionMetadata, SessionObservation};
+use crate::domain::{KeyBindings, SessionMetadata, SessionObservation};
 
 pub struct TmuxMultiplexer {
     tmux: TmuxCommand,
@@ -56,7 +56,7 @@ impl TmuxMultiplexer {
     ) -> Result<PathBuf, MultiplexerError> {
         let server = PrivateServer::new(&self.tmux);
         server.restore_socket()?;
-        server.write_files(spec.return_key())?;
+        server.write_files(spec.key_bindings())?;
         let sequence = TmuxScripts::create_session(spec, prepared.words());
         let output = self.tmux.create(&sequence, spec.removed_env_names())?;
         let launched = TmuxLaunch::new(&self.tmux).run(&sequence, output)?;
@@ -345,9 +345,9 @@ impl Multiplexer for TmuxMultiplexer {
 
     fn server_config(
         &self,
-        return_key: &ReturnKey,
+        key_bindings: &KeyBindings,
     ) -> Result<Option<ServerConfig>, MultiplexerError> {
-        PrivateServer::new(&self.tmux).config(return_key)
+        PrivateServer::new(&self.tmux).config(key_bindings)
     }
 
     fn socket_lost(&self) -> bool {
@@ -358,8 +358,8 @@ impl Multiplexer for TmuxMultiplexer {
         PrivateServer::new(&self.tmux).restore_socket()
     }
 
-    fn apply_config(&self, return_key: &ReturnKey) -> Result<(), MultiplexerError> {
-        PrivateServer::new(&self.tmux).apply(return_key)
+    fn apply_config(&self, key_bindings: &KeyBindings) -> Result<(), MultiplexerError> {
+        PrivateServer::new(&self.tmux).apply(key_bindings)
     }
 
     fn version(&self) -> Result<String, MultiplexerError> {
@@ -395,7 +395,7 @@ mod tests {
     use crate::adapters::Deadlines;
     use crate::adapters::process_environment::ProcessEnvironment;
     use crate::adapters::tmux_sequence::TmuxSequence;
-    use crate::domain::{RepoName, ReturnKey, SessionRepo, SessionWorktree};
+    use crate::domain::{HotKey, KeyBindings, RepoName, SessionRepo, SessionWorktree};
     use crate::test_support::TmuxTestServer;
 
     const HOOKED: &str = "run-shell \"echo hooked; exit 1\"";
@@ -569,7 +569,9 @@ mod tests {
             multiplexer.server_state().unwrap();
             multiplexer.version().unwrap();
             multiplexer
-                .apply_config(&ReturnKey::parse("M-x").unwrap())
+                .apply_config(
+                    &KeyBindings::default().with_return_key(HotKey::parse("M-x").unwrap()),
+                )
                 .unwrap();
             let agent = fixture.tagged_panes("ringleader-fix-auth").pop().unwrap();
             fixture

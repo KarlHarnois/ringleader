@@ -11,9 +11,9 @@ use crate::application::{
     SessionService, StatePorts, TmuxPorts,
 };
 use crate::domain::{
-    Agent, AgentPane, Config, NamingScheme, PullRequest, PullRequestState, Registration, Repo,
-    RepoName, Session, SessionMetadata, SessionName, SessionObservation, SessionRepo, SessionState,
-    SessionSummary, SessionWorktree, TmuxAddress,
+    Agent, AgentPane, Config, HotKey, KeyBindings, NamingScheme, PullRequest, PullRequestState,
+    Registration, Repo, RepoName, Session, SessionMetadata, SessionName, SessionObservation,
+    SessionRepo, SessionState, SessionSummary, SessionWorktree, TmuxAddress,
 };
 
 pub struct ServiceFixture {
@@ -226,6 +226,14 @@ impl ServiceFixture {
 
     pub fn config() -> Config {
         Config::defaults(Path::new(Self::WORKTREE_ROOT)).with_agents(vec![Self::agent()])
+    }
+
+    pub fn config_with_alt_n() -> Config {
+        Self::config().with_key_bindings(Self::alt_n_bindings())
+    }
+
+    pub fn alt_n_bindings() -> KeyBindings {
+        KeyBindings::default().with_next_session_keys(HotKey::parse_valid(["M-n"]))
     }
 
     pub fn naming() -> NamingScheme {

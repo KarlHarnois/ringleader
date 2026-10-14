@@ -20,7 +20,6 @@ pub mod git_runner;
 pub mod git_workspace;
 pub mod host_path;
 pub mod json_session_registry;
-pub mod key_switch;
 pub mod live_process;
 pub mod metadata_json;
 pub mod mount_table;

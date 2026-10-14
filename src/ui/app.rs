@@ -70,7 +70,8 @@ impl App {
     }
 
     pub fn resize(&mut self, width: u16, height: u16) {
-        self.home.resize(width, height, &self.service);
+        let status = Self::status_bar(self.theme, &self.status, &self.home);
+        self.home.resize(width, height, &status, &self.service);
     }
 
     pub fn on_tick(&mut self, now: Instant) {
@@ -161,6 +162,9 @@ impl App {
             KeyAction::Move(offset) => self.home.move_selection(offset, &self.service),
             KeyAction::SelectFirst => self.home.select_first(&self.service),
             KeyAction::SelectLast => self.home.select_last(&self.service),
+            KeyAction::SelectHigh => self.home.select_high(&self.service),
+            KeyAction::SelectMiddle => self.home.select_middle(&self.service),
+            KeyAction::SelectLow => self.home.select_low(&self.service),
             KeyAction::Fold => self.home.toggle_fold(&self.service),
             KeyAction::JumpToRepo(number) => self.home.jump_to_repo(number, &self.service),
             KeyAction::Open(opening) => {
@@ -575,6 +579,30 @@ mod tests {
     }
 
     #[test]
+    fn capital_m_selects_the_middle_session_on_screen() {
+        let fixture = AppFixture::three_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press(&mut app, 'M');
+
+        assert_eq!(AppFixture::selected(&app).as_deref(), Some("fix-auth"));
+        assert_eq!(
+            AppFixture::captures(&fixture).last().unwrap(),
+            "capture_pane ringleader-fix-auth"
+        );
+    }
+
+    #[test]
+    fn capital_l_selects_the_bottom_session_on_screen() {
+        let fixture = AppFixture::three_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press(&mut app, 'L');
+
+        assert_eq!(AppFixture::selected(&app).as_deref(), Some("spike-tui"));
+    }
+
+    #[test]
     fn space_folds_the_selected_repo() {
         let fixture = AppFixture::two_repos();
         let mut app = AppFixture::started(&fixture, 100, 28);
@@ -795,7 +823,7 @@ mod tests {
             fixture
                 .multiplexer()
                 .calls()
-                .contains(&"apply_config C-q".to_string())
+                .contains(&"apply_config C-q M-j M-Down M-k M-Up".to_string())
         );
     }
 
