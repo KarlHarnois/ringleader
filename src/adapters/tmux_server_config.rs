@@ -1,5 +1,6 @@
 use std::iter::once;
 
+use super::fnv_hash::FnvHash;
 use super::tmux_sequence::TmuxSequence;
 use crate::domain::{HotKey, KeyBindings};
 
@@ -39,8 +40,6 @@ impl TmuxServerConfig {
     pub const NEXT_SESSION_KEYS_OPTION: &'static str = "@ringleader_next_session_keys";
     pub const PREVIOUS_SESSION_KEYS_OPTION: &'static str = "@ringleader_previous_session_keys";
     pub const HASH_OPTION: &'static str = "@ringleader_config";
-    const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
-    const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 
     pub fn new(key_bindings: &KeyBindings) -> Self {
         Self {
@@ -64,7 +63,7 @@ impl TmuxServerConfig {
 
     pub fn hash(&self) -> String {
         let hashed = [self.leading_lines(), self.bindings()].concat();
-        format!("{:016x}", Self::fnv1a(Self::joined(&hashed).as_bytes()))
+        FnvHash::of(Self::joined(&hashed).as_bytes()).hex()
     }
 
     fn leading_lines(&self) -> Vec<String> {
@@ -103,12 +102,6 @@ impl TmuxServerConfig {
 
     fn joined(lines: &[String]) -> String {
         lines.iter().map(|line| format!("{line}\n")).collect()
-    }
-
-    fn fnv1a(bytes: &[u8]) -> u64 {
-        bytes.iter().fold(Self::FNV_OFFSET_BASIS, |hash, byte| {
-            (hash ^ u64::from(*byte)).wrapping_mul(Self::FNV_PRIME)
-        })
     }
 
     fn released(sequence: TmuxSequence, key: &HotKey) -> TmuxSequence {
