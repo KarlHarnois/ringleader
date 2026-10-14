@@ -5,8 +5,8 @@ use super::hot_key::HotKey;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeyBindings {
     return_key: HotKey,
-    next_session: Vec<HotKey>,
-    previous_session: Vec<HotKey>,
+    next_session_keys: Vec<HotKey>,
+    previous_session_keys: Vec<HotKey>,
 }
 
 impl KeyBindings {
@@ -19,13 +19,13 @@ impl KeyBindings {
 
     pub fn new(
         return_key: HotKey,
-        next_session: Vec<HotKey>,
-        previous_session: Vec<HotKey>,
+        next_session_keys: Vec<HotKey>,
+        previous_session_keys: Vec<HotKey>,
     ) -> Self {
         Self {
             return_key,
-            next_session,
-            previous_session,
+            next_session_keys,
+            previous_session_keys,
         }
     }
 
@@ -35,17 +35,17 @@ impl KeyBindings {
     }
 
     #[cfg(test)]
-    pub fn with_next_session(self, next_session: Vec<HotKey>) -> Self {
+    pub fn with_next_session_keys(self, next_session_keys: Vec<HotKey>) -> Self {
         Self {
-            next_session,
+            next_session_keys,
             ..self
         }
     }
 
     #[cfg(test)]
-    pub fn with_previous_session(self, previous_session: Vec<HotKey>) -> Self {
+    pub fn with_previous_session_keys(self, previous_session_keys: Vec<HotKey>) -> Self {
         Self {
-            previous_session,
+            previous_session_keys,
             ..self
         }
     }
@@ -54,12 +54,12 @@ impl KeyBindings {
         &self.return_key
     }
 
-    pub fn next_session(&self) -> &[HotKey] {
-        &self.next_session
+    pub fn next_session_keys(&self) -> &[HotKey] {
+        &self.next_session_keys
     }
 
-    pub fn previous_session(&self) -> &[HotKey] {
-        &self.previous_session
+    pub fn previous_session_keys(&self) -> &[HotKey] {
+        &self.previous_session_keys
     }
 
     pub fn all(&self) -> impl Iterator<Item = &HotKey> {
@@ -68,11 +68,11 @@ impl KeyBindings {
 
     pub fn by_setting(&self) -> Vec<(&'static str, &HotKey)> {
         let next = self
-            .next_session
+            .next_session_keys
             .iter()
             .map(|key| (Self::NEXT_SESSION_SETTING, key));
         let previous = self
-            .previous_session
+            .previous_session_keys
             .iter()
             .map(|key| (Self::PREVIOUS_SESSION_SETTING, key));
         once((Self::RETURN_KEY_SETTING, &self.return_key))
@@ -114,11 +114,11 @@ mod tests {
 
         assert_eq!(defaults.return_key().to_string(), "C-q");
         assert_eq!(
-            BindingsFixture::names(defaults.next_session()),
+            BindingsFixture::names(defaults.next_session_keys()),
             ["M-j", "M-Down"]
         );
         assert_eq!(
-            BindingsFixture::names(defaults.previous_session()),
+            BindingsFixture::names(defaults.previous_session_keys()),
             ["M-k", "M-Up"]
         );
     }

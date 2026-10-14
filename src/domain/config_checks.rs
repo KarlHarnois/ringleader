@@ -391,7 +391,7 @@ mod tests {
 
         let config = crate::domain::Config::new(&draft).unwrap();
 
-        let previous = config.key_bindings().previous_session();
+        let previous = config.key_bindings().previous_session_keys();
         assert_eq!(previous, HotKey::parse_valid(["M-Up"]));
     }
 

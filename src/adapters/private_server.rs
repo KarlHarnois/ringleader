@@ -199,7 +199,7 @@ mod tests {
         }
 
         fn alt_n_and_alt_down() -> KeyBindings {
-            KeyBindings::default().with_next_session(HotKey::parse_valid(["M-n", "M-Down"]))
+            KeyBindings::default().with_next_session_keys(HotKey::parse_valid(["M-n", "M-Down"]))
         }
 
         fn detach_keys(server: &TmuxTestServer) -> Vec<String> {
@@ -383,8 +383,8 @@ mod tests {
         let server = TmuxTestServer::with_session("holder");
         let tmux = server.command();
         let without_arrows = KeyBindings::default()
-            .with_next_session(HotKey::parse_valid(["M-j"]))
-            .with_previous_session(HotKey::parse_valid(["M-k"]));
+            .with_next_session_keys(HotKey::parse_valid(["M-j"]))
+            .with_previous_session_keys(HotKey::parse_valid(["M-k"]));
 
         PrivateServer::new(&tmux).apply(&without_arrows).unwrap();
 

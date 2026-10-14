@@ -230,7 +230,7 @@ impl ServiceFixture {
     }
 
     pub fn alt_n_bindings() -> KeyBindings {
-        KeyBindings::default().with_next_session(HotKey::parse_valid(["M-n"]))
+        KeyBindings::default().with_next_session_keys(HotKey::parse_valid(["M-n"]))
     }
 
     pub fn naming() -> NamingScheme {

@@ -68,11 +68,11 @@ impl HelpView {
                 Self::RETURN_ACTION,
             ),
             (
-                Self::shown(key_bindings.next_session()),
+                Self::shown(key_bindings.next_session_keys()),
                 Self::NEXT_SESSION_ACTION,
             ),
             (
-                Self::shown(key_bindings.previous_session()),
+                Self::shown(key_bindings.previous_session_keys()),
                 Self::PREVIOUS_SESSION_ACTION,
             ),
         ];
@@ -415,8 +415,8 @@ mod tests {
     #[test]
     fn the_help_lists_the_configured_next_and_previous_session_keys() {
         let bindings = KeyBindings::default()
-            .with_next_session(HotKey::parse_valid(["M-n"]))
-            .with_previous_session(HotKey::parse_valid(["M-p", "F7"]));
+            .with_next_session_keys(HotKey::parse_valid(["M-n"]))
+            .with_previous_session_keys(HotKey::parse_valid(["M-p", "F7"]));
 
         let text = HelpFixture::text(&HelpFixture::help_for(&bindings));
 
@@ -440,7 +440,7 @@ mod tests {
 
     #[test]
     fn a_session_direction_without_keys_has_no_row() {
-        let bindings = KeyBindings::default().with_next_session(Vec::new());
+        let bindings = KeyBindings::default().with_next_session_keys(Vec::new());
 
         let text = HelpFixture::text(&HelpFixture::help_for(&bindings));
 

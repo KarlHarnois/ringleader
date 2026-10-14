@@ -300,9 +300,9 @@ mod tests {
         let config = fixture.source().load().unwrap();
 
         let bindings = config.key_bindings();
-        assert_eq!(SourceFixture::names(bindings.next_session()), ["M-n"]);
+        assert_eq!(SourceFixture::names(bindings.next_session_keys()), ["M-n"]);
         assert_eq!(
-            SourceFixture::names(bindings.previous_session()),
+            SourceFixture::names(bindings.previous_session_keys()),
             ["M-p", "F7"]
         );
     }
@@ -315,7 +315,10 @@ mod tests {
 
         let bindings = config.key_bindings();
         assert_eq!(bindings.return_key().to_string(), "M-k");
-        assert_eq!(SourceFixture::names(bindings.previous_session()), ["M-Up"]);
+        assert_eq!(
+            SourceFixture::names(bindings.previous_session_keys()),
+            ["M-Up"]
+        );
     }
 
     #[test]

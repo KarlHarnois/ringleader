@@ -93,10 +93,13 @@ mod tests {
         assert_eq!(running.hash(), "0123456789abcdef");
         assert_eq!(bindings.return_key().to_string(), "M-x");
         assert_eq!(
-            RunningFixture::names(bindings.next_session()),
+            RunningFixture::names(bindings.next_session_keys()),
             ["M-n", "F7"]
         );
-        assert_eq!(RunningFixture::names(bindings.previous_session()), ["M-p"]);
+        assert_eq!(
+            RunningFixture::names(bindings.previous_session_keys()),
+            ["M-p"]
+        );
     }
 
     #[test]
@@ -108,7 +111,7 @@ mod tests {
         ));
 
         let bindings = running.key_bindings().unwrap();
-        assert!(bindings.next_session().is_empty());
-        assert!(bindings.previous_session().is_empty());
+        assert!(bindings.next_session_keys().is_empty());
+        assert!(bindings.previous_session_keys().is_empty());
     }
 }

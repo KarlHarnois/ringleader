@@ -83,11 +83,11 @@ impl TmuxServerConfig {
             ),
             Self::option_line(
                 Self::NEXT_SESSION_KEYS_OPTION,
-                &Self::key_list(bindings.next_session()),
+                &Self::key_list(bindings.next_session_keys()),
             ),
             Self::option_line(
                 Self::PREVIOUS_SESSION_KEYS_OPTION,
-                &Self::key_list(bindings.previous_session()),
+                &Self::key_list(bindings.previous_session_keys()),
             ),
         ]
     }
@@ -149,11 +149,11 @@ impl TmuxServerConfig {
     fn table_bindings(&self, table: &str) -> Vec<String> {
         let bindings = &self.key_bindings;
         let next = bindings
-            .next_session()
+            .next_session_keys()
             .iter()
             .map(|key| Self::binding(table, key, Self::NEXT_SESSION));
         let previous = bindings
-            .previous_session()
+            .previous_session_keys()
             .iter()
             .map(|key| Self::binding(table, key, Self::PREVIOUS_SESSION));
         let return_binding = Self::binding(table, bindings.return_key(), Self::RETURN);
@@ -332,7 +332,7 @@ mod tests {
     #[test]
     fn the_reapply_unbinds_a_dropped_key_in_every_table_before_sourcing() {
         let changed =
-            KeyBindings::default().with_next_session(HotKey::parse_valid(["M-n", "M-Down"]));
+            KeyBindings::default().with_next_session_keys(HotKey::parse_valid(["M-n", "M-Down"]));
 
         let words = ConfigFixture::reapply_words(&KeyBindings::default(), &changed);
 
@@ -346,8 +346,8 @@ mod tests {
     #[test]
     fn the_reapply_never_unbinds_a_key_that_stays_bound_under_any_setting() {
         let swapped = KeyBindings::default()
-            .with_next_session(HotKey::parse_valid(["M-k", "M-Down"]))
-            .with_previous_session(HotKey::parse_valid(["M-j", "M-Up"]));
+            .with_next_session_keys(HotKey::parse_valid(["M-k", "M-Down"]))
+            .with_previous_session_keys(HotKey::parse_valid(["M-j", "M-Up"]));
 
         let words = ConfigFixture::reapply_words(&KeyBindings::default(), &swapped);
 
