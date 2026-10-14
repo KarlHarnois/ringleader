@@ -83,6 +83,20 @@ impl App {
         self.dialogs.poll();
     }
 
+    pub fn observe(&mut self) {
+        let outcome = self.home.observe(&mut self.service);
+        self.status.failure(outcome);
+    }
+
+    pub fn poll(&mut self, now: Instant) {
+        let outcome = self.home.poll(now, &mut self.service);
+        self.status.failure(outcome);
+    }
+
+    pub fn awaits_results(&self) -> bool {
+        self.home.awaits_results()
+    }
+
     pub fn into_service(self) -> SessionService {
         self.service
     }
@@ -233,11 +247,6 @@ impl App {
             Err(error) => self.status.error(error),
         }
     }
-
-    fn observe(&mut self) {
-        let outcome = self.home.observe(&mut self.service);
-        self.status.failure(outcome);
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -253,6 +262,7 @@ pub enum AppRequest {
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};
+    use std::sync::Arc;
     use std::time::{Duration, Instant};
 
     use crossterm::event::KeyCode;
@@ -266,7 +276,8 @@ mod tests {
     use crate::application::ports::{ConfigError, MergeOutcome, MultiplexerError, UnmergedCommits};
     use crate::domain::{Config, ConfigDraft, DiffStat, PullRequestState, Session};
     use crate::test_support::{
-        CapturedWriter, Deadline, FakeMultiplexer, FakePullRequests, ServiceFixture, UiHarness,
+        CapturedWriter, Deadline, FakeMultiplexer, FakePullRequests, HeldCalls, ServiceFixture,
+        UiHarness,
     };
 
     struct AppFixture;
@@ -371,7 +382,7 @@ mod tests {
         fn ringing(fixture: &ServiceFixture, bell: &CapturedWriter) -> App {
             let mut app = App::new(fixture.service(), Box::new(bell.clone()), Instant::now());
             app.resize(100, 28);
-            app.on_tick(Instant::now());
+            UiHarness::settle(&mut app);
             app
         }
 
@@ -385,8 +396,38 @@ mod tests {
         fn started(fixture: &ServiceFixture, width: u16, height: u16) -> App {
             let mut app = UiHarness::app(fixture);
             app.resize(width, height);
-            app.on_tick(Instant::now());
+            UiHarness::settle(&mut app);
             app
+        }
+
+        fn observed(fixture: &ServiceFixture) -> App {
+            let mut app = UiHarness::app(fixture);
+            app.resize(UiHarness::WIDTH, UiHarness::HEIGHT);
+            app.observe();
+            app
+        }
+
+        fn screens_until_settled(app: &mut App) -> Vec<String> {
+            let mut screens = vec![Self::screen(app, UiHarness::WIDTH, UiHarness::HEIGHT)];
+            Deadline::for_background_work().wait_until(|| {
+                app.on_tick(Instant::now());
+                screens.push(Self::screen(app, UiHarness::WIDTH, UiHarness::HEIGHT));
+                !app.awaits_results()
+            });
+            screens
+        }
+
+        fn wait_for_capture(fixture: &ServiceFixture, name: &str) -> bool {
+            let call = format!("capture_pane ringleader-{name}");
+            Deadline::for_background_work().wait_until(|| Self::captures(fixture).contains(&call))
+        }
+
+        fn holding_captures(held: &Arc<HeldCalls>) -> ServiceFixture {
+            let fixture = Self::two_waiting_sessions();
+            fixture
+                .multiplexer()
+                .add_call_hook("capture_pane", held.hook());
+            fixture
         }
 
         fn screen(app: &App, width: u16, height: u16) -> String {
@@ -459,13 +500,10 @@ mod tests {
         }
 
         fn settle_dialog(app: &mut App) {
-            let deadline = Instant::now() + Duration::from_secs(2);
-            while Instant::now() < deadline
-                && Self::screen(app, 100, 28).contains("Finding the repo")
-            {
+            Deadline::for_background_work().wait_until(|| {
                 app.on_tick(Instant::now());
-                std::thread::sleep(Duration::from_millis(5));
-            }
+                !Self::screen(app, 100, 28).contains("Finding the repo")
+            });
         }
 
         fn deletable() -> ServiceFixture {
@@ -534,12 +572,100 @@ mod tests {
         let mut app = AppFixture::started(&fixture, 100, 28);
 
         AppFixture::press(&mut app, 'j');
+        let captured_without_a_tick = AppFixture::wait_for_capture(&fixture, "fix-auth");
+        UiHarness::settle(&mut app);
 
-        assert_eq!(
-            AppFixture::captures(&fixture).last().unwrap(),
-            "capture_pane ringleader-fix-auth"
-        );
+        assert!(captured_without_a_tick);
         assert!(AppFixture::screen(&app, 100, 28).contains("fix auth output"));
+    }
+
+    #[test]
+    fn j_moves_the_selection_while_a_capture_is_still_blocked() {
+        let held = HeldCalls::all();
+        let fixture = AppFixture::holding_captures(&held);
+        let mut app = AppFixture::observed(&fixture);
+
+        AppFixture::press(&mut app, 'j');
+        let selected = AppFixture::selected(&app);
+        let finished_captures = AppFixture::captures(&fixture).len();
+        held.release();
+
+        assert_eq!(selected.as_deref(), Some("fix-auth"));
+        assert_eq!(finished_captures, 0);
+    }
+
+    #[test]
+    fn a_capture_of_the_previous_selection_never_shows_under_the_new_one() {
+        let held = HeldCalls::all();
+        let fixture = AppFixture::holding_captures(&held);
+        let mut app = AppFixture::observed(&fixture);
+        AppFixture::press(&mut app, 'j');
+
+        held.release();
+        let screens = AppFixture::screens_until_settled(&mut app);
+
+        assert!(
+            screens
+                .iter()
+                .all(|screen| !screen.contains("dark mode output"))
+        );
+        assert!(screens.last().unwrap().contains("fix auth output"));
+    }
+
+    #[test]
+    fn a_row_passed_over_during_a_capture_is_captured_once_that_capture_lands() {
+        let fixture = AppFixture::three_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        let held = HeldCalls::all();
+        fixture
+            .multiplexer()
+            .add_call_hook("capture_pane", held.hook());
+        AppFixture::press(&mut app, 'j');
+        AppFixture::press(&mut app, 'j');
+
+        held.release();
+        UiHarness::settle(&mut app);
+
+        assert!(AppFixture::screen(&app, 100, 28).contains("spike tui output"));
+    }
+
+    #[test]
+    fn a_late_capture_of_a_row_left_behind_keeps_the_current_preview() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, 'j');
+        UiHarness::settle(&mut app);
+        let held = HeldCalls::all();
+        fixture
+            .multiplexer()
+            .add_call_hook("capture_pane", held.hook());
+        AppFixture::press(&mut app, 'k');
+        AppFixture::press(&mut app, 'j');
+
+        held.release();
+        let screens = AppFixture::screens_until_settled(&mut app);
+
+        assert!(
+            screens
+                .iter()
+                .all(|screen| screen.contains("fix auth output"))
+        );
+    }
+
+    #[test]
+    fn a_shown_capture_leaves_the_preview_when_the_selection_moves() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        let held = HeldCalls::all();
+        fixture
+            .multiplexer()
+            .add_call_hook("capture_pane", held.hook());
+
+        AppFixture::press(&mut app, 'j');
+        let screen = AppFixture::screen(&app, 100, 28);
+        held.release();
+
+        assert!(!screen.contains("dark mode output"));
     }
 
     #[test]
@@ -550,6 +676,7 @@ mod tests {
         let before = AppFixture::captures(&fixture).len();
 
         app.on_tick(start + Duration::from_millis(800));
+        UiHarness::settle(&mut app);
 
         assert_eq!(AppFixture::captures(&fixture).len(), before + 1);
     }
@@ -560,6 +687,7 @@ mod tests {
         let mut app = AppFixture::started(&fixture, 60, 12);
 
         AppFixture::press(&mut app, 'j');
+        UiHarness::settle(&mut app);
 
         assert!(AppFixture::captures(&fixture).is_empty());
     }
@@ -570,6 +698,7 @@ mod tests {
         let mut app = AppFixture::started(&fixture, 60, 12);
 
         app.handle_event(&Event::Resize(100, 28));
+        UiHarness::settle(&mut app);
 
         assert_eq!(AppFixture::captures(&fixture).len(), 1);
     }
@@ -599,6 +728,7 @@ mod tests {
         let mut app = AppFixture::started(&fixture, 100, 28);
 
         AppFixture::press(&mut app, 'G');
+        UiHarness::settle(&mut app);
 
         assert_eq!(AppFixture::selected(&app).as_deref(), Some("spike-tui"));
         assert_eq!(
@@ -612,9 +742,11 @@ mod tests {
         let fixture = AppFixture::three_waiting_sessions();
         let mut app = AppFixture::started(&fixture, 100, 28);
         AppFixture::press(&mut app, 'G');
+        UiHarness::settle(&mut app);
 
         AppFixture::press(&mut app, 'g');
         AppFixture::press(&mut app, 'g');
+        UiHarness::settle(&mut app);
 
         assert_eq!(AppFixture::selected(&app).as_deref(), Some("dark-mode"));
         assert_eq!(
@@ -629,6 +761,7 @@ mod tests {
         let mut app = AppFixture::started(&fixture, 100, 28);
 
         AppFixture::press(&mut app, 'M');
+        UiHarness::settle(&mut app);
 
         assert_eq!(AppFixture::selected(&app).as_deref(), Some("fix-auth"));
         assert_eq!(
@@ -666,6 +799,7 @@ mod tests {
         let mut app = AppFixture::started(&fixture, 100, 28);
 
         AppFixture::press(&mut app, '2');
+        UiHarness::settle(&mut app);
 
         assert_eq!(AppFixture::selected(&app).as_deref(), Some("fix-auth"));
         assert_eq!(
@@ -683,6 +817,7 @@ mod tests {
         fixture.multiplexer().end_session("ringleader-dark-mode");
 
         app.on_tick(start + Duration::from_secs(2));
+        UiHarness::settle(&mut app);
 
         assert_eq!(app.home.sessions().rows()[0].name(), "fix-auth");
         assert_eq!(AppFixture::selected(&app).as_deref(), Some("fix-auth"));
@@ -1244,6 +1379,30 @@ mod tests {
     }
 
     #[test]
+    fn an_observation_started_before_a_delete_does_not_bring_the_session_back() {
+        let fixture = AppFixture::deletable();
+        let start = Instant::now();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        let held = HeldCalls::first(1);
+        fixture
+            .multiplexer()
+            .add_call_hook("observe_all", held.hook());
+        app.on_tick(start + Duration::from_secs(2));
+        let listing_started = held.wait_for(1);
+
+        let measure = app.handle_event(&UiHarness::character('d'));
+        AppFixture::perform(&mut app, measure);
+        let delete = app.handle_event(&UiHarness::key(KeyCode::Enter));
+        AppFixture::perform(&mut app, delete);
+        held.release();
+        UiHarness::settle(&mut app);
+
+        assert!(listing_started);
+        assert!(fixture.registry().sessions().is_empty());
+        assert!(app.home.sessions().rows().is_empty());
+    }
+
+    #[test]
     fn attach_from_the_tui_attaches_to_the_agent() {
         let fixture = AppFixture::two_waiting_sessions();
         let mut app = AppFixture::started(&fixture, 100, 28);
@@ -1306,6 +1465,7 @@ mod tests {
         let measured = AppFixture::screen(&app, 100, 28);
 
         app.on_tick(start + Duration::from_millis(1100));
+        UiHarness::settle(&mut app);
 
         assert!(measured.contains("+0 -0 ?3"));
         assert!(AppFixture::screen(&app, 100, 28).contains("+0 -0 ?3"));
@@ -1326,7 +1486,7 @@ mod tests {
         let mut app = UiHarness::app(&fixture).with_startup_messages(&["word ".repeat(40)], None);
         app.resize(100, 8);
 
-        app.on_tick(Instant::now());
+        UiHarness::settle(&mut app);
 
         let looked_up = Deadline::after(Duration::from_secs(2))
             .wait_until(|| !fixture.pull_requests().calls().is_empty());
@@ -1373,8 +1533,10 @@ mod tests {
             .fail("observe_all", AppFixture::tmux_timeout());
 
         app.on_tick(start + Duration::from_secs(2));
+        UiHarness::settle(&mut app);
         let after_the_timeout = AppFixture::observe_calls(&fixture);
         app.on_tick(start + Duration::from_secs(4));
+        UiHarness::settle(&mut app);
         let while_paused = AppFixture::observe_calls(&fixture);
         AppFixture::press(&mut app, 'r');
 
@@ -1394,6 +1556,7 @@ mod tests {
 
         app.on_tick(start + Duration::from_secs(1));
         app.on_tick(start + Duration::from_secs(2));
+        UiHarness::settle(&mut app);
 
         assert_eq!(first, 1);
         assert_eq!(AppFixture::captures(&fixture).len(), 1);
@@ -1556,6 +1719,7 @@ mod tests {
         let mut app = UiHarness::app(&fixture);
 
         app.on_tick(Instant::now());
+        UiHarness::settle(&mut app);
 
         assert_eq!(fixture.registry().save_count(), 0);
     }
@@ -1569,6 +1733,7 @@ mod tests {
         let mut app = UiHarness::app(&fixture);
 
         app.on_tick(Instant::now());
+        UiHarness::settle(&mut app);
 
         assert_eq!(fixture.registry().save_count(), 1);
     }

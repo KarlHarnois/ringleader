@@ -1,13 +1,17 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::diff_base_resolver::DiffBaseResolver;
+use super::pending::Pending;
 use super::ports::{Clock, HostProbe, Multiplexer, StartPoint, Workspace};
 use super::reconciliation::Reconciliation;
 use super::repo_merge::RepoMerge;
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
 use super::session_reconciler::SessionReconciler;
-use crate::domain::{BaseBranch, Config, DiffStat, KeyBindings, Session};
+use crate::domain::{
+    BaseBranch, Branch, Config, DiffStat, KeyBindings, Session, SessionObservation,
+};
 
 pub struct SessionMonitor {
     multiplexer: Arc<dyn Multiplexer>,
@@ -26,15 +30,24 @@ impl SessionMonitor {
         }
     }
 
+    pub fn observe_all(&self) -> Result<Vec<SessionObservation>, ServiceError> {
+        Ok(self.multiplexer.observe_all()?)
+    }
+
+    pub fn start_observing(&self) -> Pending<Vec<SessionObservation>> {
+        let multiplexer = Arc::clone(&self.multiplexer);
+        Pending::start(move || Ok(multiplexer.observe_all()?))
+    }
+
     pub fn reconcile(
         &self,
         entries: &[Session],
         config: &Config,
-    ) -> Result<Reconciliation, ServiceError> {
-        let observations = self.multiplexer.observe_all()?;
+        observations: Vec<SessionObservation>,
+    ) -> Reconciliation {
         let now = self.clock.now_epoch_seconds();
         let reconciler = SessionReconciler::new(config, self.host.as_ref(), now);
-        Ok(reconciler.reconcile(entries, observations))
+        reconciler.reconcile(entries, observations)
     }
 
     pub fn diff_stat(
@@ -43,19 +56,23 @@ impl SessionMonitor {
         sessions: &[Session],
         config: &Config,
     ) -> Result<DiffStat, ServiceError> {
-        let base_branch = self.base_branch(session, config);
-        let recorded = StartPoint::from_base_commit(session.base_commit());
-        let worktree = session.worktree_path();
-        let session_branches =
-            RepoMerge::new(self.host.as_ref()).session_branches_in(session.repo_path(), sessions);
-        let measured_from = DiffBaseResolver::new(self.diff_workspace.as_ref())
-            .skipping(session_branches)
-            .resolve(worktree, &recorded, base_branch)?;
-        Ok(self.diff_workspace.diff_stat(worktree, &measured_from)?)
+        self.diff_measurement(session, sessions, config).measure()
     }
 
-    pub fn preview(&self, tmux_name: &str) -> Result<String, ServiceError> {
-        Ok(self.multiplexer.capture_pane(tmux_name)?)
+    pub fn start_diff(
+        &self,
+        session: &Session,
+        sessions: &[Session],
+        config: &Config,
+    ) -> Pending<DiffStat> {
+        let measurement = self.diff_measurement(session, sessions, config);
+        Pending::start(move || measurement.measure())
+    }
+
+    pub fn start_preview(&self, tmux_name: &str) -> Pending<String> {
+        let multiplexer = Arc::clone(&self.multiplexer);
+        let tmux_name = tmux_name.to_string();
+        Pending::start(move || Ok(multiplexer.capture_pane(&tmux_name)?))
     }
 
     pub fn server_key_bindings(&self) -> Option<KeyBindings> {
@@ -66,8 +83,37 @@ impl SessionMonitor {
         running.key_bindings().cloned()
     }
 
-    fn base_branch<'a>(&self, session: &'a Session, config: &'a Config) -> Option<&'a BaseBranch> {
-        RepoMerge::new(self.host.as_ref()).base_branch_of(session, config.repos())
+    fn diff_measurement(
+        &self,
+        session: &Session,
+        sessions: &[Session],
+        config: &Config,
+    ) -> DiffMeasurement {
+        let repos = RepoMerge::new(self.host.as_ref());
+        DiffMeasurement {
+            workspace: Arc::clone(&self.diff_workspace),
+            worktree: session.worktree_path().to_path_buf(),
+            recorded: StartPoint::from_base_commit(session.base_commit()),
+            base_branch: repos.base_branch_of(session, config.repos()).cloned(),
+            session_branches: repos.session_branches_in(session.repo_path(), sessions),
+        }
+    }
+}
+
+struct DiffMeasurement {
+    workspace: Arc<dyn Workspace>,
+    worktree: PathBuf,
+    recorded: StartPoint,
+    base_branch: Option<BaseBranch>,
+    session_branches: Vec<Branch>,
+}
+
+impl DiffMeasurement {
+    fn measure(self) -> Result<DiffStat, ServiceError> {
+        let measured_from = DiffBaseResolver::new(self.workspace.as_ref())
+            .skipping(self.session_branches)
+            .resolve(&self.worktree, &self.recorded, self.base_branch.as_ref())?;
+        Ok(self.workspace.diff_stat(&self.worktree, &measured_from)?)
     }
 }
 
@@ -107,8 +153,22 @@ mod tests {
             fixture.service().diff_stats(&[Self::SESSION.to_string()]);
         }
 
+        fn measure_in_the_background(fixture: &ServiceFixture) {
+            let measurement = fixture.service().start_diff(Self::SESSION).unwrap();
+            measurement.wait_unless(|| false);
+        }
+
         fn branch_lookups(fixture: &ServiceFixture) -> Vec<Vec<Branch>> {
             Self::measure(fixture);
+            Self::recorded_branch_lookups(fixture)
+        }
+
+        fn background_branch_lookups(fixture: &ServiceFixture) -> Vec<Vec<Branch>> {
+            Self::measure_in_the_background(fixture);
+            Self::recorded_branch_lookups(fixture)
+        }
+
+        fn recorded_branch_lookups(fixture: &ServiceFixture) -> Vec<Vec<Branch>> {
             let requests = fixture.workspace().branch_tip_requests();
             requests.into_iter().map(|(_, branches)| branches).collect()
         }
@@ -125,6 +185,16 @@ mod tests {
 
         assert_eq!(
             MonitorFixture::branch_lookups(&fixture),
+            MonitorFixture::configured_lookups()
+        );
+    }
+
+    #[test]
+    fn the_background_diff_uses_the_configured_base_branch_too() {
+        let fixture = MonitorFixture::fixture_with_repo_at(ServiceFixture::REPO);
+
+        assert_eq!(
+            MonitorFixture::background_branch_lookups(&fixture),
             MonitorFixture::configured_lookups()
         );
     }

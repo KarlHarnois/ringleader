@@ -87,7 +87,10 @@ impl SessionMerge {
         reconciliation: &Reconciliation,
         config: &Config,
     ) -> Result<(), ServiceError> {
-        let current = self.monitor.reconcile(reconciliation.entries(), config)?;
+        let observations = self.monitor.observe_all()?;
+        let current = self
+            .monitor
+            .reconcile(reconciliation.entries(), config, observations);
         self.refuse_unsafe_merge(&current.managed(session.name().as_str())?)
     }
 

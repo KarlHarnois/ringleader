@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use super::CallHooks;
 use crate::application::ports::{
     DirtyState, Head, MergeOutcome, StartPoint, UnmergedCommits, Workspace, WorkspaceError,
     WorktreeEntry,
@@ -11,6 +12,7 @@ use crate::domain::{BaseBranch, Branch, BranchTips, DiffStat, MergeBases};
 #[derive(Default)]
 pub struct FakeWorkspace {
     state: Mutex<WorkspaceState>,
+    hooks: CallHooks,
 }
 
 #[derive(Default)]
@@ -158,8 +160,12 @@ impl FakeWorkspace {
     }
 
     pub fn with_diff(self, worktree: &Path, diff: DiffStat) -> Self {
-        self.edit(|state| state.diffs.insert(worktree.to_path_buf(), diff));
+        self.change_diff(worktree, diff);
         self
+    }
+
+    pub fn change_diff(&self, worktree: &Path, diff: DiffStat) {
+        self.edit(|state| state.diffs.insert(worktree.to_path_buf(), diff));
     }
 
     pub fn with_merge_outcome(self, outcome: MergeOutcome) -> Self {
@@ -200,6 +206,11 @@ impl FakeWorkspace {
 
     pub fn with_version(self, version: &str) -> Self {
         self.edit(|state| state.version = Some(version.to_string()));
+        self
+    }
+
+    pub fn on_call(self, operation: &'static str, hook: impl Fn() + Send + Sync + 'static) -> Self {
+        self.hooks.add(operation, hook);
         self
     }
 
@@ -260,6 +271,7 @@ impl FakeWorkspace {
     }
 
     fn call(&self, operation: &'static str, detail: String) -> Result<(), WorkspaceError> {
+        self.hooks.run(operation);
         self.edit(|state| {
             state.calls.push(format!("{operation} {detail}"));
             match state.failures.get(operation) {
@@ -650,11 +662,12 @@ impl Workspace for FakeWorkspace {
     }
 
     fn diff_stat(&self, worktree: &Path, base: &StartPoint) -> Result<DiffStat, WorkspaceError> {
-        self.call("diff_stat", worktree.display().to_string())?;
-        Ok(self.edit(|state| {
+        let diff = self.edit(|state| {
             state.diff_bases.push(base.clone());
             state.diffs.get(worktree).copied().unwrap_or_default()
-        }))
+        });
+        self.call("diff_stat", worktree.display().to_string())?;
+        Ok(diff)
     }
 
     fn fetch_upstream(

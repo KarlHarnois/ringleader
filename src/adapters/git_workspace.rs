@@ -301,7 +301,7 @@ mod tests {
     use std::fs;
 
     use super::*;
-    use crate::adapters::bounded_command::Deadlines;
+    use crate::adapters::Deadlines;
     use crate::application::ServiceError;
     use crate::application::diff_base_resolver::DiffBaseResolver;
     use crate::application::start_point_resolver::StartPointResolver;
