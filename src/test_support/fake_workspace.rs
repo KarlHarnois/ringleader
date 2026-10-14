@@ -115,8 +115,12 @@ impl FakeWorkspace {
     }
 
     pub fn with_diff(self, worktree: &Path, diff: DiffStat) -> Self {
-        self.edit(|state| state.diffs.insert(worktree.to_path_buf(), diff));
+        self.change_diff(worktree, diff);
         self
+    }
+
+    pub fn change_diff(&self, worktree: &Path, diff: DiffStat) {
+        self.edit(|state| state.diffs.insert(worktree.to_path_buf(), diff));
     }
 
     pub fn with_upstream_merge(self, outcome: MergeOutcome) -> Self {
@@ -533,8 +537,9 @@ impl Workspace for FakeWorkspace {
         let base_branch = base
             .base_branch()
             .map_or(Self::NO_BASE_BRANCH, BaseBranch::as_str);
+        let diff = self.edit(|state| state.diffs.get(worktree).copied().unwrap_or_default());
         self.call("diff_stat", format!("{} {base_branch}", worktree.display()))?;
-        Ok(self.edit(|state| state.diffs.get(worktree).copied().unwrap_or_default()))
+        Ok(diff)
     }
 
     fn fetch_upstream(

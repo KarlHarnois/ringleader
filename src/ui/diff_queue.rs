@@ -27,6 +27,7 @@ impl DiffQueue {
     pub fn refresh_soon(&mut self) {
         self.next_refresh = None;
         self.timed_out.clear();
+        self.measuring.iter_mut().for_each(Measurement::supersede);
     }
 
     pub fn keep_only(&mut self, names: &[String]) {
@@ -56,6 +57,7 @@ impl DiffQueue {
         let mut outcome = Ok(());
         for measurement in std::mem::take(&mut self.measuring) {
             match measurement.pending.poll() {
+                Some(_) if measurement.superseded => {}
                 Some(measured) => outcome = outcome.and(self.record(measurement.name, measured)),
                 None => self.measuring.push(measurement),
             }
@@ -104,7 +106,7 @@ impl DiffQueue {
         let measuring = self
             .measuring
             .iter()
-            .any(|measurement| &measurement.name == name);
+            .any(|measurement| measurement.is_current_for(name));
         !measuring && !self.queued.contains(name) && !self.timed_out.contains(name)
     }
 
@@ -114,7 +116,7 @@ impl DiffQueue {
                 return;
             };
             if let Some(pending) = service.start_diff(&name) {
-                self.measuring.push(Measurement { name, pending });
+                self.measuring.push(Measurement::new(name, pending));
             }
         }
     }
@@ -123,6 +125,25 @@ impl DiffQueue {
 struct Measurement {
     name: String,
     pending: Pending<DiffStat>,
+    superseded: bool,
+}
+
+impl Measurement {
+    fn new(name: String, pending: Pending<DiffStat>) -> Self {
+        Self {
+            name,
+            pending,
+            superseded: false,
+        }
+    }
+
+    fn supersede(&mut self) {
+        self.superseded = true;
+    }
+
+    fn is_current_for(&self, name: &str) -> bool {
+        !self.superseded && self.name == name
+    }
 }
 
 #[cfg(test)]
@@ -134,7 +155,7 @@ mod tests {
     use super::*;
     use crate::application::ports::WorkspaceError;
     use crate::domain::Session;
-    use crate::test_support::{FakeWorkspace, HeldCalls, ServiceFixture};
+    use crate::test_support::{Deadline, FakeWorkspace, HeldCalls, ServiceFixture};
 
     struct QueueFixture;
 
@@ -181,6 +202,10 @@ mod tests {
                 .iter()
                 .filter(|call| call.starts_with("diff_stat"))
                 .count()
+        }
+
+        fn wait_for_diff_calls(fixture: &ServiceFixture, count: usize) -> bool {
+            Deadline::after(Self::LIMIT).wait_until(|| Self::diff_calls(fixture) == count)
         }
 
         fn settle_at(
@@ -266,13 +291,40 @@ mod tests {
         let service = fixture.service();
         let mut queue = DiffQueue::default();
         let visible = QueueFixture::visible(&QueueFixture::NAMES);
+        let start = Instant::now();
 
-        queue.tick(Instant::now(), &visible, &service).unwrap();
-        queue.refresh_soon();
-        queue.tick(Instant::now(), &visible, &service).unwrap();
+        queue.tick(start, &visible, &service).unwrap();
+        queue
+            .tick(start + Duration::from_secs(4), &visible, &service)
+            .unwrap();
         held.release();
 
         assert_eq!(queue.queued, ["gamma"]);
+    }
+
+    #[test]
+    fn a_refresh_replaces_a_measurement_that_was_in_flight() {
+        let held = HeldCalls::first(1);
+        let fixture = QueueFixture::holding(&held);
+        let service = fixture.service();
+        let mut queue = DiffQueue::default();
+        let visible = QueueFixture::visible(&["alpha"]);
+        let start = Instant::now();
+        queue.tick(start, &visible, &service).unwrap();
+        held.wait_for(1);
+
+        fixture.workspace().change_diff(
+            &ServiceFixture::worktree_path("alpha"),
+            DiffStat::from_changes([], 9),
+        );
+        queue.refresh_soon();
+        queue.tick(start, &visible, &service).unwrap();
+        QueueFixture::wait_for_diff_calls(&fixture, 1);
+        queue.tick(start, &visible, &service).unwrap();
+        held.release();
+        QueueFixture::settle_at(&mut queue, start, &visible, &service).unwrap();
+
+        assert_eq!(queue.diffs()["alpha"].untracked(), 9);
     }
 
     #[test]
