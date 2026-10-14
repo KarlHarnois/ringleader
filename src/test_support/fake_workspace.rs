@@ -111,6 +111,12 @@ impl FakeWorkspace {
         self
     }
 
+    pub fn with_branch_tips(self, location: &Path, tips: &[(Branch, &str)]) -> Self {
+        tips.iter().fold(self, |workspace, (branch, tip)| {
+            workspace.with_branch_tip(location, branch.clone(), tip)
+        })
+    }
+
     pub fn without_branch_tips(self) -> Self {
         self.edit(|state| state.without_default_tips = true);
         self

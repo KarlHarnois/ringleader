@@ -100,12 +100,9 @@ mod tests {
         }
 
         fn with_tips(tips: &[(Branch, &str)]) -> FakeWorkspace {
-            tips.iter().fold(
-                FakeWorkspace::default().without_branch_tips(),
-                |workspace, (branch, tip)| {
-                    workspace.with_branch_tip(Self::repo(), branch.clone(), tip)
-                },
-            )
+            FakeWorkspace::default()
+                .without_branch_tips()
+                .with_branch_tips(Self::repo(), tips)
         }
 
         fn resolve(

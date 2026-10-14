@@ -72,13 +72,13 @@ mod tests {
         }
 
         fn on_origin(names: &[&str]) -> FakeWorkspace {
-            names.iter().fold(
-                FakeWorkspace::default().without_branch_tips(),
-                |workspace, name| {
-                    let origin_copy = Branch::origin_copy_of(name);
-                    workspace.with_branch_tip(Self::worktree(), origin_copy, Self::COMMIT)
-                },
-            )
+            let origin_tips: Vec<(Branch, &str)> = names
+                .iter()
+                .map(|name| (Branch::origin_copy_of(name), Self::COMMIT))
+                .collect();
+            FakeWorkspace::default()
+                .without_branch_tips()
+                .with_branch_tips(Self::worktree(), &origin_tips)
         }
 
         fn resolve(

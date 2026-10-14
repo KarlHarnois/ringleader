@@ -544,16 +544,16 @@ mod tests {
     fn another_sessions_branch_named_main_is_never_merged() {
         let session = MergeFixture::session();
         let worktree = session.worktree_path().to_path_buf();
-        let both_on_origin =
-            ["main", "master"]
-                .iter()
-                .fold(MergeFixture::workspace(), |workspace, name| {
-                    workspace.with_branch_tip(
-                        &worktree,
-                        Branch::origin_copy_of(name),
-                        FakeWorkspace::DEFAULT_START,
-                    )
-                });
+        let both_on_origin = MergeFixture::workspace().with_branch_tips(
+            &worktree,
+            &[
+                (Branch::origin_copy_of("main"), FakeWorkspace::DEFAULT_START),
+                (
+                    Branch::origin_copy_of("master"),
+                    FakeWorkspace::DEFAULT_START,
+                ),
+            ],
+        );
         let fixture = MergeFixture::waiting()
             .with_sessions(&[session, ServiceFixture::session("main")])
             .with_workspace(both_on_origin);

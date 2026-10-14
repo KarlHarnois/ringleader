@@ -217,15 +217,12 @@ mod tests {
         }
 
         fn with_local_tips(tips: &[(&str, &str)]) -> ServiceFixture {
-            let workspace =
-                tips.iter()
-                    .fold(FakeWorkspace::default(), |workspace, (branch, tip)| {
-                        workspace.with_branch_tip(
-                            Path::new(ServiceFixture::REPO),
-                            Branch::Local(branch.to_string()),
-                            tip,
-                        )
-                    });
+            let local_tips: Vec<(Branch, &str)> = tips
+                .iter()
+                .map(|(name, tip)| (Branch::Local(name.to_string()), *tip))
+                .collect();
+            let workspace = FakeWorkspace::default()
+                .with_branch_tips(Path::new(ServiceFixture::REPO), &local_tips);
             ServiceFixture::new().with_workspace(workspace)
         }
 
