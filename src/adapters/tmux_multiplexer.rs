@@ -323,6 +323,12 @@ impl Multiplexer for TmuxMultiplexer {
         self.type_into_agent(tmux_name, lines, Duration::ZERO)
     }
 
+    fn agent_at_prompt(&self, tmux_name: &str) -> Result<bool, MultiplexerError> {
+        let pane = self.required_agent_pane(tmux_name)?;
+        let input = TmuxAgentInput::new(&self.tmux, Duration::ZERO);
+        Ok(input.is_ready(&pane)?)
+    }
+
     fn ensure_shell_window(
         &self,
         tmux_name: &str,
@@ -1387,6 +1393,43 @@ mod tests {
                 tmux_name: "ringleader-fix-auth".to_string()
             })
         );
+    }
+
+    #[test]
+    fn an_agent_showing_a_bare_prompt_marker_is_at_its_prompt() {
+        let fixture = MultiplexerFixture::with_holder();
+        let multiplexer = TmuxMultiplexer::new(
+            fixture.server.command(),
+            fixture.server.launcher(
+                ["sh", "-c", "printf '> '; exec cat", "--"]
+                    .map(OsString::from)
+                    .to_vec(),
+            ),
+        );
+        multiplexer
+            .create_session(&fixture.spec("fix-auth"))
+            .unwrap();
+
+        let at_prompt = fixture.server.wait_for(|| {
+            multiplexer
+                .agent_at_prompt("ringleader-fix-auth")
+                .unwrap_or(false)
+        });
+
+        assert!(at_prompt);
+    }
+
+    #[test]
+    fn an_agent_with_no_prompt_marker_is_not_at_its_prompt() {
+        let fixture = MultiplexerFixture::with_holder();
+        fixture.create("fix-auth").unwrap();
+
+        let at_prompt = fixture
+            .server
+            .multiplexer()
+            .agent_at_prompt("ringleader-fix-auth");
+
+        assert_eq!(at_prompt, Ok(false));
     }
 
     #[test]

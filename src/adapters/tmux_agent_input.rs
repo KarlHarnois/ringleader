@@ -7,6 +7,7 @@ use super::tmux_command::TmuxCommand;
 use super::tmux_error::TmuxError;
 use super::tmux_launch::TmuxLaunch;
 use super::tmux_scripts::TmuxScripts;
+use super::tmux_sequence::TmuxSequence;
 use crate::application::ports::MultiplexerError;
 
 pub struct TmuxAgentInput<'a> {
@@ -20,6 +21,7 @@ impl<'a> TmuxAgentInput<'a> {
         "ringleader-cursor #{pane_dead} #{pane_in_mode} #{cursor_flag} #{cursor_x} #{cursor_y}";
     const POLL_INTERVAL: Duration = Duration::from_millis(100);
     const LINE_SETTLE: Duration = Duration::from_millis(300);
+    const SUBMIT_PAUSE: Duration = Duration::from_millis(300);
     const NEXT_LINE_PATIENCE: Duration = Duration::from_secs(2);
 
     pub fn new(tmux: &'a TmuxCommand, patience: Duration) -> Self {
@@ -36,6 +38,11 @@ impl<'a> TmuxAgentInput<'a> {
             self.type_at_prompt(pane, line, Self::NEXT_LINE_PATIENCE)?;
         }
         Ok(())
+    }
+
+    pub fn is_ready(&self, pane: &str) -> Result<bool, TmuxError> {
+        let cursor = self.cursor(pane)?;
+        self.is_at_prompt(pane, &cursor)
     }
 
     fn type_at_prompt(&self, pane: &str, line: &str, patience: Duration) -> Result<(), InputError> {
@@ -87,7 +94,13 @@ impl<'a> TmuxAgentInput<'a> {
     }
 
     fn type_line(&self, pane: &str, line: &str) -> Result<(), TmuxError> {
-        let output = self.tmux.change(&TmuxScripts::type_line(pane, line))?;
+        self.send(&TmuxScripts::type_text(pane, line))?;
+        thread::sleep(Self::SUBMIT_PAUSE);
+        self.send(&TmuxScripts::press_enter(pane))
+    }
+
+    fn send(&self, keys: &TmuxSequence) -> Result<(), TmuxError> {
+        let output = self.tmux.change(keys)?;
         if output.has(TmuxLaunch::DONE_LABEL) {
             return Ok(());
         }
@@ -184,6 +197,9 @@ mod tests {
         const SHORT_PATIENCE: Duration = Duration::from_millis(300);
         const LONG_PATIENCE: Duration = Duration::from_secs(5);
         const AT_PROMPT: &'static str = "printf '> '; exec cat";
+        const PASTE_AWARE: &'static str = "stty raw -echo; printf '> '; while :; do \
+            read_bytes=$(dd bs=4096 count=1 2>/dev/null | od -An -tx1 | tr -d ' \\n'); \
+            [ \"$read_bytes\" = 0d ] && printf '[submitted]'; done";
         const REDRAWS_PROMPT: &'static str =
             "printf '> '; while read -r line; do printf 'got %s\\n> ' \"$line\"; done";
         const DIALOG_AFTER_A_LINE: &'static str =
@@ -251,6 +267,19 @@ mod tests {
 
         assert_eq!(typed, Ok(()));
         assert!(fixture.shows("hello demo"));
+    }
+
+    #[test]
+    fn a_line_is_submitted_by_an_enter_that_arrives_on_its_own() {
+        let fixture = InputFixture::running(InputFixture::PASTE_AWARE);
+
+        let typed = fixture.type_lines(
+            &["a line long enough that an agent could read it as a paste"],
+            InputFixture::LONG_PATIENCE,
+        );
+
+        assert_eq!(typed, Ok(()));
+        assert!(fixture.shows("[submitted]"));
     }
 
     #[test]

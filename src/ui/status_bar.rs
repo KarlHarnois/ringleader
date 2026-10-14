@@ -97,18 +97,19 @@ pub struct KeyHints {
 }
 
 impl KeyHints {
-    const HINTS: [(&'static str, &'static str); 9] = [
+    const HINTS: [(&'static str, &'static str); 10] = [
         ("n", "new"),
         ("d", "delete"),
         ("R", "rename"),
         ("Enter", "attach"),
         ("t", "shell"),
         ("s", "restart"),
+        ("p", "pull"),
         ("r", "refresh"),
         ("?", "help"),
         ("q", "quit"),
     ];
-    const DROP_ORDER: [&'static str; 5] = ["r", "s", "t", "R", "d"];
+    const DROP_ORDER: [&'static str; 6] = ["p", "r", "s", "t", "R", "d"];
     const WIDE_GAP: &'static str = "   ";
     const NARROW_GAP: &'static str = "  ";
 
@@ -207,12 +208,22 @@ mod tests {
     }
 
     #[test]
-    fn a_wide_bar_lists_every_key_in_the_fixed_order() {
+    fn a_hundred_column_bar_drops_merge_first() {
         let text = BarFixture::render(StatusBar::new(Theme), 100);
 
         assert_eq!(
             text,
             " n new   d delete   R rename   Enter attach   t shell   s restart   r refresh   ? help   q quit"
+        );
+    }
+
+    #[test]
+    fn a_hundred_and_ten_column_bar_also_lists_pull() {
+        let text = BarFixture::render(StatusBar::new(Theme), 110);
+
+        assert_eq!(
+            text,
+            " n new   d delete   R rename   Enter attach   t shell   s restart   p pull   r refresh   ? help   q quit"
         );
     }
 

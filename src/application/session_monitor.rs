@@ -6,7 +6,7 @@ use super::repo_merge::RepoMerge;
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
 use super::session_reconciler::SessionReconciler;
-use crate::domain::{BaseBranch, Config, DiffStat, KeyBindings, Repo, Session};
+use crate::domain::{BaseBranch, Config, DiffStat, KeyBindings, Session};
 
 pub struct SessionMonitor {
     multiplexer: Arc<dyn Multiplexer>,
@@ -59,10 +59,7 @@ impl SessionMonitor {
         session: &Session,
         config: &'c Config,
     ) -> Option<&'c BaseBranch> {
-        let repo_path = self.host.canonical_or_given(session.repo_path());
-        RepoMerge::new(self.host.as_ref())
-            .configured(&repo_path, config.repos())
-            .and_then(Repo::base_branch)
+        RepoMerge::new(self.host.as_ref()).base_branch_of(session, config.repos())
     }
 }
 
