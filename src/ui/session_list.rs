@@ -6,6 +6,7 @@ use super::repo_heading::RepoHeading;
 use super::session_table::SessionTable;
 use super::session_tree::{SessionTree, TreeLine};
 use super::theme::Theme;
+use super::viewport::Viewport;
 use crate::domain::{DiffStat, PullRequest, SessionSummary};
 
 #[derive(Debug, Default)]
@@ -13,6 +14,7 @@ pub struct SessionList {
     rows: Vec<SessionSummary>,
     selection: Option<ListSelection>,
     folded: HashSet<RepoGroup>,
+    viewport: Viewport,
 }
 
 impl SessionList {
@@ -22,6 +24,7 @@ impl SessionList {
 
     pub fn table(&self, tick: u64, theme: Theme) -> SessionTable<'_> {
         SessionTable::new(self.tree(), self.selection.as_ref(), tick, theme)
+            .with_viewport(self.viewport)
     }
 
     pub fn selected_name(&self) -> Option<&str> {
@@ -32,9 +35,9 @@ impl SessionList {
         matches!(self.selection, Some(ListSelection::Repo(_)))
     }
 
-    pub fn visible_managed(&self, room: usize) -> Vec<String> {
+    pub fn visible_managed(&self) -> Vec<String> {
         let tree = self.tree();
-        let visible = tree.visible(self.selection.as_ref(), room);
+        let visible = tree.visible(self.selection.as_ref(), self.viewport);
         visible
             .filter_map(TreeLine::row)
             .filter(|row| row.session().is_some())
@@ -79,11 +82,17 @@ impl SessionList {
         }
     }
 
+    pub fn resize(&mut self, room: usize) {
+        self.viewport = self.viewport.with_room(room);
+        self.scroll_to_selection();
+    }
+
     pub fn show(&mut self, mut rows: Vec<SessionSummary>) {
         SessionTree::sort(&mut rows);
         self.rows = rows;
         self.forget_folds_without_a_heading();
         self.selection = self.repaired_selection();
+        self.scroll_to_selection();
     }
 
     pub fn select(&mut self, name: &str) {
@@ -91,21 +100,33 @@ impl SessionList {
             return;
         };
         self.folded.remove(&group);
-        self.selection = Some(ListSelection::Session(name.to_string()));
+        self.move_selection_to(ListSelection::Session(name.to_string()));
     }
 
     pub fn move_selection(&mut self, offset: isize) {
         if let Some(selection) = self.selection_moved_by(offset) {
-            self.selection = Some(selection);
+            self.move_selection_to(selection);
         }
     }
 
     pub fn select_first(&mut self) {
-        self.selection = self.tree().lines().first().map(TreeLine::selection);
+        self.select_line(0);
     }
 
     pub fn select_last(&mut self) {
-        self.selection = self.tree().lines().last().map(TreeLine::selection);
+        self.select_line(self.line_count().saturating_sub(1));
+    }
+
+    pub fn select_high(&mut self) {
+        self.select_shown_line(self.viewport.high(self.line_count()));
+    }
+
+    pub fn select_middle(&mut self) {
+        self.select_shown_line(self.viewport.middle(self.line_count()));
+    }
+
+    pub fn select_low(&mut self) {
+        self.select_shown_line(self.viewport.low(self.line_count()));
     }
 
     pub fn toggle_fold(&mut self) {
@@ -115,16 +136,46 @@ impl SessionList {
         if !self.folded.remove(group) {
             self.folded.insert(group.clone());
         }
+        self.scroll_to_selection();
     }
 
     pub fn jump_to_repo(&mut self, number: usize) {
         if let Some(target) = self.jump_target(number) {
-            self.selection = Some(target);
+            self.move_selection_to(target);
         }
     }
 
     fn tree(&self) -> SessionTree<'_> {
         SessionTree::new(&self.rows, &self.folded)
+    }
+
+    fn line_count(&self) -> usize {
+        self.tree().lines().len()
+    }
+
+    fn select_shown_line(&mut self, line: Option<usize>) {
+        if let Some(line) = line {
+            self.select_line(line);
+        }
+    }
+
+    fn select_line(&mut self, line: usize) {
+        let selection = self.tree().lines().get(line).map(TreeLine::selection);
+        if let Some(selection) = selection {
+            self.move_selection_to(selection);
+        }
+    }
+
+    fn move_selection_to(&mut self, selection: ListSelection) {
+        self.selection = Some(selection);
+        self.scroll_to_selection();
+    }
+
+    fn scroll_to_selection(&mut self) {
+        let tree = self.tree();
+        let selected = tree.selected_line(self.selection.as_ref());
+        let line_count = tree.lines().len();
+        self.viewport = self.viewport.scrolled_to(selected, line_count);
     }
 
     fn forget_folds_without_a_heading(&mut self) {
@@ -178,6 +229,9 @@ mod tests {
     struct ListFixture;
 
     impl ListFixture {
+        const ROOM_FOR_EVERY_LINE: usize = 10;
+        const ROOM_FOR_THREE_LINES: usize = 3;
+
         fn row(name: &str, state: SessionState) -> SessionSummary {
             SessionSummary::managed(ServiceFixture::session(name), state, false)
         }
@@ -192,7 +246,19 @@ mod tests {
 
         fn showing(rows: Vec<SessionSummary>) -> SessionList {
             let mut list = SessionList::default();
+            list.resize(Self::ROOM_FOR_EVERY_LINE);
             list.show(rows);
+            list
+        }
+
+        fn six_rows_in_three_lines() -> SessionList {
+            let names = ["a-one", "b-two", "c-three", "d-four", "e-five", "f-six"];
+            let rows = names
+                .iter()
+                .map(|name| Self::row(name, SessionState::Waiting))
+                .collect();
+            let mut list = Self::showing(rows);
+            list.resize(Self::ROOM_FOR_THREE_LINES);
             list
         }
 
@@ -201,13 +267,11 @@ mod tests {
         }
 
         fn three_waiting_rows() -> SessionList {
-            let mut list = SessionList::default();
-            list.show(vec![
+            Self::showing(vec![
                 Self::row("dark-mode", SessionState::Waiting),
                 Self::row("fix-auth", SessionState::Waiting),
                 Self::row("spike-tui", SessionState::Waiting),
-            ]);
-            list
+            ])
         }
     }
 
@@ -301,24 +365,25 @@ mod tests {
             "mystery",
             ServiceFixture::waiting(&stranger),
         ));
-        let mut list = SessionList::default();
-        list.show(vec![
+        let mut list = ListFixture::showing(vec![
             ListFixture::row("a-one", SessionState::Waiting),
             ListFixture::row("b-two", SessionState::Waiting),
             ListFixture::row("c-three", SessionState::Waiting),
             unmanaged,
         ]);
+        list.resize(2);
         list.move_selection(3);
 
-        assert_eq!(list.visible_managed(2), ["c-three"]);
+        assert_eq!(list.visible_managed(), ["c-three"]);
     }
 
     #[test]
     fn heading_lines_count_against_the_room_for_diffs() {
         let mut list = ListFixture::showing(ListFixture::two_repos());
+        list.resize(2);
         list.select("c-three");
 
-        assert_eq!(list.visible_managed(2), ["c-three"]);
+        assert_eq!(list.visible_managed(), ["c-three"]);
     }
 
     #[test]
@@ -327,7 +392,7 @@ mod tests {
 
         list.toggle_fold();
 
-        assert_eq!(list.visible_managed(10), ["c-three"]);
+        assert_eq!(list.visible_managed(), ["c-three"]);
     }
 
     #[test]
@@ -358,7 +423,7 @@ mod tests {
 
         list.toggle_fold();
 
-        assert_eq!(list.visible_managed(10), ["a-one", "b-two", "c-three"]);
+        assert_eq!(list.visible_managed(), ["a-one", "b-two", "c-three"]);
     }
 
     #[test]
@@ -368,7 +433,7 @@ mod tests {
         list.toggle_fold();
         list.toggle_fold();
 
-        assert_eq!(list.visible_managed(10), ["a-one", "b-two", "c-three"]);
+        assert_eq!(list.visible_managed(), ["a-one", "b-two", "c-three"]);
     }
 
     #[test]
@@ -388,7 +453,7 @@ mod tests {
         list.toggle_fold();
 
         assert!(on_heading);
-        assert_eq!(list.visible_managed(10), ["b-two", "a-one", "c-three"]);
+        assert_eq!(list.visible_managed(), ["b-two", "a-one", "c-three"]);
     }
 
     #[test]
@@ -401,7 +466,7 @@ mod tests {
         list.show(ListFixture::two_repos()[2..].to_vec());
         list.show(ListFixture::two_repos());
 
-        assert_eq!(list.visible_managed(10), ["a-one", "b-two", "c-three"]);
+        assert_eq!(list.visible_managed(), ["a-one", "b-two", "c-three"]);
     }
 
     #[test]
@@ -433,7 +498,7 @@ mod tests {
         list.jump_to_repo(1);
         list.toggle_fold();
 
-        assert_eq!(list.visible_managed(10), ["a-one", "b-two", "c-three"]);
+        assert_eq!(list.visible_managed(), ["a-one", "b-two", "c-three"]);
     }
 
     #[test]
@@ -464,7 +529,7 @@ mod tests {
         list.select("b-two");
 
         assert_eq!(list.selected_name(), Some("b-two"));
-        assert_eq!(list.visible_managed(10), ["a-one", "b-two", "c-three"]);
+        assert_eq!(list.visible_managed(), ["a-one", "b-two", "c-three"]);
     }
 
     #[test]
@@ -510,7 +575,7 @@ mod tests {
         list.select_first();
         list.toggle_fold();
 
-        assert_eq!(list.visible_managed(10), ["c-three"]);
+        assert_eq!(list.visible_managed(), ["c-three"]);
     }
 
     #[test]
@@ -528,7 +593,60 @@ mod tests {
 
         list.select_last();
         list.select_first();
+        list.select_high();
+        list.select_middle();
+        list.select_low();
 
         assert_eq!(list.selected_name(), None);
+    }
+
+    #[test]
+    fn select_low_picks_the_bottom_row_on_screen() {
+        let mut list = ListFixture::six_rows_in_three_lines();
+
+        list.select_low();
+
+        assert_eq!(list.selected_name(), Some("c-three"));
+    }
+
+    #[test]
+    fn select_high_picks_the_top_row_on_screen_without_scrolling() {
+        let mut list = ListFixture::six_rows_in_three_lines();
+        list.select_last();
+
+        list.select_high();
+
+        assert_eq!(list.selected_name(), Some("d-four"));
+        assert_eq!(list.visible_managed(), ["d-four", "e-five", "f-six"]);
+    }
+
+    #[test]
+    fn select_middle_picks_the_middle_row_on_screen() {
+        let mut list = ListFixture::six_rows_in_three_lines();
+        list.select_last();
+
+        list.select_middle();
+
+        assert_eq!(list.selected_name(), Some("e-five"));
+    }
+
+    #[test]
+    fn select_middle_picks_the_middle_of_a_list_shorter_than_the_screen() {
+        let mut list = ListFixture::three_waiting_rows();
+
+        list.select_middle();
+
+        assert_eq!(list.selected_name(), Some("fix-auth"));
+    }
+
+    #[test]
+    fn moving_up_inside_a_scrolled_view_keeps_the_view() {
+        let mut list = ListFixture::six_rows_in_three_lines();
+        list.select_last();
+
+        list.move_selection(-1);
+
+        assert_eq!(list.selected_name(), Some("e-five"));
+        assert_eq!(list.visible_managed(), ["d-four", "e-five", "f-six"]);
     }
 }

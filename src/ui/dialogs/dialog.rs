@@ -28,7 +28,7 @@ pub enum Dialog {
 impl Dialog {
     const WIDTH: u16 = 76;
     const HEIGHT: u16 = 22;
-    const HELP_HEIGHT: u16 = 27;
+    const HELP_HEIGHT: u16 = 28;
 
     pub fn open(opening: DialogOpening, service: &SessionService) -> Self {
         match opening {
@@ -243,7 +243,7 @@ mod tests {
         let new_session = PlacementFixture::render(DialogOpening::NewSession, 100, 30);
 
         assert_eq!(PlacementFixture::symbol(&help, 12, 1), "┌");
-        assert_eq!(PlacementFixture::symbol(&help, 12, 27), "└");
+        assert_eq!(PlacementFixture::symbol(&help, 12, 28), "└");
         assert_eq!(PlacementFixture::symbol(&new_session, 12, 4), "┌");
         assert_eq!(PlacementFixture::symbol(&new_session, 12, 25), "└");
     }

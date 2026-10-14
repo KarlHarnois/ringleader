@@ -18,7 +18,6 @@ pub struct HomeState {
     preview: PreviewFeed,
     diffs: DiffQueue,
     pull_requests: PullRequestFeed,
-    table_rows: usize,
     next_observe: Instant,
     tmux_paused_until: Option<Instant>,
 }
@@ -33,7 +32,6 @@ impl HomeState {
             preview: PreviewFeed::new(now),
             diffs: DiffQueue::default(),
             pull_requests: PullRequestFeed::default(),
-            table_rows: 0,
             next_observe: now,
             tmux_paused_until: None,
         }
@@ -58,7 +56,7 @@ impl HomeState {
 
     pub fn resize(&mut self, width: u16, height: u16, service: &SessionService) {
         let tier = LayoutTier::for_size(width, height);
-        self.table_rows = tier.table_rows(height);
+        self.sessions.resize(tier.table_rows(height));
         self.preview.resize(tier);
         self.refresh_preview(service);
     }
@@ -87,7 +85,7 @@ impl HomeState {
                 .refresh_if_due(now, service, self.sessions.selected());
             self.pause_on_failure(previewed);
         }
-        let visible = self.sessions.visible_managed(self.table_rows);
+        let visible = self.sessions.visible_managed();
         let measured = self.diffs.tick(now, &visible, service);
         self.sessions.apply_diffs(self.diffs.diffs());
         self.pull_requests.tick(now, &visible, service);
@@ -130,6 +128,18 @@ impl HomeState {
 
     pub fn select_last(&mut self, service: &SessionService) {
         self.change_selection(service, SessionList::select_last);
+    }
+
+    pub fn select_high(&mut self, service: &SessionService) {
+        self.change_selection(service, SessionList::select_high);
+    }
+
+    pub fn select_middle(&mut self, service: &SessionService) {
+        self.change_selection(service, SessionList::select_middle);
+    }
+
+    pub fn select_low(&mut self, service: &SessionService) {
+        self.change_selection(service, SessionList::select_low);
     }
 
     pub fn toggle_fold(&mut self, service: &SessionService) {

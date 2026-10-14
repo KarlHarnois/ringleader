@@ -25,7 +25,7 @@ pub struct HelpView {
 impl HelpView {
     pub const TITLE: &'static str = concat!(" Help · ringleader ", env!("CARGO_PKG_VERSION"), " ");
     const KEYS_HEADING: &'static str = "Keys";
-    const KEYS: [(&'static str, &'static str); 13] = [
+    const KEYS: [(&'static str, &'static str); 14] = [
         ("n", "create a session"),
         ("d", "delete the selected session"),
         ("R", "rename the selected session and its branch"),
@@ -43,6 +43,7 @@ impl HelpView {
         ),
         ("↑ ↓ j k h l", "move the selection"),
         ("gg G", "select the first or the last row"),
+        ("H M L", "select the top, middle, or bottom row on screen"),
         ("1-9", "jump to a repo"),
         ("q", "quit, the sessions keep running"),
     ];
@@ -229,7 +230,7 @@ mod tests {
         const SHORT_WIDTH: usize = 56;
         const SHORT_HEIGHT: usize = 8;
         const PAST_THE_END: usize = 50;
-        const ROWS_ABOVE_THE_SMALLEST_FULL_SIZE: u16 = 5;
+        const ROWS_ABOVE_THE_SMALLEST_FULL_SIZE: u16 = 6;
         const TALL_NARROW_SIZE: (u16, u16) = (79, 30);
         const TMUX_CONFIG_ROW: &'static str = "tmux config  ~/.local/state/ringleader/tmux.conf";
 

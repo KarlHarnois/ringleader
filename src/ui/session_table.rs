@@ -13,11 +13,13 @@ use super::session_tree::{SessionTree, TreeBranch, TreeLine};
 use super::state_indicator::StateIndicator;
 use super::table_columns::{RowCells, TableColumns};
 use super::theme::Theme;
+use super::viewport::Viewport;
 use crate::domain::{DiffStat, SessionMetadata, SessionSummary};
 
 pub struct SessionTable<'a> {
     tree: SessionTree<'a>,
     selection: Option<&'a ListSelection>,
+    viewport: Viewport,
     tick: u64,
     theme: Theme,
     tier: LayoutTier,
@@ -35,10 +37,15 @@ impl<'a> SessionTable<'a> {
         Self {
             tree,
             selection,
+            viewport: Viewport::default(),
             tick,
             theme,
             tier: LayoutTier::Full,
         }
+    }
+
+    pub fn with_viewport(self, viewport: Viewport) -> Self {
+        Self { viewport, ..self }
     }
 
     pub fn for_tier(self, tier: LayoutTier) -> Self {
@@ -60,7 +67,9 @@ impl<'a> SessionTable<'a> {
             return;
         }
         let room = usize::from(inner.height).saturating_sub(lines.len());
-        let visible = self.tree.visible(self.selection, room);
+        let visible = self
+            .tree
+            .visible(self.selection, self.viewport.with_room(room));
         lines.extend(visible.map(|line| self.line(line, &columns, width)));
         frame.render_widget(Paragraph::new(lines), inner);
     }
