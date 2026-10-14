@@ -40,6 +40,7 @@ pub mod session_service;
 pub mod start_point_resolver;
 pub mod tool_version;
 pub mod typed_paths;
+pub mod upstream_resolver;
 pub mod use_checks;
 pub mod worktree_containment;
 pub mod worktree_inspection;

@@ -1,15 +1,14 @@
 use std::sync::Arc;
 
-use super::ports::{
-    HostProbe, MergeOutcome, Multiplexer, MultiplexerError, UpstreamMerge, Workspace,
-};
+use super::ports::{HostProbe, MergeOutcome, Multiplexer, MultiplexerError, Workspace};
 use super::reconciliation::{ManagedRow, Reconciliation};
 use super::repo_merge::RepoMerge;
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
 use super::session_monitor::SessionMonitor;
+use super::upstream_resolver::UpstreamResolver;
 use super::worktree_inspection::WorktreeInspection;
-use crate::domain::{Config, Session, SessionName, SessionState};
+use crate::domain::{BaseBranch, Branch, Config, Session, SessionName, SessionState};
 
 pub struct SessionMerge {
     workspace: Arc<dyn Workspace>,
@@ -42,16 +41,32 @@ impl SessionMerge {
     ) -> Result<MergeReport, ServiceError> {
         let session = row.session();
         self.refuse_unsafe_merge(row)?;
-        let base_branch =
-            RepoMerge::new(self.host.as_ref()).base_branch_of(session, config.repos());
-        let worktree = session.worktree_path();
-        let branch_on_origin = self.workspace.fetch_upstream(worktree, base_branch)?;
+        let upstream = self.upstream_of(session, config)?;
+        self.workspace
+            .fetch_upstream(session.worktree_path(), &upstream)?;
         self.refuse_unsafe_merge_now(session, reconciliation, config)?;
-        let merge =
-            self.workspace
-                .merge_upstream(worktree, &branch_on_origin, session.base_commit())?;
+        let merge = self.merge_fetched(session, &upstream)?;
         let handoff = self.hand_off_conflicts(session, &merge);
         Ok(MergeReport::new(session.name(), merge, handoff))
+    }
+
+    fn upstream_of(&self, session: &Session, config: &Config) -> Result<BaseBranch, ServiceError> {
+        let base_branch =
+            RepoMerge::new(self.host.as_ref()).base_branch_of(session, config.repos());
+        UpstreamResolver::new(self.workspace.as_ref()).resolve(session.worktree_path(), base_branch)
+    }
+
+    fn merge_fetched(
+        &self,
+        session: &Session,
+        upstream: &BaseBranch,
+    ) -> Result<UpstreamMerge, ServiceError> {
+        let outcome = self.workspace.merge_upstream(
+            session.worktree_path(),
+            upstream,
+            session.base_commit(),
+        )?;
+        Ok(UpstreamMerge::new(upstream, outcome))
     }
 
     fn refuse_unsafe_merge_now(
@@ -169,10 +184,33 @@ pub struct MergeReport {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct UpstreamMerge {
+    upstream: Branch,
+    outcome: MergeOutcome,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum ConflictHandoff {
     Unneeded,
     Asked,
     Refused(MultiplexerError),
+}
+
+impl UpstreamMerge {
+    fn new(branch_on_origin: &BaseBranch, outcome: MergeOutcome) -> Self {
+        Self {
+            upstream: branch_on_origin.origin_copy(),
+            outcome,
+        }
+    }
+
+    fn upstream(&self) -> &str {
+        self.upstream.name()
+    }
+
+    fn outcome(&self) -> &MergeOutcome {
+        &self.outcome
+    }
 }
 
 impl MergeReport {
@@ -219,7 +257,7 @@ mod tests {
 
     use super::*;
     use crate::application::ports::{DirtyState, WorkspaceError, WorktreeEntry};
-    use crate::domain::{BaseBranch, Repo, RepoName, SessionObservation};
+    use crate::domain::{Repo, RepoName, SessionObservation};
     use crate::test_support::{FakeMultiplexer, FakeWorkspace, ServiceFixture};
 
     struct MergeFixture;
@@ -557,6 +595,15 @@ mod tests {
     }
 
     #[test]
+    fn without_a_base_branch_origins_main_is_merged() {
+        let fixture = MergeFixture::waiting();
+
+        MergeFixture::merge(&fixture).unwrap();
+
+        assert!(MergeFixture::fetched_branch(&fixture, "main"));
+    }
+
+    #[test]
     fn the_configured_base_branch_is_merged() {
         let fixture = MergeFixture::waiting().with_config(MergeFixture::config_with_develop());
 
@@ -568,6 +615,15 @@ mod tests {
             MergeFixture::worktree(),
             FakeWorkspace::DEFAULT_START
         )));
+    }
+
+    #[test]
+    fn the_report_names_origins_copy_of_the_merged_branch() {
+        let fixture = MergeFixture::waiting().with_config(MergeFixture::config_with_develop());
+
+        let report = MergeFixture::merge(&fixture).unwrap();
+
+        assert_eq!(report.summary(), "merged origin/develop into fix-auth");
     }
 
     #[test]

@@ -1,0 +1,141 @@
+use std::path::Path;
+
+use super::ports::Workspace;
+use super::service_error::ServiceError;
+use crate::domain::{BaseBranch, BaseBranchLadder, Branch};
+
+pub struct UpstreamResolver<'a> {
+    workspace: &'a dyn Workspace,
+}
+
+impl<'a> UpstreamResolver<'a> {
+    pub fn new(workspace: &'a dyn Workspace) -> Self {
+        Self { workspace }
+    }
+
+    pub fn resolve(
+        &self,
+        worktree: &Path,
+        base_branch: Option<&BaseBranch>,
+    ) -> Result<BaseBranch, ServiceError> {
+        match base_branch {
+            Some(base) => Self::on_origin(base),
+            None => self.origin_default(worktree),
+        }
+    }
+
+    fn on_origin(base: &BaseBranch) -> Result<BaseBranch, ServiceError> {
+        base.on_origin().ok_or_else(|| {
+            ServiceError::Invalid(format!("base branch {base} names no branch on origin"))
+        })
+    }
+
+    fn origin_default(&self, worktree: &Path) -> Result<BaseBranch, ServiceError> {
+        let origin_head = self
+            .workspace
+            .remote_default_branch(worktree, Branch::ORIGIN)?;
+        let ladder = BaseBranchLadder::new(origin_head);
+        let tips = self
+            .workspace
+            .branch_tips(worktree, &ladder.upstream_lookups())?;
+        ladder.upstream(&tips).ok_or_else(|| {
+            ServiceError::Invalid(format!(
+                "{} has no default branch, main, or master on origin, add an origin remote or set base_branch for its repo",
+                worktree.display()
+            ))
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::FakeWorkspace;
+
+    struct UpstreamFixture;
+
+    impl UpstreamFixture {
+        const WORKTREE: &'static str = "/worktrees/fix-auth";
+        const COMMIT: &'static str = "1111111111111111111111111111111111111111";
+
+        fn worktree() -> &'static Path {
+            Path::new(Self::WORKTREE)
+        }
+
+        fn on_origin(names: &[&str]) -> FakeWorkspace {
+            names.iter().fold(
+                FakeWorkspace::default().without_branch_tips(),
+                |workspace, name| {
+                    let origin_copy = Branch::origin_copy_of(name);
+                    workspace.with_branch_tip(Self::worktree(), origin_copy, Self::COMMIT)
+                },
+            )
+        }
+
+        fn resolve(
+            workspace: &FakeWorkspace,
+            base_branch: Option<&str>,
+        ) -> Result<BaseBranch, ServiceError> {
+            let base_branch = base_branch.and_then(BaseBranch::new);
+            UpstreamResolver::new(workspace).resolve(Self::worktree(), base_branch.as_ref())
+        }
+
+        fn branch(name: &str) -> BaseBranch {
+            BaseBranch::new(name).unwrap()
+        }
+    }
+
+    #[test]
+    fn a_base_branch_is_pulled_by_its_name_on_origin() {
+        let workspace = UpstreamFixture::on_origin(&["main"]);
+
+        assert_eq!(
+            UpstreamFixture::resolve(&workspace, Some("origin/develop")).unwrap(),
+            UpstreamFixture::branch("develop")
+        );
+    }
+
+    #[test]
+    fn a_base_branch_naming_no_branch_on_origin_is_refused() {
+        let workspace = UpstreamFixture::on_origin(&["main"]);
+
+        assert_eq!(
+            UpstreamFixture::resolve(&workspace, Some("origin/")).unwrap_err(),
+            ServiceError::Invalid("base branch origin/ names no branch on origin".to_string())
+        );
+    }
+
+    #[test]
+    fn the_origin_default_is_pulled_over_main() {
+        let workspace = UpstreamFixture::on_origin(&["main", "trunk"])
+            .with_remote_default(UpstreamFixture::worktree(), "trunk");
+
+        assert_eq!(
+            UpstreamFixture::resolve(&workspace, None).unwrap(),
+            UpstreamFixture::branch("trunk")
+        );
+    }
+
+    #[test]
+    fn without_an_origin_default_main_is_pulled_before_master() {
+        let workspace = UpstreamFixture::on_origin(&["master", "main"]);
+
+        assert_eq!(
+            UpstreamFixture::resolve(&workspace, None).unwrap(),
+            UpstreamFixture::branch("main")
+        );
+    }
+
+    #[test]
+    fn a_worktree_with_nothing_to_pull_is_refused_by_path() {
+        let workspace = UpstreamFixture::on_origin(&[]);
+
+        assert_eq!(
+            UpstreamFixture::resolve(&workspace, None).unwrap_err(),
+            ServiceError::Invalid(format!(
+                "{} has no default branch, main, or master on origin, add an origin remote or set base_branch for its repo",
+                UpstreamFixture::WORKTREE
+            ))
+        );
+    }
+}

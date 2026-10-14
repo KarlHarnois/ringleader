@@ -4,8 +4,8 @@ use thiserror::Error;
 
 use super::dirty_state::DirtyState;
 use super::head::Head;
+use super::merge_outcome::MergeOutcome;
 use super::unmerged_commits::UnmergedCommits;
-use super::upstream_merge::UpstreamMerge;
 use crate::domain::{BaseBranch, Branch, BranchTips, DiffStat, MergeBases};
 
 pub trait Workspace: Send + Sync {
@@ -71,14 +71,14 @@ pub trait Workspace: Send + Sync {
     fn fetch_upstream(
         &self,
         worktree: &Path,
-        base_branch: Option<&BaseBranch>,
-    ) -> Result<BaseBranch, WorkspaceError>;
+        branch_on_origin: &BaseBranch,
+    ) -> Result<(), WorkspaceError>;
     fn merge_upstream(
         &self,
         worktree: &Path,
         branch_on_origin: &BaseBranch,
         started_from: &str,
-    ) -> Result<UpstreamMerge, WorkspaceError>;
+    ) -> Result<MergeOutcome, WorkspaceError>;
     fn validate_repo(&self, path: &Path) -> Result<PathBuf, WorkspaceError>;
     fn version(&self) -> Result<String, WorkspaceError>;
 }
@@ -197,10 +197,6 @@ pub enum WorkspaceError {
     LinkedWorktree { path: PathBuf },
     #[error("{path} is a submodule, add its superproject instead")]
     Submodule { path: PathBuf },
-    #[error(
-        "{worktree} has no origin/HEAD, origin/main, or origin/master: add an origin remote, or set base_branch for its repo when origin's default has another name"
-    )]
-    NoUpstream { worktree: PathBuf },
     #[error("{worktree} has a merge in progress, finish or abort it before merging again")]
     MergeInProgress { worktree: PathBuf },
     #[error(

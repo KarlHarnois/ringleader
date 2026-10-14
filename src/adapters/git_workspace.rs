@@ -13,7 +13,7 @@ use super::host_path::HostPath;
 use super::submodule_commits::SubmoduleCommits;
 use super::upstream_merger::UpstreamMerger;
 use crate::application::ports::{
-    DirtyState, Head, StartPoint, UnmergedCommits, UpstreamMerge, Workspace, WorkspaceError,
+    DirtyState, Head, MergeOutcome, StartPoint, UnmergedCommits, Workspace, WorkspaceError,
     WorktreeEntry,
 };
 use crate::domain::{BaseBranch, Branch, BranchTips, DiffStat, MergeBases};
@@ -253,9 +253,9 @@ impl Workspace for GitWorkspace {
     fn fetch_upstream(
         &self,
         worktree: &Path,
-        base_branch: Option<&BaseBranch>,
-    ) -> Result<BaseBranch, WorkspaceError> {
-        UpstreamMerger::new(&self.git).fetch(worktree, base_branch)
+        branch_on_origin: &BaseBranch,
+    ) -> Result<(), WorkspaceError> {
+        UpstreamMerger::new(&self.git).fetch(worktree, branch_on_origin)
     }
 
     fn merge_upstream(
@@ -263,7 +263,7 @@ impl Workspace for GitWorkspace {
         worktree: &Path,
         branch_on_origin: &BaseBranch,
         started_from: &str,
-    ) -> Result<UpstreamMerge, WorkspaceError> {
+    ) -> Result<MergeOutcome, WorkspaceError> {
         UpstreamMerger::new(&self.git).merge(worktree, branch_on_origin, started_from)
     }
 

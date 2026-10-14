@@ -315,7 +315,7 @@ impl ServiceFixture {
         let session = Self::session(name);
         Self::new()
             .with_sessions(std::slice::from_ref(&session))
-            .with_workspace(Self::workspace_for(&[&session]).with_upstream_merge(outcome))
+            .with_workspace(Self::workspace_for(&[&session]).with_merge_outcome(outcome))
             .with_host(Self::host_for(&[&session]))
             .with_multiplexer(multiplexer.with_live(Self::waiting(&session)))
     }

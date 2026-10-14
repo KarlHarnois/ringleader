@@ -317,6 +317,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── branch_availability.rs # BranchAvailability, refuses a branch name that exists or holds other branches, for create and rename
     │   ├── session_restart.rs    # SessionRestart: restart of an Exited or Stopped session
     │   ├── session_merge.rs      # SessionMerge: merge of origin's copy of the base branch into a Waiting session, with MergeReport
+    │   ├── upstream_resolver.rs  # UpstreamResolver, the branch a pull fetches from origin, or why there is none
     │   ├── agent_hooks.rs        # AgentHooks, schedules an agent's startup input in the background and types its rename input
     │   ├── worktree_inspection.rs # WorktreeInspection, the worktree checks restart, delete, and doctor share
     │   ├── session_deletion.rs   # SessionDeletion: delete_session steps 5 to 8 and forget
@@ -352,7 +353,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │       ├── dirty_state.rs        # DirtyState, the uncommitted files and nested repos of a worktree
     │       ├── head.rs               # Head, whether a checkout's HEAD is unborn, detached, or on a branch
     │       ├── unmerged_commits.rs   # UnmergedCommits, commits on no other ref with the tip and HEAD
-    │       ├── upstream_merge.rs     # UpstreamMerge and MergeOutcome, the origin branch a worktree merged and whether it was up to date, merged, or conflicted
+    │       ├── merge_outcome.rs      # MergeOutcome, whether a worktree's merge of a branch from origin was up to date, merged, or conflicted
     │       ├── multiplexer.rs        # Multiplexer trait
     │       ├── agent_launch.rs       # AgentLaunch, the argv, environment, and worktree an agent starts with
     │       ├── config_source.rs      # ConfigSource trait
@@ -393,7 +394,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── git_branches.rs       # GitBranches: compare-and-swap delete, rename, the managed-branch marker, and whether a branch has been pushed
     │   ├── branch_marker.rs      # BranchMarker, the git config entry that marks a branch Ringleader created, and the command that sets it by hand
     │   ├── branch_section.rs     # BranchSection, the git config section and upstream keys of one branch
-    │   ├── upstream_merger.rs    # UpstreamMerger, fetches origin's copy of the base branch and merges it into a worktree, listing any conflicted paths
+    │   ├── upstream_merger.rs    # UpstreamMerger, fetches a branch from origin and merges origin's copy into a worktree, listing any conflicted paths
     │   ├── submodule_commits.rs  # SubmoduleCommits, the submodule walk of unmerged_commits
     │   ├── system_clock.rs       # SystemClock, reads `SystemTime`
     │   ├── system_host_probe.rs  # SystemHostProbe
