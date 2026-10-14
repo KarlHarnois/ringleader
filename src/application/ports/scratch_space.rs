@@ -16,6 +16,22 @@ pub enum ScratchSpaceError {
         path: PathBuf,
         detail: String,
     },
-    #[error("the scratch directory {path} holds a mounted filesystem")]
+    #[error(
+        "the scratch directory {path} holds a mount point, unmount it before removing the directory"
+    )]
     HoldsMount { path: PathBuf },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_kept_mount_says_to_unmount_before_removing_the_directory() {
+        let error = ScratchSpaceError::HoldsMount {
+            path: PathBuf::from("/cache/ringleader/tmp/8718940d"),
+        };
+
+        assert!(error.to_string().contains("unmount it before removing"));
+    }
 }

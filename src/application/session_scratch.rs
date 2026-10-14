@@ -31,7 +31,7 @@ impl SessionScratch {
 
     pub fn discard(&self, worktree: &Path) {
         if let Err(error) = self.space.remove(worktree) {
-            log::warn!("{error}, so it stays on disk, remove it by hand");
+            log::warn!("kept a scratch directory on disk: {error}");
         }
     }
 }
@@ -102,7 +102,7 @@ mod tests {
 
         scratch.discard(&ServiceFixture::worktree_path("discard-fails"));
 
-        let warning = "/scratch/discard-fails: Permission denied, so it stays on disk";
+        let warning = "kept a scratch directory on disk: cannot remove the scratch directory /scratch/discard-fails";
         assert_eq!(capture.count_containing(warning), 1);
     }
 }
