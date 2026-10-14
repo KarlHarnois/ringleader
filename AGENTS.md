@@ -45,11 +45,12 @@ When no rule covers a case, choose what these values favor. When two conflict, t
 nix develop -c cargo fmt --check
 nix develop -c cargo clippy --all-targets -- -D warnings
 nix develop -c cargo test
+nix build --no-link .#checks.x86_64-linux.readme-version-badge
 nix build .#
 nix flake check
 ```
 
-These are the commands `.github/workflows/ci.yml` runs. All of them run on pushes to `master` and on merge-queue runs, and the first three also run on pull requests. A change is done when all of them pass. If a change edits a file under `src/`, the change is done only when the completion steps in Metrics also pass.
+These are the commands `.github/workflows/ci.yml` runs. All of them run on pushes to `master` and on merge-queue runs, and the first four also run on pull requests. A change is done when all of them pass. If a change edits a file under `src/`, the change is done only when the completion steps in Metrics also pass.
 
 ## Architecture
 
