@@ -194,6 +194,8 @@ enum Flow {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, Instant};
+
     use crossterm::event::KeyCode;
     use signal_hook::consts::SIGHUP;
 
@@ -204,6 +206,26 @@ mod tests {
         FakeMultiplexer, FixtureBackend, HeldCalls, RecordingShells, ScriptedInput, ServiceFixture,
         UiHarness,
     };
+    use crate::ui::App;
+
+    type FixtureLoop = EventLoop<FixtureBackend, ScriptedInput>;
+
+    struct WakeFixture;
+
+    impl WakeFixture {
+        const LIMIT: Duration = Duration::from_secs(2);
+        const POLL_INTERVAL: Duration = Duration::from_millis(5);
+        const FAR_OFF: Duration = Duration::from_secs(3600);
+
+        fn wake_until_collected(app: &mut App) {
+            let next_tick = Instant::now() + Self::FAR_OFF;
+            let deadline = Instant::now() + Self::LIMIT;
+            while app.awaits_results() && Instant::now() < deadline {
+                std::thread::sleep(Self::POLL_INTERVAL);
+                FixtureLoop::advance(app, next_tick);
+            }
+        }
+    }
 
     struct ShellLoopFixture;
 
@@ -251,8 +273,25 @@ mod tests {
         event_loop.run(&mut app).unwrap();
         held.release();
 
-        let frame = EventLoop::<FixtureBackend, ScriptedInput>::RESULT_POLL;
-        assert!(event_loop.input().timeouts()[0] <= frame);
+        assert!(event_loop.input().timeouts()[0] <= FixtureLoop::RESULT_POLL);
+    }
+
+    #[test]
+    fn a_wake_before_the_tick_collects_a_finished_capture() {
+        let unregistered = ServiceFixture::session("fix-auth");
+        let fixture = ServiceFixture::new().with_multiplexer(
+            FakeMultiplexer::new()
+                .with_live(ServiceFixture::waiting(&unregistered).without_metadata()),
+        );
+        let mut app = UiHarness::app(&fixture);
+        app.resize(UiHarness::WIDTH, UiHarness::HEIGHT);
+        app.observe();
+        let capture_started = app.awaits_results();
+
+        WakeFixture::wake_until_collected(&mut app);
+
+        assert!(capture_started);
+        assert!(!app.awaits_results());
     }
 
     #[test]
@@ -263,8 +302,7 @@ mod tests {
 
         event_loop.run(&mut app).unwrap();
 
-        let frame = EventLoop::<FixtureBackend, ScriptedInput>::RESULT_POLL;
-        assert!(event_loop.input().timeouts()[0] > frame);
+        assert!(event_loop.input().timeouts()[0] > FixtureLoop::RESULT_POLL);
     }
 
     #[test]
