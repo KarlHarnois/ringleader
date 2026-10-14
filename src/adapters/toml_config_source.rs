@@ -56,8 +56,9 @@ env = ["ANTHROPIC_API_KEY"]
 # written: only a leading ~/ expands. Keep secrets in env.
 # set_env = { CLAUDE_CONFIG_DIR = "~/.claude-work" }
 prompt_args = ["{prompt}"]
-# Added after args when a new session starts in plan mode, which Shift-Tab
-# picks in the new session dialog. An agent without plan_args has no plan mode.
+# Added after args when a new session starts in plan mode. The new session
+# dialog opens in plan mode when the first agent has plan_args, and Shift-Tab
+# switches modes. An agent without plan_args has no plan mode.
 plan_args = ["--permission-mode", "plan"]
 # Lines typed into the agent once its prompt is ready, each followed by Enter.
 # startup_input is typed at every start, rename_input after a rename.
