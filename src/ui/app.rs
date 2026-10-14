@@ -1257,6 +1257,7 @@ mod tests {
         UiHarness::settle(&mut app);
         let after_the_timeout = AppFixture::observe_calls(&fixture);
         app.on_tick(start + Duration::from_secs(4));
+        UiHarness::settle(&mut app);
         let while_paused = AppFixture::observe_calls(&fixture);
         AppFixture::press(&mut app, 'r');
 
@@ -1276,6 +1277,7 @@ mod tests {
 
         app.on_tick(start + Duration::from_secs(1));
         app.on_tick(start + Duration::from_secs(2));
+        UiHarness::settle(&mut app);
 
         assert_eq!(first, 1);
         assert_eq!(AppFixture::captures(&fixture).len(), 1);
