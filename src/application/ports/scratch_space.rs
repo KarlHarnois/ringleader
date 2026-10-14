@@ -16,4 +16,6 @@ pub enum ScratchSpaceError {
         path: PathBuf,
         detail: String,
     },
+    #[error("the scratch directory {path} holds a mounted filesystem")]
+    HoldsMount { path: PathBuf },
 }

@@ -17,7 +17,6 @@ pub struct DirectoryRepoScanner {
 
 impl DirectoryRepoScanner {
     pub const VISIT_CAP: usize = 5000;
-    pub const MOUNT_TABLE: &'static str = "/proc/self/mountinfo";
     const PRUNED_NAMES: [&'static str; 4] = ["node_modules", "target", "vendor", "dist"];
     const SYSTEM_DIRECTORIES: [&'static str; 4] = ["/proc", "/sys", "/dev", "/nix/store"];
     const GIT_MARKER: &'static str = ".git";

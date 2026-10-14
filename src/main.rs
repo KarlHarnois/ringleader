@@ -27,6 +27,7 @@ use adapters::file_lock::FileLock;
 use adapters::gh_pull_requests::GhPullRequests;
 use adapters::git_runner::GitRunner;
 use adapters::json_session_registry::JsonSessionRegistry;
+use adapters::mount_table::MountTable;
 use adapters::null_pull_requests::NullPullRequests;
 use adapters::process_environment::{ProcessEnvironment, ProgramPaths};
 use adapters::server_files::ServerFiles;
@@ -275,7 +276,7 @@ impl CompositionRoot {
             Arc::new(DirectoryRepoScanner::new(
                 GitRunner::new(self.programs.git(), bounded),
                 DirectoryRepoScanner::VISIT_CAP,
-                Path::new(DirectoryRepoScanner::MOUNT_TABLE),
+                Path::new(MountTable::PROCESS_TABLE),
             )),
             host,
             pull_requests,
@@ -298,7 +299,10 @@ impl CompositionRoot {
             Arc::new(registry),
             Arc::new(config_source),
             clock,
-            Arc::new(DirectoryScratchSpace::new(&self.paths.scratch_root())),
+            Arc::new(DirectoryScratchSpace::new(
+                &self.paths.scratch_root(),
+                Path::new(MountTable::PROCESS_TABLE),
+            )),
         )
     }
 

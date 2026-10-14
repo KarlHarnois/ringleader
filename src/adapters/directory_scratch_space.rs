@@ -5,20 +5,34 @@ use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use super::fnv_hash::FnvHash;
+use super::host_path::HostPath;
+use super::mount_table::MountTable;
 use crate::application::ports::{ScratchSpace, ScratchSpaceError};
 
 pub struct DirectoryScratchSpace {
     root: PathBuf,
+    mount_table: PathBuf,
 }
 
 impl DirectoryScratchSpace {
     const PRIVATE_MODE: u32 = 0o700;
     const OWNER_ACCESS_BITS: u32 = 0o700;
 
-    pub fn new(root: &Path) -> Self {
+    pub fn new(root: &Path, mount_table: &Path) -> Self {
         Self {
             root: root.to_path_buf(),
+            mount_table: mount_table.to_path_buf(),
         }
+    }
+
+    fn refuse_mounts_within(&self, directory: &Path) -> Result<(), ScratchSpaceError> {
+        let canonical = HostPath::new(directory).canonical_lenient();
+        if MountTable::read(&self.mount_table).has_mount_within(&canonical) {
+            return Err(ScratchSpaceError::HoldsMount {
+                path: directory.to_path_buf(),
+            });
+        }
+        Ok(())
     }
 
     fn remove_tree(directory: &Path) -> io::Result<()> {
@@ -68,6 +82,7 @@ impl ScratchSpace for DirectoryScratchSpace {
 
     fn remove(&self, worktree: &Path) -> Result<(), ScratchSpaceError> {
         let directory = self.directory(worktree);
+        self.refuse_mounts_within(&directory)?;
         match Self::remove_tree(&directory) {
             Err(error) if error.kind() != io::ErrorKind::NotFound => {
                 Err(Self::failure("remove", &directory, &error))
@@ -93,13 +108,27 @@ mod tests {
         const OTHER_WORKTREE: &'static str = "/data/ringleader/worktrees/example-project/fix-ui";
         const WORKTREE_HASH: &'static str = "8718940d";
         const ROOT: &'static str = "cache/ringleader/tmp";
+        const MOUNT_TABLE: &'static str = "mountinfo";
         const SEALED_MODE: u32 = 0o500;
         const ACCESS_BITS: u32 = 0o777;
 
         fn new() -> Self {
             let base = tempfile::tempdir().unwrap();
-            let space = DirectoryScratchSpace::new(&base.path().join(Self::ROOT));
+            let space = DirectoryScratchSpace::new(
+                &base.path().join(Self::ROOT),
+                &base.path().join(Self::MOUNT_TABLE),
+            );
             Self { base, space }
+        }
+
+        fn with_mount_inside(self) -> Self {
+            let point = fs::canonicalize(self.scratch()).unwrap().join("mnt");
+            let line = format!(
+                "41 30 0:40 / {} rw - fuse.sshfs host: rw\n",
+                point.display()
+            );
+            fs::write(self.base.path().join(Self::MOUNT_TABLE), line).unwrap();
+            self
         }
 
         fn worktree() -> &'static Path {
@@ -277,5 +306,23 @@ mod tests {
             ScratchFixture::failed_operation(result),
             Some(("remove", fixture.scratch()))
         );
+    }
+
+    #[test]
+    fn a_mount_inside_the_directory_keeps_it() {
+        let fixture = ScratchFixture::new()
+            .created()
+            .with_file()
+            .with_mount_inside();
+
+        let result = fixture.space.remove(ScratchFixture::worktree());
+
+        assert_eq!(
+            result,
+            Err(ScratchSpaceError::HoldsMount {
+                path: fixture.scratch()
+            })
+        );
+        assert!(fixture.scratch().join("notes.md").exists());
     }
 }
