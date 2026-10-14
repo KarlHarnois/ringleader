@@ -9,6 +9,7 @@ pub mod delete_impact;
 pub mod delete_outcome;
 pub mod deletion_guards;
 pub mod diagnostic_paths;
+pub mod diff_base_resolver;
 pub mod doctor;
 pub mod doctor_report;
 pub mod home_repo_search;

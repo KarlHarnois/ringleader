@@ -238,6 +238,7 @@ viewer exits.
     │   ├── delete_outcome.rs     # DeleteOutcome
     │   ├── worktree_containment.rs # WorktreeContainment, shared by delete step 3 and reconciliation
     │   ├── session_monitor.rs    # SessionMonitor: reconcile, observe, diffs, preview
+    │   ├── diff_base_resolver.rs # DiffBaseResolver, the commit a session diff measures from
     │   ├── session_reconciler.rs # SessionReconciler, pairs registry entries with live tmux sessions
     │   ├── reconciliation.rs     # Reconciliation, the reconciled entries and rows
     │   ├── session_access.rs     # SessionAccess: attach and open_shell, and the refusal from a pane of the private server
@@ -260,7 +261,6 @@ viewer exits.
     │       ├── mod.rs
     │       ├── session_registry.rs   # SessionRegistry trait
     │       ├── workspace.rs          # Workspace trait
-    │       ├── diff_base.rs          # DiffBase, the recorded commit and configured base branch a session diff measures from
     │       ├── dirty_state.rs        # DirtyState, the uncommitted files and nested repos of a worktree
     │       ├── head.rs               # Head, whether a checkout's HEAD is unborn, detached, or on a branch
     │       ├── unmerged_commits.rs   # UnmergedCommits, commits on no other ref with the tip and HEAD
@@ -304,7 +304,6 @@ viewer exits.
     │   ├── git_branches.rs       # GitBranches: compare-and-swap delete, rename, the managed-branch marker, and whether a branch has been pushed
     │   ├── branch_marker.rs      # BranchMarker, the git config entry that marks a branch Ringleader created, and the command that sets it by hand
     │   ├── branch_section.rs     # BranchSection, the git config section and upstream keys of one branch
-    │   ├── diff_base_resolver.rs # DiffBaseResolver, the commit a session diff measures from
     │   ├── submodule_commits.rs  # SubmoduleCommits, the submodule walk of unmerged_commits
     │   ├── system_clock.rs       # SystemClock, reads `SystemTime`
     │   ├── system_host_probe.rs  # SystemHostProbe

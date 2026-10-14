@@ -2,11 +2,10 @@ use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
-use super::diff_base::DiffBase;
 use super::dirty_state::DirtyState;
 use super::head::Head;
 use super::unmerged_commits::UnmergedCommits;
-use crate::domain::{Branch, BranchTips, DiffStat};
+use crate::domain::{Branch, BranchTips, DiffStat, MergeBases};
 
 pub trait Workspace: Send + Sync {
     fn create_worktree(
@@ -62,7 +61,12 @@ pub trait Workspace: Send + Sync {
         branch: &str,
         worktree: &Path,
     ) -> Result<UnmergedCommits, WorkspaceError>;
-    fn diff_stat(&self, worktree: &Path, base: &DiffBase) -> Result<DiffStat, WorkspaceError>;
+    fn merge_bases(
+        &self,
+        worktree: &Path,
+        commits: &[String],
+    ) -> Result<MergeBases, WorkspaceError>;
+    fn diff_stat(&self, worktree: &Path, base: &StartPoint) -> Result<DiffStat, WorkspaceError>;
     fn validate_repo(&self, path: &Path) -> Result<PathBuf, WorkspaceError>;
     fn version(&self) -> Result<String, WorkspaceError>;
 }
@@ -181,4 +185,14 @@ pub enum WorkspaceError {
     LinkedWorktree { path: PathBuf },
     #[error("{path} is a submodule, add its superproject instead")]
     Submodule { path: PathBuf },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_empty_recorded_commit_starts_an_orphan() {
+        assert_eq!(StartPoint::from_base_commit(""), StartPoint::Orphan);
+    }
 }

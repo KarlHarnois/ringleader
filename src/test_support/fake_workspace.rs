@@ -3,10 +3,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use crate::application::ports::{
-    DiffBase, DirtyState, Head, StartPoint, UnmergedCommits, Workspace, WorkspaceError,
-    WorktreeEntry,
+    DirtyState, Head, StartPoint, UnmergedCommits, Workspace, WorkspaceError, WorktreeEntry,
 };
-use crate::domain::{BaseBranch, Branch, BranchTips, DiffStat};
+use crate::domain::{Branch, BranchTips, DiffStat, MergeBases};
 
 #[derive(Default)]
 pub struct FakeWorkspace {
@@ -26,6 +25,11 @@ struct WorkspaceState {
     without_default_tips: bool,
     remote_defaults: Vec<(PathBuf, String)>,
     orphan_start: bool,
+    heads: Vec<(PathBuf, Head)>,
+    tip_requests: Vec<(PathBuf, Vec<Branch>)>,
+    merge_bases: HashMap<PathBuf, Vec<String>>,
+    merge_base_requests: Vec<Vec<String>>,
+    diff_bases: Vec<StartPoint>,
     invalid_repos: HashSet<PathBuf>,
     failures: HashMap<&'static str, WorkspaceError>,
     failed_create_leftover: Option<FailedCreateLeftover>,
@@ -60,7 +64,6 @@ impl FakeWorkspace {
     ];
     pub const DEFAULT_START: &'static str = "0123456789abcdef0123456789abcdef01234567";
     pub const DEFAULT_BRANCH: &'static str = "main";
-    pub const NO_BASE_BRANCH: &'static str = "-";
 
     pub fn with_branch(self, repo: &Path, branch: &str, tip: &str) -> Self {
         self.edit(|state| state.add_branch(repo, branch, tip));
@@ -115,6 +118,17 @@ impl FakeWorkspace {
                 .remote_defaults
                 .push((location.to_path_buf(), branch.to_string()))
         });
+        self
+    }
+
+    pub fn with_head(self, location: &Path, head: Head) -> Self {
+        self.edit(|state| state.heads.push((location.to_path_buf(), head)));
+        self
+    }
+
+    pub fn with_merge_bases(self, worktree: &Path, bases: &[&str]) -> Self {
+        let bases = bases.iter().map(ToString::to_string).collect();
+        self.edit(|state| state.merge_bases.insert(worktree.to_path_buf(), bases));
         self
     }
 
@@ -194,6 +208,18 @@ impl FakeWorkspace {
             .collect()
     }
 
+    pub fn branch_tip_requests(&self) -> Vec<(PathBuf, Vec<Branch>)> {
+        self.edit(|state| state.tip_requests.clone())
+    }
+
+    pub fn merge_base_requests(&self) -> Vec<Vec<String>> {
+        self.edit(|state| state.merge_base_requests.clone())
+    }
+
+    pub fn diff_bases(&self) -> Vec<StartPoint> {
+        self.edit(|state| state.diff_bases.clone())
+    }
+
     pub fn has_branch(&self, repo: &Path, branch: &str) -> bool {
         self.state
             .lock()
@@ -252,6 +278,11 @@ impl WorkspaceState {
             Branch::Local(FakeWorkspace::DEFAULT_BRANCH.to_string()),
             FakeWorkspace::DEFAULT_START.to_string(),
         )]
+    }
+
+    fn head_at(&self, location: &Path) -> Head {
+        let recorded = self.heads.iter().find(|(owner, _)| owner == location);
+        recorded.map_or_else(|| self.default_head(), |(_, head)| head.clone())
     }
 
     fn default_head(&self) -> Head {
@@ -536,7 +567,7 @@ impl Workspace for FakeWorkspace {
 
     fn head(&self, location: &Path) -> Result<Head, WorkspaceError> {
         self.call("head", location.display().to_string())?;
-        Ok(self.edit(|state| state.default_head()))
+        Ok(self.edit(|state| state.head_at(location)))
     }
 
     fn remote_default_branch(
@@ -564,6 +595,9 @@ impl Workspace for FakeWorkspace {
     ) -> Result<BranchTips, WorkspaceError> {
         self.call("branch_tips", location.display().to_string())?;
         Ok(self.edit(|state| {
+            state
+                .tip_requests
+                .push((location.to_path_buf(), branches.to_vec()));
             let known = state.tips_at(location);
             let tips = branches
                 .iter()
@@ -587,12 +621,24 @@ impl Workspace for FakeWorkspace {
         Ok(self.edit(|state| state.next_unmerged(repo, branch, worktree)))
     }
 
-    fn diff_stat(&self, worktree: &Path, base: &DiffBase) -> Result<DiffStat, WorkspaceError> {
-        let base_branch = base
-            .base_branch()
-            .map_or(Self::NO_BASE_BRANCH, BaseBranch::as_str);
-        self.call("diff_stat", format!("{} {base_branch}", worktree.display()))?;
-        Ok(self.edit(|state| state.diffs.get(worktree).copied().unwrap_or_default()))
+    fn merge_bases(
+        &self,
+        worktree: &Path,
+        commits: &[String],
+    ) -> Result<MergeBases, WorkspaceError> {
+        self.call("merge_bases", worktree.display().to_string())?;
+        Ok(self.edit(|state| {
+            state.merge_base_requests.push(commits.to_vec());
+            MergeBases::new(state.merge_bases.get(worktree).cloned().unwrap_or_default())
+        }))
+    }
+
+    fn diff_stat(&self, worktree: &Path, base: &StartPoint) -> Result<DiffStat, WorkspaceError> {
+        self.call("diff_stat", worktree.display().to_string())?;
+        Ok(self.edit(|state| {
+            state.diff_bases.push(base.clone());
+            state.diffs.get(worktree).copied().unwrap_or_default()
+        }))
     }
 
     fn validate_repo(&self, path: &Path) -> Result<PathBuf, WorkspaceError> {

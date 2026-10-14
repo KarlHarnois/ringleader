@@ -7,7 +7,6 @@ pub mod branch_ref;
 pub mod branch_section;
 pub mod command_output;
 pub mod config_file_writer;
-pub mod diff_base_resolver;
 pub mod directory_repo_scanner;
 pub mod durable_file;
 pub mod file_lock;

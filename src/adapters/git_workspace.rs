@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 
 use super::bounded_command::BoundedCommand;
 use super::branch_marker::BranchMarker;
-use super::diff_base_resolver::DiffBaseResolver;
 use super::git_branches::GitBranches;
 use super::git_diffs::GitDiffs;
 use super::git_invocation::GitInvocation;
@@ -13,10 +12,9 @@ use super::git_runner::GitRunner;
 use super::host_path::HostPath;
 use super::submodule_commits::SubmoduleCommits;
 use crate::application::ports::{
-    DiffBase, DirtyState, Head, StartPoint, UnmergedCommits, Workspace, WorkspaceError,
-    WorktreeEntry,
+    DirtyState, Head, StartPoint, UnmergedCommits, Workspace, WorkspaceError, WorktreeEntry,
 };
-use crate::domain::{Branch, BranchTips, DiffStat};
+use crate::domain::{Branch, BranchTips, DiffStat, MergeBases};
 
 pub struct GitWorkspace {
     git: GitRunner,
@@ -238,10 +236,16 @@ impl Workspace for GitWorkspace {
         ))
     }
 
-    fn diff_stat(&self, worktree: &Path, base: &DiffBase) -> Result<DiffStat, WorkspaceError> {
-        let measured_from =
-            DiffBaseResolver::new(&self.git).resolve(worktree, base.start(), base.base_branch())?;
-        GitDiffs::new(&self.git).diff_stat(worktree, &measured_from)
+    fn merge_bases(
+        &self,
+        worktree: &Path,
+        commits: &[String],
+    ) -> Result<MergeBases, WorkspaceError> {
+        GitDiffs::new(&self.git).merge_bases(worktree, commits)
+    }
+
+    fn diff_stat(&self, worktree: &Path, base: &StartPoint) -> Result<DiffStat, WorkspaceError> {
+        GitDiffs::new(&self.git).diff_stat(worktree, base)
     }
 
     fn validate_repo(&self, path: &Path) -> Result<PathBuf, WorkspaceError> {
@@ -280,6 +284,7 @@ mod tests {
     use super::*;
     use crate::adapters::bounded_command::Deadlines;
     use crate::application::ServiceError;
+    use crate::application::diff_base_resolver::DiffBaseResolver;
     use crate::application::start_point_resolver::StartPointResolver;
     use crate::domain::{BaseBranch, SessionName};
     use crate::test_support::GitTestRepo;
@@ -1102,10 +1107,12 @@ mod tests {
         .unwrap();
         let before = fs::metadata(&index).unwrap().modified().unwrap();
 
-        fixture
-            .workspace()
-            .diff_stat(&worktree, &FakeBase::head(&fixture, &worktree))
+        let workspace = fixture.workspace();
+        let recorded = FakeBase::head(&fixture, &worktree);
+        let measured_from = DiffBaseResolver::new(&workspace)
+            .resolve(&worktree, &recorded, None)
             .unwrap();
+        workspace.diff_stat(&worktree, &measured_from).unwrap();
 
         assert_eq!(fs::metadata(&index).unwrap().modified().unwrap(), before);
     }
@@ -1140,7 +1147,7 @@ mod tests {
 
         let diff = fixture
             .workspace()
-            .diff_stat(&worktree, &DiffBase::new("", None))
+            .diff_stat(&worktree, &StartPoint::Orphan)
             .unwrap();
 
         assert_eq!((diff.files(), diff.insertions()), (1, 1));
@@ -1758,8 +1765,8 @@ mod tests {
     struct FakeBase;
 
     impl FakeBase {
-        fn head(fixture: &GitTestRepo, worktree: &Path) -> DiffBase {
-            DiffBase::new(&fixture.git(worktree, &["rev-parse", "HEAD"]), None)
+        fn head(fixture: &GitTestRepo, worktree: &Path) -> StartPoint {
+            StartPoint::Commit(fixture.git(worktree, &["rev-parse", "HEAD"]))
         }
     }
 }
