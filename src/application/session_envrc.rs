@@ -25,11 +25,7 @@ impl SessionEnvrc {
         if self.main_checkout_vouches_for(main_checkout, &envrc) {
             return self.allow(worktree, main_checkout);
         }
-        EnvrcChoice::Warn(format!(
-            "the .envrc of {} is not allowed, so the agent started without it, review the .envrc and run {}",
-            worktree.display(),
-            envrc.allow_command()
-        ))
+        Self::not_allowed(worktree, &envrc)
     }
 
     fn main_checkout_vouches_for(&self, main_checkout: &Path, envrc: &Envrc) -> bool {
@@ -52,6 +48,14 @@ impl SessionEnvrc {
                 EnvrcChoice::Warn(format!("the agent started without its .envrc, {error}"))
             }
         }
+    }
+
+    fn not_allowed(worktree: &Path, envrc: &Envrc) -> EnvrcChoice {
+        EnvrcChoice::Warn(format!(
+            "the .envrc of {} is not allowed, so the agent started without it, review the .envrc and run {}",
+            worktree.display(),
+            envrc.allow_command()
+        ))
     }
 }
 
