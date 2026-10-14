@@ -206,6 +206,11 @@ mod tests {
             command
         }
 
+        fn reap(mut child: Child) {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+
         fn call() -> Call {
             Call::new("sh", CallKind::GitRead)
         }
@@ -288,6 +293,27 @@ mod tests {
 
         assert!(waited.is_ok());
         assert!(child.try_wait().unwrap().is_some());
+    }
+
+    #[test]
+    fn the_fallback_check_sees_an_exited_child() {
+        let mut child = ChildFixture::shell("exit 0").spawn().unwrap();
+
+        let status =
+            BoundedCommand::check_until(&mut child, Instant::now() + Duration::from_secs(5));
+
+        assert!(status.is_some());
+    }
+
+    #[test]
+    fn the_fallback_check_gives_up_at_the_deadline() {
+        let mut child = ChildFixture::shell("exec sleep 5").spawn().unwrap();
+
+        let status =
+            BoundedCommand::check_until(&mut child, Instant::now() + Duration::from_millis(50));
+        ChildFixture::reap(child);
+
+        assert!(status.is_none());
     }
 
     #[test]
