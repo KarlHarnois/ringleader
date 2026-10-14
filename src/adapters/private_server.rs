@@ -223,10 +223,13 @@ mod tests {
         }
 
         fn binding_of(server: &TmuxTestServer, table: &str, key: &str) -> String {
-            let listed = server.tmux(&["list-keys", "-T", table, key]);
-            String::from_utf8_lossy(&listed.stdout)
-                .trim_end()
-                .to_string()
+            let listed = server.text(&["list-keys", "-T", table]);
+            let line = listed
+                .lines()
+                .map(|line| line.split_whitespace().collect::<Vec<_>>())
+                .find(|words| words.get(3) == Some(&key))
+                .unwrap_or_default();
+            line.join(" ")
         }
 
         fn option(server: &TmuxTestServer, name: &str) -> String {
@@ -394,6 +397,7 @@ mod tests {
         let tmux = server.command();
         let private = PrivateServer::new(&tmux);
         let original = ServerFixture::binding_of(&server, "copy-mode", "C-r");
+        assert!(!original.is_empty());
         let alt_r = KeyBindings::default().with_return_key(HotKey::parse("C-r").unwrap());
 
         private.apply(&alt_r).unwrap();
@@ -411,6 +415,7 @@ mod tests {
         let tmux = server.command();
         let private = PrivateServer::new(&tmux);
         let original = ServerFixture::binding_of(&server, "copy-mode", "M-x");
+        assert!(!original.is_empty());
         let next_on_alt_x =
             KeyBindings::default().with_next_session_keys(HotKey::parse_valid(["M-x"]));
 

@@ -56,9 +56,10 @@ struct DisplacedBinding {
 
 impl DisplacedBindings {
     const OPTION_PREFIX: &'static str = "@ringleader_displaced_";
+    const TABLE_FLAG: &'static str = "-T";
 
     fn saved_for(tmux: &TmuxCommand, keys: &[&HotKey]) -> Result<Self, MultiplexerError> {
-        Self::per_slot(keys, |option, _, _| {
+        Self::per_slot(keys, |option| {
             let query = TmuxSequence::new().command(["show-options", "-gqv", option]);
             let output = tmux.query(&query)?;
             match output.succeeded() {
@@ -69,11 +70,49 @@ impl DisplacedBindings {
     }
 
     fn replaced_by(tmux: &TmuxCommand, keys: &[&HotKey]) -> Result<Self, MultiplexerError> {
-        Self::per_slot(keys, |_, table, key| {
-            let query = TmuxSequence::new().command(["list-keys", "-T", table, &key.to_string()]);
-            let output = tmux.query(&query)?;
-            Ok(Self::first_line(&output).filter(|_| output.succeeded()))
-        })
+        let listings = Self::copy_table_listings(tmux)?;
+        let slots = keys
+            .iter()
+            .flat_map(|key| {
+                listings
+                    .iter()
+                    .map(move |(table, listing)| DisplacedBinding {
+                        option: Self::option(table, key),
+                        line: Self::listed_binding(listing, key),
+                    })
+            })
+            .collect();
+        Ok(Self { slots })
+    }
+
+    fn copy_table_listings(
+        tmux: &TmuxCommand,
+    ) -> Result<Vec<(&'static str, TmuxOutput)>, MultiplexerError> {
+        TmuxServerConfig::COPY_TABLES
+            .iter()
+            .map(|table| {
+                let query = TmuxSequence::new().command(["list-keys", "-T", table]);
+                Ok((*table, tmux.query(&query)?))
+            })
+            .collect()
+    }
+
+    fn listed_binding(listing: &TmuxOutput, key: &HotKey) -> Option<String> {
+        let name = key.to_string();
+        listing
+            .stdout()
+            .lines()
+            .find(|line| Self::listed_key(line) == Some(name.as_str()))
+            .map(str::to_string)
+    }
+
+    fn listed_key(line: &str) -> Option<&str> {
+        let key = line
+            .split_whitespace()
+            .skip_while(|word| *word != Self::TABLE_FLAG)
+            .nth(2)?;
+        let quoted = key.strip_prefix('"').and_then(|key| key.strip_suffix('"'));
+        Some(quoted.or_else(|| key.strip_prefix('\\')).unwrap_or(key))
     }
 
     fn saving(&self) -> TmuxSequence {
@@ -95,13 +134,13 @@ impl DisplacedBindings {
 
     fn per_slot(
         keys: &[&HotKey],
-        read: impl Fn(&str, &str, &HotKey) -> Result<Option<String>, MultiplexerError>,
+        read: impl Fn(&str) -> Result<Option<String>, MultiplexerError>,
     ) -> Result<Self, MultiplexerError> {
         let mut slots = Vec::new();
         for key in keys {
             for table in TmuxServerConfig::COPY_TABLES {
                 let option = Self::option(table, key);
-                let line = read(&option, table, key)?;
+                let line = read(&option)?;
                 slots.push(DisplacedBinding { option, line });
             }
         }
@@ -135,6 +174,35 @@ impl DisplacedBindings {
 mod tests {
     use super::*;
     use crate::test_support::TmuxTestServer;
+
+    #[test]
+    fn a_listed_key_is_read_plain_quoted_or_escaped() {
+        let lines = [
+            "bind-key -T copy-mode M-x send-keys -X jump-to-mark",
+            "bind-key -T copy-mode \"M-}\" send-keys -X next-paragraph",
+            "bind-key -T copy-mode-vi \\; send-keys -X jump-again",
+            "bind-key  -T copy-mode    Escape send-keys -X cancel",
+            "bind-key -r -T prefix M-Up resize-pane -U 5",
+        ];
+
+        let keys = lines.map(DisplacedBindings::listed_key);
+
+        assert_eq!(
+            keys,
+            [
+                Some("M-x"),
+                Some("M-}"),
+                Some(";"),
+                Some("Escape"),
+                Some("M-Up")
+            ]
+        );
+    }
+
+    #[test]
+    fn a_line_without_a_table_flag_lists_no_key() {
+        assert_eq!(DisplacedBindings::listed_key("unknown key: C-q"), None);
+    }
 
     #[test]
     fn a_server_that_cannot_report_the_saved_bindings_fails_the_switch() {
