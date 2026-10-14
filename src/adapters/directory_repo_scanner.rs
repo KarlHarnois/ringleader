@@ -557,6 +557,19 @@ mod tests {
     }
 
     #[test]
+    fn a_tree_exactly_the_size_of_the_cap_is_scanned_whole() {
+        let fixture = ScanFixture::new();
+        for index in 0..3 {
+            fs::create_dir_all(fixture.scope().join(format!("directory-{index:02}"))).unwrap();
+        }
+        let scope_and_children = 4;
+        let scanner = fixture.scanner_with(scope_and_children, Path::new("/nonexistent/mountinfo"));
+        let scope = scanner.resolve_scope(&fixture.scope()).unwrap();
+
+        assert!(!scanner.scan(&scope, 3).unwrap().cut_short());
+    }
+
+    #[test]
     fn a_shallow_repo_is_found_before_the_cap_stops_a_wide_branch() {
         let fixture = ScanFixture::new();
         for index in 0..20 {
