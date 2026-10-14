@@ -188,7 +188,7 @@ pub enum WorkspaceError {
     #[error("{repo} has no origin/HEAD, main, or master branch, set base_branch for it")]
     NoBaseBranch { repo: PathBuf },
     #[error(
-        "{worktree} has no origin/HEAD, origin/main, or origin/master, set base_branch for its repo"
+        "{worktree} has no origin/HEAD, origin/main, or origin/master: add an origin remote, or set base_branch for its repo when origin's default has another name"
     )]
     NoUpstream { worktree: PathBuf },
     #[error("{worktree} has a merge in progress, finish or abort it before merging again")]
