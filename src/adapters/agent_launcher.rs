@@ -66,10 +66,7 @@ impl AgentLauncher {
         match contents.envrc() {
             EnvrcStep::Skip => self.exec(self.agent_command(contents, contents.inherited())),
             EnvrcStep::Load => self.exec_through_envrc(contents),
-            EnvrcStep::Loaded => {
-                let loaded = self.environment.variables().to_vec();
-                self.exec(self.agent_command(contents, loaded))
-            }
+            EnvrcStep::Loaded => self.exec_inside_envrc(contents),
         }
     }
 
@@ -103,6 +100,11 @@ impl AgentLauncher {
         let error = self.exec(self.in_pane(loader, contents, contents.inherited()));
         prepared.discard();
         error
+    }
+
+    fn exec_inside_envrc(&mut self, contents: &HandoffContents) -> LaunchError {
+        let loaded = self.environment.variables().to_vec();
+        self.exec(self.agent_command(contents, loaded))
     }
 
     fn agent_command(
