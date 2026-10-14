@@ -1,43 +1,66 @@
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
 pub struct MountTable {
-    remote_mounts: Vec<PathBuf>,
+    mounts: Vec<Mount>,
+}
+
+struct Mount {
+    filesystem: String,
+    point: PathBuf,
+}
+
+impl Mount {
+    const REMOTE_TYPES: [&'static str; 7] = ["nfs", "nfs4", "cifs", "smb3", "9p", "ceph", "autofs"];
+    const FUSE_PREFIX: &'static str = "fuse";
+
+    fn is_remote(&self) -> bool {
+        self.filesystem.starts_with(Self::FUSE_PREFIX)
+            || Self::REMOTE_TYPES.contains(&self.filesystem.as_str())
+    }
 }
 
 impl MountTable {
-    const REMOTE_TYPES: [&'static str; 7] = ["nfs", "nfs4", "cifs", "smb3", "9p", "ceph", "autofs"];
-    const FUSE_PREFIX: &'static str = "fuse";
+    pub const PROCESS_TABLE: &'static str = "/proc/self/mountinfo";
     const OPTIONAL_FIELDS_END: &'static str = "-";
     const MOUNT_POINT_FIELD: usize = 4;
 
-    pub fn read(path: &Path) -> Self {
-        let text = fs::read_to_string(path).unwrap_or_default();
-        Self {
-            remote_mounts: text.lines().filter_map(Self::remote_mount_point).collect(),
-        }
+    pub fn read(path: &Path) -> io::Result<Self> {
+        let bytes = fs::read(path)?;
+        let text = String::from_utf8_lossy(&bytes);
+        Ok(Self {
+            mounts: text.lines().filter_map(Self::mount).collect(),
+        })
+    }
+
+    pub fn read_or_empty(path: &Path) -> Self {
+        Self::read(path).unwrap_or(Self { mounts: Vec::new() })
     }
 
     pub fn is_remote_mount(&self, path: &Path) -> bool {
-        self.remote_mounts.iter().any(|mount| mount == path)
+        self.mounts
+            .iter()
+            .any(|mount| mount.point == path && mount.is_remote())
     }
 
-    fn remote_mount_point(line: &str) -> Option<PathBuf> {
+    pub fn has_mount_within(&self, directory: &Path) -> bool {
+        self.mounts
+            .iter()
+            .any(|mount| mount.point.starts_with(directory))
+    }
+
+    fn mount(line: &str) -> Option<Mount> {
         let fields: Vec<&str> = line.split(' ').collect();
         let separator = fields
             .iter()
             .position(|field| *field == Self::OPTIONAL_FIELDS_END)?;
         let filesystem = fields.get(separator + 1)?;
-        if !Self::is_remote(filesystem) {
-            return None;
-        }
-        fields
-            .get(Self::MOUNT_POINT_FIELD)
-            .map(|mount_point| PathBuf::from(Self::decode(mount_point)))
-    }
-
-    fn is_remote(filesystem: &str) -> bool {
-        filesystem.starts_with(Self::FUSE_PREFIX) || Self::REMOTE_TYPES.contains(&filesystem)
+        let point = fields.get(Self::MOUNT_POINT_FIELD)?;
+        Some(Mount {
+            filesystem: filesystem.to_string(),
+            point: PathBuf::from(Self::decode(point)),
+        })
     }
 
     fn decode(escaped: &str) -> String {
@@ -82,7 +105,7 @@ mod tests {
             let directory = tempfile::tempdir().unwrap();
             let path = directory.path().join("mountinfo");
             fs::write(&path, TABLE).unwrap();
-            MountTable::read(&path)
+            MountTable::read(&path).unwrap()
         }
     }
 
@@ -102,9 +125,32 @@ mod tests {
     }
 
     #[test]
+    fn a_mount_below_a_directory_is_within_it() {
+        assert!(TableFixture::table().has_mount_within(Path::new("/home/user")));
+    }
+
+    #[test]
+    fn a_mount_whose_name_only_starts_like_a_directory_is_not_within_it() {
+        assert!(!TableFixture::table().has_mount_within(Path::new("/home/user/remote")));
+    }
+
+    #[test]
     fn an_unreadable_table_skips_nothing() {
-        let table = MountTable::read(Path::new("/nonexistent/mountinfo"));
+        let table = MountTable::read_or_empty(Path::new("/nonexistent/mountinfo"));
 
         assert!(!table.is_remote_mount(Path::new("/mnt/share")));
+    }
+
+    #[test]
+    fn a_line_that_is_not_utf8_hides_no_other_mount() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("mountinfo");
+        let mut bytes = b"40 30 0:39 / /home/user/donn\xe9es rw - fuse.sshfs host: rw\n".to_vec();
+        bytes.extend_from_slice(TABLE.as_bytes());
+        fs::write(&path, bytes).unwrap();
+
+        let table = MountTable::read(&path).unwrap();
+
+        assert!(table.is_remote_mount(Path::new("/mnt/share")));
     }
 }

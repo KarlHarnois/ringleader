@@ -166,8 +166,12 @@ impl FakeMultiplexer {
     }
 
     pub fn with_lost_socket(self) -> Self {
-        self.edit(|state| state.socket_lost = true);
+        self.lose_socket();
         self
+    }
+
+    pub fn lose_socket(&self) {
+        self.edit(|state| state.socket_lost = true);
     }
 
     pub fn with_drifted_config(self, server_return_key: &str) -> Self {
@@ -213,6 +217,11 @@ impl FakeMultiplexer {
 
     pub fn fail(&self, operation: &'static str, error: MultiplexerError) {
         self.edit(|state| state.failures.insert(operation, error));
+    }
+
+    pub fn replace_live(&self, observation: SessionObservation) {
+        self.end_session(observation.tmux_name());
+        self.edit(|state| state.live.push(observation));
     }
 
     pub fn end_session(&self, tmux_name: &str) {
@@ -385,6 +394,9 @@ impl Multiplexer for FakeMultiplexer {
     fn observe_all(&self) -> Result<Vec<SessionObservation>, MultiplexerError> {
         self.call("observe_all", "")?;
         Ok(self.edit(|state| {
+            if state.socket_lost {
+                return Vec::new();
+            }
             let seen = state.live.clone();
             state.apply_later_observation();
             seen

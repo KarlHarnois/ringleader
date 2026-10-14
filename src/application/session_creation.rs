@@ -9,6 +9,7 @@ use super::reconciliation::Reconciliation;
 use super::repo_merge::RepoMerge;
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
+use super::session_scratch::SessionScratch;
 use super::start_point_resolver::StartPointResolver;
 use super::use_checks::UseChecks;
 use super::worktree_rollback::WorktreeRollback;
@@ -21,6 +22,7 @@ pub struct SessionCreation {
     host: Arc<dyn HostProbe>,
     registry: Arc<dyn SessionRegistry>,
     clock: Arc<dyn Clock>,
+    scratch: SessionScratch,
     hooks: Arc<AgentHooks>,
 }
 
@@ -33,6 +35,7 @@ impl SessionCreation {
             host: ports.repos().host(),
             registry: ports.state().registry(),
             clock: ports.state().clock(),
+            scratch: SessionScratch::new(ports),
             hooks,
         }
     }
@@ -145,12 +148,13 @@ impl SessionCreation {
         start: &StartPoint,
         rollback: &WorktreeRollback,
     ) -> Result<PathBuf, ServiceError> {
-        let spec = plan.spec(start);
+        let launch = self.scratch.prepare(plan.launch());
+        let spec = plan.spec(start, launch);
         self.multiplexer.create_session(&spec).map_err(|error| {
             if error.is_timeout() {
                 self.after_tmux_timeout(plan, rollback, error.into())
             } else {
-                rollback.run(error.into())
+                self.roll_back_launch(plan, rollback, error.into())
             }
         })
     }
@@ -162,13 +166,23 @@ impl SessionCreation {
         error: ServiceError,
     ) -> ServiceError {
         match self.multiplexer.kill_session(&plan.tmux_name()) {
-            Ok(()) => rollback.run(error),
+            Ok(()) => self.roll_back_launch(plan, rollback, error),
             Err(_) => error.adding_context(&format!(
                 "kept the worktree {} and the branch {}, run ringleader doctor",
                 plan.worktree().display(),
                 plan.branch()
             )),
         }
+    }
+
+    fn roll_back_launch(
+        &self,
+        plan: &CreationPlan,
+        rollback: &WorktreeRollback,
+        error: ServiceError,
+    ) -> ServiceError {
+        self.scratch.discard(&plan.worktree());
+        rollback.run(error)
     }
 }
 
@@ -180,7 +194,9 @@ mod tests {
     use super::*;
     use crate::application::ports::{MultiplexerError, WorkspaceError, WorktreeEntry};
     use crate::domain::{Agent, AgentMode, AgentPane, BaseBranch, Branch, Repo, RepoName};
-    use crate::test_support::{FakeHostProbe, FakeMultiplexer, FakeWorkspace, ServiceFixture};
+    use crate::test_support::{
+        FakeHostProbe, FakeMultiplexer, FakeScratchSpace, FakeWorkspace, ServiceFixture,
+    };
 
     struct CreateFixture;
 
@@ -574,7 +590,32 @@ mod tests {
         CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap();
 
         let launch = fixture.multiplexer().launches().pop().unwrap();
-        assert_eq!(launch.env_assignments(), assignments);
+        assert!(launch.env_assignments().starts_with(&assignments));
+    }
+
+    #[test]
+    fn create_points_the_agent_tmpdir_at_the_session_scratch_directory() {
+        let fixture = ServiceFixture::new();
+
+        CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap();
+
+        let launch = fixture.multiplexer().launches().pop().unwrap();
+        assert_eq!(
+            launch.env_assignments(),
+            [fixture.tmpdir_assignment("fix-auth")]
+        );
+    }
+
+    #[test]
+    fn a_scratch_directory_that_cannot_be_made_still_creates_the_session() {
+        let fixture =
+            ServiceFixture::new().with_scratch_space(FakeScratchSpace::default().failing("create"));
+
+        let session = CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap();
+
+        assert_eq!(fixture.registry().sessions(), vec![session]);
+        let launch = fixture.multiplexer().launches().pop().unwrap();
+        assert!(launch.env_assignments().is_empty());
     }
 
     #[test]
@@ -586,7 +627,8 @@ mod tests {
         let spec = fixture.multiplexer().specs().pop().unwrap();
         assert_eq!(spec.launch().env_names(), ["ANTHROPIC_API_KEY"]);
         assert_eq!(spec.removed_env_names(), ["ANTHROPIC_API_KEY"]);
-        assert!(spec.launch().env_assignments().is_empty());
+        let assigned = spec.launch().env_assignments();
+        assert!(assigned.iter().all(|(name, _)| name != "ANTHROPIC_API_KEY"));
     }
 
     #[test]
@@ -748,7 +790,7 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_tmux_creation_removes_the_worktree_and_branch() {
+    fn a_failed_tmux_creation_removes_the_worktree_branch_and_scratch_directory() {
         let fixture = ServiceFixture::new().with_multiplexer(
             FakeMultiplexer::new().failing("create_session", CreateFixture::tmux_failure()),
         );
@@ -760,10 +802,14 @@ mod tests {
         let repo = Path::new(ServiceFixture::REPO);
         assert!(!fixture.workspace().has_branch(repo, "fix-auth"));
         assert!(fixture.registry().sessions().is_empty());
+        assert_eq!(
+            fixture.scratch_space().removed(),
+            [ServiceFixture::worktree_path("fix-auth")]
+        );
     }
 
     #[test]
-    fn a_timed_out_tmux_creation_whose_kill_completes_removes_the_worktree_and_branch() {
+    fn a_timed_out_tmux_creation_whose_kill_completes_removes_the_worktree_branch_and_scratch() {
         let fixture = ServiceFixture::new().with_multiplexer(
             FakeMultiplexer::new()
                 .failing("create_session", CreateFixture::tmux_timeout())
@@ -775,10 +821,14 @@ mod tests {
         let repo = Path::new(ServiceFixture::REPO);
         assert!(fixture.multiplexer().live_names().is_empty());
         assert!(!fixture.workspace().has_branch(repo, "fix-auth"));
+        assert_eq!(
+            fixture.scratch_space().removed(),
+            [ServiceFixture::worktree_path("fix-auth")]
+        );
     }
 
     #[test]
-    fn a_timed_out_tmux_creation_whose_kill_also_times_out_keeps_the_worktree_and_branch() {
+    fn a_timed_out_tmux_creation_whose_kill_also_times_out_keeps_the_worktree_branch_and_scratch() {
         let fixture = ServiceFixture::new().with_multiplexer(
             FakeMultiplexer::new()
                 .failing("create_session", CreateFixture::tmux_timeout())
@@ -791,6 +841,7 @@ mod tests {
         let repo = Path::new(ServiceFixture::REPO);
         assert!(fixture.workspace().has_branch(repo, "fix-auth"));
         assert!(error.to_string().contains("doctor"));
+        assert!(fixture.scratch_space().removed().is_empty());
     }
 
     #[test]

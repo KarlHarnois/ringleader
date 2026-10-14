@@ -8,7 +8,7 @@ use super::preview_panel::PreviewPanel;
 use super::pull_request_feed::PullRequestFeed;
 use super::session_list::SessionList;
 use super::session_table::SessionTable;
-use super::status_bar::StatusNote;
+use super::status_bar::{StatusBar, StatusNote};
 use super::theme::Theme;
 use crate::application::{ServiceError, SessionService, Tool};
 
@@ -18,6 +18,7 @@ pub struct HomeState {
     preview: PreviewFeed,
     diffs: DiffQueue,
     pull_requests: PullRequestFeed,
+    screen: (u16, u16),
     next_observe: Instant,
     tmux_paused_until: Option<Instant>,
 }
@@ -32,6 +33,7 @@ impl HomeState {
             preview: PreviewFeed::new(now),
             diffs: DiffQueue::default(),
             pull_requests: PullRequestFeed::default(),
+            screen: (0, 0),
             next_observe: now,
             tmux_paused_until: None,
         }
@@ -54,10 +56,16 @@ impl HomeState {
         StatusNote::new(row).text()
     }
 
-    pub fn resize(&mut self, width: u16, height: u16, service: &SessionService) {
-        let tier = LayoutTier::for_size(width, height);
-        self.sessions.resize(tier.table_rows(height));
-        self.preview.resize(tier);
+    pub fn resize(
+        &mut self,
+        width: u16,
+        height: u16,
+        status: &StatusBar,
+        service: &SessionService,
+    ) {
+        self.screen = (width, height);
+        self.fit_rows(status);
+        self.preview.resize(LayoutTier::for_size(width, height));
         self.refresh_preview(service);
     }
 
@@ -77,7 +85,12 @@ impl HomeState {
         }
     }
 
-    pub fn tick(&mut self, now: Instant, service: &mut SessionService) -> Result<(), ServiceError> {
+    pub fn tick(
+        &mut self,
+        now: Instant,
+        service: &mut SessionService,
+        status: &StatusBar,
+    ) -> Result<(), ServiceError> {
         let mut observed = Ok(());
         if now >= self.next_observe && !self.is_tmux_paused() {
             self.next_observe = now + service.config().intervals().state_poll();
@@ -89,6 +102,7 @@ impl HomeState {
                 .refresh_if_due(now, service, self.sessions.selected());
             self.pause_on_failure(previewed);
         }
+        self.fit_rows(status);
         let visible = self.sessions.visible_managed();
         let measured = self.diffs.tick(now, &visible, service);
         self.sessions.apply_diffs(self.diffs.diffs());
@@ -116,6 +130,10 @@ impl HomeState {
             .apply_pull_requests(self.pull_requests.pull_requests());
         self.bell.watch(self.sessions.rows(), service);
         Ok(())
+    }
+
+    pub fn returned_from(&mut self, name: &str) {
+        self.bell.forget(name);
     }
 
     pub fn select(&mut self, name: &str, service: &SessionService) {
@@ -178,6 +196,15 @@ impl HomeState {
         if let Err(error) = outcome {
             self.pause_after(&error);
         }
+    }
+
+    fn fit_rows(&mut self, status: &StatusBar) {
+        self.sessions.resize(self.table_rows(status));
+    }
+
+    fn table_rows(&self, status: &StatusBar) -> usize {
+        let (width, height) = self.screen;
+        LayoutTier::for_size(width, height).table_rows(height, status.height(width, height))
     }
 
     fn is_tmux_paused(&self) -> bool {

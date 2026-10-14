@@ -11,6 +11,7 @@ pub struct DeleteOutcome {
     impact: DeleteImpact,
     branch: BranchPresence,
     kept: Option<(PathBuf, String)>,
+    stray_session: Option<String>,
 }
 
 impl DeleteOutcome {
@@ -28,6 +29,14 @@ impl DeleteOutcome {
             branch,
             impact: measurement.into_impact(),
             kept: None,
+            stray_session: None,
+        }
+    }
+
+    pub fn with_stray_session(self, warning: Option<String>) -> Self {
+        Self {
+            stray_session: warning,
+            ..self
         }
     }
 
@@ -41,6 +50,7 @@ impl DeleteOutcome {
                 session.worktree_path().to_path_buf(),
                 session.branch().to_string(),
             )),
+            stray_session: None,
         }
     }
 
@@ -59,6 +69,10 @@ impl DeleteOutcome {
     #[cfg(test)]
     pub fn branch(&self) -> BranchPresence {
         self.branch
+    }
+
+    pub fn stray_session(&self) -> Option<&str> {
+        self.stray_session.as_deref()
     }
 
     pub fn kept(&self) -> Option<(&Path, &str)> {

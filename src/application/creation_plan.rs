@@ -143,8 +143,11 @@ impl CreationPlan {
         self.naming.tmux_session_name(&self.name)
     }
 
-    pub fn spec(&self, start: &StartPoint) -> SessionSpec {
-        let launch = AgentLaunch::for_agent(&self.agent, self.argv.clone(), &self.worktree());
+    pub fn launch(&self) -> AgentLaunch {
+        AgentLaunch::for_agent(&self.agent, self.argv.clone(), &self.worktree())
+    }
+
+    pub fn spec(&self, start: &StartPoint, launch: AgentLaunch) -> SessionSpec {
         SessionSpec::new(&self.tmux_name(), self.metadata(start), launch)
             .sized(self.size)
             .removing_env_names(&self.removed_env_names)
