@@ -15,7 +15,7 @@ use super::session_scratch::SessionScratch;
 use super::start_outcome::StartOutcome;
 use super::use_checks::UseChecks;
 use super::worktree_rollback::WorktreeRollback;
-use crate::domain::Config;
+use crate::domain::{Config, Session};
 
 pub struct SessionCreation {
     branches: BranchAvailability,
@@ -63,12 +63,7 @@ impl SessionCreation {
         let launch = envrc.applied_to(self.scratch.prepare(plan.launch()));
         let socket = self.start_tmux_session(&plan, &plan.spec(&start, launch), &rollback)?;
         let session = plan.session(&start, &socket, self.clock.now_epoch_seconds());
-        let mut entries = reconciliation.entries().to_vec();
-        entries.push(session.clone());
-        self.registry.save(&entries).map_err(|error| {
-            ServiceError::from(error)
-                .adding_context("the session runs, and the next observe adopts it from tmux")
-        })?;
+        self.record(&session, reconciliation)?;
         self.hooks.after_start(&session, plan.agent());
         Ok(StartOutcome::new(session, envrc.warning()))
     }
@@ -186,6 +181,19 @@ impl SessionCreation {
         self.scratch.discard(&plan.worktree());
         rollback.run(error)
     }
+
+    fn record(
+        &self,
+        session: &Session,
+        reconciliation: &Reconciliation,
+    ) -> Result<(), ServiceError> {
+        let mut entries = reconciliation.entries().to_vec();
+        entries.push(session.clone());
+        self.registry.save(&entries).map_err(|error| {
+            ServiceError::from(error)
+                .adding_context("the session runs, and the next observe adopts it from tmux")
+        })
+    }
 }
 
 #[cfg(test)]
@@ -195,7 +203,7 @@ mod tests {
 
     use super::*;
     use crate::application::ports::{MultiplexerError, WorkspaceError, WorktreeEntry};
-    use crate::domain::{Agent, AgentMode, AgentPane, Session};
+    use crate::domain::{Agent, AgentMode, AgentPane};
     use crate::test_support::{
         FakeDirectoryEnvironment, FakeHostProbe, FakeMultiplexer, FakeScratchSpace, FakeWorkspace,
         ServiceFixture,
