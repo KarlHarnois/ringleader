@@ -251,7 +251,7 @@ mod tests {
     use crate::application::ports::{ConfigError, MultiplexerError, UnmergedCommits};
     use crate::domain::{Config, ConfigDraft, DiffStat, PullRequestState, Session};
     use crate::test_support::{
-        FakeMultiplexer, FakePullRequests, HeldCalls, ServiceFixture, UiHarness,
+        Deadline, FakeMultiplexer, FakePullRequests, HeldCalls, ServiceFixture, UiHarness,
     };
 
     struct AppFixture;
@@ -356,6 +356,11 @@ mod tests {
                 screens.push(Self::screen(app, UiHarness::WIDTH, UiHarness::HEIGHT));
             }
             screens
+        }
+
+        fn wait_for_capture(fixture: &ServiceFixture, name: &str) -> bool {
+            let call = format!("capture_pane ringleader-{name}");
+            Deadline::after(Self::LIMIT).wait_until(|| Self::captures(fixture).contains(&call))
         }
 
         fn holding_captures(held: &Arc<HeldCalls>) -> ServiceFixture {
@@ -486,12 +491,10 @@ mod tests {
         let mut app = AppFixture::started(&fixture, 100, 28);
 
         AppFixture::press(&mut app, 'j');
+        let captured_without_a_tick = AppFixture::wait_for_capture(&fixture, "fix-auth");
         UiHarness::settle(&mut app);
 
-        assert_eq!(
-            AppFixture::captures(&fixture).last().unwrap(),
-            "capture_pane ringleader-fix-auth"
-        );
+        assert!(captured_without_a_tick);
         assert!(AppFixture::screen(&app, 100, 28).contains("fix auth output"));
     }
 
