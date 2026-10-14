@@ -1,7 +1,7 @@
 use std::fs::{self, DirBuilder};
 use std::io;
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::DirBuilderExt;
+use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use super::fnv_hash::FnvHash;
@@ -13,11 +13,33 @@ pub struct DirectoryScratchSpace {
 
 impl DirectoryScratchSpace {
     const PRIVATE_MODE: u32 = 0o700;
+    const OWNER_ACCESS_BITS: u32 = 0o700;
 
     pub fn new(root: &Path) -> Self {
         Self {
             root: root.to_path_buf(),
         }
+    }
+
+    fn remove_tree(directory: &Path) -> io::Result<()> {
+        match fs::remove_dir_all(directory) {
+            Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
+                Self::open_to_owner(directory)?;
+                fs::remove_dir_all(directory)
+            }
+            result => result,
+        }
+    }
+
+    fn open_to_owner(path: &Path) -> io::Result<()> {
+        let metadata = fs::symlink_metadata(path)?;
+        if !metadata.is_dir() {
+            return Ok(());
+        }
+        let mut permissions = metadata.permissions();
+        permissions.set_mode(permissions.mode() | Self::OWNER_ACCESS_BITS);
+        fs::set_permissions(path, permissions)?;
+        fs::read_dir(path)?.try_for_each(|entry| Self::open_to_owner(&entry?.path()))
     }
 
     fn failure(operation: &'static str, path: &Path, error: &io::Error) -> ScratchSpaceError {
@@ -46,7 +68,7 @@ impl ScratchSpace for DirectoryScratchSpace {
 
     fn remove(&self, worktree: &Path) -> Result<(), ScratchSpaceError> {
         let directory = self.directory(worktree);
-        match fs::remove_dir_all(&directory) {
+        match Self::remove_tree(&directory) {
             Err(error) if error.kind() != io::ErrorKind::NotFound => {
                 Err(Self::failure("remove", &directory, &error))
             }
@@ -58,7 +80,6 @@ impl ScratchSpace for DirectoryScratchSpace {
 #[cfg(test)]
 mod tests {
     use std::fs::Permissions;
-    use std::os::unix::fs::PermissionsExt;
 
     use super::*;
 
@@ -101,6 +122,10 @@ mod tests {
         fn with_file(self) -> Self {
             fs::write(self.scratch().join("notes.md"), "draft").unwrap();
             self
+        }
+
+        fn seal(path: &Path) {
+            fs::set_permissions(path, Permissions::from_mode(Self::SEALED_MODE)).unwrap();
         }
 
         fn unseal(path: &Path) {
@@ -209,16 +234,45 @@ mod tests {
     }
 
     #[test]
-    fn a_directory_that_cannot_be_emptied_reports_the_failed_remove() {
+    fn remove_opens_read_only_directories_to_delete_them() {
         let fixture = ScratchFixture::new().created();
-        let locked = fixture.scratch().join("locked");
-        fs::create_dir(&locked).unwrap();
-        fs::write(locked.join("notes.md"), "draft").unwrap();
-        fs::set_permissions(&locked, Permissions::from_mode(ScratchFixture::SEALED_MODE)).unwrap();
+        let module = fixture.scratch().join("gopath/pkg/mod/example");
+        fs::create_dir_all(&module).unwrap();
+        fs::write(module.join("go.mod"), "module example").unwrap();
+        ScratchFixture::seal(&module);
+        ScratchFixture::seal(module.parent().unwrap());
+
+        fixture.space.remove(ScratchFixture::worktree()).unwrap();
+
+        assert!(!fixture.scratch().exists());
+    }
+
+    #[test]
+    fn remove_leaves_the_target_of_a_symlink_alone() {
+        let fixture = ScratchFixture::new().created();
+        let outside = fixture.base.path().join("outside");
+        fs::create_dir(&outside).unwrap();
+        ScratchFixture::seal(&outside);
+        std::os::unix::fs::symlink(&outside, fixture.scratch().join("link")).unwrap();
+        let read_only = fixture.scratch().join("read-only");
+        fs::create_dir_all(read_only.join("inner")).unwrap();
+        ScratchFixture::seal(&read_only);
+
+        fixture.space.remove(ScratchFixture::worktree()).unwrap();
+
+        assert!(!fixture.scratch().exists());
+        assert_eq!(ScratchFixture::mode(&outside), ScratchFixture::SEALED_MODE);
+        ScratchFixture::unseal(&outside);
+    }
+
+    #[test]
+    fn a_root_without_write_access_reports_the_failed_remove() {
+        let fixture = ScratchFixture::new().created();
+        ScratchFixture::seal(&fixture.root());
 
         let result = fixture.space.remove(ScratchFixture::worktree());
 
-        ScratchFixture::unseal(&locked);
+        ScratchFixture::unseal(&fixture.root());
         assert_eq!(
             ScratchFixture::failed_operation(result),
             Some(("remove", fixture.scratch()))
