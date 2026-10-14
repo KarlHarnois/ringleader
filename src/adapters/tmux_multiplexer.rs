@@ -126,7 +126,7 @@ impl TmuxMultiplexer {
     }
 
     fn agent_pane(&self, tmux_name: &str) -> Result<Option<String>, MultiplexerError> {
-        let lookup = TmuxScripts::session_panes(tmux_name, TmuxListing::AGENT_FORMAT);
+        let lookup = TmuxScripts::session_panes(tmux_name, &TmuxListing::agent_format());
         let output = self.tmux.query(&lookup)?;
         if !output.succeeded() && !output.has("ringleader-agent") {
             return Err(TmuxError::failed("list-panes", &output).into());
@@ -246,7 +246,7 @@ impl Multiplexer for TmuxMultiplexer {
     fn observe_all(&self) -> Result<Vec<SessionObservation>, MultiplexerError> {
         let output = self
             .tmux
-            .query(&TmuxScripts::all_panes(TmuxListing::PANE_FORMAT))?;
+            .query(&TmuxScripts::all_panes(&TmuxListing::pane_format()))?;
         if output.has("ringleader-pane") || output.succeeded() {
             return Ok(TmuxListing::new(&output).observations());
         }
@@ -1190,6 +1190,19 @@ mod tests {
         });
 
         assert!(captured);
+    }
+
+    #[test]
+    fn capturing_a_missing_session_reports_the_failed_pane_lookup() {
+        let fixture = MultiplexerFixture::with_holder();
+
+        let error = fixture
+            .server
+            .multiplexer()
+            .capture_pane("ringleader-missing")
+            .unwrap_err();
+
+        assert!(matches!(error, MultiplexerError::Failed { .. }));
     }
 
     #[test]

@@ -11,11 +11,9 @@ pub struct TmuxListing<'a> {
 }
 
 impl<'a> TmuxListing<'a> {
-    pub const PANE_FORMAT: &'static str = "ringleader-pane\t#{session_name}\t#{socket_path}\t#{session_created}\t#{window_active_clients}\t#{pane_id}\t#{@ringleader_agent}\t#{pane_dead}\t#{window_activity}\t#{@ringleader_meta}";
     pub const AGENT_TAG: &'static str = "@ringleader_agent";
     pub const SHELL_TAG: &'static str = "@ringleader_shell";
     pub const METADATA_OPTION: &'static str = "@ringleader_meta";
-    pub const AGENT_FORMAT: &'static str = "ringleader-agent #{pane_id} #{@ringleader_agent}";
     pub const PANE_PID_FORMAT: &'static str = "ringleader-pane-pid #{pane_dead} #{pane_pid}";
     pub const TTY_FORMAT: &'static str = "ringleader-tty #{pane_dead} #{pane_tty}";
     pub const SERVER_FORMAT: &'static str = "ringleader-server #{version}";
@@ -27,6 +25,18 @@ impl<'a> TmuxListing<'a> {
 
     pub fn new(output: &'a TmuxOutput) -> Self {
         Self { output }
+    }
+
+    pub fn pane_format() -> String {
+        format!(
+            "ringleader-pane\t#{{session_name}}\t#{{socket_path}}\t#{{session_created}}\t#{{window_active_clients}}\t#{{pane_id}}\t#{{{agent}}}\t#{{pane_dead}}\t#{{window_activity}}\t#{{{metadata}}}",
+            agent = Self::AGENT_TAG,
+            metadata = Self::METADATA_OPTION
+        )
+    }
+
+    pub fn agent_format() -> String {
+        format!("ringleader-agent #{{pane_id}} #{{{}}}", Self::AGENT_TAG)
     }
 
     pub fn window_format() -> String {
