@@ -185,8 +185,32 @@ mod tests {
     struct CreateFixture;
 
     impl CreateFixture {
+        const DEVELOP_TIP: &'static str = "5555555555555555555555555555555555555555";
+        const RELEASE_TIP: &'static str = "6666666666666666666666666666666666666666";
+
         fn request(name: &str) -> CreateRequest {
             CreateRequest::new(name, ServiceFixture::repo())
+        }
+
+        fn repo_on_develop() -> Repo {
+            Repo::explicit(
+                RepoName::parse("example-project").unwrap(),
+                Path::new(ServiceFixture::REPO),
+                BaseBranch::new("develop"),
+            )
+        }
+
+        fn with_local_tips(tips: &[(&str, &str)]) -> ServiceFixture {
+            let workspace =
+                tips.iter()
+                    .fold(FakeWorkspace::default(), |workspace, (branch, tip)| {
+                        workspace.with_branch_tip(
+                            Path::new(ServiceFixture::REPO),
+                            Branch::Local(branch.to_string()),
+                            tip,
+                        )
+                    });
+            ServiceFixture::new().with_workspace(workspace)
         }
 
         fn branch(name: &str) -> String {
@@ -265,19 +289,40 @@ mod tests {
 
     #[test]
     fn a_configured_base_branch_tip_becomes_the_recorded_start() {
-        let develop_tip = "5555555555555555555555555555555555555555";
-        let fixture =
-            ServiceFixture::new().with_workspace(FakeWorkspace::default().with_branch_tip(
-                Path::new(ServiceFixture::REPO),
-                Branch::Local("develop".to_string()),
-                develop_tip,
-            ));
+        let fixture = CreateFixture::with_local_tips(&[("develop", CreateFixture::DEVELOP_TIP)]);
         let request = CreateFixture::request("fix-auth")
             .with_base_branch(BaseBranch::new("develop").unwrap());
 
         let session = CreateFixture::create(&fixture, request).unwrap();
 
-        assert_eq!(session.base_commit(), develop_tip);
+        assert_eq!(session.base_commit(), CreateFixture::DEVELOP_TIP);
+    }
+
+    #[test]
+    fn the_repo_base_branch_is_started_from_without_a_requested_one() {
+        let fixture = CreateFixture::with_local_tips(&[
+            ("main", FakeWorkspace::DEFAULT_START),
+            ("develop", CreateFixture::DEVELOP_TIP),
+        ]);
+        let request = CreateRequest::new("fix-auth", CreateFixture::repo_on_develop());
+
+        let session = CreateFixture::create(&fixture, request).unwrap();
+
+        assert_eq!(session.base_commit(), CreateFixture::DEVELOP_TIP);
+    }
+
+    #[test]
+    fn a_requested_base_branch_is_started_from_over_the_repo_one() {
+        let fixture = CreateFixture::with_local_tips(&[
+            ("develop", CreateFixture::DEVELOP_TIP),
+            ("release", CreateFixture::RELEASE_TIP),
+        ]);
+        let request = CreateRequest::new("fix-auth", CreateFixture::repo_on_develop())
+            .with_base_branch(BaseBranch::new("release").unwrap());
+
+        let session = CreateFixture::create(&fixture, request).unwrap();
+
+        assert_eq!(session.base_commit(), CreateFixture::RELEASE_TIP);
     }
 
     #[test]
@@ -304,14 +349,9 @@ mod tests {
                 Branch::Local("develop".to_string()),
                 FakeWorkspace::DEFAULT_START,
             ));
-        let configured = Repo::explicit(
-            RepoName::parse("example-project").unwrap(),
-            Path::new(ServiceFixture::REPO),
-            BaseBranch::new("develop"),
-        );
+        let request = CreateRequest::new("fix-auth", CreateFixture::repo_on_develop());
 
-        let session =
-            CreateFixture::create(&fixture, CreateRequest::new("fix-auth", configured)).unwrap();
+        let session = CreateFixture::create(&fixture, request).unwrap();
 
         assert_eq!(session.base_branch(), None);
     }

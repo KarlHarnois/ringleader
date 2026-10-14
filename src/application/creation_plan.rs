@@ -79,7 +79,6 @@ impl CreateRequest {
 pub struct CreationPlan {
     name: SessionName,
     repo: Repo,
-    base_branch: Option<BaseBranch>,
     requested_base_branch: Option<BaseBranch>,
     naming: NamingScheme,
     agent: Agent,
@@ -100,10 +99,6 @@ impl CreationPlan {
             argv: agent.launch_argv(&name, request.mode, &request.prompt),
             name,
             repo: request.repo.clone(),
-            base_branch: request
-                .base_branch
-                .clone()
-                .or_else(|| request.repo.base_branch().cloned()),
             requested_base_branch: request.base_branch.clone(),
             naming: config.naming().clone(),
             agent: agent.clone(),
@@ -131,7 +126,9 @@ impl CreationPlan {
     }
 
     pub fn base_branch(&self) -> Option<&BaseBranch> {
-        self.base_branch.as_ref()
+        self.requested_base_branch
+            .as_ref()
+            .or_else(|| self.repo.base_branch())
     }
 
     pub fn worktree(&self) -> PathBuf {
