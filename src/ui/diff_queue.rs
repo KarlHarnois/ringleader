@@ -295,13 +295,13 @@ mod tests {
         let visible = QueueFixture::visible(&QueueFixture::NAMES);
         let start = Instant::now();
 
+        let later = start + Duration::from_secs(4);
         queue.tick(start, &visible, &service).unwrap();
-        queue
-            .tick(start + Duration::from_secs(4), &visible, &service)
-            .unwrap();
+        queue.tick(later, &visible, &service).unwrap();
         held.release();
+        QueueFixture::settle_at(&mut queue, later, &visible, &service).unwrap();
 
-        assert_eq!(queue.queued, ["gamma"]);
+        assert_eq!(QueueFixture::diff_calls(&fixture), 3);
     }
 
     #[test]
