@@ -105,7 +105,7 @@ impl SessionFinder {
         let name_room = width.saturating_sub(Self::SIDE_PADDING);
         let indent = " ".repeat(Self::SIDE_PADDING);
         self.matches.lines(rows, theme, |index| {
-            indent.clone() + &TextFit::new(&self.names[index]).right_truncated(name_room)
+            indent.clone() + &TextFit::new(&self.names[index]).padded(name_room)
         })
     }
 }
@@ -160,6 +160,10 @@ mod tests {
         fn rule() -> String {
             "─".repeat(Self::WIDTH)
         }
+
+        fn full_width(text: &str) -> String {
+            format!("{text:<width$}", width = Self::WIDTH)
+        }
     }
 
     #[test]
@@ -171,9 +175,9 @@ mod tests {
             [
                 "❯ █             3/3 ".to_string(),
                 FinderFixture::rule(),
-                " fix-auth".to_string(),
-                " dark-mode".to_string(),
-                " docs".to_string(),
+                FinderFixture::full_width(" fix-auth"),
+                FinderFixture::full_width(" dark-mode"),
+                FinderFixture::full_width(" docs"),
             ]
         );
     }
@@ -189,7 +193,7 @@ mod tests {
             [
                 "❯ fa█           1/3 ".to_string(),
                 FinderFixture::rule(),
-                " fix-auth".to_string(),
+                FinderFixture::full_width(" fix-auth"),
             ]
         );
     }
