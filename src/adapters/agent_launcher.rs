@@ -47,24 +47,28 @@ impl AgentLauncher {
     }
 
     pub fn launch(&mut self, handoff: &Path) -> LaunchError {
-        let contents = match AgentHandoff::take(handoff) {
-            Ok(contents) => contents,
-            Err(error) => {
-                return LaunchError::Handoff {
-                    path: handoff.display().to_string(),
-                    detail: error.to_string(),
-                };
-            }
-        };
-        if let Err(error) = Self::check(&contents) {
-            return error;
+        match Self::checked_contents(handoff) {
+            Ok(contents) => self.exec_step(&contents),
+            Err(error) => error,
         }
+    }
+
+    fn checked_contents(handoff: &Path) -> Result<HandoffContents, LaunchError> {
+        let contents = AgentHandoff::take(handoff).map_err(|error| LaunchError::Handoff {
+            path: handoff.display().to_string(),
+            detail: error.to_string(),
+        })?;
+        Self::check(&contents)?;
+        Ok(contents)
+    }
+
+    fn exec_step(&mut self, contents: &HandoffContents) -> LaunchError {
         match contents.envrc() {
-            EnvrcStep::Skip => self.exec(self.agent_command(&contents, contents.inherited())),
-            EnvrcStep::Load => self.exec_through_envrc(&contents),
+            EnvrcStep::Skip => self.exec(self.agent_command(contents, contents.inherited())),
+            EnvrcStep::Load => self.exec_through_envrc(contents),
             EnvrcStep::Loaded => {
                 let loaded = self.environment.variables().to_vec();
-                self.exec(self.agent_command(&contents, loaded))
+                self.exec(self.agent_command(contents, loaded))
             }
         }
     }
