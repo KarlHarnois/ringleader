@@ -30,10 +30,7 @@ impl HandoffContents {
             inherited: Self::stored(inherited),
             explicit: Self::stored(explicit),
             worktree: launch.worktree().as_os_str().as_bytes().to_vec(),
-            envrc: match launch.loads_envrc() {
-                true => EnvrcStep::Load,
-                false => EnvrcStep::Skip,
-            },
+            envrc: EnvrcStep::for_launch(launch),
         }
     }
 
@@ -93,6 +90,15 @@ pub enum EnvrcStep {
     Skip,
     Load,
     Loaded,
+}
+
+impl EnvrcStep {
+    fn for_launch(launch: &AgentLaunch) -> Self {
+        match launch.loads_envrc() {
+            true => Self::Load,
+            false => Self::Skip,
+        }
+    }
 }
 
 #[cfg(test)]
