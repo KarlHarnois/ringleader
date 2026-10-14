@@ -49,7 +49,7 @@ pub trait Workspace: Send + Sync {
         &self,
         location: &Path,
         remote: &str,
-    ) -> Result<Option<String>, WorkspaceError>;
+    ) -> Result<Option<BaseBranch>, WorkspaceError>;
     fn branch_tips(
         &self,
         location: &Path,

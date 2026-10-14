@@ -3,14 +3,14 @@ use super::branch::Branch;
 use super::branch_tips::BranchTips;
 
 pub struct BaseBranchLadder {
-    origin_default: Option<String>,
+    origin_default: Option<BaseBranch>,
     session_branches: Vec<Branch>,
 }
 
 impl BaseBranchLadder {
     const CONVENTIONAL_DEFAULT_BRANCHES: [&'static str; 2] = ["main", "master"];
 
-    pub fn new(origin_default: Option<String>) -> Self {
+    pub fn new(origin_default: Option<BaseBranch>) -> Self {
         Self {
             origin_default,
             session_branches: Vec::new(),
@@ -75,15 +75,14 @@ impl BaseBranchLadder {
     }
 
     fn upstream_candidates(&self) -> Vec<BaseBranch> {
-        let free_conventional_names = Self::conventional_branches()
+        let free_conventional = Self::conventional_branches()
             .into_iter()
             .filter(|branch| self.is_free(branch))
-            .map(|branch| branch.name().to_string());
+            .filter_map(|branch| BaseBranch::new(branch.name()));
         self.origin_default
             .clone()
             .into_iter()
-            .chain(free_conventional_names)
-            .filter_map(|name| BaseBranch::new(&name))
+            .chain(free_conventional)
             .collect()
     }
 
@@ -93,8 +92,8 @@ impl BaseBranchLadder {
 
     fn origin_rung(&self) -> Vec<Branch> {
         self.origin_default
-            .as_deref()
-            .map(|name| Self::with_origin_copy(&Branch::Local(name.to_string())))
+            .as_ref()
+            .map(|default| Self::with_origin_copy(&Branch::Local(default.to_string())))
             .unwrap_or_default()
     }
 
@@ -125,7 +124,7 @@ mod tests {
         }
 
         fn with_trunk() -> BaseBranchLadder {
-            BaseBranchLadder::new(Some("trunk".to_string()))
+            BaseBranchLadder::new(BaseBranch::new("trunk"))
         }
 
         fn without_origin_default() -> BaseBranchLadder {

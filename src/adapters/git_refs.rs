@@ -4,7 +4,7 @@ use super::branch_ref::BranchRef;
 use super::git_invocation::GitInvocation;
 use super::git_runner::GitRunner;
 use crate::application::ports::{Head, WorkspaceError};
-use crate::domain::{Branch, BranchTips};
+use crate::domain::{BaseBranch, Branch, BranchTips};
 
 pub struct GitRefs<'a> {
     git: &'a GitRunner,
@@ -36,7 +36,7 @@ impl<'a> GitRefs<'a> {
         &self,
         location: &Path,
         remote: &str,
-    ) -> Result<Option<String>, WorkspaceError> {
+    ) -> Result<Option<BaseBranch>, WorkspaceError> {
         let remote_branches = format!("{}{remote}/", BranchRef::REMOTE_TRACKING_PREFIX);
         let remote_head = format!("{remote_branches}{}", Self::HEAD);
         let listed = self.listing(
@@ -47,8 +47,11 @@ impl<'a> GitRefs<'a> {
         Ok(listed
             .into_iter()
             .find(|(name, _)| *name == remote_head)
-            .and_then(|(_, target)| target.strip_prefix(&remote_branches).map(str::to_string))
-            .filter(|branch| !branch.is_empty()))
+            .and_then(|(_, target)| {
+                target
+                    .strip_prefix(&remote_branches)
+                    .and_then(BaseBranch::new)
+            }))
     }
 
     pub fn branch_tips(
@@ -136,7 +139,7 @@ mod tests {
             self.refs().head(self.repo.path()).unwrap()
         }
 
-        fn origin_default(&self) -> Option<String> {
+        fn origin_default(&self) -> Option<BaseBranch> {
             self.refs()
                 .remote_default_branch(self.repo.path(), Branch::ORIGIN)
                 .unwrap()
@@ -192,7 +195,7 @@ mod tests {
             RefsFixture::ORIGIN_MAIN,
         ]);
 
-        assert_eq!(fixture.origin_default().as_deref(), Some("main"));
+        assert_eq!(fixture.origin_default(), BaseBranch::new("main"));
     }
 
     #[test]

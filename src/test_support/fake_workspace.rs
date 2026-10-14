@@ -590,7 +590,7 @@ impl Workspace for FakeWorkspace {
         &self,
         location: &Path,
         remote: &str,
-    ) -> Result<Option<String>, WorkspaceError> {
+    ) -> Result<Option<BaseBranch>, WorkspaceError> {
         self.call(
             "remote_default_branch",
             format!("{} {remote}", location.display()),
@@ -600,7 +600,7 @@ impl Workspace for FakeWorkspace {
                 .remote_defaults
                 .iter()
                 .find(|(owner, _)| owner == location)
-                .map(|(_, branch)| branch.clone())
+                .and_then(|(_, branch)| BaseBranch::new(branch))
         }))
     }
 

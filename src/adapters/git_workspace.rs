@@ -194,7 +194,7 @@ impl Workspace for GitWorkspace {
         &self,
         location: &Path,
         remote: &str,
-    ) -> Result<Option<String>, WorkspaceError> {
+    ) -> Result<Option<BaseBranch>, WorkspaceError> {
         GitRefs::new(&self.git).remote_default_branch(location, remote)
     }
 
