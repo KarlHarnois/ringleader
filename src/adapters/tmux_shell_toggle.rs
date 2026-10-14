@@ -223,7 +223,7 @@ mod tests {
     }
 
     #[test]
-    fn the_shell_window_the_toggle_key_opens_runs_the_shell_t_runs() {
+    fn a_shell_path_with_a_quote_starts_alike_from_the_toggle_key_and_t() {
         let server = TmuxTestServer::new();
         let shell = ToggleFixture::shell_named_with_a_quote(&server);
         let multiplexer = ToggleFixture::multiplexer_with_shell(&server, &shell);
