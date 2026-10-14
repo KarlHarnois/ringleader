@@ -102,11 +102,20 @@ impl<'a> ConfigChecks<'a> {
                 continue;
             };
             match seen.iter().find(|(_, earlier)| *earlier == key) {
-                Some((earlier_setting, _)) => self.fail(format!(
-                    "{setting}: `{raw}` is already bound in {earlier_setting}, and each key can do only one thing"
-                )),
+                Some((earlier_setting, _)) => {
+                    self.fail(Self::repeated_key_failure(setting, raw, earlier_setting))
+                }
                 None => seen.push((setting, key)),
             }
+        }
+    }
+
+    fn repeated_key_failure(setting: &str, raw: &str, earlier_setting: &str) -> String {
+        match setting == earlier_setting {
+            true => format!("{setting}: `{raw}` is listed twice"),
+            false => format!(
+                "{setting}: `{raw}` is already bound in {earlier_setting}, and each key can do only one thing"
+            ),
         }
     }
 
@@ -393,6 +402,15 @@ mod tests {
 
         let previous = config.key_bindings().previous_session_keys();
         assert_eq!(previous, HotKey::parse_valid(["M-Up"]));
+    }
+
+    #[test]
+    fn a_key_listed_twice_in_one_setting_is_named_as_listed_twice() {
+        let draft = ChecksFixture::draft().next_session_keys(&["M-j", "M-Down", "M-j"]);
+
+        let failures = ChecksFixture::failures(&draft);
+
+        assert_eq!(failures, ["next_session_keys: `M-j` is listed twice"]);
     }
 
     #[test]
