@@ -41,7 +41,7 @@ impl SessionMerge {
     ) -> Result<MergeReport, ServiceError> {
         let session = row.session();
         self.refuse_unsafe_merge(row)?;
-        let upstream = self.upstream_of(session, config)?;
+        let upstream = self.upstream_of(session, reconciliation, config)?;
         self.workspace
             .fetch_upstream(session.worktree_path(), &upstream)?;
         self.refuse_unsafe_merge_now(session, reconciliation, config)?;
@@ -50,10 +50,21 @@ impl SessionMerge {
         Ok(MergeReport::new(session.name(), merge, handoff))
     }
 
-    fn upstream_of(&self, session: &Session, config: &Config) -> Result<BaseBranch, ServiceError> {
-        let base_branch =
-            RepoMerge::new(self.host.as_ref()).base_branch_of(session, config.repos());
-        UpstreamResolver::new(self.workspace.as_ref()).resolve(session.worktree_path(), base_branch)
+    fn upstream_of(
+        &self,
+        session: &Session,
+        reconciliation: &Reconciliation,
+        config: &Config,
+    ) -> Result<BaseBranch, ServiceError> {
+        let repos = RepoMerge::new(self.host.as_ref());
+        let session_branches =
+            repos.session_branches_in(session.repo_path(), reconciliation.entries());
+        UpstreamResolver::new(self.workspace.as_ref())
+            .skipping(session_branches)
+            .resolve(
+                session.worktree_path(),
+                repos.base_branch_of(session, config.repos()),
+            )
     }
 
     fn merge_fetched(
@@ -601,6 +612,29 @@ mod tests {
         MergeFixture::merge(&fixture).unwrap();
 
         assert!(MergeFixture::fetched_branch(&fixture, "main"));
+    }
+
+    #[test]
+    fn another_sessions_branch_named_main_is_never_merged() {
+        let session = MergeFixture::session();
+        let worktree = session.worktree_path().to_path_buf();
+        let both_on_origin =
+            ["main", "master"]
+                .iter()
+                .fold(MergeFixture::workspace(), |workspace, name| {
+                    workspace.with_branch_tip(
+                        &worktree,
+                        Branch::origin_copy_of(name),
+                        FakeWorkspace::DEFAULT_START,
+                    )
+                });
+        let fixture = MergeFixture::waiting()
+            .with_sessions(&[session, ServiceFixture::session("main")])
+            .with_workspace(both_on_origin);
+
+        MergeFixture::merge(&fixture).unwrap();
+
+        assert!(MergeFixture::fetched_branch(&fixture, "master"));
     }
 
     #[test]

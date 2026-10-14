@@ -75,11 +75,15 @@ impl BaseBranchLadder {
     }
 
     fn upstream_candidates(&self) -> Vec<BaseBranch> {
-        self.origin_default
-            .as_deref()
+        let free_conventional_names = Self::conventional_branches()
             .into_iter()
-            .chain(Self::CONVENTIONAL_DEFAULT_BRANCHES)
-            .filter_map(BaseBranch::new)
+            .filter(|branch| self.is_free(branch))
+            .map(|branch| branch.name().to_string());
+        self.origin_default
+            .clone()
+            .into_iter()
+            .chain(free_conventional_names)
+            .filter_map(|name| BaseBranch::new(&name))
             .collect()
     }
 
@@ -315,6 +319,23 @@ mod tests {
             LadderFixture::without_origin_default().upstream(&tips),
             BaseBranch::new("master")
         );
+    }
+
+    #[test]
+    fn a_session_branch_is_never_the_upstream() {
+        let tips = LadderFixture::tracked_tips_of(&["origin/main", "origin/master"]);
+        let ladder =
+            LadderFixture::without_origin_default().skipping(&[LadderFixture::local("main")]);
+
+        assert_eq!(ladder.upstream(&tips), BaseBranch::new("master"));
+    }
+
+    #[test]
+    fn a_session_branch_named_like_the_origin_default_leaves_it_the_upstream() {
+        let tips = LadderFixture::tracked_tips_of(&["origin/trunk", "origin/main"]);
+        let ladder = LadderFixture::with_trunk().skipping(&[LadderFixture::local("trunk")]);
+
+        assert_eq!(ladder.upstream(&tips), BaseBranch::new("trunk"));
     }
 
     #[test]

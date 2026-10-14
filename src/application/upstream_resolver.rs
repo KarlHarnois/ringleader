@@ -6,11 +6,22 @@ use crate::domain::{BaseBranch, BaseBranchLadder, Branch};
 
 pub struct UpstreamResolver<'a> {
     workspace: &'a dyn Workspace,
+    session_branches: Vec<Branch>,
 }
 
 impl<'a> UpstreamResolver<'a> {
     pub fn new(workspace: &'a dyn Workspace) -> Self {
-        Self { workspace }
+        Self {
+            workspace,
+            session_branches: Vec::new(),
+        }
+    }
+
+    pub fn skipping(self, session_branches: Vec<Branch>) -> Self {
+        Self {
+            session_branches,
+            ..self
+        }
     }
 
     pub fn resolve(
@@ -34,7 +45,7 @@ impl<'a> UpstreamResolver<'a> {
         let origin_head = self
             .workspace
             .remote_default_branch(worktree, Branch::ORIGIN)?;
-        let ladder = BaseBranchLadder::new(origin_head);
+        let ladder = BaseBranchLadder::new(origin_head).skipping(&self.session_branches);
         let tips = self
             .workspace
             .branch_tips(worktree, &ladder.upstream_lookups())?;
@@ -123,6 +134,18 @@ mod tests {
         assert_eq!(
             UpstreamFixture::resolve(&workspace, None).unwrap(),
             UpstreamFixture::branch("main")
+        );
+    }
+
+    #[test]
+    fn a_session_branch_named_main_is_never_pulled() {
+        let workspace = UpstreamFixture::on_origin(&["main", "master"]);
+        let resolver =
+            UpstreamResolver::new(&workspace).skipping(vec![Branch::Local("main".to_string())]);
+
+        assert_eq!(
+            resolver.resolve(UpstreamFixture::worktree(), None).unwrap(),
+            UpstreamFixture::branch("master")
         );
     }
 
