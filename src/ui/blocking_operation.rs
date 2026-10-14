@@ -49,13 +49,14 @@ impl BlockingOperation {
 
     fn create(service: &mut SessionService, request: &CreateRequest) -> OperationOutcome {
         match service.create_session(request) {
-            Ok(outcome) => {
-                let session = outcome.session();
-                let message = format!("Created {} on branch {}.", session.name(), session.branch());
-                OperationOutcome::started(message, &outcome)
-            }
+            Ok(outcome) => OperationOutcome::started(Self::created(&outcome), &outcome),
             Err(error) => OperationOutcome::Failed(error),
         }
+    }
+
+    fn created(outcome: &StartOutcome) -> String {
+        let session = outcome.session();
+        format!("Created {} on branch {}.", session.name(), session.branch())
     }
 
     fn restart(service: &mut SessionService, name: String) -> OperationOutcome {
