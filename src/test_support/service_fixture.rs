@@ -11,9 +11,9 @@ use crate::application::{
     SessionService, StatePorts, TmuxPorts,
 };
 use crate::domain::{
-    Agent, AgentPane, Config, NamingScheme, PullRequest, PullRequestState, Registration, Repo,
-    RepoName, Session, SessionMetadata, SessionName, SessionObservation, SessionRepo, SessionState,
-    SessionSummary, SessionWorktree, TmuxAddress,
+    Agent, AgentPane, BaseBranch, Config, NamingScheme, PullRequest, PullRequestState,
+    Registration, Repo, RepoName, Session, SessionMetadata, SessionName, SessionObservation,
+    SessionRepo, SessionState, SessionSummary, SessionWorktree, TmuxAddress,
 };
 
 pub struct ServiceFixture {
@@ -257,16 +257,26 @@ impl ServiceFixture {
 
     pub fn session_with_agent(name: &str, agent: &str) -> Session {
         let session = Self::session(name);
-        let recorded = session.metadata();
-        let metadata = SessionMetadata::new(
-            SessionRepo::new(recorded.repo_name().clone(), recorded.repo_path()),
-            SessionWorktree::new(
-                recorded.worktree_path(),
-                recorded.branch(),
-                recorded.base_commit(),
-            ),
-            agent,
-        );
+        Self::rebuilt(&session, Self::recorded_worktree(&session), agent)
+    }
+
+    pub fn session_based_on(name: &str, base_branch: &str) -> Session {
+        let session = Self::session(name);
+        let worktree = Self::recorded_worktree(&session).based_on(BaseBranch::new(base_branch));
+        Self::rebuilt(&session, worktree, session.agent())
+    }
+
+    fn recorded_worktree(session: &Session) -> SessionWorktree {
+        SessionWorktree::new(
+            session.worktree_path(),
+            session.branch(),
+            session.base_commit(),
+        )
+    }
+
+    fn rebuilt(session: &Session, worktree: SessionWorktree, agent: &str) -> Session {
+        let repo = SessionRepo::new(session.repo_name().clone(), session.repo_path());
+        let metadata = SessionMetadata::new(repo, worktree, agent);
         let tmux = TmuxAddress::new(session.tmux_name(), session.socket_path());
         session.rekeyed(session.name().clone(), metadata, tmux)
     }

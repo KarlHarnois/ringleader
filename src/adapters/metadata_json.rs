@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::domain::{RepoName, SessionMetadata, SessionRepo, SessionWorktree};
+use crate::domain::{BaseBranch, RepoName, SessionMetadata, SessionRepo, SessionWorktree};
 
 #[derive(Serialize, Deserialize)]
 pub struct MetadataJson {
@@ -10,6 +10,8 @@ pub struct MetadataJson {
     repo_path: PathBuf,
     branch: String,
     base_commit: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    base_branch: Option<String>,
     worktree_path: PathBuf,
     agent: String,
 }
@@ -21,6 +23,7 @@ impl MetadataJson {
             repo_path: metadata.repo_path().to_path_buf(),
             branch: metadata.branch().to_string(),
             base_commit: metadata.base_commit().to_string(),
+            base_branch: metadata.base_branch().map(ToString::to_string),
             worktree_path: metadata.worktree_path().to_path_buf(),
             agent: metadata.agent().to_string(),
         };
@@ -30,8 +33,10 @@ impl MetadataJson {
     pub fn decode(text: &str) -> Option<SessionMetadata> {
         let record: Self = serde_json::from_str(text).ok()?;
         let repo = SessionRepo::new(RepoName::parse(&record.repo_name).ok()?, &record.repo_path);
+        let base_branch = record.base_branch.as_deref().and_then(BaseBranch::new);
         let worktree =
-            SessionWorktree::new(&record.worktree_path, &record.branch, &record.base_commit);
+            SessionWorktree::new(&record.worktree_path, &record.branch, &record.base_commit)
+                .based_on(base_branch);
         Some(SessionMetadata::new(repo, worktree, &record.agent))
     }
 }
@@ -41,6 +46,7 @@ mod tests {
     use std::path::Path;
 
     use super::*;
+    use crate::test_support::ServiceFixture;
 
     #[test]
     fn metadata_survives_an_encode_decode_round_trip() {
@@ -60,6 +66,15 @@ mod tests {
         let decoded = MetadataJson::decode(&MetadataJson::encode(&metadata)).unwrap();
 
         assert_eq!(decoded, metadata);
+    }
+
+    #[test]
+    fn a_requested_base_branch_survives_an_encode_decode_round_trip() {
+        let session = ServiceFixture::session_based_on("fix-auth", "develop");
+
+        let decoded = MetadataJson::decode(&MetadataJson::encode(session.metadata())).unwrap();
+
+        assert_eq!(decoded.base_branch(), BaseBranch::new("develop").as_ref());
     }
 
     #[test]

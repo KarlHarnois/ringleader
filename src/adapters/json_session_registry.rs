@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use super::durable_file::DurableFile;
 use crate::application::ports::{Clock, RegistryError, SessionRegistry};
 use crate::domain::{
-    NamingScheme, Registration, RepoName, Session, SessionMetadata, SessionName, SessionRepo,
-    SessionWorktree, TmuxAddress,
+    BaseBranch, NamingScheme, Registration, RepoName, Session, SessionMetadata, SessionName,
+    SessionRepo, SessionWorktree, TmuxAddress,
 };
 
 pub struct JsonSessionRegistry {
@@ -115,6 +115,8 @@ struct SessionEntry {
     worktree_path: PathBuf,
     branch: String,
     base_commit: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    base_branch: Option<String>,
     agent: String,
     tmux_session_name: String,
     socket_path: PathBuf,
@@ -133,6 +135,7 @@ impl SessionEntry {
             worktree_path: session.worktree_path().to_path_buf(),
             branch: session.branch().to_string(),
             base_commit: session.base_commit().to_string(),
+            base_branch: session.base_branch().map(ToString::to_string),
             agent: session.agent().to_string(),
             tmux_session_name: session.tmux_name().to_string(),
             socket_path: session.socket_path().to_path_buf(),
@@ -145,7 +148,8 @@ impl SessionEntry {
     fn into_session(self) -> Option<Session> {
         let metadata = SessionMetadata::new(
             SessionRepo::new(RepoName::parse(&self.repo_name).ok()?, &self.repo_path),
-            SessionWorktree::new(&self.worktree_path, &self.branch, &self.base_commit),
+            SessionWorktree::new(&self.worktree_path, &self.branch, &self.base_commit)
+                .based_on(self.base_branch.as_deref().and_then(BaseBranch::new)),
             &self.agent,
         );
         let registration = Registration::new(
@@ -216,6 +220,42 @@ mod tests {
             .collect();
         assert_eq!(names, ["fix-auth", "dark-mode"]);
         assert_eq!(sessions[0].naming().tmux_prefix(), "ringleader-");
+    }
+
+    #[test]
+    fn a_requested_base_branch_survives_a_save_and_load() {
+        let fixture = RegistryFixture::new();
+        let session = ServiceFixture::session_based_on("fix-auth", "develop");
+
+        fixture.registry().save(&[session]).unwrap();
+
+        let loaded = fixture.registry().load().unwrap();
+        assert_eq!(loaded[0].base_branch(), BaseBranch::new("develop").as_ref());
+    }
+
+    #[test]
+    fn a_session_without_a_requested_base_branch_writes_no_field_for_it() {
+        let fixture = RegistryFixture::new();
+
+        fixture
+            .registry()
+            .save(&[ServiceFixture::session("fix-auth")])
+            .unwrap();
+
+        assert!(
+            !fs::read_to_string(fixture.path())
+                .unwrap()
+                .contains("base_branch")
+        );
+    }
+
+    #[test]
+    fn an_entry_written_without_a_base_branch_loads_without_one() {
+        let fixture = RegistryFixture::with_contents(FIXTURE);
+
+        let sessions = fixture.registry().load().unwrap();
+
+        assert_eq!(sessions[0].base_branch(), None);
     }
 
     #[test]

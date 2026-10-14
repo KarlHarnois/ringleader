@@ -179,7 +179,7 @@ mod tests {
     use crate::application::ports::{MultiplexerError, WorkspaceError, WorktreeEntry};
     use crate::domain::Agent;
     use crate::domain::AgentPane;
-    use crate::domain::{BaseBranch, Branch};
+    use crate::domain::{BaseBranch, Branch, Repo, RepoName};
     use crate::test_support::{FakeHostProbe, FakeMultiplexer, FakeWorkspace, ServiceFixture};
 
     struct CreateFixture;
@@ -278,6 +278,42 @@ mod tests {
         let session = CreateFixture::create(&fixture, request).unwrap();
 
         assert_eq!(session.base_commit(), develop_tip);
+    }
+
+    #[test]
+    fn create_records_a_requested_base_branch_on_the_session() {
+        let develop = BaseBranch::new("develop").unwrap();
+        let fixture =
+            ServiceFixture::new().with_workspace(FakeWorkspace::default().with_branch_tip(
+                Path::new(ServiceFixture::REPO),
+                Branch::Local("develop".to_string()),
+                FakeWorkspace::DEFAULT_START,
+            ));
+        let request = CreateFixture::request("fix-auth").with_base_branch(develop.clone());
+
+        let session = CreateFixture::create(&fixture, request).unwrap();
+
+        assert_eq!(session.base_branch(), Some(&develop));
+    }
+
+    #[test]
+    fn create_leaves_a_configured_base_branch_off_the_session() {
+        let fixture =
+            ServiceFixture::new().with_workspace(FakeWorkspace::default().with_branch_tip(
+                Path::new(ServiceFixture::REPO),
+                Branch::Local("develop".to_string()),
+                FakeWorkspace::DEFAULT_START,
+            ));
+        let configured = Repo::explicit(
+            RepoName::parse("example-project").unwrap(),
+            Path::new(ServiceFixture::REPO),
+            BaseBranch::new("develop"),
+        );
+
+        let session =
+            CreateFixture::create(&fixture, CreateRequest::new("fix-auth", configured)).unwrap();
+
+        assert_eq!(session.base_branch(), None);
     }
 
     #[test]

@@ -43,7 +43,9 @@ impl SessionMonitor {
         sessions: &[Session],
         config: &Config,
     ) -> Result<DiffStat, ServiceError> {
-        let base_branch = self.configured_base_branch(session, config);
+        let base_branch = session
+            .base_branch()
+            .or_else(|| self.configured_base_branch(session, config));
         let recorded = StartPoint::from_base_commit(session.base_commit());
         let worktree = session.worktree_path();
         let session_branches = Branch::of_sessions_in(session.repo_path(), sessions);
@@ -199,6 +201,20 @@ mod tests {
                 session.base_commit().to_string(),
                 master_tip.to_string()
             ]]
+        );
+    }
+
+    #[test]
+    fn a_requested_base_branch_wins_over_the_configured_one() {
+        let session = ServiceFixture::session_based_on(MonitorFixture::SESSION, "release");
+        let fixture = ServiceFixture::new()
+            .with_sessions(&[session])
+            .with_config(MonitorFixture::config_with_repo_at(ServiceFixture::REPO));
+        let release = BaseBranch::new("release").unwrap();
+
+        assert_eq!(
+            MonitorFixture::branch_lookups(&fixture),
+            [release.branches_and_origin_copy()]
         );
     }
 }
