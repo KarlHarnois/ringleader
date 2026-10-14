@@ -1,15 +1,13 @@
+use super::tmux_listing::TmuxListing;
+
 pub struct TmuxShellToggle {
     shell: String,
 }
 
 impl TmuxShellToggle {
     const IN_MANAGED_SESSION: &'static str = "#{@ringleader_meta}";
-    const ON_SHELL_WINDOW: &'static str = "#{@ringleader_shell}";
-    const HAS_SHELL_WINDOW: &'static str = "#{W:#{@ringleader_shell}}";
     const AGENT_WINDOW: &'static str = "#{W:#{P:#{?@ringleader_agent,#{window_id},}}}";
-    const SHELL_WINDOW: &'static str = "#{W:#{?@ringleader_shell,#{window_id},}}";
     const WORKTREE: &'static str = "#{session_path}";
-    const SHELL_TAG: &'static str = "@ringleader_shell";
     const ESCAPED_QUOTE: &'static str = r"'\''";
 
     pub fn new(shell: &str) -> Self {
@@ -20,7 +18,7 @@ impl TmuxShellToggle {
 
     pub fn command(&self) -> String {
         let toggled = Self::either(
-            Self::ON_SHELL_WINDOW,
+            &Self::on_shell_window(),
             &Self::shown(Self::AGENT_WINDOW),
             &self.shell_window_shown(),
         );
@@ -29,8 +27,8 @@ impl TmuxShellToggle {
 
     fn shell_window_shown(&self) -> String {
         Self::either(
-            Self::HAS_SHELL_WINDOW,
-            &Self::shown(Self::SHELL_WINDOW),
+            &Self::has_shell_window(),
+            &Self::shown(&Self::shell_window()),
             &self.shell_window_created(),
         )
     }
@@ -40,8 +38,20 @@ impl TmuxShellToggle {
             "new-window -c '{}' {} ; set-option -w {} 1",
             Self::WORKTREE,
             Self::quoted(&self.shell),
-            Self::SHELL_TAG
+            TmuxListing::SHELL_TAG
         )
+    }
+
+    fn on_shell_window() -> String {
+        Self::expanded(TmuxListing::SHELL_TAG)
+    }
+
+    fn has_shell_window() -> String {
+        Self::over_windows(&Self::on_shell_window())
+    }
+
+    fn shell_window() -> String {
+        Self::over_windows(&Self::window_id_if(TmuxListing::SHELL_TAG))
     }
 
     fn shown(window: &str) -> String {
@@ -58,6 +68,18 @@ impl TmuxShellToggle {
 
     fn quoted(text: &str) -> String {
         format!("'{}'", text.replace('\'', Self::ESCAPED_QUOTE))
+    }
+
+    fn over_windows(format: &str) -> String {
+        Self::expanded(&format!("W:{format}"))
+    }
+
+    fn window_id_if(tag: &str) -> String {
+        Self::expanded(&format!("?{tag},#{{window_id}},"))
+    }
+
+    fn expanded(expression: &str) -> String {
+        format!("#{{{expression}}}")
     }
 }
 

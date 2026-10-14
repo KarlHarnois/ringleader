@@ -92,7 +92,14 @@ impl TmuxScripts {
         new_window.extend(Self::words(&["-P", "-F", Self::WINDOW_CREATED, shell]));
         TmuxSequence::new()
             .command(new_window)
-            .command(["set-option", "-w", "-t", &target, "@ringleader_shell", "1"])
+            .command([
+                "set-option",
+                "-w",
+                "-t",
+                &target,
+                TmuxListing::SHELL_TAG,
+                "1",
+            ])
             .command([
                 "display-message",
                 "-p",
@@ -108,7 +115,7 @@ impl TmuxScripts {
             "-t",
             &Self::exact(tmux_name),
             "-F",
-            TmuxListing::WINDOW_FORMAT,
+            &TmuxListing::window_format(),
         ])
     }
 
