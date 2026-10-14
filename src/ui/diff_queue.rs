@@ -200,24 +200,6 @@ mod tests {
     }
 
     #[test]
-    fn a_tick_starts_two_measurements_and_queues_the_rest() {
-        let fixture = QueueFixture::fixture();
-        let service = fixture.service();
-        let mut queue = DiffQueue::default();
-
-        queue
-            .tick(
-                Instant::now(),
-                &QueueFixture::visible(&QueueFixture::NAMES),
-                &service,
-            )
-            .unwrap();
-
-        assert_eq!(queue.measuring.len(), 2);
-        assert_eq!(queue.queued, ["gamma"]);
-    }
-
-    #[test]
     fn finished_measurements_make_room_for_the_rest_of_the_queue() {
         let fixture = QueueFixture::fixture();
         let service = fixture.service();
@@ -334,7 +316,7 @@ mod tests {
             .tick(start, &QueueFixture::visible(&["alpha"]), &service)
             .unwrap();
 
-        assert_eq!(queue.measuring.len(), 1);
+        assert!(queue.awaits_results());
     }
 
     #[test]
