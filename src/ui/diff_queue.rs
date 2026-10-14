@@ -34,7 +34,9 @@ impl DiffQueue {
         self.diffs.retain(|name, _| names.contains(name));
         self.timed_out.retain(|name| names.contains(name));
         self.measuring
-            .retain(|measurement| names.contains(&measurement.name));
+            .iter_mut()
+            .filter(|measurement| !names.contains(&measurement.name))
+            .for_each(Measurement::supersede);
     }
 
     pub fn tick(
@@ -412,6 +414,31 @@ mod tests {
         queue.keep_only(&QueueFixture::visible(&["beta"]));
 
         assert!(queue.diffs().is_empty());
+    }
+
+    #[test]
+    fn a_measurement_of_a_session_that_is_gone_keeps_its_slot() {
+        let held = HeldCalls::all();
+        let fixture = QueueFixture::holding(&held);
+        let service = fixture.service();
+        let mut queue = DiffQueue::default();
+        let start = Instant::now();
+        queue
+            .tick(
+                start,
+                &QueueFixture::visible(&QueueFixture::NAMES),
+                &service,
+            )
+            .unwrap();
+        held.wait_for(2);
+
+        let remaining = QueueFixture::visible(&["beta", "gamma"]);
+        queue.keep_only(&remaining);
+        queue.tick(start, &remaining, &service).unwrap();
+        let only_two = held.stays_at(2);
+        held.release();
+
+        assert!(only_two);
     }
 
     #[test]
