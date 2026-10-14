@@ -48,6 +48,7 @@
         pkgs.git
         pkgs.nixfmt
         pkgs.util-linux
+        pkgs.direnv
       ];
 
       metricsTools =
@@ -161,6 +162,7 @@
           nativeCheckInputs = [
             pkgs.gitMinimal
             pkgs.tmux
+            pkgs.direnv
           ];
           postInstall = ''
             wrapProgram $out/bin/ringleader \

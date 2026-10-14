@@ -19,14 +19,16 @@ use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
 use adapters::agent_handoff::AgentHandoff;
-use adapters::agent_launcher::{AgentLauncher, LauncherCommand, ProcessExec};
+use adapters::agent_launcher::{AgentLauncher, ProcessExec};
 use adapters::app_log::AppLog;
 use adapters::directory_repo_scanner::DirectoryRepoScanner;
 use adapters::directory_scratch_space::DirectoryScratchSpace;
+use adapters::direnv_directory_environment::DirenvDirectoryEnvironment;
 use adapters::file_lock::FileLock;
 use adapters::gh_pull_requests::GhPullRequests;
 use adapters::git_runner::GitRunner;
 use adapters::json_session_registry::JsonSessionRegistry;
+use adapters::launcher_command::LauncherCommand;
 use adapters::mount_table::MountTable;
 use adapters::null_pull_requests::NullPullRequests;
 use adapters::process_environment::{ProcessEnvironment, ProgramPaths};
@@ -155,7 +157,11 @@ impl CompositionRoot {
     }
 
     fn exec_agent(&self, handoff: &Path) -> ExitCode {
-        let mut launcher = AgentLauncher::new(&self.environment, Box::new(ProcessExec));
+        let reentry = LauncherCommand::new(
+            Self::launcher_prefix(),
+            AgentHandoff::beside(handoff, &self.environment),
+        );
+        let mut launcher = AgentLauncher::new(&self.environment, Box::new(ProcessExec), reentry);
         Self::fail(&launcher.launch(handoff).to_string())
     }
 
@@ -272,6 +278,8 @@ impl CompositionRoot {
             self.programs.tmux(),
         ));
         let pull_requests = Self::pull_requests(&host, bounded);
+        let directory_environment =
+            DirenvDirectoryEnvironment::when_installed(host.as_ref(), &self.environment, bounded);
         let repos = RepoPorts::new(
             Arc::new(GitWorkspace::new(self.programs.git(), bounded)),
             Arc::new(DirectoryRepoScanner::new(
@@ -281,6 +289,7 @@ impl CompositionRoot {
             )),
             host,
             pull_requests,
+            directory_environment,
         );
         let tmux_ports = TmuxPorts::new(Arc::new(TmuxMultiplexer::new(tmux, self.launcher())));
         let context = ServiceContext::new(loaded, &self.launch_directory)
@@ -334,9 +343,12 @@ impl CompositionRoot {
     }
 
     fn launcher(&self) -> LauncherCommand {
+        LauncherCommand::new(Self::launcher_prefix(), self.handoff())
+    }
+
+    fn launcher_prefix() -> Vec<OsString> {
         let executable = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("ringleader"));
-        let prefix = vec![executable.into_os_string(), OsString::from("__exec-agent")];
-        LauncherCommand::new(prefix, self.handoff())
+        vec![executable.into_os_string(), OsString::from("__exec-agent")]
     }
 
     fn handoff(&self) -> AgentHandoff {

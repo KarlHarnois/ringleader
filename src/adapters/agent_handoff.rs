@@ -1,14 +1,12 @@
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::fs::{self, DirBuilder, OpenOptions};
 use std::io::{self, Write};
-use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime};
 
-use serde::{Deserialize, Serialize};
-
+use super::handoff_contents::HandoffContents;
 use super::process_environment::ProcessEnvironment;
 use crate::application::ports::AgentLaunch;
 use crate::domain::Agent;
@@ -24,6 +22,8 @@ impl AgentHandoff {
     pub const STALE_AFTER: Duration = Duration::from_secs(60);
     const DIRECTORY_MODE: u32 = 0o700;
     const FILE_MODE: u32 = 0o600;
+    const ROOT: &'static str = "/";
+
     pub fn new(directory: &Path, environment: &ProcessEnvironment) -> Self {
         Self {
             directory: directory.to_path_buf(),
@@ -31,20 +31,31 @@ impl AgentHandoff {
         }
     }
 
+    pub fn beside(handoff: &Path, environment: &ProcessEnvironment) -> Self {
+        let directory = handoff.parent().unwrap_or(Path::new(Self::ROOT));
+        Self::new(directory, environment)
+    }
+
     pub fn write(&self, launch: &AgentLaunch) -> io::Result<PathBuf> {
+        let named = self.named_variables(launch);
+        let inherited = [self.baseline_variables(), named.clone()].concat();
+        let explicit = Self::overridden(named, Self::assigned_variables(launch));
+        self.write_contents(&HandoffContents::for_launch(launch, &inherited, &explicit))
+    }
+
+    pub fn write_contents(&self, contents: &HandoffContents) -> io::Result<PathBuf> {
         DirBuilder::new()
             .recursive(true)
             .mode(Self::DIRECTORY_MODE)
             .create(&self.directory)?;
         self.delete_stale();
         let path = self.next_path();
-        let contents = HandoffContents::for_launch(launch, &self.handed_environment(launch));
         let mut file = OpenOptions::new()
             .write(true)
             .create_new(true)
             .mode(Self::FILE_MODE)
             .open(&path)?;
-        file.write_all(&serde_json::to_vec(&contents).map_err(io::Error::other)?)?;
+        file.write_all(&serde_json::to_vec(contents).map_err(io::Error::other)?)?;
         file.sync_all()?;
         Ok(path)
     }
@@ -85,39 +96,40 @@ impl AgentHandoff {
         serde_json::from_slice(&bytes?).map_err(io::Error::other)
     }
 
-    fn handed_environment(&self, launch: &AgentLaunch) -> Vec<(OsString, OsString)> {
-        let assigned = Self::assigned_variables(launch);
-        let is_assigned = |name: &OsString| {
-            assigned
-                .iter()
-                .any(|(assigned_name, _)| assigned_name == name)
-        };
-        let mut handed: Vec<(OsString, OsString)> = self
-            .inherited_variables(launch)
+    fn overridden(
+        variables: Vec<(OsString, OsString)>,
+        overrides: Vec<(OsString, OsString)>,
+    ) -> Vec<(OsString, OsString)> {
+        let is_overridden =
+            |name: &OsString| overrides.iter().any(|(overriding, _)| overriding == name);
+        let mut combined: Vec<(OsString, OsString)> = variables
             .into_iter()
-            .filter(|(name, _)| !is_assigned(name))
+            .filter(|(name, _)| !is_overridden(name))
             .collect();
-        handed.extend(assigned);
-        handed
+        combined.extend(overrides);
+        combined
     }
 
-    fn inherited_variables(&self, launch: &AgentLaunch) -> Vec<(OsString, OsString)> {
-        let mut inherited: Vec<(OsString, OsString)> = self
-            .environment
+    fn baseline_variables(&self) -> Vec<(OsString, OsString)> {
+        self.environment
             .variables()
             .iter()
             .filter(|(name, _)| Agent::is_baseline_variable(&name.to_string_lossy()))
             .cloned()
-            .collect();
+            .collect()
+    }
+
+    fn named_variables(&self, launch: &AgentLaunch) -> Vec<(OsString, OsString)> {
+        let mut named = Vec::new();
         for name in launch.env_names() {
             match self.environment.get(name) {
-                Some(value) => inherited.push((OsString::from(name), value.to_os_string())),
+                Some(value) => named.push((OsString::from(name), value.to_os_string())),
                 None => {
                     log::warn!("the agent variable {name} is not set, the agent starts without it")
                 }
             }
         }
-        inherited
+        named
     }
 
     fn assigned_variables(launch: &AgentLaunch) -> Vec<(OsString, OsString)> {
@@ -132,53 +144,6 @@ impl AgentHandoff {
         let sequence = HANDOFF_COUNTER.fetch_add(1, Ordering::Relaxed);
         self.directory
             .join(format!("handoff-{}-{sequence}.json", std::process::id()))
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HandoffContents {
-    argv: Vec<Vec<u8>>,
-    environment: Vec<(Vec<u8>, Vec<u8>)>,
-    worktree: Vec<u8>,
-}
-
-impl HandoffContents {
-    fn for_launch(launch: &AgentLaunch, environment: &[(OsString, OsString)]) -> Self {
-        Self {
-            argv: launch
-                .argv()
-                .iter()
-                .map(|word| word.as_bytes().to_vec())
-                .collect(),
-            environment: environment
-                .iter()
-                .map(|(name, value)| (name.as_bytes().to_vec(), value.as_bytes().to_vec()))
-                .collect(),
-            worktree: launch.worktree().as_os_str().as_bytes().to_vec(),
-        }
-    }
-
-    pub fn argv(&self) -> Vec<OsString> {
-        self.argv
-            .iter()
-            .map(|word| OsString::from_vec(word.clone()))
-            .collect()
-    }
-
-    pub fn environment(&self) -> Vec<(OsString, OsString)> {
-        self.environment
-            .iter()
-            .map(|(name, value)| {
-                (
-                    OsString::from_vec(name.clone()),
-                    OsString::from_vec(value.clone()),
-                )
-            })
-            .collect()
-    }
-
-    pub fn worktree(&self) -> PathBuf {
-        PathBuf::from(OsStr::from_bytes(&self.worktree))
     }
 }
 
@@ -227,13 +192,13 @@ mod tests {
             Self::launch(&[]).with_env_assignments(&[(name.to_string(), value.to_string())])
         }
 
-        fn handed_environment(
-            &self,
-            pairs: &[(&str, &str)],
-            launch: &AgentLaunch,
-        ) -> Vec<(OsString, OsString)> {
+        fn handed(&self, pairs: &[(&str, &str)], launch: &AgentLaunch) -> HandoffContents {
             let path = self.handoff(pairs).write(launch).unwrap();
-            AgentHandoff::take(&path).unwrap().environment()
+            AgentHandoff::take(&path).unwrap()
+        }
+
+        fn pair(name: &str, value: &str) -> (OsString, OsString) {
+            (OsString::from(name), OsString::from(value))
         }
 
         fn aged_file(&self, name: &str, age: Duration) -> PathBuf {
@@ -248,52 +213,79 @@ mod tests {
     #[test]
     fn a_handoff_carries_the_argv_the_worktree_and_the_baseline_and_configured_values() {
         let fixture = HandoffFixture::new();
-        let handoff =
-            fixture.handoff(&[("PATH", "/bin"), ("API_KEY", "secret"), ("UNRELATED", "x")]);
+        let pairs = [("PATH", "/bin"), ("API_KEY", "secret"), ("UNRELATED", "x")];
 
-        let path = handoff
-            .write(&HandoffFixture::launch(&["API_KEY"]))
-            .unwrap();
-        let contents = AgentHandoff::take(&path).unwrap();
+        let contents = fixture.handed(&pairs, &HandoffFixture::launch(&["API_KEY"]));
 
         assert_eq!(contents.argv(), ["claude", "fix it"]);
         assert_eq!(contents.worktree(), Path::new("/worktrees/fix-auth"));
         assert_eq!(
-            contents.environment(),
+            contents.inherited(),
             [
-                ("PATH".into(), "/bin".into()),
-                ("API_KEY".into(), "secret".into())
+                HandoffFixture::pair("PATH", "/bin"),
+                HandoffFixture::pair("API_KEY", "secret")
             ]
         );
     }
 
     #[test]
-    fn a_set_value_follows_the_inherited_ones() {
+    fn a_configured_value_is_also_explicit() {
+        let fixture = HandoffFixture::new();
+        let pairs = [("PATH", "/bin"), ("API_KEY", "secret")];
+
+        let contents = fixture.handed(&pairs, &HandoffFixture::launch(&["API_KEY"]));
+
+        assert_eq!(
+            contents.explicit(),
+            [HandoffFixture::pair("API_KEY", "secret")]
+        );
+    }
+
+    #[test]
+    fn a_set_value_is_explicit_and_never_inherited() {
         let fixture = HandoffFixture::new();
         let launch = HandoffFixture::launch_setting("EXAMPLE_ACCOUNT_DIR", "/accounts/example");
 
-        let environment = fixture.handed_environment(&[("PATH", "/bin")], &launch);
+        let contents = fixture.handed(&[("PATH", "/bin")], &launch);
 
+        assert_eq!(contents.inherited(), [HandoffFixture::pair("PATH", "/bin")]);
         assert_eq!(
-            environment,
-            [
-                ("PATH".into(), "/bin".into()),
-                ("EXAMPLE_ACCOUNT_DIR".into(), "/accounts/example".into())
-            ]
+            contents.explicit(),
+            [HandoffFixture::pair(
+                "EXAMPLE_ACCOUNT_DIR",
+                "/accounts/example"
+            )]
         );
     }
 
     #[test]
-    fn a_set_value_replaces_an_inherited_one() {
+    fn a_set_value_replaces_a_configured_one_among_the_explicit_values() {
         let fixture = HandoffFixture::new();
-        let launch = HandoffFixture::launch_setting("HOME", "/home/example-account");
+        let launch = HandoffFixture::launch(&["API_KEY"])
+            .with_env_assignments(&[("API_KEY".to_string(), "assigned".to_string())]);
 
-        let environment = fixture.handed_environment(&[("HOME", "/home/example")], &launch);
+        let contents = fixture.handed(&[("API_KEY", "inherited")], &launch);
 
         assert_eq!(
-            environment,
-            [("HOME".into(), "/home/example-account".into())]
+            contents.explicit(),
+            [HandoffFixture::pair("API_KEY", "assigned")]
         );
+    }
+
+    #[test]
+    fn a_handoff_beside_another_writes_into_its_directory() {
+        let fixture = HandoffFixture::new();
+        let first = fixture
+            .handoff(&[])
+            .write(&HandoffFixture::launch(&[]))
+            .unwrap();
+        let contents = AgentHandoff::take(&first).unwrap();
+
+        let second = AgentHandoff::beside(&first, &ProcessEnvironment::default())
+            .write_contents(&contents.inside_envrc())
+            .unwrap();
+
+        assert_eq!(second.parent(), Some(fixture.handoff_directory().as_path()));
     }
 
     #[test]

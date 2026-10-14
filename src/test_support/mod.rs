@@ -1,7 +1,9 @@
 pub mod cli_harness;
 pub mod deadline;
+pub mod direnv_test_home;
 pub mod fake_clock;
 pub mod fake_config_source;
+pub mod fake_directory_environment;
 pub mod fake_host_probe;
 pub mod fake_interrupts;
 pub mod fake_lock;
@@ -21,8 +23,10 @@ pub mod ui_harness;
 
 pub use cli_harness::{CapturedWriter, CliHarness};
 pub use deadline::Deadline;
+pub use direnv_test_home::DirenvTestHome;
 pub use fake_clock::FakeClock;
 pub use fake_config_source::FakeConfigSource;
+pub use fake_directory_environment::FakeDirectoryEnvironment;
 pub use fake_host_probe::FakeHostProbe;
 pub use fake_interrupts::FakeInterrupts;
 pub use fake_lock::FakeLock;

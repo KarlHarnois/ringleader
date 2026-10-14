@@ -10,7 +10,7 @@ use tempfile::TempDir;
 
 use crate::adapters::Deadlines;
 use crate::adapters::agent_handoff::AgentHandoff;
-use crate::adapters::agent_launcher::LauncherCommand;
+use crate::adapters::launcher_command::LauncherCommand;
 use crate::adapters::process_environment::ProcessEnvironment;
 use crate::adapters::server_files::ServerFiles;
 use crate::adapters::tmux_command::TmuxCommand;

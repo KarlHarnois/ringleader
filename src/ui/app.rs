@@ -266,7 +266,8 @@ mod tests {
     use crate::application::ports::{ConfigError, MergeOutcome, MultiplexerError, UnmergedCommits};
     use crate::domain::{Config, ConfigDraft, DiffStat, PullRequestState, Session};
     use crate::test_support::{
-        CapturedWriter, Deadline, FakeMultiplexer, FakePullRequests, ServiceFixture, UiHarness,
+        CapturedWriter, Deadline, FakeDirectoryEnvironment, FakeMultiplexer, FakePullRequests,
+        ServiceFixture, UiHarness,
     };
 
     struct AppFixture;
@@ -815,6 +816,22 @@ mod tests {
         assert!(
             AppFixture::flattened_screen(&app, 100, 28)
                 .contains("Restarted fix-auth. Also recreated the socket")
+        );
+    }
+
+    #[test]
+    fn a_restart_whose_envrc_is_not_allowed_shows_the_warning_in_the_status_bar() {
+        let worktree = ServiceFixture::worktree_path("fix-auth");
+        let fixture = UiHarness::exited_session_fixture("fix-auth").with_directory_environment(
+            FakeDirectoryEnvironment::default().with_envrc(&worktree, "use flake\n"),
+        );
+        let mut app = AppFixture::started(&fixture, 300, 28);
+
+        app.perform(BlockingOperation::Restart("fix-auth".to_string()));
+
+        assert!(
+            AppFixture::flattened_screen(&app, 300, 28)
+                .contains("Restarted fix-auth. But the .envrc of")
         );
     }
 

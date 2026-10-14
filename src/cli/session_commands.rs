@@ -55,13 +55,15 @@ impl<'a> SessionCommands<'a> {
             request = request.with_base_branch(base);
         }
         self.session.stop_if_signaled()?;
-        let created = self.service.create_session(&request)?;
+        let outcome = self.service.create_session(&request)?;
+        let created = outcome.session();
         self.session.output().line(&format!(
             "created {} in {} on branch {}",
             created.name(),
             created.worktree_path().display(),
             created.branch()
         ));
+        self.note_if_present(outcome.warning());
         Ok(0)
     }
 
@@ -115,11 +117,17 @@ impl<'a> SessionCommands<'a> {
     pub fn restart(&mut self, name: &str) -> Result<u8, CommandStop> {
         self.service.observe(true)?;
         self.session.stop_if_signaled()?;
-        if let Some(note) = self.service.restart_session(name)? {
-            self.session.output().note(&note);
-        }
+        let outcome = self.service.restart_session(name)?;
+        self.note_if_present(outcome.recovery());
+        self.note_if_present(outcome.warning());
         self.session.output().line(&format!("restarted {name}"));
         Ok(0)
+    }
+
+    fn note_if_present(&mut self, note: Option<&str>) {
+        if let Some(note) = note {
+            self.session.output().note(note);
+        }
     }
 }
 
@@ -133,8 +141,8 @@ mod tests {
     use crate::cli::CliExit;
     use crate::domain::{Repo, RepoName, Session};
     use crate::test_support::{
-        CapturedWriter, CliHarness, FakeMultiplexer, FakeRepoScanner, FakeSessionRegistry,
-        ServiceFixture,
+        CapturedWriter, CliHarness, FakeDirectoryEnvironment, FakeMultiplexer, FakeRepoScanner,
+        FakeSessionRegistry, ServiceFixture,
     };
 
     struct CommandFixture;
@@ -157,6 +165,24 @@ mod tests {
 
         fn repo(name: &str, path: &str) -> Repo {
             Repo::discovered(RepoName::parse(name).unwrap(), Path::new(path))
+        }
+
+        fn renamed_by_hand() -> ServiceFixture {
+            let entry = Self::session();
+            let renamed = crate::domain::SessionObservation::new(
+                crate::domain::TmuxAddress::new("ringleader-fix-login", entry.socket_path()),
+                ServiceFixture::CREATED_AT,
+            )
+            .with_agent_pane(crate::domain::AgentPane::live(0))
+            .with_metadata(entry.metadata().with_branch("fix-login"));
+            ServiceFixture::new()
+                .with_sessions(std::slice::from_ref(&entry))
+                .with_multiplexer(FakeMultiplexer::new().with_live(renamed))
+        }
+
+        fn not_allowed_envrc(name: &str) -> FakeDirectoryEnvironment {
+            FakeDirectoryEnvironment::default()
+                .with_envrc(&ServiceFixture::worktree_path(name), "use flake\n")
         }
 
         fn broken_config() -> ConfigError {
@@ -274,6 +300,42 @@ mod tests {
 
         assert_eq!(exit, CliExit::Code(0));
         assert!(harness.stdout().starts_with("created fix-auth"));
+    }
+
+    #[test]
+    fn new_with_a_not_allowed_envrc_warns_on_stderr_and_exits_zero() {
+        let fixture = ServiceFixture::new()
+            .with_directory_environment(CommandFixture::not_allowed_envrc("fix-auth"));
+        let harness = CliHarness::new(fixture);
+
+        let exit = harness.run(&["new", "--name", "fix-auth", "--repo", "example-project"]);
+
+        assert_eq!(exit, CliExit::Code(0));
+        assert!(
+            harness.stderr().contains("is not allowed"),
+            "{}",
+            harness.stderr()
+        );
+        assert!(harness.stdout().starts_with("created fix-auth"));
+    }
+
+    #[test]
+    fn restart_with_a_not_allowed_envrc_warns_on_stderr_and_exits_zero() {
+        let session = CommandFixture::session();
+        let fixture = CommandFixture::live()
+            .with_multiplexer(FakeMultiplexer::new().with_live(ServiceFixture::exited(&session)))
+            .with_directory_environment(CommandFixture::not_allowed_envrc("fix-auth"));
+        let harness = CliHarness::new(fixture);
+
+        let exit = harness.run(&["restart", "fix-auth"]);
+
+        assert_eq!(exit, CliExit::Code(0));
+        assert!(
+            harness.stderr().contains("is not allowed"),
+            "{}",
+            harness.stderr()
+        );
+        assert_eq!(harness.stdout(), "restarted fix-auth\n");
     }
 
     #[test]
@@ -564,19 +626,21 @@ mod tests {
 
     #[test]
     fn a_changing_command_records_a_pending_rekey_before_it_acts() {
-        let entry = CommandFixture::session();
-        let renamed = crate::domain::SessionObservation::new(
-            crate::domain::TmuxAddress::new("ringleader-fix-login", entry.socket_path()),
-            ServiceFixture::CREATED_AT,
-        )
-        .with_agent_pane(crate::domain::AgentPane::live(0))
-        .with_metadata(entry.metadata().with_branch("fix-login"));
-        let fixture = ServiceFixture::new()
-            .with_sessions(std::slice::from_ref(&entry))
-            .with_multiplexer(FakeMultiplexer::new().with_live(renamed));
-        let harness = CliHarness::new(fixture);
+        let harness = CliHarness::new(CommandFixture::renamed_by_hand());
 
         harness.run(&["restart", "unrelated"]);
+
+        assert_eq!(
+            harness.fixture().registry().sessions()[0].name().as_str(),
+            "fix-login"
+        );
+    }
+
+    #[test]
+    fn new_records_a_pending_rekey_even_when_its_repo_is_unknown() {
+        let harness = CliHarness::new(CommandFixture::renamed_by_hand());
+
+        harness.run(&["new", "--name", "other", "--repo", "no-such-repo"]);
 
         assert_eq!(
             harness.fixture().registry().sessions()[0].name().as_str(),
