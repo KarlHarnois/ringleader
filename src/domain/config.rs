@@ -32,8 +32,8 @@ impl Config {
                 draft.return_key_value(),
                 draft.next_session_keys_value(),
                 draft.previous_session_keys_value(),
-            )
-            .with_shell_toggle_keys(draft.shell_toggle_keys_value()),
+                draft.shell_toggle_keys_value(),
+            ),
             intervals: draft.intervals(),
             activity_idle_seconds: draft.activity_idle_seconds_value(),
             session_size: draft.session_size_value(),

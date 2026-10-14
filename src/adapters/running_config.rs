@@ -44,8 +44,8 @@ impl RunningConfig {
                 return_key,
                 Self::keys(output, Self::NEXT_SESSION_LABEL),
                 Self::keys(output, Self::PREVIOUS_SESSION_LABEL),
+                Self::keys(output, Self::SHELL_TOGGLE_LABEL),
             )
-            .with_shell_toggle_keys(Self::keys(output, Self::SHELL_TOGGLE_LABEL))
         });
         Some(Self {
             hash: hash.to_string(),

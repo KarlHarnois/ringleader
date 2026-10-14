@@ -24,15 +24,17 @@ impl KeyBindings {
         return_key: HotKey,
         next_session_keys: Vec<HotKey>,
         previous_session_keys: Vec<HotKey>,
+        shell_toggle_keys: Vec<HotKey>,
     ) -> Self {
         Self {
             return_key,
             next_session_keys,
             previous_session_keys,
-            shell_toggle_keys: Vec::new(),
+            shell_toggle_keys,
         }
     }
 
+    #[cfg(test)]
     pub fn with_shell_toggle_keys(self, shell_toggle_keys: Vec<HotKey>) -> Self {
         Self {
             shell_toggle_keys,
@@ -116,8 +118,8 @@ impl Default for KeyBindings {
             HotKey::parse(Self::RETURN_KEY).expect("the default return key parses"),
             HotKey::parse_valid(Self::NEXT_SESSION_KEYS),
             HotKey::parse_valid(Self::PREVIOUS_SESSION_KEYS),
+            HotKey::parse_valid(Self::SHELL_TOGGLE_KEYS),
         )
-        .with_shell_toggle_keys(HotKey::parse_valid(Self::SHELL_TOGGLE_KEYS))
     }
 }
 
