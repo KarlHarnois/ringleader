@@ -30,6 +30,10 @@ impl Bell {
         }
     }
 
+    pub fn forget(&mut self, name: &str) {
+        self.previous.remove(name);
+    }
+
     fn ring(&mut self) {
         let _ = self.sink.write_all(Self::BEL);
         let _ = self.sink.flush();

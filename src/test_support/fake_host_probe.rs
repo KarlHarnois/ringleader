@@ -18,6 +18,7 @@ struct HostState {
     canonical: HashMap<PathBuf, PathBuf>,
     access: HashMap<PathBuf, DirectoryAccess>,
     processes: Vec<FakeProcess>,
+    servers: HashSet<PathBuf>,
     terminated: Vec<u32>,
 }
 
@@ -98,6 +99,15 @@ impl FakeHostProbe {
             process.server_socket = Some(socket.to_path_buf());
         }
         drop(state);
+        self
+    }
+
+    pub fn with_tmux_server_on(self, socket: &Path) -> Self {
+        self.state
+            .lock()
+            .unwrap()
+            .servers
+            .insert(socket.to_path_buf());
         self
     }
 
@@ -185,6 +195,15 @@ impl HostProbe for FakeHostProbe {
             .filter(|process| process.server_socket.as_deref() == Some(socket))
             .map(|process| process.info.clone())
             .collect()
+    }
+
+    fn tmux_server_serves(&self, socket: &Path) -> bool {
+        let state = self.state.lock().unwrap();
+        state.servers.contains(socket)
+            || state
+                .processes
+                .iter()
+                .any(|process| process.server_socket.as_deref() == Some(socket))
     }
 
     fn session_processes(&self, sessions: &[u32]) -> Vec<ProcessInfo> {

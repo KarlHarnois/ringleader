@@ -1,5 +1,6 @@
 use std::io;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::Duration;
 
 use super::agent_launcher::{LauncherCommand, PreparedLaunch};
@@ -126,7 +127,11 @@ impl TmuxMultiplexer {
     }
 
     fn agent_pane(&self, tmux_name: &str) -> Result<Option<String>, MultiplexerError> {
-        let lookup = TmuxScripts::session_panes(tmux_name, TmuxListing::AGENT_FORMAT);
+        self.agent_pane_in(&self.session_target(tmux_name)?)
+    }
+
+    fn agent_pane_in(&self, session: &str) -> Result<Option<String>, MultiplexerError> {
+        let lookup = TmuxScripts::session_panes(session, TmuxListing::AGENT_FORMAT);
         let output = self.tmux.query(&lookup)?;
         if !output.succeeded() && !output.has("ringleader-agent") {
             return Err(TmuxError::failed("list-panes", &output).into());
@@ -134,16 +139,40 @@ impl TmuxMultiplexer {
         Ok(TmuxListing::new(&output).agent_pane())
     }
 
-    fn attach_in_foreground(&self, target: &str) -> Result<(), MultiplexerError> {
-        let attach = TmuxScripts::attach_session(target);
-        let child =
-            self.tmux
-                .foreground(&attach)
-                .spawn()
-                .map_err(|error| MultiplexerError::Failed {
-                    subcommand: "attach-session".to_string(),
-                    detail: error.to_string(),
-                })?;
+    fn attach_command(&self, target: &AttachTarget) -> Result<Command, MultiplexerError> {
+        let resolved = match target {
+            AttachTarget::Agent(tmux_name) => self.shown_pane(tmux_name)?,
+            AttachTarget::Shell(window) => window.clone(),
+        };
+        Ok(self
+            .tmux
+            .foreground(&TmuxScripts::attach_session(&resolved)))
+    }
+
+    fn shown_pane(&self, tmux_name: &str) -> Result<String, MultiplexerError> {
+        let session = self.session_target(tmux_name)?;
+        Ok(self.agent_pane_in(&session)?.unwrap_or(session))
+    }
+
+    fn session_target(&self, tmux_name: &str) -> Result<String, MultiplexerError> {
+        if !TmuxScripts::reads_as_session_id(tmux_name) {
+            return Ok(TmuxScripts::exact(tmux_name));
+        }
+        let output = self.tmux.query(&TmuxScripts::session_ids())?;
+        TmuxListing::new(&output)
+            .session_id_named(tmux_name)
+            .map(|session_id| TmuxScripts::by_session_id(&session_id))
+            .ok_or_else(|| MultiplexerError::Failed {
+                subcommand: "list-sessions".to_string(),
+                detail: format!("no tmux session is named {tmux_name}"),
+            })
+    }
+
+    fn attach_in_foreground(&self, mut attach: Command) -> Result<(), MultiplexerError> {
+        let child = attach.spawn().map_err(|error| MultiplexerError::Failed {
+            subcommand: "attach-session".to_string(),
+            detail: error.to_string(),
+        })?;
         let Ok(pid) = libc::pid_t::try_from(child.id()) else {
             return Ok(());
         };
@@ -203,7 +232,8 @@ impl Multiplexer for TmuxMultiplexer {
     }
 
     fn pane_pids(&self, tmux_name: &str) -> Result<Vec<u32>, MultiplexerError> {
-        let list = TmuxScripts::session_panes(tmux_name, TmuxListing::PANE_PID_FORMAT);
+        let session = self.session_target(tmux_name)?;
+        let list = TmuxScripts::session_panes(&session, TmuxListing::PANE_PID_FORMAT);
         let output = self.tmux.query(&list)?;
         if !output.succeeded() && !output.has("ringleader-pane-pid") {
             return Err(TmuxError::failed("list-panes", &output).into());
@@ -257,17 +287,12 @@ impl Multiplexer for TmuxMultiplexer {
     }
 
     fn attach(&self, target: &AttachTarget) -> Result<(), MultiplexerError> {
-        let resolved = match target {
-            AttachTarget::Agent(tmux_name) => self
-                .agent_pane(tmux_name)?
-                .unwrap_or_else(|| TmuxScripts::exact(tmux_name)),
-            AttachTarget::Shell(window) => window.clone(),
-        };
-        self.attach_in_foreground(&resolved)
+        let attach = self.attach_command(target)?;
+        self.attach_in_foreground(attach)
     }
 
     fn capture_pane(&self, tmux_name: &str) -> Result<String, MultiplexerError> {
-        let pane = self.required_agent_pane(tmux_name)?;
+        let pane = self.shown_pane(tmux_name)?;
         let output = self.tmux.query(&TmuxScripts::capture(&pane))?;
         if !output.succeeded() && output.stdout().is_empty() {
             return Err(TmuxError::failed("capture-pane", &output).into());
@@ -475,6 +500,31 @@ mod tests {
 
         fn created_pane(&self, tmux_name: &str) -> String {
             self.server.pane_of(&format!("={tmux_name}:0.0"))
+        }
+
+        fn attached_to(&self, target: &AttachTarget) -> Vec<String> {
+            let attach = self.server.multiplexer().attach_command(target).unwrap();
+            let arguments: Vec<String> = attach
+                .get_args()
+                .map(|argument| argument.to_string_lossy().into_owned())
+                .collect();
+            let subcommand = arguments
+                .iter()
+                .position(|argument| argument == "attach-session")
+                .unwrap();
+            arguments[subcommand..].to_vec()
+        }
+
+        fn session_named_by(&self, target: &str) -> String {
+            self.server
+                .text(&["display-message", "-p", "-t", target, "#{session_name}"])
+        }
+
+        fn signal(pid: &str, signal: &str) {
+            std::process::Command::new("kill")
+                .args([signal, pid])
+                .status()
+                .unwrap();
         }
 
         fn on_terminal(&self, terminal: Option<&str>) -> TmuxMultiplexer {
@@ -1147,9 +1197,22 @@ mod tests {
 
     #[test]
     fn the_attach_targets_the_agent_pane_id() {
-        let argv = TmuxScripts::attach_session("%3").argv();
+        let fixture = MultiplexerFixture::new();
+        fixture.create("fix-auth").unwrap();
+        let agent = fixture.tagged_panes("ringleader-fix-auth").pop().unwrap();
 
-        assert_eq!(argv, ["attach-session", "-t", "%3"]);
+        let attach = fixture.attached_to(&AttachTarget::Agent("ringleader-fix-auth".to_string()));
+
+        assert_eq!(attach, ["attach-session", "-t", agent.as_str()]);
+    }
+
+    #[test]
+    fn the_attach_to_a_session_without_an_agent_pane_targets_its_exact_name() {
+        let fixture = MultiplexerFixture::with_holder();
+
+        let attach = fixture.attached_to(&AttachTarget::Agent("holder".to_string()));
+
+        assert_eq!(attach, ["attach-session", "-t", "=holder:"]);
     }
 
     #[test]
@@ -1193,6 +1256,64 @@ mod tests {
     }
 
     #[test]
+    fn capture_reads_a_session_without_an_agent_pane() {
+        let fixture = MultiplexerFixture::new();
+        fixture.server.text(&[
+            "new-session",
+            "-d",
+            "-s",
+            "handmade",
+            "sh",
+            "-c",
+            "printf 'made by hand\\n'; sleep 30",
+        ]);
+        let multiplexer = fixture.server.multiplexer();
+
+        let captured = fixture.server.wait_for(|| {
+            multiplexer
+                .capture_pane("handmade")
+                .is_ok_and(|text| text.contains("made by hand"))
+        });
+
+        assert!(captured, "{:?}", multiplexer.capture_pane("handmade"));
+    }
+
+    #[test]
+    fn a_session_named_like_another_sessions_id_is_attached_by_its_own_id() {
+        let fixture = MultiplexerFixture::new();
+        fixture.create("fix-auth").unwrap();
+        fixture.server.start_session("$0");
+
+        let attach = fixture.attached_to(&AttachTarget::Agent("$0".to_string()));
+
+        let target = attach.last().unwrap();
+        assert_eq!(fixture.session_named_by(target), "$0");
+    }
+
+    #[test]
+    fn a_session_named_like_another_sessions_id_is_captured_from_its_own_pane() {
+        let fixture = MultiplexerFixture::with_holder();
+        fixture.server.text(&[
+            "new-session",
+            "-d",
+            "-s",
+            "$0",
+            "sh",
+            "-c",
+            "printf 'named like an id\\n'; sleep 30",
+        ]);
+        let multiplexer = fixture.server.multiplexer();
+
+        let captured = fixture.server.wait_for(|| {
+            multiplexer
+                .capture_pane("$0")
+                .is_ok_and(|text| text.contains("named like an id"))
+        });
+
+        assert!(captured, "{:?}", multiplexer.capture_pane("$0"));
+    }
+
+    #[test]
     fn creating_after_the_socket_was_removed_reuses_the_running_server() {
         let fixture = MultiplexerFixture::with_holder();
         let first_server = fixture.server.server_pid();
@@ -1207,6 +1328,26 @@ mod tests {
                 .text(&["list-sessions", "-F", "#{session_name}"])
                 .contains("holder")
         );
+    }
+
+    #[test]
+    fn a_stopped_server_that_cannot_restore_its_socket_refuses_the_creation() {
+        let fixture = MultiplexerFixture::with_holder();
+        let first_server = fixture.server.server_pid();
+        MultiplexerFixture::signal(&first_server, "-STOP");
+        fs::remove_file(fixture.server.socket()).unwrap();
+
+        let result = fixture.create("fix-auth");
+
+        MultiplexerFixture::signal(&first_server, "-CONT");
+        let socket_back = fixture.server.wait_for(|| fixture.server.socket().exists());
+        assert!(
+            matches!(result, Err(MultiplexerError::SocketNotRestored { .. })),
+            "{result:?}"
+        );
+        assert!(socket_back);
+        assert_eq!(fixture.server.server_pid(), first_server);
+        assert_eq!(fixture.sessions(), ["holder"]);
     }
 
     #[test]
@@ -1365,18 +1506,12 @@ mod tests {
             fixture.server.launcher(Vec::new()),
         );
         let pid = fixture.server.server_pid();
-        std::process::Command::new("kill")
-            .args(["-STOP", &pid])
-            .status()
-            .unwrap();
+        MultiplexerFixture::signal(&pid, "-STOP");
         let started = Instant::now();
 
         let result = multiplexer.observe_all();
 
-        std::process::Command::new("kill")
-            .args(["-CONT", &pid])
-            .status()
-            .unwrap();
+        MultiplexerFixture::signal(&pid, "-CONT");
         assert!(matches!(result, Err(MultiplexerError::TimedOut { .. })));
         assert!(started.elapsed() < deadline + Duration::from_secs(3));
     }

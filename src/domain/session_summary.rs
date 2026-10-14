@@ -1,11 +1,9 @@
-use std::path::PathBuf;
-
 use super::diff_stat::DiffStat;
 use super::pull_request::PullRequest;
 use super::session::Session;
 use super::session_metadata::SessionMetadata;
-use super::session_observation::SessionObservation;
 use super::session_state::SessionState;
+use super::unmanaged_session::UnmanagedSession;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionSummary {
@@ -28,7 +26,7 @@ impl SessionSummary {
     }
 
     pub fn unmanaged(session: UnmanagedSession) -> Self {
-        let attached = session.observation.attached();
+        let attached = session.observation().attached();
         Self {
             subject: SummarySubject::Unmanaged(Box::new(session)),
             state: SessionState::Unmanaged,
@@ -67,14 +65,14 @@ impl SessionSummary {
     pub fn tmux_name(&self) -> &str {
         match &self.subject {
             SummarySubject::Managed(session) => session.tmux_name(),
-            SummarySubject::Unmanaged(session) => session.observation.tmux_name(),
+            SummarySubject::Unmanaged(session) => session.observation().tmux_name(),
         }
     }
 
     pub fn metadata(&self) -> Option<&SessionMetadata> {
         match &self.subject {
             SummarySubject::Managed(session) => Some(session.metadata()),
-            SummarySubject::Unmanaged(session) => session.observation.metadata(),
+            SummarySubject::Unmanaged(session) => session.observation().metadata(),
         }
     }
 
@@ -115,79 +113,13 @@ enum SummarySubject {
     Unmanaged(Box<UnmanagedSession>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UnmanagedSession {
-    label: String,
-    observation: SessionObservation,
-    shadowed: Option<(Session, PairMismatch)>,
-}
-
-impl UnmanagedSession {
-    pub fn new(label: &str, observation: SessionObservation) -> Self {
-        Self {
-            label: label.to_string(),
-            observation,
-            shadowed: None,
-        }
-    }
-
-    pub fn shadowing(
-        entry: Session,
-        observation: SessionObservation,
-        mismatch: PairMismatch,
-    ) -> Self {
-        Self {
-            label: entry.name().to_string(),
-            observation,
-            shadowed: Some((entry, mismatch)),
-        }
-    }
-
-    pub fn label(&self) -> &str {
-        &self.label
-    }
-
-    pub fn advice(&self) -> Option<String> {
-        let (_, mismatch) = self.shadowed.as_ref()?;
-        let tmux_name = self.observation.tmux_name();
-        let socket = self.observation.socket_path().display();
-        Some(format!(
-            "tmux session {tmux_name} on {socket} {}. Inspect it, then end it with tmux -S {socket} kill-session -t '={tmux_name}:' to restart or delete this session.",
-            mismatch.describe()
-        ))
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PairMismatch {
-    NoValidMetadata,
-    OtherWorktree(PathBuf),
-    OtherSocket(PathBuf),
-}
-
-impl PairMismatch {
-    fn describe(&self) -> String {
-        match self {
-            PairMismatch::NoValidMetadata => "has no valid Ringleader metadata".to_string(),
-            PairMismatch::OtherWorktree(path) => {
-                format!("names another worktree, {}", path.display())
-            }
-            PairMismatch::OtherSocket(path) => {
-                format!(
-                    "runs on another socket than the recorded {}",
-                    path.display()
-                )
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::Path;
 
     use super::*;
     use crate::domain::session::TmuxAddress;
+    use crate::domain::session_observation::SessionObservation;
 
     #[test]
     fn an_unmanaged_summary_never_carries_a_diff() {
@@ -212,21 +144,6 @@ mod tests {
         ));
 
         assert_eq!(summary.pull_request(), None);
-    }
-
-    #[test]
-    fn a_shadowing_session_advises_how_to_end_it() {
-        let tmux = TmuxAddress::new("ringleader-fix-auth", Path::new("/tmp/s"));
-        let observation = SessionObservation::new(tmux, 1_700_000_000);
-        let entry = crate::test_support::ServiceFixture::session("fix-auth");
-
-        let unmanaged =
-            UnmanagedSession::shadowing(entry, observation, PairMismatch::NoValidMetadata);
-
-        assert_eq!(
-            unmanaged.advice().unwrap(),
-            "tmux session ringleader-fix-auth on /tmp/s has no valid Ringleader metadata. Inspect it, then end it with tmux -S /tmp/s kill-session -t '=ringleader-fix-auth:' to restart or delete this session."
-        );
     }
 
     #[test]

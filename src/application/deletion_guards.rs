@@ -6,6 +6,7 @@ use super::ports::{HostProbe, Multiplexer, UnmergedCommits, Workspace, WorktreeE
 use super::reconciliation::ManagedRow;
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
+use super::unseen_session::UnseenSession;
 use super::worktree_containment::WorktreeContainment;
 use super::worktree_inspection::WorktreeInspection;
 use crate::domain::{Session, SessionState};
@@ -13,6 +14,7 @@ use crate::domain::{Session, SessionState};
 pub struct DeletionGuards {
     inspection: WorktreeInspection,
     ownership: BranchOwnership,
+    unseen: UnseenSession,
     workspace: Arc<dyn Workspace>,
     multiplexer: Arc<dyn Multiplexer>,
     host: Arc<dyn HostProbe>,
@@ -23,6 +25,7 @@ impl DeletionGuards {
         Self {
             inspection: WorktreeInspection::new(ports),
             ownership: BranchOwnership::new(ports),
+            unseen: UnseenSession::new(ports),
             workspace: ports.repos().workspace(),
             multiplexer: ports.tmux().multiplexer(),
             host: ports.repos().host(),
@@ -31,6 +34,7 @@ impl DeletionGuards {
 
     pub fn measure(&self, row: &ManagedRow) -> Result<Measurement, ServiceError> {
         let session = row.session();
+        self.unseen.refuse_behind_lost_socket(row)?;
         self.refuse_unmeasurable(session)?;
         self.ownership
             .refuse_unmarked(session, BranchMutation::Delete)?;

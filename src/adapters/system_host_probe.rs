@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs::{self, OpenOptions};
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Component, Path, PathBuf};
@@ -14,6 +14,7 @@ use crate::application::ports::{DirectoryAccess, HostProbe, HostProbeError, Proc
 pub struct SystemHostProbe {
     search_path: OsString,
     own_lineage: Vec<u32>,
+    tmux_executable: Option<PathBuf>,
 }
 
 impl SystemHostProbe {
@@ -22,25 +23,34 @@ impl SystemHostProbe {
     const EXECUTABLE_BITS: u32 = 0o111;
     const ACCESS_BITS: u32 = 0o777;
 
-    pub fn new(environment: &ProcessEnvironment) -> Self {
+    pub fn new(environment: &ProcessEnvironment, tmux_program: &OsStr) -> Self {
+        let search_path = environment
+            .get("PATH")
+            .map(OsString::from)
+            .unwrap_or_default();
+        let tmux_executable = Self::resolve_on(&search_path, &tmux_program.to_string_lossy())
+            .and_then(|program| fs::canonicalize(program).ok());
         Self {
-            search_path: environment
-                .get("PATH")
-                .map(OsString::from)
-                .unwrap_or_default(),
+            search_path,
             own_lineage: LiveProcess::lineage_of(std::process::id()),
+            tmux_executable,
         }
+    }
+
+    fn resolve_on(search_path: &OsStr, command: &str) -> Option<PathBuf> {
+        if command.contains('/') {
+            let path = PathBuf::from(command);
+            return (path.is_absolute() && Self::is_executable(&path)).then_some(path);
+        }
+        std::env::split_paths(search_path)
+            .map(|directory| directory.join(command))
+            .find(|candidate| Self::is_executable(candidate))
     }
 
     fn is_executable(path: &Path) -> bool {
         fs::metadata(path).is_ok_and(|metadata| {
             metadata.is_file() && metadata.permissions().mode() & Self::EXECUTABLE_BITS != 0
         })
-    }
-
-    fn user_id() -> u32 {
-        // SAFETY: geteuid takes no arguments, reads no memory of this process, and cannot fail.
-        unsafe { libc::geteuid() }
     }
 
     fn is_own(&self, process: &LiveProcess) -> bool {
@@ -56,7 +66,15 @@ impl SystemHostProbe {
         processes
             .iter()
             .filter(move |process| process.cwd().is_some_and(|cwd| cwd.starts_with(&canonical)))
-            .filter(|process| !self.is_own(process) && !process.is_tmux())
+            .filter(|process| !self.is_own(process) && !self.runs_tmux(process))
+    }
+
+    fn runs_tmux(&self, process: &LiveProcess) -> bool {
+        process.is_tmux()
+            || self
+                .tmux_executable
+                .as_deref()
+                .is_some_and(|tmux| process.runs(tmux))
     }
 
     fn probe_directory_write(directory: &Path) -> bool {
@@ -75,13 +93,7 @@ impl SystemHostProbe {
 
 impl HostProbe for SystemHostProbe {
     fn resolve_command(&self, command: &str) -> Option<PathBuf> {
-        if command.contains('/') {
-            let path = PathBuf::from(command);
-            return (path.is_absolute() && Self::is_executable(&path)).then_some(path);
-        }
-        std::env::split_paths(&self.search_path)
-            .map(|directory| directory.join(command))
-            .find(|candidate| Self::is_executable(candidate))
+        Self::resolve_on(&self.search_path, command)
     }
 
     fn is_writable(&self, path: &Path) -> bool {
@@ -107,7 +119,7 @@ impl HostProbe for SystemHostProbe {
         let mode = metadata.permissions().mode() & Self::ACCESS_BITS;
         Some(DirectoryAccess::new(
             mode,
-            metadata.uid() == Self::user_id(),
+            metadata.uid() == LiveProcess::current_user(),
         ))
     }
 
@@ -143,6 +155,10 @@ impl HostProbe for SystemHostProbe {
             .filter(|process| process.runs_under_server(&by_pid, &socket))
             .map(LiveProcess::info)
             .collect()
+    }
+
+    fn tmux_server_serves(&self, socket: &Path) -> bool {
+        !LiveProcess::tmux_servers_on(socket).is_empty()
     }
 
     fn session_processes(&self, sessions: &[u32]) -> Vec<ProcessInfo> {
@@ -185,8 +201,13 @@ mod tests {
 
     impl ProbeFixture {
         fn probe() -> SystemHostProbe {
+            Self::probe_for(OsStr::new("tmux"))
+        }
+
+        fn probe_for(tmux_program: &OsStr) -> SystemHostProbe {
             let path = std::env::var_os("PATH").unwrap_or_default();
-            SystemHostProbe::new(&ProcessEnvironment::new(vec![("PATH".into(), path)], None))
+            let environment = ProcessEnvironment::new(vec![("PATH".into(), path)], None);
+            SystemHostProbe::new(&environment, tmux_program)
         }
 
         fn pid_of(server: &TmuxTestServer, pattern: &str) -> Option<u32> {
@@ -275,6 +296,7 @@ mod tests {
 
     #[test]
     fn a_process_outside_any_tmux_server_is_not_under_one() {
+        let server = TmuxTestServer::with_session("probe");
         let directory = tempfile::tempdir().unwrap();
         std::process::Command::new("sh")
             .args(["-c", "nohup sleep 33 >/dev/null 2>&1 &"])
@@ -284,11 +306,21 @@ mod tests {
         let probe = ProbeFixture::probe();
         let orphan = probe.processes_in(directory.path(), &[]);
 
-        let under = probe.processes_under_server(directory.path(), Path::new("/run/example.sock"));
+        let under = probe.processes_under_server(directory.path(), server.socket());
 
         probe.terminate(&orphan.iter().map(ProcessInfo::pid).collect::<Vec<_>>());
         assert_eq!(orphan.len(), 1);
         assert!(under.is_empty());
+    }
+
+    #[test]
+    fn a_running_server_serves_its_own_socket_and_no_other() {
+        let server = TmuxTestServer::with_session("probe");
+        let other_socket = server.directory().join("other.sock");
+        let probe = ProbeFixture::probe();
+
+        assert!(probe.tmux_server_serves(server.socket()));
+        assert!(!probe.tmux_server_serves(&other_socket));
     }
 
     #[test]
@@ -339,6 +371,21 @@ mod tests {
 
         assert!(commands.contains(&"sleep 31".to_string()));
         assert!(commands.iter().all(|command| !command.starts_with("tmux")));
+    }
+
+    #[test]
+    fn a_server_of_the_configured_tmux_under_another_name_is_no_worktree_process() {
+        let server = TmuxTestServer::under_program_name("tmux-next");
+        server.start_session("probe");
+        let server_pid: u32 = server.server_pid().parse().unwrap();
+
+        let listed =
+            ProbeFixture::probe_for(server.program()).processes_in(server.directory(), &[]);
+
+        assert!(
+            listed.iter().all(|process| process.pid() != server_pid),
+            "{listed:?}"
+        );
     }
 
     #[test]
