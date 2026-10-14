@@ -7,7 +7,7 @@ use super::repo_merge::RepoMerge;
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
 use super::session_reconciler::SessionReconciler;
-use crate::domain::{BaseBranch, Branch, Config, DiffStat, KeyBindings, Session};
+use crate::domain::{BaseBranch, Config, DiffStat, KeyBindings, Session};
 
 pub struct SessionMonitor {
     multiplexer: Arc<dyn Multiplexer>,
@@ -46,7 +46,8 @@ impl SessionMonitor {
         let base_branch = self.base_branch(session, config);
         let recorded = StartPoint::from_base_commit(session.base_commit());
         let worktree = session.worktree_path();
-        let session_branches = Branch::of_sessions_in(session.repo_path(), sessions);
+        let session_branches =
+            RepoMerge::new(self.host.as_ref()).session_branches_in(session.repo_path(), sessions);
         let measured_from = DiffBaseResolver::new(self.workspace.as_ref())
             .skipping(session_branches)
             .resolve(worktree, &recorded, base_branch)?;

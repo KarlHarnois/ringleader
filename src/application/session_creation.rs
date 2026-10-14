@@ -6,12 +6,13 @@ use super::branch_availability::BranchAvailability;
 use super::creation_plan::{CreateRequest, CreationPlan};
 use super::ports::{Clock, HostProbe, Multiplexer, SessionRegistry, StartPoint, Workspace};
 use super::reconciliation::Reconciliation;
+use super::repo_merge::RepoMerge;
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
 use super::start_point_resolver::StartPointResolver;
 use super::use_checks::UseChecks;
 use super::worktree_rollback::WorktreeRollback;
-use crate::domain::{Branch, Config, Session};
+use crate::domain::{Config, Session};
 
 pub struct SessionCreation {
     branches: BranchAvailability,
@@ -45,7 +46,8 @@ impl SessionCreation {
     ) -> Result<Session, ServiceError> {
         let plan = self.plan_creation(request, config, config_path)?;
         self.check_availability(&plan, reconciliation)?;
-        let session_branches = Branch::of_sessions_in(plan.repo_path(), reconciliation.entries());
+        let session_branches = RepoMerge::new(self.host.as_ref())
+            .session_branches_in(plan.repo_path(), reconciliation.entries());
         let start = StartPointResolver::new(self.workspace.as_ref())
             .skipping(session_branches)
             .resolve(plan.repo_path(), plan.base_branch())?;

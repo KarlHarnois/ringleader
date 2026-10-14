@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use super::ports::HostProbe;
-use crate::domain::{BaseBranch, InvalidName, Repo, RepoName, RepoScope, Session};
+use crate::domain::{BaseBranch, Branch, InvalidName, Repo, RepoName, RepoScope, Session};
 
 pub struct RepoMerge<'a> {
     host: &'a dyn HostProbe,
@@ -52,6 +52,15 @@ impl<'a> RepoMerge<'a> {
             .or_else(|| self.configured_base_branch(session, explicit))
     }
 
+    pub fn session_branches_in(&self, repo: &Path, sessions: &[Session]) -> Vec<Branch> {
+        let repo = self.host.canonical_or_given(repo);
+        sessions
+            .iter()
+            .filter(|session| self.host.canonical_or_given(session.repo_path()) == repo)
+            .map(|session| Branch::Local(session.branch().to_string()))
+            .collect()
+    }
+
     fn configured_base_branch<'e>(
         &self,
         session: &Session,
@@ -77,7 +86,7 @@ impl<'a> RepoMerge<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::FakeHostProbe;
+    use crate::test_support::{FakeHostProbe, ServiceFixture};
 
     #[test]
     fn the_configured_entry_is_found_by_its_canonical_path_and_kept_as_written() {
@@ -96,5 +105,34 @@ mod tests {
             RepoMerge::new(&host).configured(Path::new("/work/example-project"), &explicit);
 
         assert_eq!(configured, Some(&entry));
+    }
+
+    #[test]
+    fn only_the_sessions_of_the_repo_give_their_local_branches() {
+        let here = ServiceFixture::session("main");
+        let elsewhere =
+            ServiceFixture::session_at("master", "/repos/other", ServiceFixture::CREATED_AT);
+        let host = FakeHostProbe::default();
+
+        assert_eq!(
+            RepoMerge::new(&host).session_branches_in(here.repo_path(), &[here.clone(), elsewhere]),
+            [Branch::Local("main".to_string())]
+        );
+    }
+
+    #[test]
+    fn a_session_recorded_through_a_symlink_shares_the_repo() {
+        let linked =
+            ServiceFixture::session_at("main", "/link/example-project", ServiceFixture::CREATED_AT);
+        let host = FakeHostProbe::default().with_canonical(
+            Path::new("/link/example-project"),
+            Path::new("/work/example-project"),
+        );
+
+        assert_eq!(
+            RepoMerge::new(&host)
+                .session_branches_in(Path::new("/work/example-project"), &[linked]),
+            [Branch::Local("main".to_string())]
+        );
     }
 }

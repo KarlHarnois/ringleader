@@ -333,7 +333,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── session_access.rs     # SessionAccess: attach and open_shell, and the refusal from a pane of the private server
     │   ├── repo_catalog.rs       # RepoCatalog: discover, find, add, and remove repos
     │   ├── pull_request_catalog.rs # PullRequestCatalog, looks up the pull requests of sessions in the background
-    │   ├── repo_merge.rs         # RepoMerge, joins configured and scanned repos, configured entries winning
+    │   ├── repo_merge.rs         # RepoMerge, joins configured and scanned repos, configured entries winning, and finds the config entry and the sessions of a repo by its canonical path
     │   ├── home_repo_search.rs   # HomeRepoSearch, the repos under home the repo search offers
     │   ├── default_repo.rs       # DefaultRepo, the launch repo or the newest session's repo
     │   ├── typed_paths.rs        # TypedPaths, a typed path read as a directory or as a repo
