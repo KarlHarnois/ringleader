@@ -116,9 +116,24 @@ mod tests {
 
         fn new() -> Self {
             let base = tempfile::tempdir().unwrap();
+            let root = base.path().join(Self::ROOT);
+            Self::rooted_at(base, &root)
+        }
+
+        fn behind_a_symlink() -> Self {
+            let base = tempfile::tempdir().unwrap();
+            let real = base.path().join("real");
+            fs::create_dir(&real).unwrap();
+            let link = base.path().join("link");
+            std::os::unix::fs::symlink(&real, &link).unwrap();
+            let root = link.join(Self::ROOT);
+            Self::rooted_at(base, &root)
+        }
+
+        fn rooted_at(base: tempfile::TempDir, root: &Path) -> Self {
             let mount_table = base.path().join(Self::MOUNT_TABLE);
             fs::write(&mount_table, "").unwrap();
-            let space = DirectoryScratchSpace::new(&base.path().join(Self::ROOT), &mount_table);
+            let space = DirectoryScratchSpace::new(root, &mount_table);
             Self { base, space }
         }
 
@@ -330,6 +345,18 @@ mod tests {
             })
         );
         assert!(fixture.scratch().join("notes.md").exists());
+    }
+
+    #[test]
+    fn a_mount_listed_under_the_resolved_path_of_a_symlinked_root_keeps_it() {
+        let fixture = ScratchFixture::behind_a_symlink()
+            .created()
+            .with_mount_inside();
+
+        let result = fixture.space.remove(ScratchFixture::worktree());
+
+        assert!(matches!(result, Err(ScratchSpaceError::HoldsMount { .. })));
+        assert!(fixture.scratch().exists());
     }
 
     #[test]
