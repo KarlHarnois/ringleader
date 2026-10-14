@@ -14,6 +14,7 @@ use super::shell_word::ShellWord;
 use crate::application::ports::{
     DirectoryEnvironment, DirectoryEnvironmentError, Envrc, HostProbe,
 };
+use crate::domain::TerminalText;
 
 pub struct DirenvDirectoryEnvironment {
     program: OsString,
@@ -84,6 +85,10 @@ impl DirenvDirectoryEnvironment {
         )
     }
 
+    fn error_text(output: &CommandOutput) -> String {
+        TerminalText::new(&output.stderr_text()).plain()
+    }
+
     fn allow_failure(directory: &Path, reason: String) -> DirectoryEnvironmentError {
         DirectoryEnvironmentError::AllowFailed {
             directory: directory.to_path_buf(),
@@ -114,7 +119,7 @@ impl DirectoryEnvironment for DirenvDirectoryEnvironment {
             .map_err(|error| Self::allow_failure(directory, error.to_string()))?;
         match output.succeeded() {
             true => Ok(()),
-            false => Err(Self::allow_failure(directory, output.stderr_text())),
+            false => Err(Self::allow_failure(directory, Self::error_text(&output))),
         }
     }
 }
@@ -220,15 +225,18 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_allow_carries_the_direnv_error() {
+    fn a_failed_allow_carries_the_direnv_error_without_its_colors() {
         let fixture = DirenvFixture::new();
         let project = fixture.home.project("example-project");
 
         let error = fixture.direnv().allow(&project).unwrap_err();
 
-        assert!(
-            error.to_string().contains(".envrc file not found"),
-            "{error}"
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "cannot allow the .envrc of {}: direnv: error .envrc file not found",
+                project.display()
+            )
         );
     }
 

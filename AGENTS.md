@@ -294,6 +294,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── naming_scheme.rs      # NamingScheme, the worktree root and tmux prefix a session records
     │   ├── pull_request.rs       # PullRequest, its number, state, and opening time
     │   ├── hot_key.rs            # HotKey, a key a terminal can send, which every key binding is made of
+    │   ├── terminal_text.rs      # TerminalText, text written for a terminal, and the same text without its escape sequences
     │   └── key_bindings.rs       # KeyBindings, the return key that detaches back to Ringleader and the keys that switch to the next and previous session
     ├── application/
     │   ├── mod.rs
