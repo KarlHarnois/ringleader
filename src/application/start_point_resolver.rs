@@ -31,16 +31,12 @@ impl<'a> StartPointResolver<'a> {
         base_branch: Option<&BaseBranch>,
     ) -> Result<StartPoint, ServiceError> {
         match base_branch {
-            Some(base) => self.resolve_configured(repo, base),
+            Some(base) => self.resolve_named(repo, base),
             None => self.resolve_ladder(repo),
         }
     }
 
-    fn resolve_configured(
-        &self,
-        repo: &Path,
-        base: &BaseBranch,
-    ) -> Result<StartPoint, ServiceError> {
+    fn resolve_named(&self, repo: &Path, base: &BaseBranch) -> Result<StartPoint, ServiceError> {
         let tips = self
             .workspace
             .branch_tips(repo, &base.branches_and_origin_copy())?;
@@ -125,7 +121,7 @@ mod tests {
     }
 
     #[test]
-    fn a_configured_local_branch_wins_over_its_remote_tracking_namesake() {
+    fn a_named_local_branch_wins_over_its_remote_tracking_namesake() {
         let workspace = StartFixture::with_tips(&[
             (StartFixture::tracked("develop"), StartFixture::TRACKED_TIP),
             (StartFixture::local("develop"), StartFixture::LOCAL_TIP),
@@ -138,7 +134,7 @@ mod tests {
     }
 
     #[test]
-    fn a_configured_remote_tracking_name_resolves() {
+    fn a_named_remote_tracking_name_resolves() {
         let workspace = StartFixture::with_tips(&[(
             StartFixture::tracked("origin/main"),
             StartFixture::TRACKED_TIP,
@@ -151,7 +147,7 @@ mod tests {
     }
 
     #[test]
-    fn a_configured_branch_only_on_origin_is_refused_with_a_hint() {
+    fn a_named_branch_only_on_origin_is_refused_with_a_hint() {
         let workspace = StartFixture::with_tips(&[(
             StartFixture::tracked("origin/develop"),
             StartFixture::ORIGIN_TIP,
@@ -164,7 +160,7 @@ mod tests {
     }
 
     #[test]
-    fn a_configured_branch_found_nowhere_is_refused_without_a_hint() {
+    fn a_named_branch_found_nowhere_is_refused_without_a_hint() {
         let workspace = StartFixture::with_tips(&[]);
 
         let refusal = StartFixture::refusal(&workspace, Some("develop"));
@@ -174,7 +170,7 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_configured_branch_never_falls_back_to_the_ladder() {
+    fn a_missing_named_branch_never_falls_back_to_the_ladder() {
         let workspace =
             StartFixture::with_tips(&[(StartFixture::local("main"), StartFixture::MAIN_TIP)]);
 

@@ -64,12 +64,12 @@ impl<'a> DiffBaseResolver<'a> {
         checked_out: Option<&Branch>,
     ) -> Result<Vec<String>, WorkspaceError> {
         match base_branch {
-            Some(base) => self.configured_commits(worktree, base, checked_out),
+            Some(base) => self.named_commits(worktree, base, checked_out),
             None => self.ladder_commits(worktree, checked_out),
         }
     }
 
-    fn configured_commits(
+    fn named_commits(
         &self,
         worktree: &Path,
         base: &BaseBranch,
@@ -238,7 +238,7 @@ mod tests {
     }
 
     #[test]
-    fn a_configured_base_branch_is_looked_up_with_its_origin_copy_and_never_the_ladder() {
+    fn a_named_base_branch_is_looked_up_with_its_origin_copy_and_never_the_ladder() {
         let workspace = DiffFixture::with_tips(&[]);
 
         DiffFixture::resolve(&workspace, Some("develop"));
@@ -259,7 +259,7 @@ mod tests {
     }
 
     #[test]
-    fn a_checked_out_configured_branch_is_left_out() {
+    fn a_checked_out_named_branch_is_left_out() {
         let workspace = DiffFixture::on(
             DiffFixture::with_tips(&[
                 (DiffFixture::local("develop"), DiffFixture::MAIN_TIP),

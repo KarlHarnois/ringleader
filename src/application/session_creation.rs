@@ -301,7 +301,7 @@ mod tests {
     }
 
     #[test]
-    fn a_configured_base_branch_tip_becomes_the_recorded_start() {
+    fn a_requested_base_branch_tip_becomes_the_recorded_start() {
         let fixture = CreateFixture::with_local_tips(&[("develop", CreateFixture::DEVELOP_TIP)]);
         let request = CreateFixture::request("fix-auth")
             .with_base_branch(BaseBranch::new("develop").unwrap());
@@ -370,7 +370,7 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_configured_base_branch_is_refused_before_anything_is_touched() {
+    fn a_missing_requested_base_branch_is_refused_before_anything_is_touched() {
         let fixture = ServiceFixture::new();
         let request = CreateFixture::request("fix-auth")
             .with_base_branch(BaseBranch::new("develop").unwrap());
