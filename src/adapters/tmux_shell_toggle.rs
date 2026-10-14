@@ -5,8 +5,6 @@ pub struct TmuxShellToggle {
 }
 
 impl TmuxShellToggle {
-    const IN_MANAGED_SESSION: &'static str = "#{@ringleader_meta}";
-    const AGENT_WINDOW: &'static str = "#{W:#{P:#{?@ringleader_agent,#{window_id},}}}";
     const WORKTREE: &'static str = "#{session_path}";
     const ESCAPED_QUOTE: &'static str = r"'\''";
 
@@ -19,10 +17,19 @@ impl TmuxShellToggle {
     pub fn command(&self) -> String {
         let toggled = Self::either(
             &Self::on_shell_window(),
-            &Self::shown(Self::AGENT_WINDOW),
+            &Self::shown(&Self::agent_window()),
             &self.shell_window_shown(),
         );
-        Self::only_if(Self::IN_MANAGED_SESSION, &toggled)
+        Self::only_if(&Self::in_managed_session(), &toggled)
+    }
+
+    fn in_managed_session() -> String {
+        Self::expanded(TmuxListing::METADATA_OPTION)
+    }
+
+    fn agent_window() -> String {
+        let agent_pane_window = Self::window_id_if(TmuxListing::AGENT_TAG);
+        Self::over_windows(&Self::over_panes(&agent_pane_window))
     }
 
     fn shell_window_shown(&self) -> String {
@@ -72,6 +79,10 @@ impl TmuxShellToggle {
 
     fn over_windows(format: &str) -> String {
         Self::expanded(&format!("W:{format}"))
+    }
+
+    fn over_panes(format: &str) -> String {
+        Self::expanded(&format!("P:{format}"))
     }
 
     fn window_id_if(tag: &str) -> String {
