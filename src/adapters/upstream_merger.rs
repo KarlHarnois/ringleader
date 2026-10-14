@@ -31,25 +31,40 @@ impl<'a> UpstreamMerger<'a> {
         self.git
             .run_checked(&fetch)
             .map(drop)
-            .map_err(|failure| self.explain_failed_fetch(worktree, branch, failure))
+            .map_err(|failure| self.settle_failed_fetch(worktree, branch, failure))
     }
 
-    fn explain_failed_fetch(
+    fn settle_failed_fetch(
         &self,
         worktree: &Path,
         branch: &BaseBranch,
         failure: WorkspaceError,
     ) -> WorkspaceError {
+        if !self.origin_lacks(worktree, branch) {
+            return failure;
+        }
+        self.drop_origin_copy(worktree, branch);
+        WorkspaceError::NotOnOrigin {
+            branch: branch.to_string(),
+        }
+    }
+
+    fn origin_lacks(&self, worktree: &Path, branch: &BaseBranch) -> bool {
         let listing = GitInvocation::in_worktree(worktree, "ls-remote")
             .probing()
             .args(["--exit-code", Branch::ORIGIN, &Self::ref_on_origin(branch)]);
-        match self.git.run(&listing) {
-            Ok(output) if output.exit_code() == Some(Self::NO_MATCHING_REFS) => {
-                WorkspaceError::NotOnOrigin {
-                    branch: branch.to_string(),
-                }
-            }
-            _ => failure,
+        matches!(
+            self.git.run(&listing),
+            Ok(output) if output.exit_code() == Some(Self::NO_MATCHING_REFS)
+        )
+    }
+
+    fn drop_origin_copy(&self, worktree: &Path, branch: &BaseBranch) {
+        let deletion = GitInvocation::in_worktree(worktree, "update-ref")
+            .writing()
+            .args(["-d", &Self::origin_ref(branch)]);
+        if let Err(error) = self.git.run_checked(&deletion) {
+            log::warn!("could not drop origin's stale copy of {branch}: {error}");
         }
     }
 
@@ -701,6 +716,24 @@ mod tests {
             }
         );
         assert!(!fixture.has_merged(&upstream_tip));
+    }
+
+    #[test]
+    fn a_branch_origin_dropped_loses_its_stale_origin_copy() {
+        let fixture = MergeFixture::new();
+        let start = fixture.start.clone();
+        fixture.origin.git(
+            &fixture.clone,
+            &["update-ref", "refs/remotes/origin/part1", &start],
+        );
+
+        fixture.merge_from("part1").unwrap_err();
+
+        let copy = fixture.origin.try_git(
+            &fixture.clone,
+            &["rev-parse", "-q", "--verify", "refs/remotes/origin/part1"],
+        );
+        assert!(!copy.status.success());
     }
 
     #[test]

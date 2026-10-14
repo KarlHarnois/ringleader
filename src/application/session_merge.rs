@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
+use super::base_branch_resolver::BaseBranchResolver;
 use super::merge_report::{ConflictHandoff, MergeReport, UpstreamMerge};
-use super::ports::{HostProbe, MergeOutcome, Multiplexer, Workspace};
+use super::ports::{HostProbe, MergeOutcome, Multiplexer, Workspace, WorkspaceError};
 use super::reconciliation::{ManagedRow, Reconciliation};
 use super::repo_merge::RepoMerge;
 use super::service_error::ServiceError;
@@ -42,13 +43,42 @@ impl SessionMerge {
     ) -> Result<MergeReport, ServiceError> {
         let session = row.session();
         self.refuse_unsafe_merge(row)?;
-        let upstream = self.upstream_of(session, reconciliation, config)?;
-        self.workspace
-            .fetch_upstream(session.worktree_path(), &upstream)?;
+        let upstream = self.fetch_upstream(session, reconciliation, config)?;
         self.refuse_unsafe_merge_now(session, reconciliation, config)?;
         let merge = self.merge_fetched(session, &upstream)?;
         let handoff = self.hand_off_conflicts(session, &merge);
         Ok(MergeReport::new(session.name(), merge, handoff))
+    }
+
+    fn fetch_upstream(
+        &self,
+        session: &Session,
+        reconciliation: &Reconciliation,
+        config: &Config,
+    ) -> Result<BaseBranch, ServiceError> {
+        let upstream = self.upstream_of(session, reconciliation, config)?;
+        match self
+            .workspace
+            .fetch_upstream(session.worktree_path(), &upstream)
+        {
+            Ok(()) => Ok(upstream),
+            Err(WorkspaceError::NotOnOrigin { .. }) => {
+                self.fetch_upstream_chosen_again(session, reconciliation, config)
+            }
+            Err(failure) => Err(failure.into()),
+        }
+    }
+
+    fn fetch_upstream_chosen_again(
+        &self,
+        session: &Session,
+        reconciliation: &Reconciliation,
+        config: &Config,
+    ) -> Result<BaseBranch, ServiceError> {
+        let upstream = self.upstream_of(session, reconciliation, config)?;
+        self.workspace
+            .fetch_upstream(session.worktree_path(), &upstream)?;
+        Ok(upstream)
     }
 
     fn upstream_of(
@@ -58,14 +88,17 @@ impl SessionMerge {
         config: &Config,
     ) -> Result<BaseBranch, ServiceError> {
         let repos = RepoMerge::new(self.host.as_ref());
+        let worktree = session.worktree_path();
+        let base_branch = BaseBranchResolver::new(self.workspace.as_ref()).resolve(
+            worktree,
+            session.requested_base_branch(),
+            repos.configured_base_branch(session, config.repos()),
+        )?;
         let session_branches =
             repos.session_branches_in(session.repo_path(), reconciliation.entries());
         UpstreamResolver::new(self.workspace.as_ref())
             .skipping(session_branches)
-            .resolve(
-                session.worktree_path(),
-                repos.base_branch_of(session, config.repos()),
-            )
+            .resolve(worktree, base_branch)
     }
 
     fn merge_fetched(
@@ -259,6 +292,15 @@ mod tests {
 
         fn workspace() -> FakeWorkspace {
             ServiceFixture::workspace_for(&[&Self::session()])
+        }
+
+        fn workspace_holding(branches: &[Branch]) -> FakeWorkspace {
+            let worktree = Self::session().worktree_path().to_path_buf();
+            let tips: Vec<(Branch, &str)> = branches
+                .iter()
+                .map(|branch| (branch.clone(), FakeWorkspace::DEFAULT_START))
+                .collect();
+            Self::workspace().with_branch_tips(&worktree, &tips)
         }
 
         fn conflicted() -> ServiceFixture {
@@ -562,12 +604,59 @@ mod tests {
     #[test]
     fn a_requested_base_branch_is_merged_over_the_configured_one() {
         let requested = ServiceFixture::session_based_on(MergeFixture::NAME, "release");
-        let fixture =
-            MergeFixture::waiting_as(requested).with_config(MergeFixture::config_with_develop());
+        let release = MergeFixture::workspace_holding(&[Branch::Local("release".to_string())]);
+        let fixture = MergeFixture::waiting_as(requested)
+            .with_workspace(release)
+            .with_config(MergeFixture::config_with_develop());
 
         MergeFixture::merge(&fixture).unwrap();
 
         assert!(MergeFixture::fetched_branch(&fixture, "release"));
+    }
+
+    #[test]
+    fn a_requested_base_branch_that_no_longer_exists_gives_way_to_origins_default() {
+        let fixture = MergeFixture::waiting_as(ServiceFixture::session_based_on(
+            MergeFixture::NAME,
+            "part1",
+        ));
+
+        MergeFixture::merge(&fixture).unwrap();
+
+        assert!(MergeFixture::fetched_branch(&fixture, "main"));
+        assert!(!MergeFixture::fetched_branch(&fixture, "part1"));
+    }
+
+    #[test]
+    fn a_requested_base_branch_origin_dropped_gives_way_in_the_same_pull() {
+        let requested = ServiceFixture::session_based_on(MergeFixture::NAME, "part1");
+        let dropped = MergeFixture::workspace_holding(&[
+            Branch::origin_copy_of("part1"),
+            Branch::origin_copy_of("main"),
+        ])
+        .without_branch_on_origin("part1");
+        let fixture = MergeFixture::waiting_as(requested).with_workspace(dropped);
+
+        let report = MergeFixture::merge(&fixture).unwrap();
+
+        assert_eq!(report.summary(), "merged origin/main into fix-auth");
+    }
+
+    #[test]
+    fn a_requested_base_branch_still_held_locally_is_refused_when_origin_lacks_it() {
+        let requested = ServiceFixture::session_based_on(MergeFixture::NAME, "part1");
+        let unpushed = MergeFixture::workspace_holding(&[Branch::Local("part1".to_string())])
+            .without_branch_on_origin("part1");
+        let fixture = MergeFixture::waiting_as(requested).with_workspace(unpushed);
+
+        let error = MergeFixture::merge(&fixture).unwrap_err();
+
+        assert_eq!(
+            error,
+            ServiceError::Invalid(
+                "origin has no branch part1, push it or merge by hand".to_string()
+            )
+        );
     }
 
     #[test]

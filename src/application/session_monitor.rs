@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use super::base_branch_resolver::BaseBranchResolver;
 use super::diff_base_resolver::DiffBaseResolver;
 use super::pending::Pending;
 use super::ports::{Clock, HostProbe, Multiplexer, StartPoint, Workspace};
@@ -94,7 +95,10 @@ impl SessionMonitor {
             workspace: Arc::clone(&self.diff_workspace),
             worktree: session.worktree_path().to_path_buf(),
             recorded: StartPoint::from_base_commit(session.base_commit()),
-            base_branch: repos.base_branch_of(session, config.repos()).cloned(),
+            requested: session.requested_base_branch().cloned(),
+            configured: repos
+                .configured_base_branch(session, config.repos())
+                .cloned(),
             session_branches: repos.session_branches_in(session.repo_path(), sessions),
         }
     }
@@ -104,16 +108,23 @@ struct DiffMeasurement {
     workspace: Arc<dyn Workspace>,
     worktree: PathBuf,
     recorded: StartPoint,
-    base_branch: Option<BaseBranch>,
+    requested: Option<BaseBranch>,
+    configured: Option<BaseBranch>,
     session_branches: Vec<Branch>,
 }
 
 impl DiffMeasurement {
     fn measure(self) -> Result<DiffStat, ServiceError> {
-        let measured_from = DiffBaseResolver::new(self.workspace.as_ref())
+        let workspace = self.workspace.as_ref();
+        let base_branch = BaseBranchResolver::new(workspace).resolve(
+            &self.worktree,
+            self.requested.as_ref(),
+            self.configured.as_ref(),
+        )?;
+        let measured_from = DiffBaseResolver::new(workspace)
             .skipping(self.session_branches)
-            .resolve(&self.worktree, &self.recorded, self.base_branch.as_ref())?;
-        Ok(self.workspace.diff_stat(&self.worktree, &measured_from)?)
+            .resolve(&self.worktree, &self.recorded, base_branch)?;
+        Ok(workspace.diff_stat(&self.worktree, &measured_from)?)
     }
 }
 
@@ -283,14 +294,33 @@ mod tests {
     #[test]
     fn a_requested_base_branch_wins_over_the_configured_one() {
         let session = ServiceFixture::session_based_on(MonitorFixture::SESSION, "release");
+        let worktree = session.worktree_path().to_path_buf();
+        let release_tip = (
+            Branch::Local("release".to_string()),
+            FakeWorkspace::DEFAULT_START,
+        );
         let fixture = ServiceFixture::new()
             .with_sessions(&[session])
+            .with_workspace(FakeWorkspace::default().with_branch_tips(&worktree, &[release_tip]))
             .with_config(MonitorFixture::config_with_repo_at(ServiceFixture::REPO));
         let release = BaseBranch::new("release").unwrap();
 
         assert_eq!(
-            MonitorFixture::branch_lookups(&fixture),
-            [release.branches_and_origin_copy()]
+            MonitorFixture::branch_lookups(&fixture).last(),
+            Some(&release.branches_and_origin_copy())
+        );
+    }
+
+    #[test]
+    fn a_requested_base_branch_that_no_longer_exists_gives_way_to_the_configured_one() {
+        let session = ServiceFixture::session_based_on(MonitorFixture::SESSION, "part1");
+        let fixture = ServiceFixture::new()
+            .with_sessions(&[session])
+            .with_config(MonitorFixture::config_with_repo_at(ServiceFixture::REPO));
+
+        assert_eq!(
+            MonitorFixture::branch_lookups(&fixture).last(),
+            MonitorFixture::configured_lookups().last()
         );
     }
 }

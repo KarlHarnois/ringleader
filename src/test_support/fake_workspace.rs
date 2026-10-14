@@ -39,6 +39,7 @@ struct WorkspaceState {
     failed_create_leftover: Option<FailedCreateLeftover>,
     partial_removal: bool,
     calls: Vec<String>,
+    missing_on_origin: Vec<String>,
     top_levels: HashMap<PathBuf, PathBuf>,
     version: Option<String>,
 }
@@ -178,6 +179,11 @@ impl FakeWorkspace {
         self
     }
 
+    pub fn without_branch_on_origin(self, branch: &str) -> Self {
+        self.edit(|state| state.missing_on_origin.push(branch.to_string()));
+        self
+    }
+
     pub fn failing(self, operation: &'static str, error: WorkspaceError) -> Self {
         self.edit(|state| state.failures.insert(operation, error));
         self
@@ -283,6 +289,22 @@ impl FakeWorkspace {
 }
 
 impl WorkspaceState {
+    fn fetch_from_origin(
+        &mut self,
+        worktree: &Path,
+        branch: &BaseBranch,
+    ) -> Result<(), WorkspaceError> {
+        if !self.missing_on_origin.contains(&branch.to_string()) {
+            return Ok(());
+        }
+        let origin_copy = branch.origin_copy();
+        self.tips
+            .retain(|(owner, tipped, _)| !(owner == worktree && *tipped == origin_copy));
+        Err(WorkspaceError::NotOnOrigin {
+            branch: branch.to_string(),
+        })
+    }
+
     fn add_branch(&mut self, repo: &Path, name: &str, tip: &str) {
         self.branches.push(FakeBranch {
             repo: repo.to_path_buf(),
@@ -678,7 +700,8 @@ impl Workspace for FakeWorkspace {
         self.call(
             "fetch_upstream",
             format!("{} {branch_on_origin}", worktree.display()),
-        )
+        )?;
+        self.edit(|state| state.fetch_from_origin(worktree, branch_on_origin))
     }
 
     fn merge_upstream(
