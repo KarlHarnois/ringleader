@@ -9,6 +9,7 @@ pub mod lock;
 pub mod multiplexer;
 pub mod pull_requests;
 pub mod repo_scanner;
+pub mod scratch_space;
 pub mod session_registry;
 pub mod unmerged_commits;
 pub mod workspace;
@@ -26,6 +27,7 @@ pub use multiplexer::{
 };
 pub use pull_requests::{PullRequestError, PullRequests};
 pub use repo_scanner::{RepoScanner, ScanError, ScanOutcome};
+pub use scratch_space::{ScratchSpace, ScratchSpaceError};
 pub use session_registry::{RegistryError, SessionRegistry};
 pub use unmerged_commits::UnmergedCommits;
 pub use workspace::{StartPoint, Workspace, WorkspaceError, WorktreeEntry};

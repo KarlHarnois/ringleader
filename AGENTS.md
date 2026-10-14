@@ -27,8 +27,8 @@ When no rule covers a case, choose what these values favor. When two conflict, t
 - Stage each new file by path with `git add` before running any `nix` command, because `nix develop`, `nix build`, and `nix flake check` ignore files outside the git index.
 - Every ad-hoc tmux command, such as a binding experiment, runs as `env -u TMUX -u TMUX_PANE tmux -u -S <tempdir>/x.sock -f /dev/null ...` and ends with `kill-server` on that socket. `nix develop` passes `$TMUX` through, so a bare `tmux` command reaches the user's live server. Never touch the default server, the server named in `$TMUX`, or the owner's real Ringleader server at `$XDG_RUNTIME_DIR/ringleader/tmux/tmux.sock`. Keep the socket path under 100 bytes, because tmux rejects a longer one with `File name too long`. Use a directory from `mktemp -d` under `/tmp`.
 - Every manual run of the `ringleader` binary, TUI or CLI, uses throwaway state, because `main` resolves the real XDG paths, and the private tmux server's socket lives under `XDG_RUNTIME_DIR`.
-  - Create `<tempdir>` with `mktemp -d /tmp/rl.XXXXXX`, and inside it `config/ringleader`, `state`, `data`, `run`, `repos`, and `home`.
-  - The prefix is `env -u TMUX -u TMUX_PANE -u RINGLEADER_CONFIG XDG_CONFIG_HOME=<tempdir>/config XDG_STATE_HOME=<tempdir>/state XDG_DATA_HOME=<tempdir>/data XDG_RUNTIME_DIR=<tempdir>/run HOME=<tempdir>/home SHELL=sh` followed by the hermetic git environment below. The throwaway `XDG_RUNTIME_DIR` and `XDG_STATE_HOME` keep a run off the owner's real private server and state, and the rest keeps the owner's shell and git startup files out of the run.
+  - Create `<tempdir>` with `mktemp -d /tmp/rl.XXXXXX`, and inside it `config/ringleader`, `state`, `data`, `run`, `tmp`, `repos`, and `home`.
+  - The prefix is `env -u TMUX -u TMUX_PANE -u RINGLEADER_CONFIG XDG_CONFIG_HOME=<tempdir>/config XDG_STATE_HOME=<tempdir>/state XDG_DATA_HOME=<tempdir>/data XDG_RUNTIME_DIR=<tempdir>/run TMPDIR=<tempdir>/tmp HOME=<tempdir>/home SHELL=sh` followed by the hermetic git environment below. The throwaway `XDG_RUNTIME_DIR`, `XDG_STATE_HOME`, and `TMPDIR` keep a run off the owner's real private server, state, and scratch directories, and the rest keeps the owner's shell and git startup files out of the run.
   - Every tmux command typed for Ringleader's server uses the prefix and passes `-S <tempdir>/run/ringleader/tmux/tmux.sock`.
   - Before the first run, write `<tempdir>/config/ringleader/config.toml` with one stand-in agent, `name = "stand-in"` and `command = "sh"`, never `claude` or `opencode`.
   - Build fixture repos under `<tempdir>/repos` with the hermetic git environment, and run the binary by absolute path with `<tempdir>/repos` as the working directory, so no real repository is in scope.
@@ -310,6 +310,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── rename_request.rs     # RenameRequest, the old and new names
     │   ├── branch_availability.rs # BranchAvailability, refuses a branch name that exists or holds other branches, for create and rename
     │   ├── session_restart.rs    # SessionRestart: restart of an Exited or Stopped session
+    │   ├── session_scratch.rs    # SessionScratch, makes a session's scratch directory before its agent starts, removes it with the session, and logs either failure
     │   ├── agent_hooks.rs        # AgentHooks, schedules an agent's startup input in the background and types its rename input
     │   ├── worktree_inspection.rs # WorktreeInspection, the worktree checks restart, delete, and doctor share
     │   ├── session_deletion.rs   # SessionDeletion: delete_session steps 5 to 8 and forget
@@ -348,6 +349,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │       ├── agent_launch.rs       # AgentLaunch, the argv, environment, and worktree an agent starts with
     │       ├── config_source.rs      # ConfigSource trait
     │       ├── repo_scanner.rs       # RepoScanner trait
+    │       ├── scratch_space.rs      # ScratchSpace trait
     │       ├── pull_requests.rs      # PullRequests trait
     │       ├── host_probe.rs         # HostProbe trait
     │       ├── clock.rs              # Clock trait
@@ -361,12 +363,14 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── process_environment.rs # ProcessEnvironment, the environment snapshot main captures once
     │   ├── xdg_paths.rs          # XdgPaths, the config, state, data, and runtime directories and the private tmux server's socket and config
     │   ├── directory_repo_scanner.rs # DirectoryRepoScanner
+    │   ├── directory_scratch_space.rs # DirectoryScratchSpace, the scratch directories inside the private ringleader-<uid> folder of the temp base
     │   ├── mount_table.rs        # MountTable, the network and FUSE mount points the scan skips
     │   ├── toml_config_source.rs # TomlConfigSource
     │   ├── raw_config.rs         # RawConfig, the config.toml shape before the load checks
     │   ├── config_file_writer.rs # ConfigFileWriter, the read-only checks and mode-keeping config write
     │   ├── json_session_registry.rs # JsonSessionRegistry
     │   ├── file_lock.rs          # FileLock
+    │   ├── fnv_hash.rs           # FnvHash, the FNV-1a hash of the server config and of a worktree path
     │   ├── gh_pull_requests.rs   # GhPullRequests, looks up the pull requests of a repo's branches in one gh GraphQL call
     │   ├── gh_query.rs           # GhQuery, the aliased GraphQL query for a repo's branches
     │   ├── gh_listing.rs         # GhListing, the viewer's or repo owner's newest pull request per branch in a gh response
@@ -476,6 +480,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
         ├── fake_multiplexer.rs      # FakeMultiplexer
         ├── fake_config_source.rs    # FakeConfigSource
         ├── fake_repo_scanner.rs     # FakeRepoScanner
+        ├── fake_scratch_space.rs    # FakeScratchSpace
         ├── fake_pull_requests.rs    # FakePullRequests
         ├── log_capture.rs           # LogCapture, the test logger that keeps warnings for assertions
         ├── fake_host_probe.rs       # FakeHostProbe
@@ -510,6 +515,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
 - Blocking TUI operations (create, delete, rename, restart, and the delete measurement) run behind a busy message, and the event loop drops the key and paste events queued while they ran.
 - A dialog's hint line lists only keys whose meaning is Ringleader's own, such as `Enter create`, `Ctrl-S create`, and `Esc cancel`, and the keys that choose from a list, such as `↑ ↓ j k choose`. It never lists text-editing keys like cursor movement, Ctrl-U, or Ctrl-W, because every terminal user already expects them. A new editing key goes into `TextField` with its usual terminal meaning, not into a hint.
 - Logs go to `$XDG_STATE_HOME/ringleader/app.log` through `env_logger`, never to the terminal.
+- A session's scratch directory is `ringleader-<uid>/<hash>` inside the temp base, where the hash is the FNV-1a hash of the recorded worktree path. The temp base is Ringleader's own `TMPDIR` when it is an absolute path, and `/tmp` otherwise. Create and restart make the scratch directory and start the agent with `TMPDIR` set to it, unless the agent's `set_env` sets `TMPDIR`. Delete removes the scratch directory after the worktree, and forget keeps it. `DirectoryScratchSpace` refuses to make or remove a scratch directory unless `ringleader-<uid>` is a directory the user owns with no group or other permission bits, because other users share the temp base. A failure to make or remove a scratch directory is logged and never fails the use case. If making it fails, the agent starts with the inherited `TMPDIR`.
 - `AgentHooks` schedules an agent's `startup_input` in the background after create and restart, so the use case returns once the tmux session exists. One typing job runs per session at a time, and a second start for the same session is skipped. The job finds the agent pane once when it starts, then checks only the prompt conditions below before each line. It never rechecks the session's name or registry entry, so a rename during its wait does not reach it. The job waits up to 60 seconds for the first prompt, and each later line waits up to 2 seconds for the prompt to come back, after a short pause that lets the agent take the line before it. The TUI polls the job while it runs. On exit, the CLI after its command and the TUI after restoring the screen release the lock, note the wait on stderr, and wait for the job unless a signal arrives. Its `rename_input` is typed after a rename only when the agent is at its prompt at that moment. An agent is at its prompt when its pane is out of copy mode, shows the cursor, and the text before the cursor on its row is a bare prompt marker and a blank, with no letters or digits. Copy mode would take the keys instead of the agent. Claude hides the cursor in its trust and permission dialogs, an agent still starting has drawn no marker, and an unsent draft puts its text before the cursor. A skipped or failed typing is logged and never fails the use case.
 
 ## CLI exit codes

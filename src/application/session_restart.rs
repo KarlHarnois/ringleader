@@ -6,6 +6,7 @@ use super::ports::{AgentLaunch, HostProbe, Multiplexer, SessionRegistry, Session
 use super::reconciliation::{ManagedRow, Reconciliation};
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
+use super::session_scratch::SessionScratch;
 use super::use_checks::UseChecks;
 use super::worktree_inspection::WorktreeInspection;
 use crate::domain::{Agent, Config, Session};
@@ -15,6 +16,7 @@ pub struct SessionRestart {
     multiplexer: Arc<dyn Multiplexer>,
     host: Arc<dyn HostProbe>,
     registry: Arc<dyn SessionRegistry>,
+    scratch: SessionScratch,
     hooks: Arc<AgentHooks>,
 }
 
@@ -25,6 +27,7 @@ impl SessionRestart {
             multiplexer: ports.tmux().multiplexer(),
             host: ports.repos().host(),
             registry: ports.state().registry(),
+            scratch: SessionScratch::new(ports),
             hooks,
         }
     }
@@ -46,7 +49,8 @@ impl SessionRestart {
         let checks = UseChecks::new(self.host.as_ref(), config, config_path);
         let agent = checks.agent_for_restart(session.agent())?;
         self.check_worktree(session)?;
-        let restarted = self.revive(row, Self::launch(agent, session), reconciliation, config)?;
+        let launch = self.scratch.prepare(Self::launch(agent, session));
+        let restarted = self.revive(row, launch, reconciliation, config)?;
         self.hooks.after_start(&restarted, agent);
         Ok(restarted)
     }
@@ -274,7 +278,20 @@ mod tests {
         RestartFixture::restart(&fixture).unwrap();
 
         let launch = fixture.multiplexer().launches().pop().unwrap();
-        assert_eq!(launch.env_assignments(), assignments);
+        assert!(launch.env_assignments().starts_with(&assignments));
+    }
+
+    #[test]
+    fn restart_points_the_agent_tmpdir_at_the_session_scratch_directory() {
+        let fixture = RestartFixture::exited();
+
+        RestartFixture::restart(&fixture).unwrap();
+
+        let launch = fixture.multiplexer().launches().pop().unwrap();
+        assert_eq!(
+            launch.env_assignments(),
+            [fixture.tmpdir_assignment("fix-auth")]
+        );
     }
 
     #[test]
