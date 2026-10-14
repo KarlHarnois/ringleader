@@ -122,6 +122,16 @@ mod tests {
 
         fn diff_calls(fixture: &ServiceFixture) -> Vec<String> {
             fixture.service().diff_stats(&[Self::SESSION.to_string()]);
+            Self::recorded_diff_calls(fixture)
+        }
+
+        fn background_diff_calls(fixture: &ServiceFixture) -> Vec<String> {
+            let measurement = fixture.service().start_diff(Self::SESSION).unwrap();
+            measurement.wait_unless(|| false);
+            Self::recorded_diff_calls(fixture)
+        }
+
+        fn recorded_diff_calls(fixture: &ServiceFixture) -> Vec<String> {
             let calls = fixture.workspace().calls();
             calls
                 .into_iter()
@@ -141,6 +151,18 @@ mod tests {
 
         assert_eq!(
             MonitorFixture::diff_calls(&fixture),
+            [MonitorFixture::diff_call_against(
+                MonitorFixture::BASE_BRANCH
+            )]
+        );
+    }
+
+    #[test]
+    fn the_background_diff_uses_the_configured_base_branch_too() {
+        let fixture = MonitorFixture::fixture_with_repo_at(ServiceFixture::REPO);
+
+        assert_eq!(
+            MonitorFixture::background_diff_calls(&fixture),
             [MonitorFixture::diff_call_against(
                 MonitorFixture::BASE_BRANCH
             )]
