@@ -1,18 +1,20 @@
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ReturnKey {
+pub struct HotKey {
     modifiers: Vec<Modifier>,
     key: String,
 }
 
-impl ReturnKey {
-    pub const DEFAULT: &'static str = "C-q";
-    const NAMED_KEYS: [&'static str; 30] = [
+impl HotKey {
+    const NAMED_KEYS: [&'static str; 28] = [
         "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12", "Escape",
         "Enter", "Tab", "BTab", "Space", "BSpace", "Home", "End", "IC", "DC", "PageUp", "PageDown",
-        "PPage", "NPage", "Up", "Down", "Left", "Right",
+        "Up", "Down", "Left", "Right",
     ];
+    const ALIASES: [(&'static str, &'static str); 2] = [("PPage", "PageUp"), ("NPage", "PageDown")];
+    const ARROWS: [(&'static str, &'static str); 4] =
+        [("Up", "↑"), ("Down", "↓"), ("Left", "←"), ("Right", "→")];
     const UNMODIFIABLE_KEYS: [&'static str; 6] =
         ["Enter", "Tab", "BTab", "Escape", "BSpace", "Space"];
     const SPACE: &'static str = "Space";
@@ -25,17 +27,23 @@ impl ReturnKey {
     ];
 
     pub fn parse(text: &str) -> Option<Self> {
-        let mut rest = text;
-        let mut modifiers = Vec::new();
-        while let Some((modifier, after)) = Modifier::strip(rest) {
-            modifiers.push(modifier);
-            rest = after;
-        }
+        let (modifiers, rest) = Modifier::split(text);
         let key = Self {
             key: Self::normalized(&modifiers, rest),
             modifiers,
         };
         key.is_reachable().then_some(key)
+    }
+
+    pub fn parse_valid<T: AsRef<str>>(texts: impl IntoIterator<Item = T>) -> Vec<Self> {
+        texts
+            .into_iter()
+            .filter_map(|text| Self::parse(text.as_ref()))
+            .collect()
+    }
+
+    pub fn has_alt(&self) -> bool {
+        self.has(Modifier::Meta)
     }
 
     pub fn shadows_agent_input(&self) -> bool {
@@ -57,15 +65,29 @@ impl ReturnKey {
         let control_character = modifiers.contains(&Modifier::Control) && key.chars().count() == 1;
         match control_character {
             true => key.to_ascii_lowercase(),
-            false => key.to_string(),
+            false => Self::unaliased(key).to_string(),
         }
+    }
+
+    fn unaliased(key: &str) -> &str {
+        Self::ALIASES
+            .iter()
+            .find(|(alias, _)| *alias == key)
+            .map_or(key, |(_, name)| name)
     }
 
     fn displayed_key(&self) -> String {
         match self.has(Modifier::Control) && self.single_character().is_some() {
             true => self.key.to_uppercase(),
-            false => self.key.clone(),
+            false => Self::arrow(&self.key).unwrap_or(&self.key).to_string(),
         }
+    }
+
+    fn arrow(key: &str) -> Option<&'static str> {
+        Self::ARROWS
+            .iter()
+            .find(|(name, _)| *name == key)
+            .map(|(_, arrow)| *arrow)
     }
 
     fn is_typed_character(&self) -> bool {
@@ -116,19 +138,13 @@ impl ReturnKey {
     }
 }
 
-impl Default for ReturnKey {
-    fn default() -> Self {
-        Self::parse(Self::DEFAULT).expect("the default return key parses")
-    }
-}
-
-impl fmt::Display for ReturnKey {
+impl fmt::Display for HotKey {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(&self.tmux_name())
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Modifier {
     Control,
     Meta,
@@ -137,6 +153,18 @@ enum Modifier {
 
 impl Modifier {
     const ALL: [Self; 3] = [Self::Control, Self::Meta, Self::Shift];
+
+    fn split(text: &str) -> (Vec<Self>, &str) {
+        let mut rest = text;
+        let mut modifiers = Vec::new();
+        while let Some((modifier, after)) = Self::strip(rest) {
+            modifiers.push(modifier);
+            rest = after;
+        }
+        modifiers.sort();
+        modifiers.dedup();
+        (modifiers, rest)
+    }
 
     fn strip(text: &str) -> Option<(Self, &str)> {
         Self::ALL.into_iter().find_map(|modifier| {
@@ -171,13 +199,13 @@ mod tests {
     impl KeyFixture {
         fn assert_parse(texts: &[&str]) {
             for text in texts {
-                assert!(ReturnKey::parse(text).is_some(), "{text:?} should parse");
+                assert!(HotKey::parse(text).is_some(), "{text:?} should parse");
             }
         }
 
         fn assert_refused(texts: &[&str]) {
             for text in texts {
-                assert!(ReturnKey::parse(text).is_none(), "{text:?} should fail");
+                assert!(HotKey::parse(text).is_none(), "{text:?} should fail");
             }
         }
     }
@@ -209,9 +237,21 @@ mod tests {
 
     #[test]
     fn an_uppercase_letter_after_ctrl_means_the_same_key_as_the_lowercase_one() {
-        let key = ReturnKey::parse("C-Q").unwrap();
+        let key = HotKey::parse("C-Q").unwrap();
 
-        assert_eq!(key, ReturnKey::default());
+        assert_eq!(key, HotKey::parse("C-q").unwrap());
+    }
+
+    #[test]
+    fn modifier_order_and_page_key_aliases_name_the_same_key() {
+        for (text, same) in [
+            ("M-C-x", "C-M-x"),
+            ("C-C-x", "C-x"),
+            ("NPage", "PageDown"),
+            ("C-PPage", "C-PageUp"),
+        ] {
+            assert_eq!(HotKey::parse(text), HotKey::parse(same), "{text}");
+        }
     }
 
     #[test]
@@ -229,40 +269,35 @@ mod tests {
 
     #[test]
     fn the_tmux_spelling_is_single_quoted() {
-        let key = ReturnKey::parse("M-}").unwrap();
+        let key = HotKey::parse("M-}").unwrap();
 
         assert_eq!(key.tmux_spelling(), "'M-}'");
     }
 
     #[test]
     fn the_display_form_names_the_modifiers() {
-        let shown = ["C-q", "M-x", "S-F1", "C-Up", "~"]
-            .map(|text| ReturnKey::parse(text).unwrap().display());
+        let shown =
+            ["C-q", "M-x", "S-F1", "C-Up", "~"].map(|text| HotKey::parse(text).unwrap().display());
 
-        assert_eq!(shown, ["Ctrl-Q", "Alt-x", "Shift-F1", "Ctrl-Up", "~"]);
+        assert_eq!(shown, ["Ctrl-Q", "Alt-x", "Shift-F1", "Ctrl-↑", "~"]);
     }
 
     #[test]
     fn keys_agents_need_and_typed_characters_shadow_agent_input() {
         for text in ["C-c", "C-d", "Enter", "Escape", "~", "x"] {
-            let key = ReturnKey::parse(text).unwrap();
+            let key = HotKey::parse(text).unwrap();
 
             assert!(key.shadows_agent_input(), "{text}");
         }
     }
 
     #[test]
-    fn the_default_and_other_rare_keys_leave_agent_input_alone() {
-        for text in ["C-q", "M-x", "F12", "M-}"] {
+    fn the_default_keys_and_other_rare_keys_leave_agent_input_alone() {
+        for text in ["C-q", "M-j", "M-Down", "M-k", "M-Up", "M-x", "F12", "M-}"] {
             assert!(
-                !ReturnKey::parse(text).unwrap().shadows_agent_input(),
+                !HotKey::parse(text).unwrap().shadows_agent_input(),
                 "{text}"
             );
         }
-    }
-
-    #[test]
-    fn the_default_is_ctrl_q() {
-        assert_eq!(ReturnKey::default().to_string(), "C-q");
     }
 }

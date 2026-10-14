@@ -2,8 +2,9 @@ use std::path::{Path, PathBuf};
 
 use super::ports::{AgentLaunch, SessionSpec, StartPoint};
 use crate::domain::{
-    Agent, BaseBranch, Config, InvalidName, NamingScheme, Registration, Repo, ReturnKey, Session,
-    SessionMetadata, SessionName, SessionRepo, SessionSize, SessionWorktree, TmuxAddress,
+    Agent, AgentMode, BaseBranch, Config, InvalidName, KeyBindings, NamingScheme, Registration,
+    Repo, Session, SessionMetadata, SessionName, SessionRepo, SessionSize, SessionWorktree,
+    TmuxAddress,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,6 +13,7 @@ pub struct CreateRequest {
     repo: Repo,
     agent: Option<String>,
     base_branch: Option<BaseBranch>,
+    mode: AgentMode,
     prompt: String,
 }
 
@@ -22,6 +24,7 @@ impl CreateRequest {
             repo,
             agent: None,
             base_branch: None,
+            mode: AgentMode::default(),
             prompt: String::new(),
         }
     }
@@ -38,6 +41,10 @@ impl CreateRequest {
             base_branch: Some(base_branch),
             ..self
         }
+    }
+
+    pub fn with_mode(self, mode: AgentMode) -> Self {
+        Self { mode, ..self }
     }
 
     pub fn with_prompt(self, prompt: &str) -> Self {
@@ -60,6 +67,10 @@ impl CreateRequest {
         self.agent.as_deref()
     }
 
+    pub fn mode(&self) -> AgentMode {
+        self.mode
+    }
+
     pub fn prompt(&self) -> &str {
         &self.prompt
     }
@@ -74,7 +85,7 @@ pub struct CreationPlan {
     argv: Vec<String>,
     removed_env_names: Vec<String>,
     size: SessionSize,
-    return_key: ReturnKey,
+    key_bindings: KeyBindings,
 }
 
 impl CreationPlan {
@@ -85,7 +96,7 @@ impl CreationPlan {
     ) -> Result<Self, InvalidName> {
         let name = SessionName::new(&request.name)?;
         Ok(Self {
-            argv: agent.launch_argv(&name, &request.prompt),
+            argv: agent.launch_argv(&name, request.mode, &request.prompt),
             name,
             repo: request.repo.clone(),
             base_branch: request
@@ -96,7 +107,7 @@ impl CreationPlan {
             agent: agent.clone(),
             removed_env_names: config.agent_env_union(),
             size: config.session_size(),
-            return_key: config.return_key().clone(),
+            key_bindings: config.key_bindings().clone(),
         })
     }
 
@@ -138,7 +149,7 @@ impl CreationPlan {
         SessionSpec::new(&self.tmux_name(), self.metadata(start), launch)
             .sized(self.size)
             .removing_env_names(&self.removed_env_names)
-            .with_return_key(&self.return_key)
+            .with_key_bindings(&self.key_bindings)
     }
 
     pub fn session(&self, start: &StartPoint, socket: &Path, created_at: u64) -> Session {

@@ -16,7 +16,7 @@ use crate::adapters::server_files::ServerFiles;
 use crate::adapters::tmux_command::TmuxCommand;
 use crate::adapters::tmux_multiplexer::TmuxMultiplexer;
 use crate::adapters::tmux_server_config::TmuxServerConfig;
-use crate::domain::ReturnKey;
+use crate::domain::KeyBindings;
 
 pub struct TmuxTestServer {
     directory: TempDir,
@@ -29,7 +29,7 @@ impl TmuxTestServer {
     const POLL_INTERVAL: Duration = Duration::from_millis(20);
 
     pub fn new() -> Self {
-        Self::with_config(&TmuxServerConfig::new(&ReturnKey::default()).render())
+        Self::with_config(&TmuxServerConfig::new(&KeyBindings::default()).render())
     }
 
     pub fn with_config(config_text: &str) -> Self {

@@ -1,9 +1,11 @@
+use std::iter::once;
 use std::path::Path;
 
 use super::agent::Agent;
 use super::config_draft::ConfigDraft;
+use super::hot_key::HotKey;
+use super::key_bindings::KeyBindings;
 use super::repo_name::RepoName;
-use super::return_key::ReturnKey;
 
 pub struct ConfigChecks<'a> {
     draft: &'a ConfigDraft,
@@ -34,7 +36,7 @@ impl<'a> ConfigChecks<'a> {
 
     pub fn failures(mut self) -> Vec<String> {
         self.check_absolute("worktree_root", self.draft.raw_worktree_root());
-        self.check_return_key();
+        self.check_keys();
         self.check_session_size();
         self.check_idle_seconds();
         self.check_scan_depth();
@@ -58,13 +60,62 @@ impl<'a> ConfigChecks<'a> {
         }
     }
 
-    fn check_return_key(&mut self) {
-        let raw = self.draft.raw_return_key();
-        if ReturnKey::parse(raw).is_none() {
+    fn check_keys(&mut self) {
+        let settings = self.key_settings();
+        for (setting, raw) in &settings {
+            self.check_key(setting, raw);
+        }
+        self.check_repeated_keys(&settings);
+    }
+
+    fn key_settings(&self) -> Vec<(&'static str, String)> {
+        let draft = self.draft;
+        let listed = |setting: &'static str, keys: Vec<String>| {
+            keys.into_iter().map(move |key| (setting, key))
+        };
+        let return_key = draft.raw_return_key().to_string();
+        once((KeyBindings::RETURN_KEY_SETTING, return_key))
+            .chain(listed(
+                KeyBindings::NEXT_SESSION_SETTING,
+                draft.raw_next_session_keys(),
+            ))
+            .chain(listed(
+                KeyBindings::PREVIOUS_SESSION_SETTING,
+                draft.raw_previous_session_keys(),
+            ))
+            .collect()
+    }
+
+    fn check_key(&mut self, setting: &str, raw: &str) {
+        if HotKey::parse(raw).is_none() {
             self.fail(format!(
-                "return_key: `{}` must be a key a terminal can send, such as C-q, M-x, or F12: optional C-, M-, and S- modifiers, then a key name or one printable character other than a quote or \\. After C- the character must be a letter other than i or m, which terminals send as Tab and Enter, or ], ^, or _. S- cannot precede a character, and C- and S- cannot precede Enter, Tab, BTab, Escape, BSpace, or Space, except C-Space",
+                "{setting}: `{}` must be a key a terminal can send, such as C-q, M-x, or F12: optional C-, M-, and S- modifiers, then a key name or one printable character other than a quote or \\. After C- the character must be a letter other than i or m, which terminals send as Tab and Enter, or ], ^, or _. S- cannot precede a character, and C- and S- cannot precede Enter, Tab, BTab, Escape, BSpace, or Space, except C-Space",
                 raw.escape_default()
             ));
+        }
+    }
+
+    fn check_repeated_keys(&mut self, settings: &[(&str, String)]) {
+        let mut seen: Vec<(&str, HotKey)> = Vec::new();
+        for (setting, raw) in settings {
+            let Some(key) = HotKey::parse(raw) else {
+                continue;
+            };
+            match seen.iter().find(|(_, earlier)| *earlier == key) {
+                Some((earlier_setting, _)) => {
+                    self.fail(Self::repeated_key_failure(setting, raw, earlier_setting))
+                }
+                None => seen.push((setting, key)),
+            }
+        }
+    }
+
+    fn repeated_key_failure(setting: &str, raw: &str, earlier_setting: &str) -> String {
+        match setting == earlier_setting {
+            true => format!("{setting}: `{raw}` is listed twice"),
+            false => format!(
+                "{setting}: `{raw}` is already bound in {earlier_setting}, and each key can do only one thing"
+            ),
         }
     }
 
@@ -291,7 +342,85 @@ mod tests {
     fn the_return_key_defaults_to_ctrl_q() {
         let config = crate::domain::Config::new(&ChecksFixture::draft()).unwrap();
 
-        assert_eq!(config.return_key().to_string(), "C-q");
+        assert_eq!(config.key_bindings().return_key().to_string(), "C-q");
+    }
+
+    #[test]
+    fn next_and_previous_keys_no_keystroke_reaches_fail_with_their_setting_named() {
+        for key in ["", "C-", "'", "C-}", "S-x", "C-m"] {
+            let next = ChecksFixture::draft().next_session_keys(&[key]);
+            let previous = ChecksFixture::draft().previous_session_keys(&[key]);
+
+            ChecksFixture::fails_on(next, "next_session_keys");
+            ChecksFixture::fails_on(previous, "previous_session_keys");
+        }
+    }
+
+    #[test]
+    fn a_key_bound_twice_fails_with_the_later_setting_named() {
+        for (draft, setting) in [
+            (
+                ChecksFixture::draft().next_session_keys(&["C-q"]),
+                "next_session_keys",
+            ),
+            (
+                ChecksFixture::draft().previous_session_keys(&["C-Q"]),
+                "previous_session_keys",
+            ),
+            (
+                ChecksFixture::draft()
+                    .next_session_keys(&["M-Down"])
+                    .previous_session_keys(&["M-Down"]),
+                "previous_session_keys",
+            ),
+            (
+                ChecksFixture::draft().next_session_keys(&["M-j", "M-j"]),
+                "next_session_keys",
+            ),
+            (
+                ChecksFixture::draft()
+                    .return_key("C-M-x")
+                    .next_session_keys(&["M-C-x"]),
+                "next_session_keys",
+            ),
+            (
+                ChecksFixture::draft()
+                    .next_session_keys(&["PageDown"])
+                    .previous_session_keys(&["NPage"]),
+                "previous_session_keys",
+            ),
+        ] {
+            ChecksFixture::fails_on(draft, setting);
+        }
+    }
+
+    #[test]
+    fn a_written_key_takes_itself_out_of_a_default_list_it_would_repeat() {
+        let draft = ChecksFixture::draft().next_session_keys(&["M-k"]);
+
+        let config = crate::domain::Config::new(&draft).unwrap();
+
+        let previous = config.key_bindings().previous_session_keys();
+        assert_eq!(previous, HotKey::parse_valid(["M-Up"]));
+    }
+
+    #[test]
+    fn a_key_listed_twice_in_one_setting_is_named_as_listed_twice() {
+        let draft = ChecksFixture::draft().next_session_keys(&["M-j", "M-Down", "M-j"]);
+
+        let failures = ChecksFixture::failures(&draft);
+
+        assert_eq!(failures, ["next_session_keys: `M-j` is listed twice"]);
+    }
+
+    #[test]
+    fn empty_session_key_lists_pass() {
+        let none: [&str; 0] = [];
+        let draft = ChecksFixture::draft()
+            .next_session_keys(&none)
+            .previous_session_keys(&none);
+
+        assert!(ChecksFixture::failures(&draft).is_empty());
     }
 
     #[test]
