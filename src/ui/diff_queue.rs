@@ -39,7 +39,7 @@ impl DiffQueue {
             .for_each(Measurement::supersede);
     }
 
-    pub fn tick(
+    pub fn poll(
         &mut self,
         now: Instant,
         visible: &[String],
@@ -215,9 +215,9 @@ mod tests {
         ) -> Result<(), ServiceError> {
             let mut outcome = Ok(());
             Deadline::for_background_work().wait_until(|| {
-                let ticked = queue.tick(now, visible, service);
+                let polled = queue.poll(now, visible, service);
                 if outcome.is_ok() {
-                    outcome = ticked;
+                    outcome = polled;
                 }
                 !queue.awaits_results()
             });
@@ -248,7 +248,7 @@ mod tests {
         let visible = QueueFixture::visible(&QueueFixture::NAMES);
 
         for _ in 0..3 {
-            queue.tick(Instant::now(), &visible, &service).unwrap();
+            queue.poll(Instant::now(), &visible, &service).unwrap();
             queue.refresh_soon();
         }
         let two_started = held.wait_for(2);
@@ -266,7 +266,7 @@ mod tests {
         let mut queue = DiffQueue::default();
         let start = Instant::now();
         queue
-            .tick(
+            .poll(
                 start,
                 &QueueFixture::visible(&QueueFixture::NAMES),
                 &service,
@@ -295,8 +295,8 @@ mod tests {
         let start = Instant::now();
 
         let later = start + Duration::from_secs(4);
-        queue.tick(start, &visible, &service).unwrap();
-        queue.tick(later, &visible, &service).unwrap();
+        queue.poll(start, &visible, &service).unwrap();
+        queue.poll(later, &visible, &service).unwrap();
         held.release();
         QueueFixture::settle_at(&mut queue, later, &visible, &service).unwrap();
 
@@ -311,7 +311,7 @@ mod tests {
         let mut queue = DiffQueue::default();
         let visible = QueueFixture::visible(&["alpha"]);
         let start = Instant::now();
-        queue.tick(start, &visible, &service).unwrap();
+        queue.poll(start, &visible, &service).unwrap();
         held.wait_for(1);
 
         fixture.workspace().change_diff(
@@ -319,9 +319,9 @@ mod tests {
             DiffStat::from_changes([], 9),
         );
         queue.refresh_soon();
-        queue.tick(start, &visible, &service).unwrap();
+        queue.poll(start, &visible, &service).unwrap();
         QueueFixture::wait_for_diff_calls(&fixture, 1);
-        queue.tick(start, &visible, &service).unwrap();
+        queue.poll(start, &visible, &service).unwrap();
         held.release();
         QueueFixture::settle_at(&mut queue, start, &visible, &service).unwrap();
 
@@ -364,9 +364,9 @@ mod tests {
         let mut queue = DiffQueue::default();
         let start = Instant::now();
 
-        queue.tick(start, &[], &service).unwrap();
+        queue.poll(start, &[], &service).unwrap();
         queue
-            .tick(start, &QueueFixture::visible(&["alpha"]), &service)
+            .poll(start, &QueueFixture::visible(&["alpha"]), &service)
             .unwrap();
 
         assert!(queue.awaits_results());
@@ -423,7 +423,7 @@ mod tests {
         let mut queue = DiffQueue::default();
         let start = Instant::now();
         queue
-            .tick(
+            .poll(
                 start,
                 &QueueFixture::visible(&QueueFixture::NAMES),
                 &service,
@@ -433,7 +433,7 @@ mod tests {
 
         let remaining = QueueFixture::visible(&["beta", "gamma"]);
         queue.keep_only(&remaining);
-        queue.tick(start, &remaining, &service).unwrap();
+        queue.poll(start, &remaining, &service).unwrap();
         let only_two = held.stays_at(2);
         held.release();
 
@@ -447,7 +447,7 @@ mod tests {
         let service = fixture.service();
         let mut queue = DiffQueue::default();
         let visible = QueueFixture::visible(&["alpha"]);
-        queue.tick(Instant::now(), &visible, &service).unwrap();
+        queue.poll(Instant::now(), &visible, &service).unwrap();
 
         queue.keep_only(&QueueFixture::visible(&["beta"]));
         held.release();

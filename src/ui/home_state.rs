@@ -227,7 +227,7 @@ impl HomeState {
 
     fn poll_diffs(&mut self, now: Instant, service: &SessionService) -> Result<(), ServiceError> {
         let visible = self.sessions.visible_managed();
-        let measured = self.diffs.tick(now, &visible, service);
+        let measured = self.diffs.poll(now, &visible, service);
         self.sessions.apply_diffs(self.diffs.diffs());
         measured
     }
