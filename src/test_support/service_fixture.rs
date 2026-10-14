@@ -3,9 +3,11 @@ use std::sync::Arc;
 
 use super::{
     FakeClock, FakeConfigSource, FakeHostProbe, FakeMultiplexer, FakePullRequests, FakeRepoScanner,
-    FakeSessionRegistry, FakeWorkspace,
+    FakeScratchSpace, FakeSessionRegistry, FakeWorkspace,
 };
-use crate::application::ports::{ConfigError, MergeOutcome, MultiplexerError, WorktreeEntry};
+use crate::application::ports::{
+    ConfigError, MergeOutcome, MultiplexerError, ScratchSpace, WorktreeEntry,
+};
 use crate::application::{
     CorruptRegistry, DiagnosticPaths, LoadedConfig, RepoPorts, ServiceContext, ServicePorts,
     SessionService, StatePorts, TmuxPorts,
@@ -25,6 +27,7 @@ pub struct ServiceFixture {
     host: Arc<FakeHostProbe>,
     pull_requests: Arc<FakePullRequests>,
     clock: Arc<FakeClock>,
+    scratch_space: Arc<FakeScratchSpace>,
     config_error: Option<ConfigError>,
     launch_directory: PathBuf,
     diagnostics: DiagnosticPaths,
@@ -59,6 +62,7 @@ impl ServiceFixture {
             host: Arc::new(Self::host_for(&[])),
             pull_requests: Arc::new(FakePullRequests::new()),
             clock: Arc::new(FakeClock::at(Self::NOW)),
+            scratch_space: Arc::new(FakeScratchSpace::default()),
             config_error: None,
             launch_directory: PathBuf::from(Self::REPO),
             diagnostics: Self::diagnostics(),
@@ -127,6 +131,13 @@ impl ServiceFixture {
     pub fn with_pull_requests(self, pull_requests: FakePullRequests) -> Self {
         Self {
             pull_requests: Arc::new(pull_requests),
+            ..self
+        }
+    }
+
+    pub fn with_scratch_space(self, scratch_space: FakeScratchSpace) -> Self {
+        Self {
+            scratch_space: Arc::new(scratch_space),
             ..self
         }
     }
@@ -200,6 +211,15 @@ impl ServiceFixture {
 
     pub fn pull_requests(&self) -> &FakePullRequests {
         &self.pull_requests
+    }
+
+    pub fn scratch_space(&self) -> &FakeScratchSpace {
+        &self.scratch_space
+    }
+
+    pub fn tmpdir_assignment(&self, name: &str) -> (String, String) {
+        let directory = self.scratch_space.directory(&Self::worktree_path(name));
+        ("TMPDIR".to_string(), directory.display().to_string())
     }
 
     pub fn repo() -> Repo {
@@ -389,12 +409,13 @@ impl ServiceFixture {
         Self::session(name).worktree_path().to_path_buf()
     }
 
-    fn ports(&self) -> ServicePorts {
+    pub fn ports(&self) -> ServicePorts {
         ServicePorts::new(
             StatePorts::new(
                 self.registry.clone(),
                 self.config_source.clone(),
                 self.clock.clone(),
+                self.scratch_space.clone(),
             ),
             RepoPorts::new(
                 self.workspace.clone(),

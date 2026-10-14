@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use super::ports::{
-    Clock, ConfigSource, HostProbe, Multiplexer, PullRequests, RepoScanner, SessionRegistry,
-    Workspace,
+    Clock, ConfigSource, HostProbe, Multiplexer, PullRequests, RepoScanner, ScratchSpace,
+    SessionRegistry, Workspace,
 };
 
 pub struct ServicePorts {
@@ -33,6 +33,7 @@ pub struct StatePorts {
     registry: Arc<dyn SessionRegistry>,
     config_source: Arc<dyn ConfigSource>,
     clock: Arc<dyn Clock>,
+    scratch_space: Arc<dyn ScratchSpace>,
 }
 
 impl StatePorts {
@@ -40,11 +41,13 @@ impl StatePorts {
         registry: Arc<dyn SessionRegistry>,
         config_source: Arc<dyn ConfigSource>,
         clock: Arc<dyn Clock>,
+        scratch_space: Arc<dyn ScratchSpace>,
     ) -> Self {
         Self {
             registry,
             config_source,
             clock,
+            scratch_space,
         }
     }
 
@@ -58,6 +61,10 @@ impl StatePorts {
 
     pub fn clock(&self) -> Arc<dyn Clock> {
         Arc::clone(&self.clock)
+    }
+
+    pub fn scratch_space(&self) -> Arc<dyn ScratchSpace> {
+        Arc::clone(&self.scratch_space)
     }
 }
 
