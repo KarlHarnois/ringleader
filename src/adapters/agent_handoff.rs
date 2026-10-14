@@ -10,7 +10,6 @@ use super::handoff_contents::HandoffContents;
 use super::live_process::LiveProcess;
 use super::process_environment::ProcessEnvironment;
 use crate::application::ports::AgentLaunch;
-use crate::domain::Agent;
 
 static HANDOFF_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -135,12 +134,7 @@ impl AgentHandoff {
     }
 
     fn baseline_variables(&self) -> Vec<(OsString, OsString)> {
-        self.environment
-            .variables()
-            .iter()
-            .filter(|(name, _)| Agent::is_baseline_variable(&name.to_string_lossy()))
-            .cloned()
-            .collect()
+        self.environment.baseline().variables().to_vec()
     }
 
     fn named_variables(&self, launch: &AgentLaunch) -> Vec<(OsString, OsString)> {

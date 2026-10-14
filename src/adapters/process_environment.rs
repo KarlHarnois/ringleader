@@ -1,6 +1,8 @@
 use std::ffi::{OsStr, OsString};
 use std::os::unix::ffi::OsStringExt;
 
+use crate::domain::Agent;
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ProcessEnvironment {
     variables: Vec<(OsString, OsString)>,
@@ -56,11 +58,19 @@ impl ProcessEnvironment {
     }
 
     pub fn without(&self, names: &[String]) -> Self {
+        self.retaining(|name| !names.iter().any(|removed| name == removed.as_str()))
+    }
+
+    pub fn baseline(&self) -> Self {
+        self.retaining(|name| Agent::is_baseline_variable(&name.to_string_lossy()))
+    }
+
+    fn retaining(&self, keeps: impl Fn(&OsString) -> bool) -> Self {
         Self {
             variables: self
                 .variables
                 .iter()
-                .filter(|(name, _)| !names.iter().any(|removed| name == removed.as_str()))
+                .filter(|(name, _)| keeps(name))
                 .cloned()
                 .collect(),
             terminal: self.terminal.clone(),
@@ -147,6 +157,21 @@ mod tests {
             (paths.tmux(), paths.git()),
             (OsStr::new("tmux"), OsStr::new("git"))
         );
+    }
+
+    #[test]
+    fn the_baseline_keeps_only_the_variables_every_agent_gets() {
+        let environment = EnvironmentFixture::with(&[
+            ("PATH", "/bin"),
+            ("XDG_CONFIG_HOME", "/home/example/.config"),
+            ("DIRENV_CONFIG", "/home/example/.config/direnv-work"),
+        ]);
+
+        let baseline = environment.baseline();
+
+        assert_eq!(baseline.get("PATH"), Some(OsStr::new("/bin")));
+        assert!(baseline.contains("XDG_CONFIG_HOME"));
+        assert!(!baseline.contains("DIRENV_CONFIG"));
     }
 
     #[test]

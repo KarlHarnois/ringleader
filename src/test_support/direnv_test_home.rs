@@ -78,6 +78,14 @@ impl DirenvTestHome {
         self.data().join("direnv").join("allow")
     }
 
+    pub fn config_variable_whitelisting(&self, project: &Path) -> (OsString, OsString) {
+        let config = self.directory.path().join("direnv-config");
+        fs::create_dir_all(&config).expect("the direnv config directory is created");
+        let whitelist = format!("[whitelist]\nprefix = [\"{}\"]\n", project.display());
+        fs::write(config.join("direnv.toml"), whitelist).expect("the direnv config is written");
+        (OsString::from("DIRENV_CONFIG"), config.into_os_string())
+    }
+
     fn home(&self) -> PathBuf {
         self.directory.path().join("home")
     }

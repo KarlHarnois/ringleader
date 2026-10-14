@@ -18,7 +18,7 @@ use crate::domain::TerminalText;
 
 pub struct DirenvDirectoryEnvironment {
     program: OsString,
-    environment: ProcessEnvironment,
+    baseline: ProcessEnvironment,
     bounded: BoundedCommand,
 }
 
@@ -33,7 +33,7 @@ impl DirenvDirectoryEnvironment {
     pub fn new(program: &OsStr, environment: &ProcessEnvironment, bounded: BoundedCommand) -> Self {
         Self {
             program: program.to_os_string(),
-            environment: environment.clone(),
+            baseline: environment.baseline(),
             bounded,
         }
     }
@@ -71,7 +71,7 @@ impl DirenvDirectoryEnvironment {
         command
             .current_dir(directory)
             .env_clear()
-            .envs(self.environment.variables().iter().cloned());
+            .envs(self.baseline.variables().iter().cloned());
         command
     }
 
@@ -144,11 +144,21 @@ mod tests {
         }
 
         fn direnv(&self) -> DirenvDirectoryEnvironment {
+            self.direnv_in(&self.home.environment())
+        }
+
+        fn direnv_in(&self, environment: &ProcessEnvironment) -> DirenvDirectoryEnvironment {
             DirenvDirectoryEnvironment::new(
                 &DirenvTestHome::program(),
-                &self.home.environment(),
+                environment,
                 BoundedCommand::new(Deadlines::standard()),
             )
+        }
+
+        fn whitelisted_by_direnv_config(&self, project: &Path) -> ProcessEnvironment {
+            let mut variables = self.home.variables();
+            variables.push(self.home.config_variable_whitelisting(project));
+            ProcessEnvironment::new(variables, None)
         }
 
         fn project_with_envrc(&self) -> std::path::PathBuf {
@@ -211,6 +221,17 @@ mod tests {
         fixture.home.allow_as_the_user(&project);
 
         assert!(fixture.direnv().envrc(&project).unwrap().is_allowed());
+    }
+
+    #[test]
+    fn a_whitelist_in_a_direnv_config_the_agent_never_sees_does_not_allow_the_envrc() {
+        let fixture = DirenvFixture::new();
+        let project = fixture.project_with_envrc();
+        let environment = fixture.whitelisted_by_direnv_config(&project);
+
+        let envrc = fixture.direnv_in(&environment).envrc(&project).unwrap();
+
+        assert!(!envrc.is_allowed());
     }
 
     #[test]
