@@ -69,7 +69,7 @@ impl SessionCreation {
         config_path: &Path,
     ) -> Result<CreationPlan, ServiceError> {
         let checks = UseChecks::new(self.host.as_ref(), config, config_path);
-        let agent = checks.agent_for_creation(request.agent(), request.prompt())?;
+        let agent = checks.agent_for_creation(request)?;
         let root = self
             .host
             .canonicalize_lenient(config.naming().worktree_root())?;
@@ -175,8 +175,7 @@ mod tests {
 
     use super::*;
     use crate::application::ports::{MultiplexerError, WorkspaceError, WorktreeEntry};
-    use crate::domain::Agent;
-    use crate::domain::AgentPane;
+    use crate::domain::{Agent, AgentMode, AgentPane};
     use crate::test_support::{FakeHostProbe, FakeMultiplexer, FakeWorkspace, ServiceFixture};
 
     struct CreateFixture;
@@ -326,6 +325,25 @@ mod tests {
     }
 
     #[test]
+    fn create_in_plan_mode_launches_the_agent_with_its_plan_args() {
+        let fixture = ServiceFixture::new();
+
+        CreateFixture::create(
+            &fixture,
+            CreateFixture::request("fix-auth")
+                .with_mode(AgentMode::Plan)
+                .with_prompt("fix the tests"),
+        )
+        .unwrap();
+
+        let launch = fixture.multiplexer().launches().pop().unwrap();
+        assert_eq!(
+            launch.argv(),
+            ["claude", "--permission-mode", "plan", "fix the tests"]
+        );
+    }
+
+    #[test]
     fn create_passes_the_session_name_to_the_agent() {
         let fixture = ServiceFixture::new().with_config(ServiceFixture::config_with_input());
 
@@ -440,6 +458,16 @@ mod tests {
         assert_eq!(spec.launch().env_names(), ["ANTHROPIC_API_KEY"]);
         assert_eq!(spec.removed_env_names(), ["ANTHROPIC_API_KEY"]);
         assert!(spec.launch().env_assignments().is_empty());
+    }
+
+    #[test]
+    fn the_session_spec_carries_the_configured_key_bindings() {
+        let fixture = ServiceFixture::new().with_config(ServiceFixture::config_with_alt_n());
+
+        CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap();
+
+        let spec = fixture.multiplexer().specs().pop().unwrap();
+        assert_eq!(spec.key_bindings(), &ServiceFixture::alt_n_bindings());
     }
 
     #[test]
@@ -704,6 +732,22 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(error.exit_code(), 1);
+        CreateFixture::assert_nothing_touched(&fixture);
+    }
+
+    #[test]
+    fn create_refuses_plan_mode_for_an_agent_without_plan_args() {
+        let agent = Agent::new("claude", "claude");
+        let fixture =
+            ServiceFixture::new().with_config(ServiceFixture::config().with_agents(vec![agent]));
+
+        let error = CreateFixture::create(
+            &fixture,
+            CreateFixture::request("fix-auth").with_mode(AgentMode::Plan),
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("cannot start in plan mode"));
         CreateFixture::assert_nothing_touched(&fixture);
     }
 }

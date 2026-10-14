@@ -7,7 +7,7 @@ use super::repo_merge::RepoMerge;
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
 use super::session_reconciler::SessionReconciler;
-use crate::domain::{BaseBranch, Config, DiffStat, Repo, ReturnKey, Session, SessionObservation};
+use crate::domain::{BaseBranch, Config, DiffStat, KeyBindings, Repo, Session, SessionObservation};
 
 pub struct SessionMonitor {
     multiplexer: Arc<dyn Multiplexer>,
@@ -64,12 +64,12 @@ impl SessionMonitor {
         Pending::start(move || Ok(multiplexer.capture_pane(&tmux_name)?))
     }
 
-    pub fn server_return_key(&self) -> Option<ReturnKey> {
+    pub fn server_key_bindings(&self) -> Option<KeyBindings> {
         let running = self
             .multiplexer
-            .server_config(&ReturnKey::default())
+            .server_config(&KeyBindings::default())
             .ok()??;
-        running.return_key().cloned()
+        running.key_bindings().cloned()
     }
 
     fn diff_base(&self, session: &Session, config: &Config) -> DiffBase {

@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use super::creation_plan::CreateRequest;
 use super::ports::HostProbe;
 use super::service_error::ServiceError;
 use crate::domain::{Agent, Config};
@@ -19,15 +20,11 @@ impl<'a> UseChecks<'a> {
         }
     }
 
-    pub fn agent_for_creation(
-        &self,
-        requested: Option<&str>,
-        prompt: &str,
-    ) -> Result<&'a Agent, ServiceError> {
-        let agent = self.requested_agent(requested)?;
+    pub fn agent_for_creation(&self, request: &CreateRequest) -> Result<&'a Agent, ServiceError> {
+        let agent = self.requested_agent(request.agent())?;
         self.check_command(agent)?;
         self.check_worktree_root()?;
-        match agent.prompt_refusal(prompt) {
+        match agent.launch_refusal(request.mode(), request.prompt()) {
             Some(refusal) => Err(ServiceError::Invalid(refusal)),
             None => Ok(agent),
         }

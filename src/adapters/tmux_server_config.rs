@@ -1,13 +1,15 @@
+use std::iter::once;
+
 use super::tmux_sequence::TmuxSequence;
-use crate::domain::ReturnKey;
+use crate::domain::{HotKey, KeyBindings};
 
 pub struct TmuxServerConfig {
-    return_key: ReturnKey,
+    key_bindings: KeyBindings,
 }
 
 impl TmuxServerConfig {
     const RESET: &'static str = "set -su terminal-features";
-    const RETURN_TABLES: [&'static str; 3] = ["root", "copy-mode", "copy-mode-vi"];
+    const BINDING_TABLES: [&'static str; 3] = ["root", "copy-mode", "copy-mode-vi"];
     const SETTINGS: [&'static str; 16] = [
         "set -g prefix None",
         "set -g prefix2 None",
@@ -26,49 +28,77 @@ impl TmuxServerConfig {
         "set -g destroy-unattached off",
         "set -g detach-on-destroy on",
     ];
+    const NEXT_SESSION: &'static str = "switch-client -n";
+    const PREVIOUS_SESSION: &'static str = "switch-client -p";
+    const RETURN: &'static str = "detach-client";
+    const EMACS_COPY_MODE: &'static str = "copy-mode";
+    const EMACS_COPY_MODE_DEFAULTS: [(&'static str, &'static str); 2] =
+        [("M-Up", "halfpage-up"), ("M-Down", "halfpage-down")];
 
     pub const RETURN_KEY_OPTION: &'static str = "@ringleader_return_key";
+    pub const NEXT_SESSION_KEYS_OPTION: &'static str = "@ringleader_next_session_keys";
+    pub const PREVIOUS_SESSION_KEYS_OPTION: &'static str = "@ringleader_previous_session_keys";
     pub const HASH_OPTION: &'static str = "@ringleader_config";
     const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
     const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 
-    pub fn new(return_key: &ReturnKey) -> Self {
+    pub fn new(key_bindings: &KeyBindings) -> Self {
         Self {
-            return_key: return_key.clone(),
+            key_bindings: key_bindings.clone(),
         }
     }
 
-    pub fn reapply_script(previous_key: Option<&ReturnKey>) -> TmuxSequence {
-        let unbound = previous_key.map_or_else(TmuxSequence::new, Self::unbinding);
-        unbound.command(["source-file", "-"])
+    pub fn reapply_script(previous: Option<&KeyBindings>, current: &KeyBindings) -> TmuxSequence {
+        let dropped = previous
+            .into_iter()
+            .flat_map(KeyBindings::all)
+            .filter(|key| !current.binds(key));
+        let released = dropped.fold(TmuxSequence::new(), Self::released);
+        released.command(["source-file", "-"])
     }
 
     pub fn render(&self) -> String {
         let hash_line = format!("set -g {} '{}'", Self::HASH_OPTION, self.hash());
-        Self::joined(
-            &[
-                self.leading_lines(),
-                vec![hash_line],
-                self.return_bindings(),
-            ]
-            .concat(),
-        )
+        Self::joined(&[self.leading_lines(), vec![hash_line], self.bindings()].concat())
     }
 
     pub fn hash(&self) -> String {
-        let hashed = [self.leading_lines(), self.return_bindings()].concat();
+        let hashed = [self.leading_lines(), self.bindings()].concat();
         format!("{:016x}", Self::fnv1a(Self::joined(&hashed).as_bytes()))
     }
 
     fn leading_lines(&self) -> Vec<String> {
         let mut lines = vec![Self::RESET.to_string()];
         lines.extend(Self::SETTINGS.iter().map(|line| line.to_string()));
-        lines.push(format!(
-            "set -g {} {}",
-            Self::RETURN_KEY_OPTION,
-            self.return_key.tmux_spelling()
-        ));
+        lines.extend(self.recorded_keys());
         lines
+    }
+
+    fn recorded_keys(&self) -> [String; 3] {
+        let bindings = &self.key_bindings;
+        [
+            Self::option_line(
+                Self::RETURN_KEY_OPTION,
+                &bindings.return_key().tmux_spelling(),
+            ),
+            Self::option_line(
+                Self::NEXT_SESSION_KEYS_OPTION,
+                &Self::key_list(bindings.next_session_keys()),
+            ),
+            Self::option_line(
+                Self::PREVIOUS_SESSION_KEYS_OPTION,
+                &Self::key_list(bindings.previous_session_keys()),
+            ),
+        ]
+    }
+
+    fn option_line(option: &str, value: &str) -> String {
+        format!("set -g {option} {value}")
+    }
+
+    fn key_list(keys: &[HotKey]) -> String {
+        let names: Vec<String> = keys.iter().map(HotKey::to_string).collect();
+        format!("'{}'", names.join(" "))
     }
 
     fn joined(lines: &[String]) -> String {
@@ -81,21 +111,57 @@ impl TmuxServerConfig {
         })
     }
 
-    fn unbinding(key: &ReturnKey) -> TmuxSequence {
-        let key = key.to_string();
-        Self::RETURN_TABLES
+    fn released(sequence: TmuxSequence, key: &HotKey) -> TmuxSequence {
+        let name = key.to_string();
+        let unbound = Self::BINDING_TABLES
             .iter()
-            .fold(TmuxSequence::new(), |sequence, table| {
-                sequence.command(["unbind-key", "-q", "-T", table, &key])
-            })
+            .fold(sequence, |sequence, table| {
+                sequence.command(["unbind-key", "-q", "-T", table, &name])
+            });
+        Self::with_emacs_copy_mode_default(unbound, &name)
     }
 
-    fn return_bindings(&self) -> Vec<String> {
-        let key = self.return_key.tmux_spelling();
-        Self::RETURN_TABLES
+    fn with_emacs_copy_mode_default(sequence: TmuxSequence, name: &str) -> TmuxSequence {
+        let default = Self::EMACS_COPY_MODE_DEFAULTS
             .iter()
-            .map(|table| format!("bind-key -T {table} {key} detach-client"))
+            .find(|(key, _)| *key == name);
+        let Some((_, action)) = default else {
+            return sequence;
+        };
+        sequence.command([
+            "bind-key",
+            "-T",
+            Self::EMACS_COPY_MODE,
+            name,
+            "send-keys",
+            "-X",
+            action,
+        ])
+    }
+
+    fn bindings(&self) -> Vec<String> {
+        Self::BINDING_TABLES
+            .iter()
+            .flat_map(|table| self.table_bindings(table))
             .collect()
+    }
+
+    fn table_bindings(&self, table: &str) -> Vec<String> {
+        let bindings = &self.key_bindings;
+        let next = bindings
+            .next_session_keys()
+            .iter()
+            .map(|key| Self::binding(table, key, Self::NEXT_SESSION));
+        let previous = bindings
+            .previous_session_keys()
+            .iter()
+            .map(|key| Self::binding(table, key, Self::PREVIOUS_SESSION));
+        let return_binding = Self::binding(table, bindings.return_key(), Self::RETURN);
+        next.chain(previous).chain(once(return_binding)).collect()
+    }
+
+    fn binding(table: &str, key: &HotKey, command: &str) -> String {
+        format!("bind-key -T {table} {} {command}", key.tmux_spelling())
     }
 }
 
@@ -123,13 +189,14 @@ mod tests {
 
     impl ConfigFixture {
         fn render(key: &str) -> String {
-            TmuxServerConfig::new(&ReturnKey::parse(key).unwrap()).render()
+            let bindings = KeyBindings::default().with_return_key(HotKey::parse(key).unwrap());
+            TmuxServerConfig::new(&bindings).render()
         }
 
         fn binding(key: &str) -> String {
             format!(
                 "bind-key -T root {} detach-client\n",
-                ReturnKey::parse(key).unwrap().tmux_spelling()
+                HotKey::parse(key).unwrap().tmux_spelling()
             )
         }
 
@@ -140,6 +207,21 @@ mod tests {
         }
 
         fn nested_client_detaches(inner: &TmuxTestServer, target: &str, typed: &[&str]) -> bool {
+            let outer = Self::nested_client(inner, target);
+            let attached = inner.wait_for(|| Self::clients(inner) == 1);
+            Self::type_bytes(&outer, typed);
+            attached && inner.wait_for(|| Self::clients(inner) == 0)
+        }
+
+        fn nested_client_on_beta_lands_on(typed: &[&str], expected: &str) -> bool {
+            let inner = Self::alpha_beta_and_gamma();
+            let outer = Self::nested_client(&inner, "=beta:");
+            let attached = inner.wait_for(|| Self::client_session(&inner) == "beta");
+            Self::type_bytes(&outer, typed);
+            attached && inner.wait_for(|| Self::client_session(&inner) == expected)
+        }
+
+        fn nested_client(inner: &TmuxTestServer, target: &str) -> TmuxTestServer {
             let outer = TmuxTestServer::new();
             let socket = inner.socket().display().to_string();
             let config = inner.config().display().to_string();
@@ -163,11 +245,32 @@ mod tests {
                 "-t",
                 target,
             ]);
-            let attached = inner.wait_for(|| Self::clients(inner) == 1);
+            outer
+        }
+
+        fn type_bytes(outer: &TmuxTestServer, typed: &[&str]) {
             let mut typing = vec!["send-keys", "-t", "=outer:", "-H"];
             typing.extend(typed);
             outer.text(&typing);
-            attached && inner.wait_for(|| Self::clients(inner) == 0)
+        }
+
+        fn alpha_beta_and_gamma() -> TmuxTestServer {
+            let server = TmuxTestServer::with_session("alpha");
+            server.start_session("beta");
+            server.start_session("gamma");
+            server
+        }
+
+        fn session_after_pressing(server: &TmuxTestServer, target: &str, key: &str) -> String {
+            let client = server.control_client(target);
+            let before = Self::client_session(server);
+            server.press(&client, key);
+            server.wait_for(|| Self::client_session(server) != before);
+            Self::client_session(server)
+        }
+
+        fn client_session(server: &TmuxTestServer) -> String {
+            server.text(&["list-clients", "-F", "#{client_session}"])
         }
 
         fn clients(server: &TmuxTestServer) -> usize {
@@ -207,6 +310,14 @@ mod tests {
             client.exits_with_notice_within(DETACH_LIMIT)
         }
 
+        fn reapply_words(previous: &KeyBindings, current: &KeyBindings) -> Vec<String> {
+            TmuxServerConfig::reapply_script(Some(previous), current)
+                .argv()
+                .iter()
+                .map(|word| word.to_string_lossy().into_owned())
+                .collect()
+        }
+
         fn option(server: &TmuxTestServer, name: &str) -> String {
             server.text(&["show-options", "-g", "-q", "-v", name])
         }
@@ -214,9 +325,34 @@ mod tests {
 
     #[test]
     fn the_default_render_matches_the_golden_fixture() {
-        let render = TmuxServerConfig::new(&ReturnKey::default()).render();
+        let render = TmuxServerConfig::new(&KeyBindings::default()).render();
 
         assert_eq!(render, GOLDEN);
+    }
+
+    #[test]
+    fn the_reapply_unbinds_a_dropped_key_in_every_table_before_sourcing() {
+        let changed =
+            KeyBindings::default().with_next_session_keys(HotKey::parse_valid(["M-n", "M-Down"]));
+
+        let words = ConfigFixture::reapply_words(&KeyBindings::default(), &changed);
+
+        assert_eq!(
+            words.join(" "),
+            "unbind-key -q -T root M-j ; unbind-key -q -T copy-mode M-j ; \
+             unbind-key -q -T copy-mode-vi M-j ; source-file -"
+        );
+    }
+
+    #[test]
+    fn the_reapply_never_unbinds_a_key_that_stays_bound_under_any_setting() {
+        let swapped = KeyBindings::default()
+            .with_next_session_keys(HotKey::parse_valid(["M-k", "M-Down"]))
+            .with_previous_session_keys(HotKey::parse_valid(["M-j", "M-Up"]));
+
+        let words = ConfigFixture::reapply_words(&KeyBindings::default(), &swapped);
+
+        assert_eq!(words, ["source-file", "-"]);
     }
 
     #[test]
@@ -248,7 +384,7 @@ mod tests {
     fn sourcing_the_render_again_on_a_running_server_succeeds() {
         let server = TmuxTestServer::with_session("holder");
 
-        let sourced = server.source(&ConfigFixture::render(ReturnKey::DEFAULT));
+        let sourced = server.source(&ConfigFixture::render(KeyBindings::RETURN_KEY));
 
         assert!(sourced.status.success(), "{sourced:?}");
     }
@@ -288,7 +424,7 @@ mod tests {
             .flat_map(|byte| {
                 ["", "C-", "M-"].map(|modifier| format!("{modifier}{}", char::from(byte)))
             })
-            .filter_map(|key| ReturnKey::parse(&key))
+            .filter_map(|key| HotKey::parse(&key))
             .map(|key| key.to_string())
             .collect();
 
@@ -371,6 +507,90 @@ mod tests {
     }
 
     #[test]
+    fn the_next_session_key_moves_the_client_to_the_next_session() {
+        let server = ConfigFixture::alpha_beta_and_gamma();
+
+        let session = ConfigFixture::session_after_pressing(&server, "=beta:", "M-j");
+
+        assert_eq!(session, "gamma");
+    }
+
+    #[test]
+    fn the_previous_session_key_moves_the_client_back() {
+        let server = ConfigFixture::alpha_beta_and_gamma();
+
+        let session = ConfigFixture::session_after_pressing(&server, "=beta:", "M-k");
+
+        assert_eq!(session, "alpha");
+    }
+
+    #[test]
+    fn the_next_session_key_on_the_last_session_wraps_to_the_first() {
+        let server = ConfigFixture::alpha_beta_and_gamma();
+
+        let session = ConfigFixture::session_after_pressing(&server, "=gamma:", "M-Down");
+
+        assert_eq!(session, "alpha");
+    }
+
+    #[test]
+    fn the_previous_session_key_on_the_first_session_wraps_to_the_last() {
+        let server = ConfigFixture::alpha_beta_and_gamma();
+
+        let session = ConfigFixture::session_after_pressing(&server, "=alpha:", "M-Up");
+
+        assert_eq!(session, "gamma");
+    }
+
+    #[test]
+    fn the_session_keys_switch_from_either_copy_mode() {
+        for (mode_keys, key) in [
+            ("emacs", "M-j"),
+            ("emacs", "M-Down"),
+            ("vi", "M-j"),
+            ("vi", "M-Down"),
+        ] {
+            let server = ConfigFixture::alpha_beta_and_gamma();
+            server.text(&["set-option", "-g", "mode-keys", mode_keys]);
+            server.text(&["copy-mode", "-t", "=beta:"]);
+
+            let session = ConfigFixture::session_after_pressing(&server, "=beta:", key);
+
+            assert_eq!(session, "gamma", "{mode_keys} {key}");
+        }
+    }
+
+    #[test]
+    fn the_session_keys_switch_from_a_shell_window() {
+        let server = TmuxTestServer::new();
+        let worktree = ConfigFixture::created(&server, "fix-auth");
+        ConfigFixture::created(&server, "other");
+        let window = server
+            .multiplexer()
+            .ensure_shell_window("ringleader-fix-auth", &worktree, "sh")
+            .unwrap();
+
+        let session = ConfigFixture::session_after_pressing(&server, &window, "M-j");
+
+        assert_eq!(session, "ringleader-other");
+    }
+
+    #[test]
+    fn the_bytes_a_terminal_sends_for_the_session_keys_switch_a_nested_client() {
+        for (key, typed, expected) in [
+            ("M-j", ["1b", "6a"].as_slice(), "gamma"),
+            ("M-Down", &["1b", "5b", "31", "3b", "33", "42"], "gamma"),
+            ("M-k", &["1b", "6b"], "alpha"),
+            ("M-Up", &["1b", "5b", "31", "3b", "33", "41"], "alpha"),
+        ] {
+            assert!(
+                ConfigFixture::nested_client_on_beta_lands_on(typed, expected),
+                "{key}"
+            );
+        }
+    }
+
+    #[test]
     fn ctrl_b_reaches_the_pane() {
         let server = TmuxTestServer::new();
         server.text(&["new-session", "-d", "-s", "work", "cat", "-v"]);
@@ -392,7 +612,7 @@ mod tests {
         let config = server.directory().join("conf[1]").join("tmux.conf");
         let files = ServerFiles::new(server.socket(), &config);
         files
-            .prepare(&ConfigFixture::render(ReturnKey::DEFAULT))
+            .prepare(&ConfigFixture::render(KeyBindings::RETURN_KEY))
             .unwrap();
         let tmux = TmuxCommand::new(OsStr::new("tmux"), &files, &server.environment());
 

@@ -29,7 +29,7 @@ pub enum Dialog {
 impl Dialog {
     const WIDTH: u16 = 76;
     const HEIGHT: u16 = 22;
-    const HELP_HEIGHT: u16 = 25;
+    const HELP_HEIGHT: u16 = 28;
 
     pub fn open(opening: DialogOpening, service: &SessionService) -> Self {
         match opening {
@@ -73,7 +73,7 @@ impl Dialog {
         ];
         let home = HomePath::new(service.home_directory());
         Self::Help(Box::new(HelpView::new(
-            &service.shown_return_key(),
+            &service.shown_key_bindings(),
             &files,
             &home,
         )))
@@ -241,13 +241,13 @@ mod tests {
 
     #[test]
     fn the_help_stands_taller_than_the_other_dialogs() {
-        let help = PlacementFixture::render(DialogOpening::Help, 100, 28);
-        let new_session = PlacementFixture::render(DialogOpening::NewSession, 100, 28);
+        let help = PlacementFixture::render(DialogOpening::Help, 100, 30);
+        let new_session = PlacementFixture::render(DialogOpening::NewSession, 100, 30);
 
         assert_eq!(PlacementFixture::symbol(&help, 12, 1), "┌");
-        assert_eq!(PlacementFixture::symbol(&help, 12, 25), "└");
-        assert_eq!(PlacementFixture::symbol(&new_session, 12, 3), "┌");
-        assert_eq!(PlacementFixture::symbol(&new_session, 12, 24), "└");
+        assert_eq!(PlacementFixture::symbol(&help, 12, 28), "└");
+        assert_eq!(PlacementFixture::symbol(&new_session, 12, 4), "┌");
+        assert_eq!(PlacementFixture::symbol(&new_session, 12, 25), "└");
     }
 
     #[test]

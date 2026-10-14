@@ -33,6 +33,7 @@ pub mod table_columns;
 pub mod terminal_guard;
 pub mod text_fit;
 pub mod theme;
+pub mod viewport;
 
 pub use app::App;
 pub use event_loop::{CrosstermInput, EventLoop};
