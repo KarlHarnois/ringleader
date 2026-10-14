@@ -40,11 +40,9 @@ impl<'a> UpstreamMerger<'a> {
         branch: &BaseBranch,
         failure: WorkspaceError,
     ) -> WorkspaceError {
-        let listing = GitInvocation::in_worktree(worktree, "ls-remote").args([
-            "--exit-code",
-            Branch::ORIGIN,
-            &Self::ref_on_origin(branch),
-        ]);
+        let listing = GitInvocation::in_worktree(worktree, "ls-remote")
+            .probing()
+            .args(["--exit-code", Branch::ORIGIN, &Self::ref_on_origin(branch)]);
         match self.git.run(&listing) {
             Ok(output) if output.exit_code() == Some(Self::NO_MATCHING_REFS) => {
                 WorkspaceError::NotOnOrigin {

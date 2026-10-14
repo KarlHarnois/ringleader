@@ -7,6 +7,7 @@ pub enum CallKind {
     GitDiff,
     GitRead,
     GitWrite,
+    GitProbe,
     GhQuery,
 }
 
@@ -17,6 +18,7 @@ pub struct Deadlines {
     git_diff: Duration,
     git_read: Duration,
     git_write: Duration,
+    git_probe: Duration,
     gh_query: Duration,
 }
 
@@ -28,6 +30,7 @@ impl Deadlines {
             git_diff: Duration::from_secs(5),
             git_read: Duration::from_secs(60),
             git_write: Duration::from_secs(300),
+            git_probe: Duration::from_secs(5),
             gh_query: Duration::from_secs(20),
         }
     }
@@ -48,6 +51,7 @@ impl Deadlines {
             git_diff: deadline,
             git_read: deadline,
             git_write: deadline,
+            git_probe: deadline,
             gh_query: deadline,
         }
     }
@@ -59,6 +63,7 @@ impl Deadlines {
             CallKind::GitDiff => self.git_diff,
             CallKind::GitRead => self.git_read,
             CallKind::GitWrite => self.git_write,
+            CallKind::GitProbe => self.git_probe,
             CallKind::GhQuery => self.gh_query,
         }
     }
@@ -67,6 +72,13 @@ impl Deadlines {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_probe_that_explains_a_failure_waits_less_than_a_read() {
+        let standard = Deadlines::standard();
+
+        assert!(standard.for_kind(CallKind::GitProbe) < standard.for_kind(CallKind::GitRead));
+    }
 
     #[test]
     fn the_diff_poll_reads_git_under_the_diff_deadline() {

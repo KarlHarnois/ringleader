@@ -77,6 +77,13 @@ impl GitInvocation {
         }
     }
 
+    pub fn probing(self) -> Self {
+        Self {
+            kind: CallKind::GitProbe,
+            ..self
+        }
+    }
+
     pub fn subcommand(&self) -> &str {
         &self.subcommand
     }
