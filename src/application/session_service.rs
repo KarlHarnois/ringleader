@@ -407,7 +407,7 @@ mod tests {
             fixture
                 .multiplexer()
                 .calls()
-                .contains(&"apply_config C-q M-n M-k M-Up".to_string())
+                .contains(&"apply_config C-q M-n M-k M-Up M-l".to_string())
         );
     }
 
@@ -421,7 +421,7 @@ mod tests {
             fixture
                 .multiplexer()
                 .calls()
-                .contains(&"apply_config C-q M-j M-Down M-k M-Up".to_string())
+                .contains(&"apply_config C-q M-j M-Down M-k M-Up M-l".to_string())
         );
     }
 

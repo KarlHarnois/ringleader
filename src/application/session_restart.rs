@@ -211,7 +211,7 @@ mod tests {
         let calls = fixture.multiplexer().calls();
         let applied = calls
             .iter()
-            .position(|call| call == "apply_config C-q M-j M-Down M-k M-Up");
+            .position(|call| call == "apply_config C-q M-j M-Down M-k M-Up M-l");
         let created = calls
             .iter()
             .position(|call| call.starts_with("create_session"));

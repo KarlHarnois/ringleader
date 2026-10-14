@@ -11,8 +11,9 @@ impl RunningConfig {
     const LABEL: &'static str = "ringleader-config";
     const NEXT_SESSION_LABEL: &'static str = "ringleader-next-session-keys";
     const PREVIOUS_SESSION_LABEL: &'static str = "ringleader-previous-session-keys";
+    const SHELL_TOGGLE_LABEL: &'static str = "ringleader-shell-toggle-keys";
 
-    pub fn formats() -> [String; 3] {
+    pub fn formats() -> [String; 4] {
         [
             format!(
                 "{} #{{{}}} #{{{}}}",
@@ -28,6 +29,10 @@ impl RunningConfig {
                 Self::PREVIOUS_SESSION_LABEL,
                 TmuxServerConfig::PREVIOUS_SESSION_KEYS_OPTION,
             ),
+            Self::labeled(
+                Self::SHELL_TOGGLE_LABEL,
+                TmuxServerConfig::SHELL_TOGGLE_KEYS_OPTION,
+            ),
         ]
     }
 
@@ -39,6 +44,7 @@ impl RunningConfig {
                 return_key,
                 Self::keys(output, Self::NEXT_SESSION_LABEL),
                 Self::keys(output, Self::PREVIOUS_SESSION_LABEL),
+                Self::keys(output, Self::SHELL_TOGGLE_LABEL),
             )
         });
         Some(Self {
@@ -85,11 +91,12 @@ mod tests {
     }
 
     #[test]
-    fn the_hash_and_all_three_key_settings_are_read() {
+    fn the_hash_and_all_four_key_settings_are_read() {
         let running = RunningFixture::read(concat!(
             "ringleader-config 0123456789abcdef M-x\n",
             "ringleader-next-session-keys M-n F7\n",
             "ringleader-previous-session-keys M-p\n",
+            "ringleader-shell-toggle-keys M-o F8\n",
         ));
 
         let bindings = running.key_bindings().unwrap();
@@ -103,6 +110,23 @@ mod tests {
             RunningFixture::names(bindings.previous_session_keys()),
             ["M-p"]
         );
+        assert_eq!(
+            RunningFixture::names(bindings.shell_toggle_keys()),
+            ["M-o", "F8"]
+        );
+    }
+
+    #[test]
+    fn a_server_without_the_shell_toggle_option_reads_as_no_toggle_keys() {
+        let running = RunningFixture::read(concat!(
+            "ringleader-config 0123456789abcdef C-q\n",
+            "ringleader-next-session-keys M-j M-Down\n",
+            "ringleader-previous-session-keys M-k M-Up\n",
+            "ringleader-shell-toggle-keys \n",
+        ));
+
+        let bindings = running.key_bindings().unwrap();
+        assert!(bindings.shell_toggle_keys().is_empty());
     }
 
     #[test]

@@ -50,6 +50,7 @@ pub mod tmux_output;
 pub mod tmux_scripts;
 pub mod tmux_sequence;
 pub mod tmux_server_config;
+pub mod tmux_shell_toggle;
 pub mod toml_config_source;
 pub mod upstream_merger;
 pub mod xdg_paths;

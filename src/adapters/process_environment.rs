@@ -11,6 +11,8 @@ impl ProcessEnvironment {
     const TERMINAL_NAME_LIMIT: usize = 256;
     const TMUX_PROGRAM: &'static str = "RINGLEADER_TMUX";
     const GIT_PROGRAM: &'static str = "RINGLEADER_GIT";
+    const SHELL: &'static str = "SHELL";
+    const FALLBACK_SHELL: &'static str = "sh";
 
     pub fn capture() -> Self {
         Self::new(
@@ -73,6 +75,12 @@ impl ProcessEnvironment {
 
     pub fn terminal(&self) -> Option<&OsStr> {
         self.terminal.as_deref()
+    }
+
+    pub fn shell(&self) -> String {
+        self.get(Self::SHELL)
+            .map(|shell| shell.to_string_lossy().into_owned())
+            .unwrap_or_else(|| Self::FALLBACK_SHELL.to_string())
     }
 
     fn standard_input_terminal() -> Option<OsString> {
@@ -147,6 +155,20 @@ mod tests {
             (paths.tmux(), paths.git()),
             (OsStr::new("tmux"), OsStr::new("git"))
         );
+    }
+
+    #[test]
+    fn the_shell_comes_from_the_shell_variable() {
+        let environment = EnvironmentFixture::with(&[("SHELL", "/bin/example-shell")]);
+
+        assert_eq!(environment.shell(), "/bin/example-shell");
+    }
+
+    #[test]
+    fn without_a_shell_variable_the_shell_is_sh() {
+        let environment = EnvironmentFixture::with(&[("PATH", "/bin")]);
+
+        assert_eq!(environment.shell(), "sh");
     }
 
     #[test]

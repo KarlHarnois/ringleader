@@ -182,10 +182,14 @@ mod tests {
     use crate::domain::HotKey;
     use crate::test_support::TmuxTestServer;
 
+    const BEFORE_SHELL_TOGGLE: &str =
+        include_str!("../../tests/fixtures/tmux-server-before-shell-toggle.conf");
+
     struct ServerFixture;
 
     impl ServerFixture {
         const TABLES: [&'static str; 3] = ["root", "copy-mode", "copy-mode-vi"];
+        const SHELL_TOGGLE_MARKER: &'static str = "@ringleader_meta";
 
         fn alt_x() -> KeyBindings {
             KeyBindings::default().with_return_key(HotKey::parse("M-x").unwrap())
@@ -211,15 +215,29 @@ mod tests {
 
         fn keys_running(server: &TmuxTestServer, table: &str, command: &str) -> Vec<String> {
             let ending = format!(" {command}");
-            let mut keys: Vec<String> = server
-                .text(&["list-keys", "-T", table])
-                .lines()
-                .filter(|line| line.ends_with(&ending))
-                .filter_map(|line| line.split_whitespace().nth(3))
-                .map(str::to_string)
-                .collect();
+            let mut keys = Self::keys_bound_where(server, table, |line| line.ends_with(&ending));
             keys.sort();
             keys
+        }
+
+        fn toggle_keys_in(server: &TmuxTestServer, table: &str) -> Vec<String> {
+            Self::keys_bound_where(server, table, |line| {
+                line.contains(Self::SHELL_TOGGLE_MARKER)
+            })
+        }
+
+        fn keys_bound_where(
+            server: &TmuxTestServer,
+            table: &str,
+            matches: impl Fn(&str) -> bool,
+        ) -> Vec<String> {
+            server
+                .text(&["list-keys", "-T", table])
+                .lines()
+                .filter(|line| matches(line))
+                .filter_map(|line| line.split_whitespace().nth(3))
+                .map(str::to_string)
+                .collect()
         }
 
         fn binding_of(server: &TmuxTestServer, table: &str, key: &str) -> String {
@@ -234,6 +252,10 @@ mod tests {
 
         fn option(server: &TmuxTestServer, name: &str) -> String {
             server.text(&["show-options", "-g", "-v", name])
+        }
+
+        fn command_with_shell(server: &TmuxTestServer, shell: &str) -> TmuxCommand {
+            server.command_with(&server.environment_with(&[("SHELL", shell)]))
         }
     }
 
@@ -371,6 +393,23 @@ mod tests {
 
         assert!(running.is_current());
         assert_eq!(running.key_bindings(), Some(&KeyBindings::default()));
+    }
+
+    #[test]
+    fn a_config_applied_under_one_shell_is_current_under_another() {
+        let server = TmuxTestServer::with_session("holder");
+        let applier = ServerFixture::command_with_shell(&server, "/bin/example-bash");
+        let checker = ServerFixture::command_with_shell(&server, "/bin/example-zsh");
+        PrivateServer::new(&applier)
+            .apply(&KeyBindings::default())
+            .unwrap();
+
+        let running = PrivateServer::new(&checker)
+            .config(&KeyBindings::default())
+            .unwrap()
+            .unwrap();
+
+        assert!(running.is_current());
     }
 
     #[test]
@@ -540,5 +579,61 @@ mod tests {
             ServerFixture::option(&server, "@ringleader_previous_session_keys"),
             "M-k M-Up"
         );
+    }
+
+    #[test]
+    fn applying_a_changed_shell_toggle_key_moves_the_toggle_in_every_table() {
+        let server = TmuxTestServer::with_session("holder");
+        let tmux = server.command();
+        let changed = KeyBindings::default().with_shell_toggle_keys(HotKey::parse_valid(["M-o"]));
+
+        PrivateServer::new(&tmux).apply(&changed).unwrap();
+
+        for table in ServerFixture::TABLES {
+            assert_eq!(
+                ServerFixture::toggle_keys_in(&server, table),
+                ["M-o"],
+                "{table}"
+            );
+        }
+        assert_eq!(
+            ServerFixture::option(&server, "@ringleader_shell_toggle_keys"),
+            "M-o"
+        );
+    }
+
+    #[test]
+    fn applying_no_shell_toggle_keys_leaves_no_toggle_in_any_table() {
+        let server = TmuxTestServer::with_session("holder");
+        let tmux = server.command();
+        let without_toggle = KeyBindings::default().with_shell_toggle_keys(Vec::new());
+
+        PrivateServer::new(&tmux).apply(&without_toggle).unwrap();
+
+        for table in ServerFixture::TABLES {
+            assert!(
+                ServerFixture::toggle_keys_in(&server, table).is_empty(),
+                "{table}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_server_started_before_the_shell_toggle_gains_it_when_the_config_is_reapplied() {
+        let server = TmuxTestServer::with_config(BEFORE_SHELL_TOGGLE);
+        server.start_session("holder");
+        let tmux = server.command();
+
+        PrivateServer::new(&tmux)
+            .apply(&KeyBindings::default())
+            .unwrap();
+
+        for table in ServerFixture::TABLES {
+            assert_eq!(
+                ServerFixture::toggle_keys_in(&server, table),
+                ["M-l"],
+                "{table}"
+            );
+        }
     }
 }
