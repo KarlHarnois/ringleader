@@ -2,8 +2,9 @@ use std::path::{Path, PathBuf};
 
 use super::ports::{AgentLaunch, SessionSpec, StartPoint};
 use crate::domain::{
-    Agent, AgentMode, BaseBranch, Config, InvalidName, NamingScheme, Registration, Repo, ReturnKey,
-    Session, SessionMetadata, SessionName, SessionRepo, SessionSize, SessionWorktree, TmuxAddress,
+    Agent, AgentMode, BaseBranch, Config, InvalidName, KeyBindings, NamingScheme, Registration,
+    Repo, Session, SessionMetadata, SessionName, SessionRepo, SessionSize, SessionWorktree,
+    TmuxAddress,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,7 +85,7 @@ pub struct CreationPlan {
     argv: Vec<String>,
     removed_env_names: Vec<String>,
     size: SessionSize,
-    return_key: ReturnKey,
+    key_bindings: KeyBindings,
 }
 
 impl CreationPlan {
@@ -106,7 +107,7 @@ impl CreationPlan {
             agent: agent.clone(),
             removed_env_names: config.agent_env_union(),
             size: config.session_size(),
-            return_key: config.return_key().clone(),
+            key_bindings: config.key_bindings().clone(),
         })
     }
 
@@ -148,7 +149,7 @@ impl CreationPlan {
         SessionSpec::new(&self.tmux_name(), self.metadata(start), launch)
             .sized(self.size)
             .removing_env_names(&self.removed_env_names)
-            .with_return_key(&self.return_key)
+            .with_key_bindings(&self.key_bindings)
     }
 
     pub fn session(&self, start: &StartPoint, socket: &Path, created_at: u64) -> Session {

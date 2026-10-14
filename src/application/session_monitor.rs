@@ -6,7 +6,7 @@ use super::repo_merge::RepoMerge;
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
 use super::session_reconciler::SessionReconciler;
-use crate::domain::{BaseBranch, Config, DiffStat, Repo, ReturnKey, Session};
+use crate::domain::{BaseBranch, Config, DiffStat, KeyBindings, Repo, Session};
 
 pub struct SessionMonitor {
     multiplexer: Arc<dyn Multiplexer>,
@@ -46,12 +46,12 @@ impl SessionMonitor {
         Ok(self.multiplexer.capture_pane(tmux_name)?)
     }
 
-    pub fn server_return_key(&self) -> Option<ReturnKey> {
+    pub fn server_key_bindings(&self) -> Option<KeyBindings> {
         let running = self
             .multiplexer
-            .server_config(&ReturnKey::default())
+            .server_config(&KeyBindings::default())
             .ok()??;
-        running.return_key().cloned()
+        running.key_bindings().cloned()
     }
 
     fn configured_base_branch<'c>(

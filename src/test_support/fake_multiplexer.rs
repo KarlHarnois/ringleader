@@ -8,7 +8,9 @@ use crate::application::ports::{
     AgentLaunch, AttachTarget, Multiplexer, MultiplexerError, ServerConfig, ServerState,
     SessionSpec,
 };
-use crate::domain::{AgentPane, ReturnKey, SessionMetadata, SessionObservation, TmuxAddress};
+use crate::domain::{
+    AgentPane, HotKey, KeyBindings, SessionMetadata, SessionObservation, TmuxAddress,
+};
 
 pub struct FakeMultiplexer {
     state: Mutex<MultiplexerState>,
@@ -42,7 +44,7 @@ struct MultiplexerState {
     client_version: String,
     server: Option<ServerState>,
     config_current: bool,
-    server_return_key: Option<ReturnKey>,
+    server_key_bindings: Option<KeyBindings>,
     socket_lost: bool,
 }
 
@@ -81,7 +83,7 @@ impl FakeMultiplexer {
                 client_version: "3.6a".to_string(),
                 server: Some(ServerState::new("3.6a", 1)),
                 config_current: true,
-                server_return_key: Some(ReturnKey::default()),
+                server_key_bindings: Some(KeyBindings::default()),
                 socket_lost: false,
             }),
         }
@@ -151,7 +153,8 @@ impl FakeMultiplexer {
     pub fn drift_config(&self, server_return_key: &str) {
         self.edit(|state| {
             state.config_current = false;
-            state.server_return_key = ReturnKey::parse(server_return_key);
+            state.server_key_bindings = HotKey::parse(server_return_key)
+                .map(|return_key| KeyBindings::default().with_return_key(return_key));
         });
     }
 
@@ -409,14 +412,13 @@ impl Multiplexer for FakeMultiplexer {
 
     fn server_config(
         &self,
-        _return_key: &ReturnKey,
+        _key_bindings: &KeyBindings,
     ) -> Result<Option<ServerConfig>, MultiplexerError> {
         self.call("server_config", "")?;
         Ok(self.edit(|state| {
-            state
-                .server
-                .as_ref()
-                .map(|_| ServerConfig::new(state.config_current, state.server_return_key.as_ref()))
+            state.server.as_ref().map(|_| {
+                ServerConfig::new(state.config_current, state.server_key_bindings.as_ref())
+            })
         }))
     }
 
@@ -429,11 +431,12 @@ impl Multiplexer for FakeMultiplexer {
         Ok(self.edit(|state| std::mem::take(&mut state.socket_lost)))
     }
 
-    fn apply_config(&self, return_key: &ReturnKey) -> Result<(), MultiplexerError> {
-        self.call("apply_config", &return_key.to_string())?;
+    fn apply_config(&self, key_bindings: &KeyBindings) -> Result<(), MultiplexerError> {
+        let keys: Vec<String> = key_bindings.all().map(HotKey::to_string).collect();
+        self.call("apply_config", &keys.join(" "))?;
         self.edit(|state| {
             state.config_current = true;
-            state.server_return_key = Some(return_key.clone());
+            state.server_key_bindings = Some(key_bindings.clone());
         });
         Ok(())
     }
