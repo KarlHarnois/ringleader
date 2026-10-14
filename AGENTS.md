@@ -289,7 +289,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── repo.rs               # Repo
     │   ├── repo_name.rs          # RepoName
     │   ├── repo_draft.rs         # RepoDraft, a [[repos]] entry before the load checks
-    │   ├── base_branch.rs        # BaseBranch, a configured base branch and the branches it is looked up as
+    │   ├── base_branch.rs        # BaseBranch, a requested, configured, or origin default base branch and the branches it is looked up as
     │   ├── base_branch_ladder.rs # BaseBranchLadder, the origin default, main, and master branches tried when no base branch is set, never a recorded session's branch
     │   ├── branch.rs             # Branch, a local or remote-tracking branch named as users type it, and origin's copy of a branch
     │   ├── branch_tips.rs        # BranchTips, the commits the existing ones of some branches point at
