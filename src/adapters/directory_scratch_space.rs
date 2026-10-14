@@ -1,4 +1,3 @@
-use std::ffi::OsStr;
 use std::fs::{self, DirBuilder, Metadata};
 use std::io;
 use std::os::unix::ffi::OsStrExt;
@@ -6,8 +5,6 @@ use std::os::unix::fs::{DirBuilderExt, MetadataExt};
 use std::path::{Path, PathBuf};
 
 use super::fnv_hash::FnvHash;
-use super::process_environment::ProcessEnvironment;
-use super::system_host_probe::SystemHostProbe;
 use crate::application::ports::{ScratchSpace, ScratchSpaceError};
 
 pub struct DirectoryScratchSpace {
@@ -16,14 +13,13 @@ pub struct DirectoryScratchSpace {
 }
 
 impl DirectoryScratchSpace {
-    const TEMP_VARIABLE: &'static str = "TMPDIR";
-    const FALLBACK_TEMP_BASE: &'static str = "/tmp";
+    const TEMP_BASE: &'static str = "/tmp";
     const ROOT_PREFIX: &'static str = "ringleader-";
     const PRIVATE_MODE: u32 = 0o700;
     const GROUP_AND_OTHER_BITS: u32 = 0o077;
 
-    pub fn new(environment: &ProcessEnvironment) -> Self {
-        Self::under(&Self::temp_base(environment), SystemHostProbe::user_id())
+    pub fn for_user(user_id: u32) -> Self {
+        Self::under(Path::new(Self::TEMP_BASE), user_id)
     }
 
     fn under(temp_base: &Path, user_id: u32) -> Self {
@@ -31,15 +27,6 @@ impl DirectoryScratchSpace {
             root: temp_base.join(format!("{}{user_id}", Self::ROOT_PREFIX)),
             user_id,
         }
-    }
-
-    fn temp_base(environment: &ProcessEnvironment) -> PathBuf {
-        environment
-            .get(Self::TEMP_VARIABLE)
-            .and_then(OsStr::to_str)
-            .map(PathBuf::from)
-            .filter(|base| base.is_absolute())
-            .unwrap_or_else(|| PathBuf::from(Self::FALLBACK_TEMP_BASE))
     }
 
     fn refuse_shared_root(&self) -> Result<(), ScratchSpaceError> {
@@ -115,11 +102,11 @@ impl ScratchSpace for DirectoryScratchSpace {
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::OsString;
     use std::fs::Permissions;
     use std::os::unix::fs::PermissionsExt;
 
     use super::*;
+    use crate::adapters::system_host_probe::SystemHostProbe;
 
     struct ScratchFixture {
         base: tempfile::TempDir,
@@ -130,31 +117,23 @@ mod tests {
         const WORKTREE: &'static str = "/data/ringleader/worktrees/example-project/fix-auth";
         const OTHER_WORKTREE: &'static str = "/data/ringleader/worktrees/example-project/fix-ui";
         const WORKTREE_HASH: &'static str = "779a3f80f082ab8d";
+        const USER_ID: u32 = 1000;
         const SHARED_MODE: u32 = 0o755;
         const SEALED_MODE: u32 = 0o500;
         const ACCESS_BITS: u32 = 0o777;
 
         fn new() -> Self {
-            let base = tempfile::tempdir().unwrap();
-            let space = DirectoryScratchSpace::new(&Self::environment(&[(
-                "TMPDIR",
-                base.path().to_str().unwrap(),
-            )]));
-            Self { base, space }
+            Self::for_user(SystemHostProbe::user_id())
         }
 
         fn owned_by_another_user() -> Self {
-            let base = tempfile::tempdir().unwrap();
-            let space = DirectoryScratchSpace::under(base.path(), SystemHostProbe::user_id() + 1);
-            Self { base, space }
+            Self::for_user(SystemHostProbe::user_id() + 1)
         }
 
-        fn environment(pairs: &[(&str, &str)]) -> ProcessEnvironment {
-            let variables = pairs
-                .iter()
-                .map(|(name, value)| (OsString::from(name), OsString::from(value)))
-                .collect();
-            ProcessEnvironment::new(variables, None)
+        fn for_user(user_id: u32) -> Self {
+            let base = tempfile::tempdir().unwrap();
+            let space = DirectoryScratchSpace::under(base.path(), user_id);
+            Self { base, space }
         }
 
         fn worktree() -> &'static Path {
@@ -358,17 +337,12 @@ mod tests {
     }
 
     #[test]
-    fn a_relative_or_missing_tmpdir_falls_back_to_tmp() {
-        let user_root = format!("/tmp/ringleader-{}", SystemHostProbe::user_id());
-        let environments = [
-            ScratchFixture::environment(&[("TMPDIR", "relative/tmp")]),
-            ScratchFixture::environment(&[]),
-        ];
+    fn the_scratch_root_is_the_user_folder_in_tmp() {
+        let space = DirectoryScratchSpace::for_user(ScratchFixture::USER_ID);
 
-        for environment in environments {
-            let space = DirectoryScratchSpace::new(&environment);
-            let scratch = space.directory(ScratchFixture::worktree());
-            assert!(scratch.starts_with(&user_root), "{}", scratch.display());
-        }
+        let scratch = space.directory(ScratchFixture::worktree());
+
+        let user_root = Path::new("/tmp/ringleader-1000");
+        assert_eq!(scratch, user_root.join(ScratchFixture::WORKTREE_HASH));
     }
 }
