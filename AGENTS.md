@@ -316,7 +316,8 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── rename_request.rs     # RenameRequest, the old and new names
     │   ├── branch_availability.rs # BranchAvailability, refuses a branch name that exists or holds other branches, for create and rename
     │   ├── session_restart.rs    # SessionRestart: restart of an Exited or Stopped session
-    │   ├── session_merge.rs      # SessionMerge: merge of origin's copy of the base branch into a Waiting session, with MergeReport
+    │   ├── session_merge.rs      # SessionMerge: merge of origin's copy of the base branch into a Waiting session
+    │   ├── merge_report.rs       # MergeReport, what a pull did to a session and whether its agent was asked to resolve the conflicts
     │   ├── upstream_resolver.rs  # UpstreamResolver, the branch a pull fetches from origin, or why there is none
     │   ├── agent_hooks.rs        # AgentHooks, schedules an agent's startup input in the background and types its rename input
     │   ├── worktree_inspection.rs # WorktreeInspection, the worktree checks restart, delete, and doctor share

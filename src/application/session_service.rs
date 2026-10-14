@@ -8,6 +8,7 @@ use super::delete_outcome::DeleteOutcome;
 use super::diagnostic_paths::DiagnosticPaths;
 use super::doctor::Doctor;
 use super::doctor_report::DoctorReport;
+use super::merge_report::MergeReport;
 use super::pending::Pending;
 use super::ports::{ConfigError, ConfigSource, RegistryError, SessionRegistry};
 use super::pull_request_catalog::PullRequestCatalog;
@@ -20,7 +21,6 @@ use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
 use super::session_access::{SessionAccess, ShellOutcome};
 use super::session_lifecycle::SessionLifecycle;
-use super::session_merge::MergeReport;
 use super::session_monitor::SessionMonitor;
 use crate::domain::{Config, DiffStat, KeyBindings, PullRequest, Repo, Session, SessionSummary};
 

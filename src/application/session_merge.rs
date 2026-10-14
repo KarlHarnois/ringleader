@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use super::ports::{HostProbe, MergeOutcome, Multiplexer, MultiplexerError, Workspace};
+use super::merge_report::{ConflictHandoff, MergeReport, UpstreamMerge};
+use super::ports::{HostProbe, MergeOutcome, Multiplexer, Workspace};
 use super::reconciliation::{ManagedRow, Reconciliation};
 use super::repo_merge::RepoMerge;
 use super::service_error::ServiceError;
@@ -8,7 +9,7 @@ use super::service_ports::ServicePorts;
 use super::session_monitor::SessionMonitor;
 use super::upstream_resolver::UpstreamResolver;
 use super::worktree_inspection::WorktreeInspection;
-use crate::domain::{BaseBranch, Branch, Config, Session, SessionName, SessionState};
+use crate::domain::{BaseBranch, Config, Session, SessionState};
 
 pub struct SessionMerge {
     workspace: Arc<dyn Workspace>,
@@ -187,88 +188,13 @@ impl SessionMerge {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MergeReport {
-    name: SessionName,
-    merge: UpstreamMerge,
-    handoff: ConflictHandoff,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct UpstreamMerge {
-    upstream: Branch,
-    outcome: MergeOutcome,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum ConflictHandoff {
-    Unneeded,
-    Asked,
-    Refused(MultiplexerError),
-}
-
-impl UpstreamMerge {
-    fn new(branch_on_origin: &BaseBranch, outcome: MergeOutcome) -> Self {
-        Self {
-            upstream: branch_on_origin.origin_copy(),
-            outcome,
-        }
-    }
-
-    fn upstream(&self) -> &str {
-        self.upstream.name()
-    }
-
-    fn outcome(&self) -> &MergeOutcome {
-        &self.outcome
-    }
-}
-
-impl MergeReport {
-    fn new(name: &SessionName, merge: UpstreamMerge, handoff: ConflictHandoff) -> Self {
-        Self {
-            name: name.clone(),
-            merge,
-            handoff,
-        }
-    }
-
-    pub fn needs_attention(&self) -> bool {
-        matches!(self.handoff, ConflictHandoff::Refused(_))
-    }
-
-    pub fn summary(&self) -> String {
-        let name = &self.name;
-        let upstream = self.merge.upstream();
-        match (self.merge.outcome(), &self.handoff) {
-            (MergeOutcome::UpToDate, _) => format!("{name} already has {upstream}"),
-            (MergeOutcome::Merged, _) => format!("merged {upstream} into {name}"),
-            (MergeOutcome::Conflicted(paths), ConflictHandoff::Refused(error)) => format!(
-                "merging {upstream} into {name} stopped on {}, and its agent was not asked to finish the merge: {error}",
-                Self::conflicts(paths)
-            ),
-            (MergeOutcome::Conflicted(paths), _) => format!(
-                "merging {upstream} into {name} stopped on {}, asked its agent to finish the merge",
-                Self::conflicts(paths)
-            ),
-        }
-    }
-
-    fn conflicts(paths: &[String]) -> String {
-        match paths.len() {
-            1 => "a conflict in 1 file".to_string(),
-            count => format!("conflicts in {count} files"),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::Path;
 
     use super::*;
     use crate::application::ports::{DirtyState, WorkspaceError, WorktreeEntry};
-    use crate::domain::{Repo, RepoName, SessionObservation};
+    use crate::domain::{Branch, Repo, RepoName, SessionObservation};
     use crate::test_support::{FakeMultiplexer, FakeWorkspace, ServiceFixture};
 
     struct MergeFixture;
