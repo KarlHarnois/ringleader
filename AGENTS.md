@@ -409,6 +409,7 @@ nix run .#mutator -- --help
 - Name each module or file to mutate as an argument. One run MAY name several. A run's files share one baseline test run.
 - Keep `--max-workers 2` and `--timeout-factor 60`.
 - The flake patches `mutator` so that each worker under `target/mutation-workers/` starts from a copy of `target/debug`. A worker's build then recompiles only the `ringleader` crate.
+- `flake.nix` pins `mutator` to the revision the patch was written for, so `nix flake update` leaves `mutator` in place. If you move the pin, check that the patch still applies to the new revision without offset or fuzz.
 - A mutant that times out counts as killed. Under load, a worker's build can take several times the warm baseline. A smaller factor then records kills that no test made.
 - If you change either value, raise the timeout factor before the worker count: parallel builds slow each other.
 - If a snapshot exists, a rerun runs only survivors and sites in changed functions. A kill recorded by a timeout therefore stays.

@@ -12,7 +12,7 @@
       flake = false;
     };
     mutator = {
-      url = "github:unclebob/mutator";
+      url = "github:unclebob/mutator/c57f03879a08d2afe8c7e044e86c80bb164afd30";
       flake = false;
     };
     uml-viewer = {

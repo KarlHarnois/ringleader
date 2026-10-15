@@ -45,6 +45,7 @@
       "original": {
         "owner": "unclebob",
         "repo": "mutator",
+        "rev": "c57f03879a08d2afe8c7e044e86c80bb164afd30",
         "type": "github"
       }
     },
