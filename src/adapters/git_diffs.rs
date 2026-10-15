@@ -396,12 +396,40 @@ mod tests {
         }
 
         fn diff_with_base_branch(&self, base_branch: Option<&BaseBranch>) -> DiffStat {
+            self.diff_with_bases(None, base_branch)
+        }
+
+        fn diff_requesting(&self, requested: &str) -> DiffStat {
+            self.diff_with_bases(BaseBranch::new(requested), None)
+        }
+
+        fn diff_with_bases(
+            &self,
+            requested: Option<BaseBranch>,
+            repo_base: Option<&BaseBranch>,
+        ) -> DiffStat {
             let workspace = self.repo.workspace();
             let recorded = StartPoint::from_base_commit(&self.recorded);
             let measured_from = DiffBaseResolver::new(&workspace)
-                .resolve(&self.worktree, &recorded, base_branch)
+                .requesting(requested)
+                .resolve(&self.worktree, &recorded, repo_base)
                 .unwrap();
             workspace.diff_stat(&self.worktree, &measured_from).unwrap()
+        }
+
+        fn stacked_on(branch: &str) -> Self {
+            let repo = Self::repo_on_new_branch(branch);
+            repo.commit(repo.path(), "base.md");
+            Self::started_in(repo)
+        }
+
+        fn land_on_main_beside_other_work(&self, branch: &str) {
+            let repo = self.repo.path();
+            self.repo
+                .git(repo, &["checkout", "-q", GitTestRepo::BRANCH]);
+            self.repo
+                .git(repo, &["merge", "-q", "--no-ff", "-m", "Land", branch]);
+            self.repo.commit(repo, "other.md");
         }
 
         fn line_counts(diff: DiffStat) -> (u64, u64, u64) {
@@ -437,6 +465,26 @@ mod tests {
         fixture.merge_into_session(DiffBaseFixture::ORIGIN_SHORT_NAME);
 
         assert_eq!(fixture.diff().files(), 1);
+    }
+
+    #[test]
+    fn a_stacked_session_measures_from_main_once_its_base_landed_and_main_was_merged() {
+        let fixture = DiffBaseFixture::stacked_on("part1");
+        fixture.commit_in_session("session.md");
+        fixture.land_on_main_beside_other_work("part1");
+        fixture.merge_into_session(GitTestRepo::BRANCH);
+
+        assert_eq!(fixture.diff_requesting("part1").files(), 1);
+    }
+
+    #[test]
+    fn a_stacked_session_measures_from_its_base_after_merging_the_base_again() {
+        let fixture = DiffBaseFixture::stacked_on("part1");
+        fixture.commit_in_session("session.md");
+        fixture.commit_on("part1", "base-2.md");
+        fixture.merge_into_session("part1");
+
+        assert_eq!(fixture.diff_requesting("part1").files(), 1);
     }
 
     #[test]

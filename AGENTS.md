@@ -311,7 +311,6 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── unseen_session.rs     # UnseenSession, a tmux server Ringleader cannot see that may still hold a stopped entry's session, which rename refuses and delete refuses or warns about
     │   ├── session_creation.rs   # SessionCreation: create_session with its rollbacks
     │   ├── start_point_resolver.rs # StartPointResolver, the commit a new worktree starts from, or why there is none
-    │   ├── base_branch_resolver.rs # BaseBranchResolver, the base branch a session's diff and pull follow: its recorded branch while that still exists, else its repo's configured one
     │   ├── base_branch_ladders.rs # BaseBranchLadders, the base branch ladder of a checkout, led by origin's default and skipping the repo's session branches, which the start point, diff base, and upstream resolvers share
     │   ├── worktree_rollback.rs  # WorktreeRollback, removes the worktree and branch of a failed create
     │   ├── creation_plan.rs      # CreationPlan and CreateRequest
@@ -334,7 +333,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── delete_outcome.rs     # DeleteOutcome
     │   ├── worktree_containment.rs # WorktreeContainment, shared by delete step 3 and reconciliation
     │   ├── session_monitor.rs    # SessionMonitor: observation, reconciliation, diff measurement, and the background jobs for observation, diff measurement, and preview capture
-    │   ├── diff_base_resolver.rs # DiffBaseResolver, the commit a session diff measures from
+    │   ├── diff_base_resolver.rs # DiffBaseResolver, the commit a session diff measures from: the newest it shares with the base branch the session recorded or its repo's base
     │   ├── session_reconciler.rs # SessionReconciler, pairs registry entries with live tmux sessions
     │   ├── reconciliation.rs     # Reconciliation, the reconciled entries and rows
     │   ├── session_access.rs     # SessionAccess: attach and open_shell, and the refusal from a pane of the private server

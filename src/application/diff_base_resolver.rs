@@ -8,6 +8,7 @@ use crate::domain::{BaseBranch, Branch, BranchTips};
 pub struct DiffBaseResolver<'a> {
     workspace: &'a dyn Workspace,
     ladders: BaseBranchLadders<'a>,
+    requested: Option<BaseBranch>,
 }
 
 impl<'a> DiffBaseResolver<'a> {
@@ -15,6 +16,7 @@ impl<'a> DiffBaseResolver<'a> {
         Self {
             workspace,
             ladders: BaseBranchLadders::new(workspace),
+            requested: None,
         }
     }
 
@@ -25,15 +27,19 @@ impl<'a> DiffBaseResolver<'a> {
         }
     }
 
+    pub fn requesting(self, requested: Option<BaseBranch>) -> Self {
+        Self { requested, ..self }
+    }
+
     pub fn resolve(
         &self,
         worktree: &Path,
         recorded: &StartPoint,
-        base_branch: Option<&BaseBranch>,
+        repo_base: Option<&BaseBranch>,
     ) -> Result<StartPoint, WorkspaceError> {
         match recorded {
             StartPoint::Commit(commit) => self
-                .measured_from(worktree, commit, base_branch)
+                .measured_from(worktree, commit, repo_base)
                 .map(StartPoint::Commit),
             StartPoint::Orphan => Ok(StartPoint::Orphan),
         }
@@ -43,13 +49,13 @@ impl<'a> DiffBaseResolver<'a> {
         &self,
         worktree: &Path,
         recorded: &str,
-        base_branch: Option<&BaseBranch>,
+        repo_base: Option<&BaseBranch>,
     ) -> Result<String, WorkspaceError> {
         let head = self.workspace.head(worktree)?;
         if head.is_unborn() {
             return Ok(recorded.to_string());
         }
-        let base_commits = self.base_branch_commits(worktree, base_branch, head.branch())?;
+        let base_commits = self.base_branch_commits(worktree, repo_base, head.branch())?;
         let candidates: Vec<String> = iter::once(recorded.to_string())
             .chain(base_commits)
             .collect();
@@ -60,12 +66,25 @@ impl<'a> DiffBaseResolver<'a> {
     fn base_branch_commits(
         &self,
         worktree: &Path,
-        base_branch: Option<&BaseBranch>,
+        repo_base: Option<&BaseBranch>,
         checked_out: Option<&Branch>,
     ) -> Result<Vec<String>, WorkspaceError> {
-        match base_branch {
-            Some(base) => self.named_commits(worktree, base, checked_out),
-            None => self.ladder_commits(worktree, checked_out),
+        let requested = self.requested_commits(worktree, checked_out)?;
+        let repo_base = match repo_base {
+            Some(base) => self.named_commits(worktree, base, checked_out)?,
+            None => self.ladder_commits(worktree, checked_out)?,
+        };
+        Ok(requested.into_iter().chain(repo_base).collect())
+    }
+
+    fn requested_commits(
+        &self,
+        worktree: &Path,
+        checked_out: Option<&Branch>,
+    ) -> Result<Vec<String>, WorkspaceError> {
+        match &self.requested {
+            Some(requested) => self.named_commits(worktree, requested, checked_out),
+            None => Ok(Vec::new()),
         }
     }
 
@@ -255,6 +274,25 @@ mod tests {
                 .calls()
                 .iter()
                 .any(|call| call.starts_with("remote_default_branch"))
+        );
+    }
+
+    #[test]
+    fn a_requested_base_branch_is_measured_with_beside_the_repo_base() {
+        let workspace = DiffFixture::with_tips(&[
+            (DiffFixture::local("part1"), DiffFixture::UPSTREAM),
+            (DiffFixture::local("main"), DiffFixture::MAIN_TIP),
+        ]);
+        let recorded = StartPoint::Commit(DiffFixture::RECORDED.to_string());
+
+        DiffBaseResolver::new(&workspace)
+            .requesting(BaseBranch::new("part1"))
+            .resolve(DiffFixture::worktree(), &recorded, None)
+            .unwrap();
+
+        assert_eq!(
+            workspace.merge_base_requests(),
+            DiffFixture::recorded_and(&[DiffFixture::UPSTREAM, DiffFixture::MAIN_TIP])
         );
     }
 
