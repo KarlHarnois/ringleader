@@ -382,15 +382,14 @@ mod tests {
 
     #[test]
     fn a_terminal_that_cannot_open_says_why() {
-        let fixture = TerminalFixture::stopped().with_terminal_emulator(
-            FakeTerminalEmulator::failing(TerminalEmulatorError::NoTerminal),
-        );
+        let missing = TerminalEmulatorError::NoTerminal {
+            reason: "none is installed".to_string(),
+        };
+        let fixture = TerminalFixture::stopped()
+            .with_terminal_emulator(FakeTerminalEmulator::failing(missing.clone()));
 
         let error = fixture.service().open_terminal("fix-auth").unwrap_err();
 
-        assert_eq!(
-            error.to_string(),
-            TerminalEmulatorError::NoTerminal.to_string()
-        );
+        assert_eq!(error.to_string(), missing.to_string());
     }
 }

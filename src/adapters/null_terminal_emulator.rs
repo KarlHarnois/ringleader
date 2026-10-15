@@ -24,11 +24,14 @@ mod tests {
 
     #[test]
     fn every_window_fails_with_what_the_host_lacks() {
-        let terminal = NullTerminalEmulator::new(TerminalEmulatorError::NoDisplay);
+        let missing = TerminalEmulatorError::NoDisplay {
+            reason: "WAYLAND_DISPLAY and DISPLAY are unset or empty".to_string(),
+        };
+        let terminal = NullTerminalEmulator::new(missing.clone());
 
         assert_eq!(
             terminal.open_window(Path::new("/data/ringleader/worktrees/fix-auth")),
-            Err(TerminalEmulatorError::NoDisplay)
+            Err(missing)
         );
     }
 }

@@ -1223,18 +1223,18 @@ mod tests {
 
     #[test]
     fn a_terminal_that_cannot_open_shows_why_as_an_error() {
-        let fixture = AppFixture::deletable().with_terminal_emulator(
-            FakeTerminalEmulator::failing(TerminalEmulatorError::NoDisplay),
-        );
+        let missing = TerminalEmulatorError::NoDisplay {
+            reason: "the session runs on a text console".to_string(),
+        };
+        let fixture = AppFixture::deletable()
+            .with_terminal_emulator(FakeTerminalEmulator::failing(missing.clone()));
         let mut app = AppFixture::started(&fixture, 100, 28);
 
         AppFixture::press(&mut app, 'T');
 
         assert_eq!(
             app.status.message(),
-            Some(&StatusMessage::Error(
-                TerminalEmulatorError::NoDisplay.to_string()
-            ))
+            Some(&StatusMessage::Error(missing.to_string()))
         );
     }
 

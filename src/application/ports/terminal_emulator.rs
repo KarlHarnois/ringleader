@@ -8,12 +8,10 @@ pub trait TerminalEmulator: Send + Sync {
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum TerminalEmulatorError {
-    #[error("no graphical display is available, WAYLAND_DISPLAY and DISPLAY are unset or empty")]
-    NoDisplay,
-    #[error(
-        "no terminal to open, xdg-terminal-exec is not on PATH and $TERMINAL is unset or empty"
-    )]
-    NoTerminal,
+    #[error("no graphical display is available, {reason}")]
+    NoDisplay { reason: String },
+    #[error("no terminal to open, {reason}")]
+    NoTerminal { reason: String },
     #[error("cannot start {program}: {reason}")]
     StartFailed { program: String, reason: String },
 }

@@ -17,6 +17,9 @@ pub struct SystemTerminalEmulator {
 
 impl SystemTerminalEmulator {
     const XDG_TERMINAL_EXEC: &'static str = "xdg-terminal-exec";
+    const NO_DISPLAY_REASON: &'static str = "WAYLAND_DISPLAY and DISPLAY are unset or empty";
+    const NO_TERMINAL_REASON: &'static str =
+        "xdg-terminal-exec is not on PATH and $TERMINAL is unset or empty";
 
     pub fn detect(
         host: &dyn HostProbe,
@@ -40,12 +43,24 @@ impl SystemTerminalEmulator {
         environment: &ProcessEnvironment,
     ) -> Result<OsString, TerminalEmulatorError> {
         if !environment.has_graphical_display() {
-            return Err(TerminalEmulatorError::NoDisplay);
+            return Err(Self::no_display());
         }
         host.resolve_command(Self::XDG_TERMINAL_EXEC)
             .map(PathBuf::into_os_string)
             .or_else(|| environment.terminal_emulator().map(OsStr::to_os_string))
-            .ok_or(TerminalEmulatorError::NoTerminal)
+            .ok_or_else(Self::no_terminal)
+    }
+
+    fn no_display() -> TerminalEmulatorError {
+        TerminalEmulatorError::NoDisplay {
+            reason: Self::NO_DISPLAY_REASON.to_string(),
+        }
+    }
+
+    fn no_terminal() -> TerminalEmulatorError {
+        TerminalEmulatorError::NoTerminal {
+            reason: Self::NO_TERMINAL_REASON.to_string(),
+        }
     }
 
     fn command(&self, directory: &Path) -> Command {
@@ -362,7 +377,7 @@ echo $$ > "$record/pid"
             .open_with(&[TerminalFixture::WAYLAND, ("TERMINAL", "")])
             .unwrap_err();
 
-        assert_eq!(error, TerminalEmulatorError::NoTerminal);
+        assert_eq!(error, SystemTerminalEmulator::no_terminal());
         assert!(error.to_string().contains("xdg-terminal-exec"));
         assert!(error.to_string().contains("$TERMINAL"));
     }
@@ -376,7 +391,7 @@ echo $$ > "$record/pid"
             .open_with(&[("WAYLAND_DISPLAY", ""), ("DISPLAY", "")])
             .unwrap_err();
 
-        assert_eq!(error, TerminalEmulatorError::NoDisplay);
+        assert_eq!(error, SystemTerminalEmulator::no_display());
         assert!(error.to_string().contains("no graphical display"));
         assert_eq!(
             fs::read_dir(fixture.record_directory(TerminalFixture::XDG_TERMINAL_EXEC))
