@@ -1,11 +1,12 @@
 use crate::application::{
-    CreateRequest, DeleteConfirmation, DeleteImpact, DeleteOutcome, ServiceError, SessionService,
-    StartOutcome,
+    CreateRequest, DeleteConfirmation, DeleteImpact, DeleteOutcome, RestartReport, ServiceError,
+    SessionService, StartOutcome,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BlockingOperation {
     Restart(String),
+    RestartAll,
     Create(CreateRequest),
     MeasureDelete(String),
     Delete { name: String, seen: DeleteImpact },
@@ -17,6 +18,7 @@ impl BlockingOperation {
     pub fn busy_message(&self) -> String {
         match self {
             Self::Restart(name) => format!("Restarting {name}…"),
+            Self::RestartAll => "Restarting every exited or stopped session…".to_string(),
             Self::Create(request) => format!("Creating {}…", request.name()),
             Self::MeasureDelete(name) => format!("Checking what deleting {name} would lose…"),
             Self::Delete { name, .. } => format!("Deleting {name}…"),
@@ -28,6 +30,7 @@ impl BlockingOperation {
     pub fn run(self, service: &mut SessionService) -> OperationOutcome {
         match self {
             Self::Restart(name) => Self::restart(service, name),
+            Self::RestartAll => Self::restart_all(service),
             Self::Create(request) => Self::create(service, &request),
             Self::MeasureDelete(name) => Self::measure(service, name),
             Self::Delete { name, seen } => Self::delete(service, name, seen),
@@ -73,6 +76,24 @@ impl BlockingOperation {
             Some(note) => format!("Restarted {name}. Also {note}."),
             None => format!("Restarted {name}."),
         }
+    }
+
+    fn restart_all(service: &mut SessionService) -> OperationOutcome {
+        match service.restart_all(|| false) {
+            Ok(report) => Self::restarted_all(&report),
+            Err(error) => OperationOutcome::Failed(error),
+        }
+    }
+
+    fn restarted_all(report: &RestartReport) -> OperationOutcome {
+        let message = report.summary();
+        if report.needs_attention() {
+            return OperationOutcome::Warned {
+                message,
+                select: None,
+            };
+        }
+        OperationOutcome::done(message, None)
     }
 
     fn rename(service: &mut SessionService, old: &str, new: &str) -> OperationOutcome {

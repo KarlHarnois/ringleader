@@ -517,6 +517,18 @@ mod tests {
     }
 
     #[test]
+    fn create_launches_the_agent_without_its_resume_args() {
+        let agent = ServiceFixture::agent().with_resume_args(&["--continue".to_string()]);
+        let fixture =
+            ServiceFixture::new().with_config(ServiceFixture::config().with_agents(vec![agent]));
+
+        CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap();
+
+        let launch = fixture.multiplexer().launches().pop().unwrap();
+        assert_eq!(launch.argv(), ["claude"]);
+    }
+
+    #[test]
     fn create_passes_the_session_name_to_the_agent() {
         let fixture = ServiceFixture::new().with_config(ServiceFixture::config_with_input());
 

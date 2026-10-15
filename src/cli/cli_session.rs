@@ -68,7 +68,7 @@ impl CliSession {
         }
     }
 
-    fn is_signaled(&self) -> bool {
+    pub fn is_signaled(&self) -> bool {
         self.signals.raised().is_some()
     }
 }

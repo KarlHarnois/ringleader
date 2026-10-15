@@ -16,6 +16,7 @@ use super::reconciliation::Reconciliation;
 use super::rename_request::RenameRequest;
 use super::repo_catalog::{RepoCatalog, RepoDiscovery};
 use super::repo_overrides::{AddRepoRequest, RepoAddition};
+use super::restart_report::RestartReport;
 use super::service_context::{LoadedConfig, ServiceContext};
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
@@ -273,6 +274,19 @@ impl SessionService {
             .restart(&reconciliation, name, self.config(), &config_path)?;
         self.entries = reconciliation.entries_with(name, outcome.session().clone());
         Ok(outcome.with_recovery(recovery))
+    }
+
+    pub fn restart_all(&mut self, stop: impl Fn() -> bool) -> Result<RestartReport, ServiceError> {
+        let names = self.reconcile()?.restartable_names();
+        let restarts = names
+            .into_iter()
+            .take_while(|_| !stop())
+            .map(|name| {
+                let restart = self.restart_session(&name);
+                (name, restart)
+            })
+            .collect();
+        Ok(RestartReport::new(restarts))
     }
 
     pub fn merge_upstream(&mut self, name: &str) -> Result<MergeReport, ServiceError> {
@@ -595,5 +609,187 @@ mod tests {
 
         assert!(error.to_string().contains("Upgrade Ringleader"));
         assert!(!fixture.registry().was_moved_aside());
+    }
+
+    struct RestartAllFixture;
+
+    impl RestartAllFixture {
+        const STOPPED: [&'static str; 2] = ["alpha", "echo"];
+        const EXITED: &'static str = "bravo";
+        const WAITING: &'static str = "charlie";
+        const WORKING: &'static str = "delta";
+
+        fn sessions() -> Vec<Session> {
+            [
+                Self::STOPPED[0],
+                Self::EXITED,
+                Self::WAITING,
+                Self::WORKING,
+                Self::STOPPED[1],
+            ]
+            .map(ServiceFixture::session)
+            .to_vec()
+        }
+
+        fn mixed() -> ServiceFixture {
+            let sessions = Self::sessions();
+            let all: Vec<&Session> = sessions.iter().collect();
+            Self::with_worktrees_of(&sessions, &all)
+        }
+
+        fn with_worktrees_of(sessions: &[Session], present: &[&Session]) -> ServiceFixture {
+            ServiceFixture::new()
+                .with_sessions(sessions)
+                .with_workspace(ServiceFixture::workspace_for(present))
+                .with_host(ServiceFixture::host_for(present))
+                .with_multiplexer(Self::live_sessions())
+        }
+
+        fn live_sessions() -> FakeMultiplexer {
+            let stranger = ServiceFixture::session("mystery");
+            FakeMultiplexer::new()
+                .with_live(ServiceFixture::exited(&ServiceFixture::session(
+                    Self::EXITED,
+                )))
+                .with_live(ServiceFixture::waiting(&ServiceFixture::session(
+                    Self::WAITING,
+                )))
+                .with_live(ServiceFixture::working(&ServiceFixture::session(
+                    Self::WORKING,
+                )))
+                .with_live(ServiceFixture::waiting(&stranger).without_metadata())
+        }
+
+        fn restarted_names(report: &RestartReport) -> Vec<String> {
+            report
+                .restarted()
+                .map(|outcome| outcome.session().name().as_str().to_string())
+                .collect()
+        }
+
+        fn recreated_tmux_names(fixture: &ServiceFixture) -> Vec<String> {
+            fixture
+                .multiplexer()
+                .specs()
+                .iter()
+                .map(|spec| spec.tmux_name().to_string())
+                .collect()
+        }
+    }
+
+    #[test]
+    fn restart_all_restarts_every_exited_and_stopped_session_in_name_order() {
+        let fixture = RestartAllFixture::mixed();
+
+        let report = fixture.service().restart_all(|| false).unwrap();
+
+        assert_eq!(
+            RestartAllFixture::restarted_names(&report),
+            ["alpha", "bravo", "echo"]
+        );
+        assert_eq!(report.failures().count(), 0);
+    }
+
+    #[test]
+    fn restart_all_recreates_only_the_stopped_sessions() {
+        let fixture = RestartAllFixture::mixed();
+
+        fixture.service().restart_all(|| false).unwrap();
+
+        assert_eq!(
+            RestartAllFixture::recreated_tmux_names(&fixture),
+            ["ringleader-alpha", "ringleader-echo"]
+        );
+    }
+
+    #[test]
+    fn restart_all_records_the_new_socket_of_every_recreated_session() {
+        let recorded = Path::new(ServiceFixture::OTHER_RUNTIME_SOCKET);
+        let sessions = RestartAllFixture::STOPPED
+            .map(|name| ServiceFixture::session(name).on_socket(recorded))
+            .to_vec();
+        let present: Vec<&Session> = sessions.iter().collect();
+        let fixture = RestartAllFixture::with_worktrees_of(&sessions, &present)
+            .with_multiplexer(FakeMultiplexer::new());
+
+        fixture.service().restart_all(|| false).unwrap();
+
+        let entries = fixture.registry().sessions();
+        let sockets: Vec<&Path> = entries.iter().map(Session::socket_path).collect();
+        let private_socket = Path::new(FakeMultiplexer::SOCKET);
+        assert_eq!(sockets, [private_socket, private_socket]);
+    }
+
+    #[test]
+    fn restart_all_keeps_going_past_a_failed_restart_and_reports_it() {
+        let sessions = RestartAllFixture::sessions();
+        let without_alpha: Vec<&Session> = sessions.iter().skip(1).collect();
+        let fixture = RestartAllFixture::with_worktrees_of(&sessions, &without_alpha);
+
+        let report = fixture.service().restart_all(|| false).unwrap();
+
+        let failures: Vec<(&str, &ServiceError)> = report.failures().collect();
+        assert_eq!(failures.len(), 1);
+        assert_eq!(failures[0].0, "alpha");
+        assert!(failures[0].1.to_string().contains("is missing"));
+        assert_eq!(
+            RestartAllFixture::restarted_names(&report),
+            ["bravo", "echo"]
+        );
+    }
+
+    #[test]
+    fn restart_all_skips_the_rest_once_stop_fires() {
+        let fixture = RestartAllFixture::mixed();
+        let checks = std::cell::Cell::new(0);
+
+        let report = fixture
+            .service()
+            .restart_all(|| {
+                checks.set(checks.get() + 1);
+                checks.get() > 1
+            })
+            .unwrap();
+
+        assert_eq!(RestartAllFixture::restarted_names(&report), ["alpha"]);
+    }
+
+    #[test]
+    fn restart_all_without_an_exited_or_stopped_session_reports_nothing() {
+        let fixture = ServiceFixture::new();
+
+        let report = fixture.service().restart_all(|| false).unwrap();
+
+        assert!(report.is_empty());
+    }
+
+    #[test]
+    fn restart_all_types_the_startup_input_of_every_restarted_agent() {
+        let fixture = RestartAllFixture::mixed().with_config(ServiceFixture::config_with_input());
+
+        fixture.service().restart_all(|| false).unwrap();
+
+        for tmux_name in ["ringleader-alpha", "ringleader-bravo", "ringleader-echo"] {
+            assert!(
+                fixture
+                    .multiplexer()
+                    .wait_for_typing(tmux_name, std::time::Duration::from_secs(2)),
+                "{tmux_name}"
+            );
+        }
+    }
+
+    #[test]
+    fn restart_all_notes_a_recreated_socket_on_the_first_restart_only() {
+        let fixture = RestartAllFixture::mixed()
+            .with_multiplexer(RestartAllFixture::live_sessions().with_lost_socket());
+
+        let report = fixture.service().restart_all(|| false).unwrap();
+
+        let recoveries: Vec<bool> = report
+            .restarted()
+            .map(|outcome| outcome.recovery().is_some())
+            .collect();
+        assert_eq!(recoveries, [true, false, false]);
     }
 }
