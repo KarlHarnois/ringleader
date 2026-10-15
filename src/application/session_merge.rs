@@ -9,7 +9,7 @@ use super::service_ports::ServicePorts;
 use super::session_monitor::SessionMonitor;
 use super::upstream_resolver::UpstreamResolver;
 use super::worktree_inspection::WorktreeInspection;
-use crate::domain::{BaseBranch, Config, Session, SessionState};
+use crate::domain::{BaseBranch, Branch, Config, Session, SessionState};
 
 pub struct SessionMerge {
     workspace: Arc<dyn Workspace>,
@@ -66,10 +66,28 @@ impl SessionMerge {
             .fetch_upstream(session.worktree_path(), &upstream)
         {
             Err(WorkspaceError::NotOnOrigin { .. }) => {
+                self.refuse_unpushed_base(session, requested)?;
                 self.fetch_upstream_of(session, reconciliation, repo_base)
             }
             fetched => Ok(fetched.map(|()| upstream)?),
         }
+    }
+
+    fn refuse_unpushed_base(
+        &self,
+        session: &Session,
+        requested: &BaseBranch,
+    ) -> Result<(), ServiceError> {
+        let local = Branch::Local(requested.to_string());
+        let tips = self
+            .workspace
+            .branch_tips(session.worktree_path(), std::slice::from_ref(&local))?;
+        if tips.tip_of(&local).is_none() {
+            return Ok(());
+        }
+        Err(ServiceError::Conflict(format!(
+            "origin has no branch {requested}, push it, or delete it once it has landed, then pull again"
+        )))
     }
 
     fn fetch_upstream_of(
@@ -637,6 +655,31 @@ mod tests {
         MergeFixture::merge(&fixture).unwrap();
 
         assert!(MergeFixture::fetched_branch(&fixture, "develop"));
+    }
+
+    #[test]
+    fn a_requested_base_branch_still_held_locally_is_refused_when_origin_lacks_it() {
+        let requested = ServiceFixture::session_based_on(MergeFixture::NAME, "part1");
+        let worktree = requested.worktree_path().to_path_buf();
+        let unpushed = MergeFixture::workspace().with_branch_tips(
+            &worktree,
+            &[(
+                Branch::Local("part1".to_string()),
+                FakeWorkspace::DEFAULT_START,
+            )],
+        );
+        let fixture = MergeFixture::based_on_part1(unpushed);
+
+        let error = MergeFixture::merge(&fixture).unwrap_err();
+
+        assert_eq!(
+            error,
+            ServiceError::Conflict(
+                "origin has no branch part1, push it, or delete it once it has landed, then pull again"
+                    .to_string()
+            )
+        );
+        assert_eq!(MergeFixture::fetches(&fixture), 1);
     }
 
     #[test]
