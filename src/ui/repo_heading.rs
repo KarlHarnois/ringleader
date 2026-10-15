@@ -80,6 +80,9 @@ impl<'a> RepoHeading<'a> {
     }
 
     fn tail_spans(&self, tick: u64, theme: &Theme) -> Vec<Span<'static>> {
+        if !self.folded {
+            return Vec::new();
+        }
         let mut spans = vec![
             Span::styled(" ", theme.base()),
             Span::styled(format!("({})", self.rows.len()), theme.dim()),
@@ -136,6 +139,11 @@ mod tests {
             ServiceFixture::summary_in(name, "/repos/alpha", state)
         }
 
+        fn folded(rows: &[SessionSummary]) -> RepoHeading<'_> {
+            let folded = HashSet::from([RepoGroup::of(&rows[0])]);
+            RepoHeading::new(1, rows).folded_among(&folded)
+        }
+
         fn text(heading: &RepoHeading) -> String {
             Self::text_within(heading, Self::WIDE)
         }
@@ -155,20 +163,28 @@ mod tests {
             HeadingFixture::row("spike-tui", SessionState::Waiting),
         ];
 
-        let heading = RepoHeading::new(1, &rows);
+        let heading = HeadingFixture::folded(&rows);
 
-        assert_eq!(HeadingFixture::text(&heading), "1 ▾ alpha (4) ⠋1 ●2 ○1");
+        assert_eq!(HeadingFixture::text(&heading), "1 ▸ alpha (4) ⠋1 ●2 ○1");
     }
 
     #[test]
     fn a_folded_heading_shows_the_folded_arrow_and_no_rows() {
         let rows = [HeadingFixture::row("docs", SessionState::Waiting)];
-        let folded = HashSet::from([RepoGroup::of(&rows[0])]);
 
-        let heading = RepoHeading::new(1, &rows).folded_among(&folded);
+        let heading = HeadingFixture::folded(&rows);
 
         assert_eq!(HeadingFixture::text(&heading), "1 ▸ alpha (1) ●1");
         assert!(heading.shown_rows().is_empty());
+    }
+
+    #[test]
+    fn an_expanded_heading_shows_no_counts() {
+        let rows = [HeadingFixture::row("docs", SessionState::Waiting)];
+
+        let heading = RepoHeading::new(1, &rows);
+
+        assert_eq!(HeadingFixture::text(&heading), "1 ▾ alpha");
     }
 
     #[test]
@@ -179,11 +195,11 @@ mod tests {
             ServiceFixture::summary_in("fix-auth", repo, SessionState::Waiting),
         ];
 
-        let heading = RepoHeading::new(1, &rows);
+        let heading = HeadingFixture::folded(&rows);
 
         assert_eq!(
             HeadingFixture::text_within(&heading, 30),
-            "1 ▾ example-project… (2) ⠋1 ●1"
+            "1 ▸ example-project… (2) ⠋1 ●1"
         );
     }
 
@@ -193,6 +209,6 @@ mod tests {
 
         let heading = RepoHeading::new(10, &rows);
 
-        assert_eq!(HeadingFixture::text(&heading), "  ▾ alpha (1) ●1");
+        assert_eq!(HeadingFixture::text(&heading), "  ▾ alpha");
     }
 }

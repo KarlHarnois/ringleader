@@ -748,7 +748,7 @@ after the completion steps pass.** None of the metrics tools runs `clippy`.
     │   ├── session_table.rs        # SessionTable, the home screen's session list, drawn as a tree of repos
     │   ├── session_tree.rs         # SessionTree, the sorted rows as repo headings and branch lines, and the lines a viewport shows
     │   ├── viewport.rs             # Viewport, the lines the session table shows, which move only to keep the selection in view, and the lines H M L select
-    │   ├── repo_heading.rs         # RepoHeading, a repo's heading line with its number, fold arrow, and state counts
+    │   ├── repo_heading.rs         # RepoHeading, a repo's heading line with its number and fold arrow, and its session and state counts while folded
     │   ├── repo_group.rs           # RepoGroup, the repo a row is listed under, or other
     │   ├── colored_row.rs          # ColoredRow, a row's text split around its coloured cells
     │   ├── state_indicator.rs      # StateIndicator, the glyph and color of a session state
