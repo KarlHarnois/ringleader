@@ -468,6 +468,7 @@ The viewer still looks for a companion with `tmux has-session`. The `env` prefix
 | Added line | A line the change's diff adds |
 | Untestable function | A production function that needs a terminal or reads the process environment. The Tests rules keep both out of every test. |
 | Step edit | Any change to a file under `src/` after step 1 first runs. A change made to pass a later Commands run is a step edit too. |
+| Edited test | A test that a step edit adds, rewrites, or deletes |
 
 **Never run a completion step alongside another command:** the tests start real tmux servers and share `target/`.
 
@@ -543,7 +544,8 @@ steps from step 1.**
   - Skip each step 3 run that passed on the current production code.
   - If a changed file's functions passed step 4 on the current production
     code, leave the file out of `<files>`.
-  - Never leave out of `<files>` a changed file that the edited tests cover.
+  - Never leave out of `<files>` a changed file that an edited test covers or
+    covered before the step edit.
   - If `<files>` is then empty, skip step 4.
 - If the step edit rewrote or deleted an existing test, find each file in
   `<files>` that the test covered. Split `<files>` into two step 4 runs:
