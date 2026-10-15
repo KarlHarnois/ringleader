@@ -126,15 +126,15 @@ impl<'a> ActionGate<'a> {
     }
 
     pub fn shell(&self) -> Result<AppRequest, String> {
-        self.managed("t cannot open a shell in it")
+        self.managed_name("t cannot open a shell in it")
             .map(AppRequest::Shell)
     }
 
     pub fn terminal(&self) -> Result<String, String> {
-        self.managed("T cannot open a terminal in it")
+        self.managed_name("T cannot open a terminal in it")
     }
 
-    fn managed(&self, refusal: &str) -> Result<String, String> {
+    fn managed_name(&self, refusal: &str) -> Result<String, String> {
         let row = self.selected()?;
         let name = row.name();
         match row.state() {
