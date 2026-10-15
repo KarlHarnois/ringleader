@@ -306,20 +306,14 @@ nix flake check
 
 ### Known violations
 
-**The code breaks these rules in four places.** Each place is a violation to fix. Never copy a violation as precedent.
+**Each issue below tracks code that breaks a rule of this file.** Never use the code an issue names as precedent for new code. Run `gh issue view <number>` to see the files and functions an issue names.
 
-1. Advice in these files spells out tmux and git command lines:
-   - `domain/unmanaged_session.rs`
-   - `application/busy_worktree.rs`
-   - `application/server_audit.rs`
-   - `application/delete_outcome.rs`
-   - `application/deletion_guards.rs`
-   - `application/session_renaming.rs`
-
-   The tmux command lines repeat the exact-target syntax that `TmuxScripts::exact` owns.
-2. `WorkspaceError`, `MultiplexerError`, and `PullRequestError` each name the subcommand that failed. `WorkspaceError` and `PullRequestError` also keep the subcommand's exit status and stderr in fields. `ServiceError::TimedOut` names the tool, and `ui/diff_queue.rs` and `ui/home_state.rs` branch on the tool.
-3. `ui/action_gate.rs` decides which actions each session state allows, such as pull only for a Waiting session. The use cases enforce their own versions of those rules.
-4. `CompositionRoot::run_tui` in `main.rs` calls the TUI's startup use cases itself: `restore_server_socket`, `refuse_own_pane`, `load_registry`, and `reapply_server_config`.
+| Issue | Violation |
+| --- | --- |
+| #58 | The core's messages spell out tool command lines. |
+| #59 | Port errors carry tool details, and two TUI types branch on those details. |
+| #60 | `ActionGate` decides which actions each session state allows. |
+| #61 | `CompositionRoot::run_tui` calls the TUI's startup use cases. |
 
 ### New ports
 
