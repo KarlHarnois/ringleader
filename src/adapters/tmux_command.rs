@@ -25,7 +25,7 @@ impl TmuxCommand {
         Self {
             program: program.to_os_string(),
             server: server.clone(),
-            environment: environment.without(&CallerIdentity::variables()),
+            environment: environment.outside_tmux(),
             caller: CallerIdentity::of(environment),
             bounded: BoundedCommand::new(Deadlines::standard()),
         }
@@ -161,10 +161,6 @@ struct CallerIdentity {
 impl CallerIdentity {
     const TMUX: &'static str = "TMUX";
     const TMUX_PANE: &'static str = "TMUX_PANE";
-
-    fn variables() -> Vec<String> {
-        vec![Self::TMUX.to_string(), Self::TMUX_PANE.to_string()]
-    }
 
     fn of(environment: &ProcessEnvironment) -> Self {
         Self {
