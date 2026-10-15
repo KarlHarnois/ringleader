@@ -9,6 +9,10 @@ pub struct ProcessEnvironment {
     terminal: Option<OsString>,
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "main captures the environment and the terminal of standard input through this snapshot"
+)]
 impl ProcessEnvironment {
     const TERMINAL_NAME_LIMIT: usize = 256;
     const TMUX_PROGRAM: &'static str = "RINGLEADER_TMUX";

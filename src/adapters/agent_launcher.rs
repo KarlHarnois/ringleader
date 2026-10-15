@@ -182,7 +182,7 @@ mod tests {
 
     use super::*;
     use crate::application::ports::AgentLaunch;
-    use crate::test_support::DirenvTestHome;
+    use crate::test_support::{DirenvTestHome, InheritedPath};
 
     #[derive(Clone, Default)]
     struct CapturingExec {
@@ -304,10 +304,7 @@ mod tests {
         }
 
         fn program_on_path(name: &str) -> String {
-            let path = std::env::var_os("PATH").unwrap_or_default();
-            std::env::split_paths(&path)
-                .map(|directory| directory.join(name))
-                .find(|candidate| candidate.is_file())
+            InheritedPath::program(name)
                 .unwrap()
                 .to_string_lossy()
                 .into_owned()

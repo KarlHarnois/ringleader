@@ -62,6 +62,10 @@ struct CompositionRoot {
     launch_directory: PathBuf,
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the composition root reads the process inputs and injects them"
+)]
 impl CompositionRoot {
     fn capture() -> Self {
         let snapshot = ProcessEnvironment::capture();
@@ -381,5 +385,218 @@ impl CompositionRoot {
     fn fail(message: &str) -> ExitCode {
         let _ = writeln!(io::stderr(), "ringleader: {message}");
         ExitCode::from(CliExit::FAILURE)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+    use std::ffi::OsStr;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+
+    struct LayerImports {
+        sources: Vec<(PathBuf, String)>,
+    }
+
+    impl LayerImports {
+        const SOURCE_DIRECTORY: &'static str = concat!(env!("CARGO_MANIFEST_DIR"), "/src");
+        const TEST_SUPPORT: &'static str = "test_support";
+        const OUTSIDE_THE_CORE: [&'static str; 4] =
+            ["crossterm", "ratatui", "std::process", "std::fs"];
+
+        fn of(layers: &[&str]) -> Self {
+            let sources = layers
+                .iter()
+                .flat_map(|layer| Self::layer_files(layer))
+                .map(|path| {
+                    let text = fs::read_to_string(&path).expect("a readable source file");
+                    (path, text)
+                })
+                .collect();
+            Self { sources }
+        }
+
+        fn from_text(text: &str) -> Self {
+            Self {
+                sources: vec![(PathBuf::from("example.rs"), text.to_string())],
+            }
+        }
+
+        fn layers_outside(&self, allowed: &[&str]) -> BTreeSet<String> {
+            self.references("crate")
+                .filter(|(_, module)| {
+                    module != Self::TEST_SUPPORT && !allowed.contains(&module.as_str())
+                })
+                .map(|(file, module)| format!("{} uses crate::{module}", file.display()))
+                .collect()
+        }
+
+        fn uses_of(&self, paths: &[&str]) -> BTreeSet<String> {
+            paths
+                .iter()
+                .flat_map(|path| self.uses_of_path(path))
+                .collect()
+        }
+
+        fn uses_of_path(&self, path: &str) -> BTreeSet<String> {
+            let (root, module) = path
+                .split_once("::")
+                .map_or((path, None), |(root, module)| (root, Some(module)));
+            self.references(root)
+                .filter(|(_, found)| module.is_none_or(|module| module == found))
+                .map(|(file, _)| format!("{} uses {path}", file.display()))
+                .collect()
+        }
+
+        fn layer_files(layer: &str) -> Vec<PathBuf> {
+            let source = Path::new(Self::SOURCE_DIRECTORY);
+            let mut files = Self::rust_files_under(&source.join(layer));
+            let module_file = source.join(format!("{layer}.rs"));
+            if module_file.is_file() {
+                files.push(module_file);
+            }
+            files
+        }
+
+        fn rust_files_under(directory: &Path) -> Vec<PathBuf> {
+            let mut files = Vec::new();
+            for entry in fs::read_dir(directory).expect("a readable layer directory") {
+                let path = entry.expect("a readable directory entry").path();
+                if path.is_dir() {
+                    files.extend(Self::rust_files_under(&path));
+                } else if path.extension() == Some(OsStr::new("rs")) {
+                    files.push(path);
+                }
+            }
+            files
+        }
+
+        fn references(&self, root: &str) -> impl Iterator<Item = (&Path, String)> {
+            let prefix = format!("{root}::");
+            self.sources.iter().flat_map(move |(path, text)| {
+                let file = path.strip_prefix(Self::SOURCE_DIRECTORY).unwrap_or(path);
+                Self::modules_after(text, &prefix)
+                    .into_iter()
+                    .map(move |module| (file, module))
+            })
+        }
+
+        fn modules_after(text: &str, prefix: &str) -> Vec<String> {
+            text.match_indices(prefix)
+                .filter(|(index, _)| !Self::continues_a_name(text, *index))
+                .flat_map(|(index, _)| Self::first_segments(&text[index + prefix.len()..]))
+                .filter(|module| !module.is_empty())
+                .collect()
+        }
+
+        fn continues_a_name(text: &str, index: usize) -> bool {
+            text[..index]
+                .chars()
+                .next_back()
+                .is_some_and(|character| character.is_alphanumeric() || character == '_')
+        }
+
+        fn first_segments(path: &str) -> Vec<String> {
+            match path.strip_prefix('{') {
+                Some(group) => Self::group_items(group)
+                    .into_iter()
+                    .map(Self::leading_name)
+                    .collect(),
+                None => vec![Self::leading_name(path)],
+            }
+        }
+
+        fn group_items(group: &str) -> Vec<&str> {
+            let mut items = Vec::new();
+            let mut depth = 0;
+            let mut start = 0;
+            for (index, character) in group.char_indices() {
+                match character {
+                    '{' => depth += 1,
+                    '}' if depth == 0 => {
+                        items.push(&group[start..index]);
+                        break;
+                    }
+                    '}' => depth -= 1,
+                    ',' if depth == 0 => {
+                        items.push(&group[start..index]);
+                        start = index + 1;
+                    }
+                    _ => {}
+                }
+            }
+            items
+        }
+
+        fn leading_name(path: &str) -> String {
+            path.trim_start()
+                .chars()
+                .take_while(|character| character.is_alphanumeric() || *character == '_')
+                .collect()
+        }
+    }
+
+    #[test]
+    fn domain_imports_no_other_layer() {
+        let outside = LayerImports::of(&["domain"]).layers_outside(&["domain"]);
+
+        assert_eq!(outside, BTreeSet::new());
+    }
+
+    #[test]
+    fn application_imports_only_domain() {
+        let outside = LayerImports::of(&["application"]).layers_outside(&["application", "domain"]);
+
+        assert_eq!(outside, BTreeSet::new());
+    }
+
+    #[test]
+    fn adapters_import_neither_ui_nor_cli() {
+        let outside =
+            LayerImports::of(&["adapters"]).layers_outside(&["adapters", "application", "domain"]);
+
+        assert_eq!(outside, BTreeSet::new());
+    }
+
+    #[test]
+    fn ui_imports_neither_adapters_nor_cli() {
+        let outside = LayerImports::of(&["ui"]).layers_outside(&["ui", "application", "domain"]);
+
+        assert_eq!(outside, BTreeSet::new());
+    }
+
+    #[test]
+    fn cli_imports_neither_adapters_nor_ui() {
+        let outside = LayerImports::of(&["cli"]).layers_outside(&["cli", "application", "domain"]);
+
+        assert_eq!(outside, BTreeSet::new());
+    }
+
+    #[test]
+    fn the_core_never_uses_crossterm_ratatui_std_process_or_std_fs() {
+        let uses =
+            LayerImports::of(&["domain", "application"]).uses_of(&LayerImports::OUTSIDE_THE_CORE);
+
+        assert_eq!(uses, BTreeSet::new());
+    }
+
+    #[test]
+    fn a_grouped_import_counts_each_module_it_names() {
+        let imports = LayerImports::from_text(
+            "use crate::{domain::Session, adapters::{GitWorkspace, TmuxMultiplexer}};",
+        );
+
+        assert_eq!(
+            imports.layers_outside(&["domain"]),
+            BTreeSet::from(["example.rs uses crate::adapters".to_string()])
+        );
+    }
+
+    #[test]
+    fn a_name_that_only_ends_in_a_root_is_not_that_root() {
+        let imports = LayerImports::from_text("use mystd::fs::File;");
+
+        assert_eq!(imports.uses_of(&["std::fs"]), BTreeSet::new());
     }
 }

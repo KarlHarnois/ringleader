@@ -703,7 +703,7 @@ mod tests {
     }
 
     #[test]
-    fn restart_all_records_the_new_socket_of_every_recreated_session() {
+    fn restart_all_records_every_new_socket_because_a_shared_reconciliation_drops_earlier_ones() {
         let recorded = Path::new(ServiceFixture::OTHER_RUNTIME_SOCKET);
         let sessions = RestartAllFixture::STOPPED
             .map(|name| ServiceFixture::session(name).on_socket(recorded))

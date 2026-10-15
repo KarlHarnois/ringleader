@@ -195,7 +195,7 @@ impl HostProbe for SystemHostProbe {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::TmuxTestServer;
+    use crate::test_support::{InheritedPath, TmuxTestServer};
 
     struct ProbeFixture;
 
@@ -205,7 +205,7 @@ mod tests {
         }
 
         fn probe_for(tmux_program: &OsStr) -> SystemHostProbe {
-            let path = std::env::var_os("PATH").unwrap_or_default();
+            let path = InheritedPath::value();
             let environment = ProcessEnvironment::new(vec![("PATH".into(), path)], None);
             SystemHostProbe::new(&environment, tmux_program)
         }

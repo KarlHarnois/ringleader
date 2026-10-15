@@ -14,9 +14,6 @@ impl ExecutableScript {
         fs::set_permissions(path, fs::Permissions::from_mode(Self::MODE)).unwrap();
     }
 
-    // With fs::write, a child that another test thread forks during the write
-    // holds the script open for writing, and running the script then fails
-    // with "Text file busy".
     fn write_from_a_child_process(path: &Path, body: &str) {
         let mut tee = Command::new("tee")
             .arg(path)
