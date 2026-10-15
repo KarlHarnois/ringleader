@@ -158,7 +158,6 @@ impl PullRequests for GhPullRequests {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::os::unix::fs::PermissionsExt;
     use std::os::unix::process::ExitStatusExt;
     use std::path::PathBuf;
     use std::process::ExitStatus;
@@ -166,6 +165,7 @@ mod tests {
     use super::*;
     use crate::adapters::Deadlines;
     use crate::domain::PullRequestState;
+    use crate::test_support::ExecutableScript;
 
     struct ParseFixture;
 
@@ -215,8 +215,7 @@ printf '{"data":{"viewer":{"login":"octocat"},"repository":{"owner":{"login":"ex
 
         fn executable(directory: &tempfile::TempDir, body: &str) -> PathBuf {
             let path = directory.path().join("fake-gh");
-            fs::write(&path, body).unwrap();
-            fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+            ExecutableScript::write(&path, body);
             path
         }
 

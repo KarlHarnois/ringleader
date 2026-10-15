@@ -814,6 +814,7 @@ after the completion steps pass.** None of the metrics tools runs `clippy`.
         ├── fake_scratch_space.rs    # FakeScratchSpace
         ├── fake_directory_environment.rs # FakeDirectoryEnvironment
         ├── direnv_test_home.rs      # DirenvTestHome: a temporary HOME, XDG_DATA_HOME, and XDG_CONFIG_HOME for tests that run a real direnv
+        ├── executable_script.rs     # ExecutableScript: writes a test script through a child process, so running the script never fails with Text file busy
         ├── fake_pull_requests.rs    # FakePullRequests
         ├── fake_terminal_emulator.rs # FakeTerminalEmulator
         ├── log_capture.rs           # LogCapture, the test logger that keeps warnings for assertions

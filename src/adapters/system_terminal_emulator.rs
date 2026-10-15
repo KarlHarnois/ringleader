@@ -155,7 +155,7 @@ mod tests {
     use crate::adapters::deadlines::Deadlines;
     use crate::adapters::live_process::LiveProcess;
     use crate::adapters::system_host_probe::SystemHostProbe;
-    use crate::test_support::{Deadline, LogCapture};
+    use crate::test_support::{Deadline, ExecutableScript, LogCapture};
 
     struct TerminalFixture {
         directory: tempfile::TempDir,
@@ -167,7 +167,6 @@ mod tests {
         const GHOSTTY: &'static str = "ghostty";
         const SINGLE_INSTANCE: &'static str = "--gtk-single-instance=true";
         const WAYLAND: (&'static str, &'static str) = ("WAYLAND_DISPLAY", "wayland-1");
-        const EXECUTABLE: u32 = 0o755;
         const NOT_EXECUTABLE: u32 = 0o644;
         const SUCCESS: &'static str = "exit 0";
         const FAILURE: &'static str = "exit 3";
@@ -223,24 +222,27 @@ echo $$ > "$record/pid"
         }
 
         fn install(&self, name: &str) -> PathBuf {
-            self.install_script(name, Self::SUCCESS, Self::EXECUTABLE)
+            self.install_script(name, Self::SUCCESS)
         }
 
         fn install_failing(&self, name: &str) -> PathBuf {
-            self.install_script(name, Self::FAILURE, Self::EXECUTABLE)
+            self.install_script(name, Self::FAILURE)
         }
 
         fn install_unexecutable(&self, name: &str) -> PathBuf {
-            self.install_script(name, Self::SUCCESS, Self::NOT_EXECUTABLE)
+            let program = self.install_script(name, Self::SUCCESS);
+            fs::set_permissions(&program, fs::Permissions::from_mode(Self::NOT_EXECUTABLE))
+                .unwrap();
+            program
         }
 
         fn install_lingering(&self, name: &str) -> PathBuf {
             let sleep = Self::tool("sleep").display().to_string();
             let ending = format!("exec '{sleep}' {}", Self::LINGERING_SECONDS);
-            self.install_script(name, &ending, Self::EXECUTABLE)
+            self.install_script(name, &ending)
         }
 
-        fn install_script(&self, name: &str, ending: &str, mode: u32) -> PathBuf {
+        fn install_script(&self, name: &str, ending: &str) -> PathBuf {
             let record = self.record_directory(name);
             fs::create_dir_all(&record).unwrap();
             let script = Self::RECORDING
@@ -249,8 +251,7 @@ echo $$ > "$record/pid"
                 .replace("{cat}", &Self::tool("cat").to_string_lossy())
                 .replace("{ending}", ending);
             let program = self.programs().join(name);
-            fs::write(&program, script).unwrap();
-            fs::set_permissions(&program, fs::Permissions::from_mode(mode)).unwrap();
+            ExecutableScript::write(&program, &script);
             program
         }
 
