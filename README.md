@@ -19,8 +19,15 @@ Linux only.
 
 ## Install
 
+Try it without installing:
+
 ```sh
 nix run github:KarlHarnois/ringleader
+```
+
+Install it:
+
+```sh
 nix profile add github:KarlHarnois/ringleader
 ```
 
