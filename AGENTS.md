@@ -214,11 +214,10 @@ nix flake check
 | --- | --- |
 | `docs/agents/completion-steps.md` | run a metrics tool or the completion steps |
 | `docs/agents/manual-runs.md` | make a manual run |
-| `docs/agents/new-ports.md` | add a port |
 | `docs/agents/uml-viewer.md` | open uml-viewer |
 | `docs/agents/features/pull.md` | change the pull that the `p` key starts |
 | `docs/agents/features/direnv.md` | change how create or restart launches an agent, or which variables the agent gets |
-| `docs/agents/features/agent-hooks.md` | change `AgentHooks`, the exit wait for its typing job, or the check that an agent is at its prompt |
+| `docs/agents/features/agent-hooks.md` | change how `AgentHooks` types into an agent, or the check that an agent is at its prompt |
 | `docs/agents/features/scratch-directories.md` | change a session's scratch directory |
 | `docs/agents/features/background-jobs.md` | change the TUI's observations, preview captures, diff measurements, or pull request lookups |
 
@@ -287,6 +286,7 @@ nix flake check
 **If `application`, `ui`, or `cli` needs a capability from outside the process, route the capability through a port.** None of those layers imports `adapters`.
 
 - `CompositionRoot` and the types in `adapters` reach the outside directly.
+- Never make a port an `Option`. If the host can lack the technology behind a port, pass a null adapter. A null adapter does nothing on such a host. `NullPullRequests` is the null adapter for a host without `gh`.
 - Logging needs no port. Every layer writes through the `log` macros, and `CompositionRoot` installs `AppLog` behind them.
 
 ### Driving adapter I/O
