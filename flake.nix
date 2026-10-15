@@ -8,7 +8,7 @@
       flake = false;
     };
     crapper = {
-      url = "github:unclebob/crapper";
+      url = "github:unclebob/crapper/9f1bead298b5a9d576bdd6319289fcf426e5b18a";
       flake = false;
     };
     mutator = {
