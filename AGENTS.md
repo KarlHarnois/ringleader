@@ -499,8 +499,8 @@ The viewer still looks for a companion with `tmux has-session`. The `env` prefix
    file. Step 3 always passes.
 4. Run
    `nix develop .#metrics -c mutator --reuse-coverage --max-workers 2 --timeout-factor 60 <files>`.
-   `<files>` is every changed file, separated by spaces. If a step edit rule
-   below splits `<files>`, make one run per part. Otherwise, pass all of
+   `<files>` is every changed file, separated by spaces. If a rule below
+   splits the files into parts, make one run per part. Otherwise, pass all of
    `<files>` to one run. `--reuse-coverage` reads the coverage step 1 wrote.
    Step 4 passes when every changed function's row reads 0 under `Survived`
    and `Uncovered`. A survivor or uncovered site that this section has you
