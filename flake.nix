@@ -135,6 +135,33 @@
           touch $out
         '';
 
+      agentDocs =
+        pkgs:
+        pkgs.runCommand "agent-docs" { } ''
+          fail() {
+            echo "$1" >&2
+            exit 1
+          }
+          guide=${./AGENTS.md}
+          references=${./docs/agents}
+          budget=25000
+          size=$(wc -c < "$guide")
+          (( size <= budget )) ||
+            fail "AGENTS.md is $size bytes, over its budget of $budget. Move a rule that only one kind of task needs into a reference file under docs/agents/."
+          if grep --quiet '^@' "$guide"; then
+            fail "AGENTS.md imports a file with @, which loads the file in every session. Name the file in the Reference files table instead."
+          fi
+          for file in $(cd "$references" && find . -name '*.md' | sed 's#^\./##'); do
+            grep --fixed-strings --quiet "| \`docs/agents/$file\` |" "$guide" ||
+              fail "The Reference files table in AGENTS.md has no row for docs/agents/$file."
+          done
+          for file in $(grep --only-matching '^| `docs/agents/[^`]*`' "$guide" | sed 's#^| `docs/agents/##; s#`$##'); do
+            [[ -f $references/$file ]] ||
+              fail "The Reference files table in AGENTS.md names docs/agents/$file, which does not exist."
+          done
+          touch $out
+        '';
+
       devShellTools =
         pkgs: defaultShell:
         pkgs.runCommand "dev-shell-tools" { } ''
@@ -230,6 +257,7 @@
       checks = nixpkgs.lib.genAttrs supportedSystems (system: {
         default = self.packages.${system}.default;
         readme-version-badge = readmeVersionBadge nixpkgs.legacyPackages.${system};
+        agent-docs = agentDocs nixpkgs.legacyPackages.${system};
         dev-shell-tools = devShellTools nixpkgs.legacyPackages.${system} self.devShells.${system}.default;
       });
     };

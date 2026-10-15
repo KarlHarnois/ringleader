@@ -230,8 +230,6 @@ nix flake check
 | `docs/agents/features/scratch-directories.md` | change a session's scratch directory |
 | `docs/agents/features/background-jobs.md` | change the TUI's observations, preview captures, diff measurements, or pull request lookups |
 
-**Never `@`-import a reference file:** an import loads the file in every session.
-
 ## Architecture
 
 **Ringleader follows hexagonal architecture, also called ports and adapters.** The core is the `domain` and `application` layers.
@@ -474,6 +472,7 @@ Add a new editing key to `TextField` with its usual terminal meaning, never to a
   - the CLI synopsis
   - the exit codes
 - Never put architecture or the rules of this file in `README.md`.
-- `docs/agents/` holds only the reference files that this file names.
+- Put a rule that every task needs in this file. Put a rule that only one kind of task needs in a reference file under `docs/agents/`.
+- Name each reference file in the Reference files table.
 - This repository holds no `CLAUDE.md` or `CLAUDE.local.md`: either file would hide this file from Claude Code.
 - If one of those files is ever needed, make its first line `@AGENTS.md`.
