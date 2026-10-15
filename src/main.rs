@@ -36,6 +36,7 @@ use adapters::server_files::ServerFiles;
 use adapters::signal_hook_interrupts::SignalHookInterrupts;
 use adapters::system_clock::SystemClock;
 use adapters::system_host_probe::SystemHostProbe;
+use adapters::system_terminal_emulator::SystemTerminalEmulator;
 use adapters::tmux_command::TmuxCommand;
 use adapters::tmux_multiplexer::TmuxMultiplexer;
 use adapters::toml_config_source::TomlConfigSource;
@@ -43,8 +44,8 @@ use adapters::xdg_paths::XdgPaths;
 use adapters::{BoundedCommand, Deadlines, GitWorkspace};
 use application::ports::{ConfigSource, HostProbe, Lock, LockError, PullRequests};
 use application::{
-    CorruptRegistry, DiagnosticPaths, LoadedConfig, RepoPorts, ServiceContext, ServiceError,
-    ServicePorts, SessionService, StatePorts, TmuxPorts,
+    CorruptRegistry, DesktopPorts, DiagnosticPaths, LoadedConfig, RepoPorts, ServiceContext,
+    ServiceError, ServicePorts, SessionService, StatePorts, TmuxPorts,
 };
 use cli::{Cli, CliExit, CliOutput, CliSession};
 use ui::{App, CrosstermInput, CrosstermScreenMode, EventLoop, TerminalGuard};
@@ -280,6 +281,10 @@ impl CompositionRoot {
         let pull_requests = Self::pull_requests(&host, bounded);
         let directory_environment =
             DirenvDirectoryEnvironment::when_installed(host.as_ref(), &self.environment, bounded);
+        let desktop = DesktopPorts::new(SystemTerminalEmulator::detect(
+            host.as_ref(),
+            &self.environment,
+        ));
         let repos = RepoPorts::new(
             Arc::new(GitWorkspace::new(self.programs.git(), bounded)),
             Arc::new(DirectoryRepoScanner::new(
@@ -300,7 +305,10 @@ impl CompositionRoot {
             .with_home(self.paths.home())
             .with_diagnostics(self.diagnostics())
             .with_shell(&self.environment.shell());
-        SessionService::new(ServicePorts::new(state, repos, tmux_ports), context)
+        SessionService::new(
+            ServicePorts::new(state, repos, tmux_ports, desktop),
+            context,
+        )
     }
 
     fn state_ports(&self, config_source: TomlConfigSource) -> StatePorts {

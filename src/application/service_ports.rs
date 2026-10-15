@@ -2,18 +2,29 @@ use std::sync::Arc;
 
 use super::ports::{
     Clock, ConfigSource, DirectoryEnvironment, HostProbe, Multiplexer, PullRequests, RepoScanner,
-    ScratchSpace, SessionRegistry, Workspace,
+    ScratchSpace, SessionRegistry, TerminalEmulator, Workspace,
 };
 
 pub struct ServicePorts {
     state: StatePorts,
     repos: RepoPorts,
     tmux: TmuxPorts,
+    desktop: DesktopPorts,
 }
 
 impl ServicePorts {
-    pub fn new(state: StatePorts, repos: RepoPorts, tmux: TmuxPorts) -> Self {
-        Self { state, repos, tmux }
+    pub fn new(
+        state: StatePorts,
+        repos: RepoPorts,
+        tmux: TmuxPorts,
+        desktop: DesktopPorts,
+    ) -> Self {
+        Self {
+            state,
+            repos,
+            tmux,
+            desktop,
+        }
     }
 
     pub fn state(&self) -> &StatePorts {
@@ -26,6 +37,10 @@ impl ServicePorts {
 
     pub fn tmux(&self) -> &TmuxPorts {
         &self.tmux
+    }
+
+    pub fn desktop(&self) -> &DesktopPorts {
+        &self.desktop
     }
 }
 
@@ -138,5 +153,19 @@ impl TmuxPorts {
 
     pub fn multiplexer(&self) -> Arc<dyn Multiplexer> {
         Arc::clone(&self.multiplexer)
+    }
+}
+
+pub struct DesktopPorts {
+    terminal_emulator: Arc<dyn TerminalEmulator>,
+}
+
+impl DesktopPorts {
+    pub fn new(terminal_emulator: Arc<dyn TerminalEmulator>) -> Self {
+        Self { terminal_emulator }
+    }
+
+    pub fn terminal_emulator(&self) -> Arc<dyn TerminalEmulator> {
+        Arc::clone(&self.terminal_emulator)
     }
 }

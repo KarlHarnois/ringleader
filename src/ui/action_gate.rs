@@ -36,8 +36,18 @@ impl<'a> ActionGate<'a> {
     }
 
     pub fn action_for(&self, key: &KeyEvent) -> KeyAction {
-        match key.code {
-            _ if BackKey::matches(key) => KeyAction::Ignore,
+        if BackKey::matches(key) {
+            return KeyAction::Ignore;
+        }
+        Self::screen_action(key)
+            .or_else(|| Self::selection_move(key.code))
+            .or_else(|| Self::repo_action(key.code))
+            .or_else(|| self.access_action(key.code))
+            .unwrap_or_else(|| self.session_change(key.code))
+    }
+
+    fn screen_action(key: &KeyEvent) -> Option<KeyAction> {
+        let action = match key.code {
             KeyCode::Char('q') => KeyAction::Request(AppRequest::Quit),
             KeyCode::Char('r') => KeyAction::Reload,
             KeyCode::Char('?') => KeyAction::Open(DialogOpening::Help),
@@ -45,27 +55,56 @@ impl<'a> ActionGate<'a> {
             KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 KeyAction::FindSession
             }
+            _ => return None,
+        };
+        Some(action)
+    }
+
+    fn selection_move(code: KeyCode) -> Option<KeyAction> {
+        let action = match code {
             KeyCode::Down | KeyCode::Right | KeyCode::Char('j' | 'l') => KeyAction::Move(1),
             KeyCode::Up | KeyCode::Left | KeyCode::Char('k' | 'h') => KeyAction::Move(-1),
             KeyCode::Char('G') => KeyAction::SelectLast,
             KeyCode::Char('H') => KeyAction::SelectHigh,
             KeyCode::Char('M') => KeyAction::SelectMiddle,
             KeyCode::Char('L') => KeyAction::SelectLow,
+            _ => return None,
+        };
+        Some(action)
+    }
+
+    fn repo_action(code: KeyCode) -> Option<KeyAction> {
+        let action = match code {
+            KeyCode::Char(' ') => KeyAction::Fold,
+            KeyCode::Char(digit @ '1'..='9') => KeyAction::JumpToRepo(Self::repo_number(digit)),
+            _ => return None,
+        };
+        Some(action)
+    }
+
+    fn access_action(&self, code: KeyCode) -> Option<KeyAction> {
+        let action = match code {
+            KeyCode::Enter => self.enter(),
+            KeyCode::Char('t') => KeyAction::from(self.shell().map(KeyAction::Request)),
+            KeyCode::Char('T') => KeyAction::from(self.terminal().map(KeyAction::OpenTerminal)),
+            _ => return None,
+        };
+        Some(action)
+    }
+
+    fn session_change(&self, code: KeyCode) -> KeyAction {
+        match code {
             KeyCode::Char('n') => KeyAction::from(
                 self.writable()
                     .map(|()| KeyAction::Open(DialogOpening::NewSession)),
             ),
-            KeyCode::Char(' ') => KeyAction::Fold,
-            KeyCode::Char(digit @ '1'..='9') => KeyAction::JumpToRepo(Self::repo_number(digit)),
-            KeyCode::Enter => self.enter(),
-            KeyCode::Char('t') => KeyAction::from(self.shell().map(KeyAction::Request)),
-            KeyCode::Char('s') => KeyAction::from(self.restart().map(KeyAction::Request)),
-            KeyCode::Char('d') => KeyAction::from(self.delete().map(KeyAction::Request)),
-            KeyCode::Char('p') => KeyAction::from(self.pull().map(KeyAction::Request)),
             KeyCode::Char('R') => KeyAction::from(
                 self.rename()
                     .map(|session| KeyAction::Open(DialogOpening::Rename(Box::new(session)))),
             ),
+            KeyCode::Char('s') => KeyAction::from(self.restart().map(KeyAction::Request)),
+            KeyCode::Char('d') => KeyAction::from(self.delete().map(KeyAction::Request)),
+            KeyCode::Char('p') => KeyAction::from(self.pull().map(KeyAction::Request)),
             _ => KeyAction::Ignore,
         }
     }
@@ -87,13 +126,20 @@ impl<'a> ActionGate<'a> {
     }
 
     pub fn shell(&self) -> Result<AppRequest, String> {
+        self.managed("t cannot open a shell in it")
+            .map(AppRequest::Shell)
+    }
+
+    pub fn terminal(&self) -> Result<String, String> {
+        self.managed("T cannot open a terminal in it")
+    }
+
+    fn managed(&self, refusal: &str) -> Result<String, String> {
         let row = self.selected()?;
         let name = row.name();
         match row.state() {
-            SessionState::Unmanaged => Err(format!(
-                "{name} is unmanaged, so t cannot open a shell in it."
-            )),
-            _ => Ok(AppRequest::Shell(name.to_string())),
+            SessionState::Unmanaged => Err(format!("{name} is unmanaged, so {refusal}.")),
+            _ => Ok(name.to_string()),
         }
     }
 
@@ -177,6 +223,7 @@ pub enum KeyAction {
     Open(DialogOpening),
     FindSession,
     Reload,
+    OpenTerminal(String),
     Refuse(String),
     Ignore,
 }
@@ -558,7 +605,7 @@ mod tests {
         let gate = ActionGate::on_heading(None);
         let refusal = |character| gate.action_for(&KeyEvent::from(KeyCode::Char(character)));
 
-        for character in ['d', 'R', 's', 't'] {
+        for character in ['d', 'R', 's', 't', 'T'] {
             assert_eq!(
                 refusal(character),
                 KeyAction::Refuse("No session is selected.".to_string())
@@ -574,5 +621,40 @@ mod tests {
         assert_eq!(gate.attach(), refusal);
         assert_eq!(gate.shell(), refusal);
         assert_eq!(gate.restart(), refusal);
+        assert_eq!(gate.terminal(), Err("No session is selected.".to_string()));
+    }
+
+    #[test]
+    fn capital_t_opens_a_terminal_for_a_managed_session_in_every_state_even_read_only() {
+        let error = GateFixture::config_error();
+        let key = KeyEvent::from(KeyCode::Char('T'));
+
+        for state in [
+            SessionState::Working,
+            SessionState::Waiting,
+            SessionState::Exited,
+            SessionState::Stopped,
+        ] {
+            let row = GateFixture::row(state);
+
+            assert_eq!(
+                ActionGate::new(Some(&row), Some(&error)).action_for(&key),
+                KeyAction::OpenTerminal("fix-auth".to_string())
+            );
+        }
+    }
+
+    #[test]
+    fn an_unmanaged_session_opens_no_terminal() {
+        let stranger = ServiceFixture::session("mystery");
+        let row = SessionSummary::unmanaged(UnmanagedSession::new(
+            "mystery",
+            ServiceFixture::waiting(&stranger).without_metadata(),
+        ));
+
+        assert_eq!(
+            ActionGate::new(Some(&row), None).terminal(),
+            Err("mystery is unmanaged, so T cannot open a terminal in it.".to_string())
+        );
     }
 }

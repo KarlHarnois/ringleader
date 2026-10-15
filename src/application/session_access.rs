@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use super::ports::{AttachTarget, HostProbe, Multiplexer};
+use super::ports::{AttachTarget, HostProbe, Multiplexer, TerminalEmulator};
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
 use crate::domain::{Session, SessionState, SessionSummary};
@@ -9,6 +9,7 @@ use crate::domain::{Session, SessionState, SessionSummary};
 pub struct SessionAccess {
     multiplexer: Arc<dyn Multiplexer>,
     host: Arc<dyn HostProbe>,
+    terminal_emulator: Arc<dyn TerminalEmulator>,
     shell: String,
 }
 
@@ -17,6 +18,7 @@ impl SessionAccess {
         Self {
             multiplexer: ports.tmux().multiplexer(),
             host: ports.repos().host(),
+            terminal_emulator: ports.desktop().terminal_emulator(),
             shell: shell.to_string(),
         }
     }
@@ -65,6 +67,13 @@ impl SessionAccess {
         Ok(ShellOutcome::Attached)
     }
 
+    pub fn open_terminal(&self, session: &Session) -> Result<(), ServiceError> {
+        self.check_worktree(session)?;
+        self.terminal_emulator
+            .open_window(session.worktree_path())?;
+        Ok(())
+    }
+
     fn check_worktree(&self, session: &Session) -> Result<(), ServiceError> {
         if self.host.path_exists(session.worktree_path()) {
             return Ok(());
@@ -108,9 +117,30 @@ impl EphemeralShell {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{FakeMultiplexer, ServiceFixture};
+    use crate::application::ports::{ConfigError, TerminalEmulatorError};
+    use crate::test_support::{FakeMultiplexer, FakeTerminalEmulator, ServiceFixture};
 
     struct AttachFixture;
+
+    struct TerminalFixture;
+
+    impl TerminalFixture {
+        fn stopped() -> ServiceFixture {
+            let session = ServiceFixture::session("fix-auth");
+            ServiceFixture::new()
+                .with_sessions(std::slice::from_ref(&session))
+                .with_host(ServiceFixture::host_for(&[&session]))
+        }
+
+        fn live() -> ServiceFixture {
+            let session = ServiceFixture::session("fix-auth");
+            Self::stopped()
+                .with_workspace(ServiceFixture::workspace_for(&[&session]))
+                .with_multiplexer(
+                    FakeMultiplexer::new().with_live(ServiceFixture::waiting(&session)),
+                )
+        }
+    }
 
     struct ShellFixture;
 
@@ -280,5 +310,87 @@ mod tests {
         );
 
         assert!(fixture.service().attach("mystery").is_ok());
+    }
+
+    #[test]
+    fn a_terminal_opens_in_the_worktree_of_a_stopped_session() {
+        let fixture = TerminalFixture::stopped();
+
+        fixture.service().open_terminal("fix-auth").unwrap();
+
+        assert_eq!(
+            fixture.terminal_emulator().opened(),
+            [ServiceFixture::worktree_path("fix-auth")]
+        );
+    }
+
+    #[test]
+    fn a_terminal_opens_while_the_config_failed_to_load() {
+        let fixture = TerminalFixture::stopped().with_broken_config(ConfigError::Parse {
+            path: "/config/ringleader/config.toml".into(),
+            detail: "expected `=`".to_string(),
+        });
+
+        fixture.service().open_terminal("fix-auth").unwrap();
+
+        assert_eq!(fixture.terminal_emulator().opened().len(), 1);
+    }
+
+    #[test]
+    fn a_terminal_for_a_live_session_sends_nothing_to_tmux_and_changes_nothing() {
+        let fixture = TerminalFixture::live();
+
+        fixture.service().open_terminal("fix-auth").unwrap();
+
+        assert!(fixture.multiplexer().calls().is_empty());
+        assert!(fixture.workspace().calls().is_empty());
+        assert_eq!(fixture.registry().save_count(), 0);
+        assert_eq!(fixture.terminal_emulator().opened().len(), 1);
+    }
+
+    #[test]
+    fn a_missing_worktree_opens_no_terminal() {
+        let fixture = ServiceFixture::new().with_sessions(&[ServiceFixture::session("fix-auth")]);
+
+        let error = fixture.service().open_terminal("fix-auth").unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "worktree {} is missing, run ringleader doctor",
+                ServiceFixture::worktree_path("fix-auth").display()
+            )
+        );
+        assert!(fixture.terminal_emulator().opened().is_empty());
+    }
+
+    #[test]
+    fn an_unmanaged_session_opens_no_terminal() {
+        let stranger = ServiceFixture::session("mystery");
+        let fixture = ServiceFixture::new()
+            .with_host(ServiceFixture::host_for(&[&stranger]))
+            .with_multiplexer(
+                FakeMultiplexer::new()
+                    .with_live(ServiceFixture::waiting(&stranger).without_metadata()),
+            );
+
+        let error = fixture.service().open_terminal("mystery").unwrap_err();
+
+        assert!(matches!(error, ServiceError::NotFound(_)));
+        assert!(fixture.terminal_emulator().opened().is_empty());
+    }
+
+    #[test]
+    fn a_terminal_that_cannot_open_says_why() {
+        let fixture = TerminalFixture::stopped().with_terminal_emulator(
+            FakeTerminalEmulator::failing(TerminalEmulatorError::NoTerminal),
+        );
+
+        let error = fixture.service().open_terminal("fix-auth").unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            TerminalEmulatorError::NoTerminal.to_string()
+        );
     }
 }

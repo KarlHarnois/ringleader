@@ -173,13 +173,20 @@ impl App {
         self.status.show(None);
         let gate = Self::gate(&self.home, &self.service);
         match self.key_sequence.handle_key(key, &gate) {
-            KeyAction::Request(request) => return self.request(request),
-            KeyAction::Move(offset) => self.home.move_selection(offset, &self.service),
-            KeyAction::SelectFirst => self.home.select_first(&self.service),
-            KeyAction::SelectLast => self.home.select_last(&self.service),
-            KeyAction::SelectHigh => self.home.select_high(&self.service),
-            KeyAction::SelectMiddle => self.home.select_middle(&self.service),
-            KeyAction::SelectLow => self.home.select_low(&self.service),
+            KeyAction::Request(request) => self.request(request),
+            KeyAction::Refuse(refusal) => {
+                self.status.error(refusal);
+                AppRequest::Continue
+            }
+            action => {
+                self.act_on(action);
+                AppRequest::Continue
+            }
+        }
+    }
+
+    fn act_on(&mut self, action: KeyAction) {
+        match action {
             KeyAction::Fold => self.home.toggle_fold(&self.service),
             KeyAction::JumpToRepo(number) => self.home.jump_to_repo(number, &self.service),
             KeyAction::Open(opening) => {
@@ -190,10 +197,21 @@ impl App {
                 self.dialogs.open(Dialog::find_session(names));
             }
             KeyAction::Reload => self.reload(),
-            KeyAction::Refuse(refusal) => self.status.error(refusal),
-            KeyAction::Ignore => {}
+            KeyAction::OpenTerminal(name) => self.open_terminal(&name),
+            other => self.navigate(&other),
         }
-        AppRequest::Continue
+    }
+
+    fn navigate(&mut self, action: &KeyAction) {
+        match action {
+            KeyAction::Move(offset) => self.home.move_selection(*offset, &self.service),
+            KeyAction::SelectFirst => self.home.select_first(&self.service),
+            KeyAction::SelectLast => self.home.select_last(&self.service),
+            KeyAction::SelectHigh => self.home.select_high(&self.service),
+            KeyAction::SelectMiddle => self.home.select_middle(&self.service),
+            KeyAction::SelectLow => self.home.select_low(&self.service),
+            _ => {}
+        }
     }
 
     fn gate<'a>(home: &'a HomeState, service: &'a SessionService) -> ActionGate<'a> {
@@ -230,6 +248,12 @@ impl App {
                     .map_err(|error| error.to_string())
             });
         self.status.outcome(outcome, reloaded);
+    }
+
+    fn open_terminal(&mut self, name: &str) {
+        let outcome = self.service.open_terminal(name);
+        let opened = format!("Opened a terminal window in the worktree of {name}.");
+        self.status.outcome(outcome, opened);
     }
 
     fn settle(&mut self, select: Option<String>) {
@@ -273,11 +297,13 @@ mod tests {
     use ratatui::style::Color;
 
     use crate::application::DeleteImpact;
-    use crate::application::ports::{ConfigError, MergeOutcome, MultiplexerError, UnmergedCommits};
+    use crate::application::ports::{
+        ConfigError, MergeOutcome, MultiplexerError, TerminalEmulatorError, UnmergedCommits,
+    };
     use crate::domain::{Config, ConfigDraft, DiffStat, PullRequestState, Session};
     use crate::test_support::{
-        CapturedWriter, Deadline, FakeMultiplexer, FakePullRequests, HeldCalls, ServiceFixture,
-        UiHarness,
+        CapturedWriter, Deadline, FakeMultiplexer, FakePullRequests, FakeTerminalEmulator,
+        HeldCalls, ServiceFixture, UiHarness,
     };
 
     struct AppFixture;
@@ -771,6 +797,17 @@ mod tests {
     }
 
     #[test]
+    fn capital_h_selects_the_top_row_on_screen() {
+        let fixture = AppFixture::three_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, 'G');
+
+        AppFixture::press(&mut app, 'H');
+
+        assert_eq!(AppFixture::selected(&app).as_deref(), Some("dark-mode"));
+    }
+
+    #[test]
     fn capital_l_selects_the_bottom_session_on_screen() {
         let fixture = AppFixture::three_waiting_sessions();
         let mut app = AppFixture::started(&fixture, 100, 28);
@@ -1140,6 +1177,82 @@ mod tests {
         let request = app.handle_event(&UiHarness::character('t'));
 
         assert_eq!(request, AppRequest::Shell("dark-mode".to_string()));
+    }
+
+    #[test]
+    fn capital_t_opens_a_terminal_in_the_selected_worktree_and_stays_on_the_list() {
+        let fixture = AppFixture::deletable();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        let request = app.handle_event(&UiHarness::character('T'));
+
+        assert_eq!(request, AppRequest::Continue);
+        assert_eq!(
+            fixture.terminal_emulator().opened(),
+            [ServiceFixture::worktree_path("fix-auth")]
+        );
+        assert_eq!(
+            app.status.message(),
+            Some(&StatusMessage::Info(
+                "Opened a terminal window in the worktree of fix-auth.".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn capital_t_sends_nothing_to_tmux() {
+        let fixture = AppFixture::deletable();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        let before = fixture.multiplexer().calls();
+
+        AppFixture::press(&mut app, 'T');
+
+        assert_eq!(fixture.multiplexer().calls(), before);
+    }
+
+    #[test]
+    fn capital_t_on_an_exited_session_in_a_read_only_tui_opens_a_terminal() {
+        let fixture = UiHarness::exited_session_fixture("fix-auth")
+            .with_broken_config(AppFixture::config_error());
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press(&mut app, 'T');
+
+        assert_eq!(fixture.terminal_emulator().opened().len(), 1);
+    }
+
+    #[test]
+    fn a_terminal_that_cannot_open_shows_why_as_an_error() {
+        let fixture = AppFixture::deletable().with_terminal_emulator(
+            FakeTerminalEmulator::failing(TerminalEmulatorError::NoDisplay),
+        );
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press(&mut app, 'T');
+
+        assert_eq!(
+            app.status.message(),
+            Some(&StatusMessage::Error(
+                TerminalEmulatorError::NoDisplay.to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn capital_t_on_a_missing_worktree_gives_the_doctor_advice() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press(&mut app, 'T');
+
+        assert_eq!(
+            app.status.message(),
+            Some(&StatusMessage::Error(format!(
+                "worktree {} is missing, run ringleader doctor",
+                ServiceFixture::worktree_path("dark-mode").display()
+            )))
+        );
+        assert!(fixture.terminal_emulator().opened().is_empty());
     }
 
     #[test]

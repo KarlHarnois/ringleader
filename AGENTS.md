@@ -305,7 +305,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── mod.rs
     │   ├── session_service.rs    # SessionService, the facade the UI and CLI call
     │   ├── service_context.rs    # ServiceContext and LoadedConfig, what main injects into the facade
-    │   ├── service_ports.rs      # ServicePorts with the StatePorts, RepoPorts, and TmuxPorts bundles
+    │   ├── service_ports.rs      # ServicePorts with the StatePorts, RepoPorts, TmuxPorts, and DesktopPorts bundles
     │   ├── service_error.rs      # ServiceError, the kinds of failure the use cases report
     │   ├── session_lifecycle.rs  # SessionLifecycle: create, delete, rename, restart, merge
     │   ├── busy_worktree.rs      # BusyWorktree, the tmux server processes that keep a stopped entry from restarting, with the advice for each case
@@ -340,7 +340,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── diff_base_resolver.rs # DiffBaseResolver, the commit a session diff measures from
     │   ├── session_reconciler.rs # SessionReconciler, pairs registry entries with live tmux sessions
     │   ├── reconciliation.rs     # Reconciliation, the reconciled entries and rows
-    │   ├── session_access.rs     # SessionAccess: attach and open_shell, and the refusal from a pane of the private server
+    │   ├── session_access.rs     # SessionAccess: attach, open_shell, and open_terminal, and the refusal from a pane of the private server
     │   ├── repo_catalog.rs       # RepoCatalog: discover, find, add, and remove repos
     │   ├── pull_request_catalog.rs # PullRequestCatalog, looks up the pull requests of sessions in the background
     │   ├── repo_merge.rs         # RepoMerge, joins configured and scanned repos, configured entries winning, and finds the config entry and the sessions of a repo by its canonical path
@@ -371,6 +371,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │       ├── scratch_space.rs      # ScratchSpace trait
     │       ├── directory_environment.rs # DirectoryEnvironment trait and Envrc, a directory's .envrc with its bytes, whether it is allowed or denied, and the command that allows it
     │       ├── pull_requests.rs      # PullRequests trait
+    │       ├── terminal_emulator.rs  # TerminalEmulator trait and TerminalEmulatorError, opens a terminal window in a directory
     │       ├── host_probe.rs         # HostProbe trait
     │       ├── clock.rs              # Clock trait
     │       ├── lock.rs               # Lock trait
@@ -399,6 +400,8 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── null_pull_requests.rs # NullPullRequests, finds no pull request on a host without gh
     │   ├── direnv_directory_environment.rs # DirenvDirectoryEnvironment, reads a directory's .envrc, asks direnv whether it is allowed, and allows it
     │   ├── null_directory_environment.rs # NullDirectoryEnvironment, finds no .envrc on a host without direnv
+    │   ├── system_terminal_emulator.rs # SystemTerminalEmulator, starts xdg-terminal-exec or the program $TERMINAL names in a directory, in a session of its own, and logs a failed exit
+    │   ├── null_terminal_emulator.rs # NullTerminalEmulator, opens no window on a host without a graphical display or a terminal, and says which it lacks
     │   ├── bounded_command.rs    # BoundedCommand, runs git, tmux, gh, and direnv children in a new session with a deadline
     │   ├── deadlines.rs          # Deadlines and CallKind, the deadline of each kind of child call
     │   ├── command_output.rs     # CommandOutput, a finished child's status and output
@@ -514,6 +517,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
         ├── fake_directory_environment.rs # FakeDirectoryEnvironment
         ├── direnv_test_home.rs      # DirenvTestHome: a temporary HOME, XDG_DATA_HOME, and XDG_CONFIG_HOME for tests that run a real direnv
         ├── fake_pull_requests.rs    # FakePullRequests
+        ├── fake_terminal_emulator.rs # FakeTerminalEmulator
         ├── log_capture.rs           # LogCapture, the test logger that keeps warnings for assertions
         ├── fake_host_probe.rs       # FakeHostProbe
         ├── fake_clock.rs            # FakeClock

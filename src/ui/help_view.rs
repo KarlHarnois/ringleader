@@ -25,7 +25,7 @@ pub struct HelpView {
 impl HelpView {
     pub const TITLE: &'static str = concat!(" Help · ringleader ", env!("CARGO_PKG_VERSION"), " ");
     const KEYS_HEADING: &'static str = "Keys";
-    const KEYS: [(&'static str, &'static str); 15] = [
+    const KEYS: [(&'static str, &'static str); 16] = [
         ("n", "create a session"),
         ("d", "delete the selected session"),
         ("R", "rename the selected session and its branch"),
@@ -36,6 +36,10 @@ impl HelpView {
         ("Space", "fold or unfold the selected repo"),
         ("/ Ctrl-K", "find a session by name and attach to it"),
         ("t", "open a shell in the selected session's worktree"),
+        (
+            "T",
+            "open a shell in the selected session's worktree in a new terminal window",
+        ),
         ("s", "restart an exited or stopped session"),
         (
             "p",
@@ -236,12 +240,13 @@ mod tests {
     impl HelpFixture {
         const HOME: &'static str = "/home/example";
         const WIDE_WIDTH: usize = 70;
+        const UNWRAPPED_WIDTH: usize = 100;
         const EVERY_ROW_HEIGHT: usize = 200;
         const SHORT_WIDTH: usize = 56;
         const SHORT_HEIGHT: usize = 8;
         const PAST_THE_END: usize = 50;
-        const ROWS_ABOVE_THE_SMALLEST_FULL_SIZE: u16 = 8;
-        const TALL_NARROW_SIZE: (u16, u16) = (79, 32);
+        const ROWS_ABOVE_THE_SMALLEST_FULL_SIZE: u16 = 10;
+        const TALL_NARROW_SIZE: (u16, u16) = (79, 34);
         const TMUX_CONFIG_ROW: &'static str = "tmux config  ~/.local/state/ringleader/tmux.conf";
 
         fn help() -> HelpView {
@@ -384,6 +389,16 @@ mod tests {
 
         assert!(rows.contains(&"t            open a shell in the selected session's".to_string()));
         assert!(rows.contains(&"             worktree".to_string()));
+    }
+
+    #[test]
+    fn the_help_lists_the_terminal_window_key() {
+        let rows = HelpFixture::rows(&HelpFixture::help(), HelpFixture::UNWRAPPED_WIDTH);
+
+        assert!(rows.contains(
+            &"T            open a shell in the selected session's worktree in a new terminal window"
+                .to_string()
+        ));
     }
 
     #[test]

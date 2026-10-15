@@ -3,14 +3,15 @@ use std::sync::Arc;
 
 use super::{
     FakeClock, FakeConfigSource, FakeDirectoryEnvironment, FakeHostProbe, FakeMultiplexer,
-    FakePullRequests, FakeRepoScanner, FakeScratchSpace, FakeSessionRegistry, FakeWorkspace,
+    FakePullRequests, FakeRepoScanner, FakeScratchSpace, FakeSessionRegistry, FakeTerminalEmulator,
+    FakeWorkspace,
 };
 use crate::application::ports::{
     ConfigError, MergeOutcome, MultiplexerError, ScratchSpace, WorktreeEntry,
 };
 use crate::application::{
-    CorruptRegistry, DiagnosticPaths, LoadedConfig, RepoPorts, ServiceContext, ServicePorts,
-    SessionService, StatePorts, TmuxPorts,
+    CorruptRegistry, DesktopPorts, DiagnosticPaths, LoadedConfig, RepoPorts, ServiceContext,
+    ServicePorts, SessionService, StatePorts, TmuxPorts,
 };
 use crate::domain::{
     Agent, AgentPane, BaseBranch, Config, HotKey, KeyBindings, NamingScheme, PullRequest,
@@ -30,6 +31,7 @@ pub struct ServiceFixture {
     clock: Arc<FakeClock>,
     scratch_space: Arc<FakeScratchSpace>,
     directory_environment: Arc<FakeDirectoryEnvironment>,
+    terminal_emulator: Arc<FakeTerminalEmulator>,
     config_error: Option<ConfigError>,
     launch_directory: PathBuf,
     diagnostics: DiagnosticPaths,
@@ -68,6 +70,7 @@ impl ServiceFixture {
             clock: Arc::new(FakeClock::at(Self::NOW)),
             scratch_space: Arc::new(FakeScratchSpace::default()),
             directory_environment: Arc::new(FakeDirectoryEnvironment::default()),
+            terminal_emulator: Arc::new(FakeTerminalEmulator::default()),
             config_error: None,
             launch_directory: PathBuf::from(Self::REPO),
             diagnostics: Self::diagnostics(),
@@ -161,6 +164,13 @@ impl ServiceFixture {
         }
     }
 
+    pub fn with_terminal_emulator(self, terminal_emulator: FakeTerminalEmulator) -> Self {
+        Self {
+            terminal_emulator: Arc::new(terminal_emulator),
+            ..self
+        }
+    }
+
     pub fn without_home(self) -> Self {
         Self { home: None, ..self }
     }
@@ -238,6 +248,10 @@ impl ServiceFixture {
 
     pub fn directory_environment(&self) -> &FakeDirectoryEnvironment {
         &self.directory_environment
+    }
+
+    pub fn terminal_emulator(&self) -> &FakeTerminalEmulator {
+        &self.terminal_emulator
     }
 
     pub fn tmpdir_assignment(&self, name: &str) -> (String, String) {
@@ -468,6 +482,7 @@ impl ServiceFixture {
             )
             .with_diff_workspace(self.measuring_workspace()),
             TmuxPorts::new(self.multiplexer.clone()),
+            DesktopPorts::new(self.terminal_emulator.clone()),
         )
     }
 
