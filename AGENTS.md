@@ -46,6 +46,15 @@ If an action could destroy work, Ringleader stops and says why instead of guessi
 
 Each way comes from an ecosystem users already know, and keeps the meaning it has there. A user who guesses a key is right.
 
+| Where the key works | Ecosystem it follows |
+| --- | --- |
+| A list | Vim |
+| A text field | readline |
+| A fuzzy picker | fzf |
+| The key that opens a finder | the `Ctrl-K` quick switcher, as in Slack, Discord, and GitHub |
+
+- The arrow keys work wherever an ecosystem's movement keys work.
+- If no ecosystem in the table covers a new key, ask the project owner which ecosystem the key follows.
 - Both the TUI and the CLI offer each of these actions:
   - create
   - delete
