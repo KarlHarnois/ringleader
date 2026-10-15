@@ -65,6 +65,17 @@ impl Reconciliation {
             .collect()
     }
 
+    pub fn restartable_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .managed_entries()
+            .into_iter()
+            .filter(|(_, state)| state.allows_restart())
+            .map(|(entry, _)| entry.name().as_str().to_string())
+            .collect();
+        names.sort();
+        names
+    }
+
     pub fn into_summaries(self) -> Vec<SessionSummary> {
         self.rows
     }

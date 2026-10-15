@@ -5,7 +5,8 @@ use super::list_report::ListReport;
 use super::repo_argument::RepoArgument;
 use super::{CliExit, CliSession, CommandStop, DeleteArgs, ListArgs, NewArgs, RenameArgs};
 use crate::application::{
-    CreateRequest, DeleteConfirmation, DeleteImpact, ServiceError, SessionService,
+    CreateRequest, DeleteConfirmation, DeleteImpact, RestartReport, ServiceError, SessionService,
+    StartOutcome,
 };
 use crate::domain::BaseBranch;
 
@@ -15,6 +16,8 @@ pub struct SessionCommands<'a> {
 }
 
 impl<'a> SessionCommands<'a> {
+    const NOTHING_TO_RESTART: &'static str = "no exited or stopped session to restart";
+
     pub fn new(service: &'a mut SessionService, session: &'a mut CliSession) -> Self {
         Self { service, session }
     }
@@ -118,10 +121,42 @@ impl<'a> SessionCommands<'a> {
         self.service.observe(true)?;
         self.session.stop_if_signaled()?;
         let outcome = self.service.restart_session(name)?;
+        self.report_restart(name, &outcome);
+        Ok(0)
+    }
+
+    pub fn restart_all(&mut self) -> Result<u8, CommandStop> {
+        self.service.observe(true)?;
+        self.session.stop_if_signaled()?;
+        let session = &*self.session;
+        let report = self.service.restart_all(|| session.is_signaled())?;
+        self.report_restarts(&report);
+        Ok(Self::restart_all_code(&report))
+    }
+
+    fn report_restarts(&mut self, report: &RestartReport) {
+        if report.is_empty() {
+            self.session.output().note(Self::NOTHING_TO_RESTART);
+        }
+        for (name, restart) in report.outcomes() {
+            match restart {
+                Ok(outcome) => self.report_restart(name, outcome),
+                Err(error) => self.session.output().error(&format!("{name}: {error}")),
+            }
+        }
+    }
+
+    fn report_restart(&mut self, name: &str, outcome: &StartOutcome) {
         self.note_if_present(outcome.recovery());
         self.note_if_present(outcome.warning());
         self.session.output().line(&format!("restarted {name}"));
-        Ok(0)
+    }
+
+    fn restart_all_code(report: &RestartReport) -> u8 {
+        report
+            .failures()
+            .next()
+            .map_or(0, |(_, error)| CliExit::error_code(error))
     }
 
     fn note_if_present(&mut self, note: Option<&str>) {
@@ -178,6 +213,21 @@ mod tests {
             ServiceFixture::new()
                 .with_sessions(std::slice::from_ref(&entry))
                 .with_multiplexer(FakeMultiplexer::new().with_live(renamed))
+        }
+
+        fn stopped(names: &[&str], with_worktrees: &[&str]) -> ServiceFixture {
+            let sessions: Vec<Session> = names
+                .iter()
+                .map(|name| ServiceFixture::session(name))
+                .collect();
+            let present: Vec<&Session> = sessions
+                .iter()
+                .filter(|session| with_worktrees.contains(&session.name().as_str()))
+                .collect();
+            ServiceFixture::new()
+                .with_sessions(&sessions)
+                .with_workspace(ServiceFixture::workspace_for(&present))
+                .with_host(ServiceFixture::host_for(&present))
         }
 
         fn broken_config() -> ConfigError {
@@ -588,6 +638,59 @@ mod tests {
             harness.run(&["rename", "mystery", "other"]),
             CliExit::Code(3)
         );
+    }
+
+    #[test]
+    fn restart_all_prints_each_restarted_session_and_exits_zero() {
+        let harness = CliHarness::new(CommandFixture::stopped(
+            &["alpha", "bravo"],
+            &["alpha", "bravo"],
+        ));
+
+        let exit = harness.run(&["restart", "--all"]);
+
+        assert_eq!(exit, CliExit::Code(0));
+        assert_eq!(harness.stdout(), "restarted alpha\nrestarted bravo\n");
+    }
+
+    #[test]
+    fn restart_all_names_each_failure_and_exits_with_its_code() {
+        let harness = CliHarness::new(CommandFixture::stopped(&["alpha", "bravo"], &["bravo"]));
+
+        let exit = harness.run(&["restart", "--all"]);
+
+        assert_eq!(exit, CliExit::Code(1));
+        assert!(
+            harness.stderr().contains("ringleader: alpha: worktree "),
+            "{}",
+            harness.stderr()
+        );
+        assert_eq!(harness.stdout(), "restarted bravo\n");
+    }
+
+    #[test]
+    fn restart_all_without_an_exited_or_stopped_session_says_so_and_exits_zero() {
+        let harness = CliHarness::new(CommandFixture::live());
+
+        let exit = harness.run(&["restart", "--all"]);
+
+        assert_eq!(exit, CliExit::Code(0));
+        assert_eq!(
+            harness.stderr(),
+            "no exited or stopped session to restart\n"
+        );
+    }
+
+    #[test]
+    fn restart_all_takes_the_write_lock_once() {
+        let harness = CliHarness::new(CommandFixture::stopped(
+            &["alpha", "bravo"],
+            &["alpha", "bravo"],
+        ));
+
+        harness.run(&["restart", "--all"]);
+
+        assert_eq!(harness.lock_acquisitions(), ["write"]);
     }
 
     #[test]

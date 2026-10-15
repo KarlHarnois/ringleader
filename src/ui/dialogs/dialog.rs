@@ -28,7 +28,7 @@ pub enum Dialog {
 impl Dialog {
     const WIDTH: u16 = 76;
     const HEIGHT: u16 = 22;
-    const HELP_HEIGHT: u16 = 32;
+    const HELP_HEIGHT: u16 = 33;
 
     pub fn open(opening: DialogOpening, service: &SessionService) -> Self {
         match opening {

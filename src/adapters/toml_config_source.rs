@@ -74,6 +74,10 @@ prompt_args = ["{prompt}"]
 # dialog opens in plan mode when the first agent has plan_args, and Shift-Tab
 # switches modes. An agent without plan_args has no plan mode.
 plan_args = ["--permission-mode", "plan"]
+# Added after args when restart recreates a stopped session, such as after a
+# reboot, to resume its conversation. An exited agent restarts without them,
+# so a resume that finds no conversation and exits restarts fresh.
+resume_args = ["--continue"]
 # Lines typed into the agent once its prompt is ready, each followed by Enter.
 # startup_input is typed at every start, rename_input after a rename.
 startup_input = ["/color"]
@@ -85,6 +89,7 @@ command = "opencode"
 env = ["OPENAI_API_KEY"]
 prompt_args = ["--prompt={prompt}"]
 plan_args = ["--agent", "plan"]
+resume_args = ["--continue"]
 "#;
     const REPOS_KEY: &'static str = "repos";
 
@@ -506,6 +511,32 @@ mod tests {
     }
 
     #[test]
+    fn agent_resume_args_load_for_a_resumed_restart() {
+        let fixture = SourceFixture::with_text(concat!(
+            "[[agents]]\nname = \"a\"\ncommand = \"a\"\n",
+            "resume_args = [\"--continue\"]\n",
+        ));
+
+        let config = fixture.source().load().unwrap();
+
+        let session = SessionName::new("fix-auth").unwrap();
+        assert_eq!(
+            config.agents()[0].resume_argv(&session),
+            ["a", "--continue"]
+        );
+    }
+
+    #[test]
+    fn an_agent_without_resume_args_loads_to_resume_as_a_plain_restart() {
+        let fixture = SourceFixture::with_text("[[agents]]\nname = \"a\"\ncommand = \"a\"\n");
+
+        let config = fixture.source().load().unwrap();
+
+        let session = SessionName::new("fix-auth").unwrap();
+        assert_eq!(config.agents()[0].resume_argv(&session), ["a"]);
+    }
+
+    #[test]
     fn an_agent_without_input_loads_with_none() {
         let fixture = SourceFixture::with_text("[[agents]]\nname = \"a\"\ncommand = \"a\"\n");
 
@@ -598,6 +629,34 @@ mod tests {
                 .unwrap()
                 .launch_argv(&session, AgentMode::Plan, ""),
             ["opencode", "--agent", "plan"]
+        );
+    }
+
+    #[test]
+    fn the_first_run_template_resumes_claude_with_continue() {
+        let fixture = SourceFixture::new();
+        fixture.source().write_first_run_template().unwrap();
+
+        let config = fixture.source().load().unwrap();
+
+        let session = SessionName::new("fix-auth").unwrap();
+        assert_eq!(
+            config.agent("claude").unwrap().resume_argv(&session),
+            ["claude", "--name", "fix-auth", "--continue"]
+        );
+    }
+
+    #[test]
+    fn the_first_run_template_resumes_opencode_with_continue() {
+        let fixture = SourceFixture::new();
+        fixture.source().write_first_run_template().unwrap();
+
+        let config = fixture.source().load().unwrap();
+
+        let session = SessionName::new("fix-auth").unwrap();
+        assert_eq!(
+            config.agent("opencode").unwrap().resume_argv(&session),
+            ["opencode", "--continue"]
         );
     }
 

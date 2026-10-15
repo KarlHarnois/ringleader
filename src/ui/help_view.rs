@@ -25,7 +25,7 @@ pub struct HelpView {
 impl HelpView {
     pub const TITLE: &'static str = concat!(" Help · ringleader ", env!("CARGO_PKG_VERSION"), " ");
     const KEYS_HEADING: &'static str = "Keys";
-    const KEYS: [(&'static str, &'static str); 16] = [
+    const KEYS: [(&'static str, &'static str); 17] = [
         ("n", "create a session"),
         ("d", "delete the selected session"),
         ("R", "rename the selected session and its branch"),
@@ -41,6 +41,7 @@ impl HelpView {
             "open a shell in the selected session's worktree in a new terminal window",
         ),
         ("s", "restart an exited or stopped session"),
+        ("S", "restart every exited or stopped session"),
         (
             "p",
             "pull the base branch from origin, the agent fixes conflicts",
@@ -245,8 +246,8 @@ mod tests {
         const SHORT_WIDTH: usize = 56;
         const SHORT_HEIGHT: usize = 8;
         const PAST_THE_END: usize = 50;
-        const ROWS_ABOVE_THE_SMALLEST_FULL_SIZE: u16 = 10;
-        const TALL_NARROW_SIZE: (u16, u16) = (79, 34);
+        const ROWS_ABOVE_THE_SMALLEST_FULL_SIZE: u16 = 11;
+        const TALL_NARROW_SIZE: (u16, u16) = (79, 35);
         const TMUX_CONFIG_ROW: &'static str = "tmux config  ~/.local/state/ringleader/tmux.conf";
 
         fn help() -> HelpView {

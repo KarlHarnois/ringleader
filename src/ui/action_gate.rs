@@ -105,6 +105,7 @@ impl<'a> ActionGate<'a> {
                     .map(|session| KeyAction::Open(DialogOpening::Rename(Box::new(session)))),
             ),
             KeyCode::Char('s') => KeyAction::from(self.restart().map(KeyAction::Request)),
+            KeyCode::Char('S') => KeyAction::from(self.restart_all().map(KeyAction::Request)),
             KeyCode::Char('d') => KeyAction::from(self.delete().map(KeyAction::Request)),
             KeyCode::Char('p') => KeyAction::from(self.pull().map(KeyAction::Request)),
             _ => KeyAction::Ignore,
@@ -168,9 +169,9 @@ impl<'a> ActionGate<'a> {
         let row = self.selected()?;
         let name = row.name();
         match row.state() {
-            SessionState::Exited | SessionState::Stopped => Ok(AppRequest::Block(
-                BlockingOperation::Restart(name.to_string()),
-            )),
+            state if state.allows_restart() => Ok(AppRequest::Block(BlockingOperation::Restart(
+                name.to_string(),
+            ))),
             SessionState::Unmanaged => {
                 Err(format!("{name} is unmanaged, so it cannot be restarted."))
             }
@@ -179,6 +180,11 @@ impl<'a> ActionGate<'a> {
                 state.label()
             )),
         }
+    }
+
+    pub fn restart_all(&self) -> Result<AppRequest, String> {
+        self.writable()?;
+        Ok(AppRequest::Block(BlockingOperation::RestartAll))
     }
 
     pub fn pull(&self) -> Result<AppRequest, String> {
@@ -315,6 +321,38 @@ mod tests {
             ActionGate::new(Some(&row), None).restart(),
             Err("mystery is unmanaged, so it cannot be restarted.".to_string())
         );
+    }
+
+    #[test]
+    fn shift_s_asks_to_restart_every_exited_or_stopped_session() {
+        let row = GateFixture::row(SessionState::Waiting);
+        let gate = ActionGate::new(Some(&row), None);
+
+        assert_eq!(
+            gate.action_for(&KeyEvent::from(KeyCode::Char('S'))),
+            KeyAction::Request(AppRequest::Block(BlockingOperation::RestartAll))
+        );
+    }
+
+    #[test]
+    fn shift_s_on_a_heading_still_asks_to_restart_every_session() {
+        let gate = ActionGate::on_heading(None);
+
+        assert_eq!(
+            gate.action_for(&KeyEvent::from(KeyCode::Char('S'))),
+            KeyAction::Request(AppRequest::Block(BlockingOperation::RestartAll))
+        );
+    }
+
+    #[test]
+    fn a_read_only_tui_refuses_a_restart_of_every_session_with_the_config_error() {
+        let error = GateFixture::config_error();
+
+        let refusal = ActionGate::new(None, Some(&error))
+            .restart_all()
+            .unwrap_err();
+
+        assert!(refusal.starts_with("config error, running read-only: "));
     }
 
     #[test]

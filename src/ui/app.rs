@@ -966,6 +966,46 @@ mod tests {
     }
 
     #[test]
+    fn shift_s_asks_to_restart_every_session_behind_a_busy_message() {
+        let fixture = UiHarness::exited_session_fixture("fix-auth");
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        let request = app.handle_event(&UiHarness::character('S'));
+
+        assert_eq!(request, AppRequest::Block(BlockingOperation::RestartAll));
+        assert_eq!(
+            AppFixture::status_line(&app, 100),
+            " Restarting every exited or stopped session…"
+        );
+    }
+
+    #[test]
+    fn performing_a_restart_of_every_session_reports_the_count() {
+        let fixture = UiHarness::exited_session_fixture("fix-auth");
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        app.perform(BlockingOperation::RestartAll);
+
+        assert_eq!(fixture.multiplexer().launches().len(), 1);
+        assert_eq!(AppFixture::status_line(&app, 100), " Restarted 1 session.");
+    }
+
+    #[test]
+    fn a_restart_of_every_session_names_the_session_that_failed() {
+        let fixture = ServiceFixture::new().with_sessions(&[ServiceFixture::session("fix-auth")]);
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        app.perform(BlockingOperation::RestartAll);
+
+        assert!(
+            AppFixture::status_line(&app, 200)
+                .starts_with(" Restarted 0 of 1 session. fix-auth failed: worktree "),
+            "{}",
+            AppFixture::status_line(&app, 200)
+        );
+    }
+
+    #[test]
     fn performing_a_restart_respawns_the_agent_and_reports_it() {
         let fixture = UiHarness::exited_session_fixture("fix-auth");
         let mut app = AppFixture::started(&fixture, 100, 28);
