@@ -407,13 +407,13 @@ nix run .#mutator -- --help
 **Never run `mutator` on the whole repository:** it runs every covered mutant, and many tests start real tmux servers.
 
 - Name each module or file to mutate as an argument. One run MAY name several. A run's files share one baseline test run.
-- The flake patches `mutator` so that each worker under `target/mutation-workers/` starts from a copy of `target/debug`. A worker's build then recompiles only the `ringleader` crate.
-- `flake.nix` pins `mutator`, and the `crapper` it imports, to the revisions the patch was tested with. `nix flake update` therefore leaves both in place.
+- The flake applies `patches/mutator-copy-debug-build.patch` to `mutator`. With the patch, each worker under `target/mutation-workers/` starts from a copy of `target/debug`. A worker's build then recompiles only the `ringleader` crate.
+- `flake.nix` pins `mutator`, and the `crapper` that `mutator` imports, to the revisions the patch was tested with. `nix flake update` therefore leaves both in place.
 - If you move either pin, move both pins together. Then run `nix develop .#metrics -c true`: the `mutator` build refuses a patch that applies only with fuzz.
-- If that build fails on the patch, rewrite the patch against the new `mutator` revision.
+- If the `mutator` build fails on the patch, rewrite the patch against the new `mutator` revision.
 - Keep `--max-workers 2` and `--timeout-factor 60`.
-- A mutant that times out counts as killed. Under load, a worker's build can take several times the warm baseline. A smaller factor then records kills that no test made.
-- If you change either value, raise the timeout factor before the worker count: parallel builds slow each other.
+- A mutant that times out counts as killed. Under load, a worker's build can take several times longer than the baseline test run. A smaller factor then records kills that no test made.
+- If you change `--max-workers` or `--timeout-factor`, raise the timeout factor before the worker count: parallel builds slow each other.
 - If a snapshot exists, a rerun runs only survivors and sites in changed functions. A kill recorded by a timeout therefore stays.
 - If a run used a smaller timeout factor, rerun its files once with `--mutate-all`.
 - Never pass `--changed` with a path: `mutator` then drops the path and mutates every changed file in `git status`.
@@ -456,7 +456,7 @@ The viewer still looks for a companion with `tmux has-session`. The `env` prefix
 
 ### Completion steps
 
-**The completion steps are the four numbered steps below.** Run them after the Commands pass. A `crapper` run takes about a minute. A step 4 run takes about 20 seconds per changed file, plus about 6 seconds per mutation site.
+**The completion steps are the four numbered steps below.** Run them after the Commands pass. A `crapper` run takes about a minute. A step 4 run takes about 20 seconds per file in the run, plus about 6 seconds per mutation site.
 
 | Term | Meaning |
 | --- | --- |
@@ -500,22 +500,23 @@ The viewer still looks for a companion with `tmux has-session`. The `env` prefix
 4. Run
    `nix develop .#metrics -c mutator --reuse-coverage --max-workers 2 --timeout-factor 60 <files>`.
    `<files>` is every changed file, separated by spaces. If a rule below
-   splits the files into parts, make one run per part. Otherwise, pass all of
+   splits `<files>` into parts, make one run per part. Otherwise, pass all of
    `<files>` to one run. `--reuse-coverage` reads the coverage step 1 wrote.
    Step 4 passes when every changed function's row reads 0 under `Survived`
    and `Uncovered`. A survivor or uncovered site that this section has you
    report to the project owner does not count.
-   - Give each step 4 run the longest timeout your shell allows.
+   - The run limit is the longest timeout your shell allows for one command.
+     Give each step 4 run the run limit as its timeout.
    - Estimate each run's time with the step 4 run time at the top of this
-     section. If twice the estimate passes that timeout, split the run into
+     section. If twice the estimate passes the run limit, split the run into
      smaller runs. The estimate is an average, and load slows a run.
-   - If twice one file's estimate alone passes that timeout, stop and show the
-     estimate to the project owner.
+   - If twice one file's estimate alone passes the run limit, stop and show
+     the estimate to the project owner.
    - Never start a step 4 run in the background. An edit made during a run
-     reaches the mutant builds, or `mutator` overwrites it when the edited
-     file's mutants finish.
+     reaches the mutant builds. `mutator` also overwrites an edited file when
+     the file's mutants finish.
    - Never judge step 4 by its exit code. Exit 3 means a mutant survived
-     anywhere in `<files>`, and a run with uncovered sites exits 0.
+     anywhere in the run, and a run with uncovered sites exits 0.
    - If the run exits 2, the baseline tests failed. Fix the baseline tests,
      which is a step edit.
    - If a changed function that is not untestable has an uncovered site, add
