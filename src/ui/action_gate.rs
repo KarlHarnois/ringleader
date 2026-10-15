@@ -36,8 +36,18 @@ impl<'a> ActionGate<'a> {
     }
 
     pub fn action_for(&self, key: &KeyEvent) -> KeyAction {
-        match key.code {
-            _ if BackKey::matches(key) => KeyAction::Ignore,
+        if BackKey::matches(key) {
+            return KeyAction::Ignore;
+        }
+        Self::screen_action(key)
+            .or_else(|| Self::selection_move(key.code))
+            .or_else(|| Self::repo_action(key.code))
+            .or_else(|| self.access_action(key.code))
+            .unwrap_or_else(|| self.session_change(key.code))
+    }
+
+    fn screen_action(key: &KeyEvent) -> Option<KeyAction> {
+        let action = match key.code {
             KeyCode::Char('q') => KeyAction::Request(AppRequest::Quit),
             KeyCode::Char('r') => KeyAction::Reload,
             KeyCode::Char('?') => KeyAction::Open(DialogOpening::Help),
@@ -45,27 +55,58 @@ impl<'a> ActionGate<'a> {
             KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 KeyAction::FindSession
             }
-            KeyCode::Down | KeyCode::Right | KeyCode::Char('j' | 'l') => KeyAction::Move(1),
-            KeyCode::Up | KeyCode::Left | KeyCode::Char('k' | 'h') => KeyAction::Move(-1),
-            KeyCode::Char('G') => KeyAction::SelectLast,
-            KeyCode::Char('H') => KeyAction::SelectHigh,
-            KeyCode::Char('M') => KeyAction::SelectMiddle,
-            KeyCode::Char('L') => KeyAction::SelectLow,
+            _ => return None,
+        };
+        Some(action)
+    }
+
+    fn selection_move(code: KeyCode) -> Option<KeyAction> {
+        let navigation = match code {
+            KeyCode::Down | KeyCode::Right | KeyCode::Char('j' | 'l') => Navigation::Move(1),
+            KeyCode::Up | KeyCode::Left | KeyCode::Char('k' | 'h') => Navigation::Move(-1),
+            KeyCode::Char('G') => Navigation::SelectLast,
+            KeyCode::Char('H') => Navigation::SelectHigh,
+            KeyCode::Char('M') => Navigation::SelectMiddle,
+            KeyCode::Char('L') => Navigation::SelectLow,
+            _ => return None,
+        };
+        Some(KeyAction::Navigate(navigation))
+    }
+
+    fn repo_action(code: KeyCode) -> Option<KeyAction> {
+        let action = match code {
+            KeyCode::Char(' ') => KeyAction::Fold,
+            KeyCode::Char(digit @ '1'..='9') => {
+                KeyAction::Navigate(Navigation::JumpToRepo(Self::repo_number(digit)))
+            }
+            _ => return None,
+        };
+        Some(action)
+    }
+
+    fn access_action(&self, code: KeyCode) -> Option<KeyAction> {
+        let action = match code {
+            KeyCode::Enter => self.enter(),
+            KeyCode::Char('t') => KeyAction::from(self.shell().map(KeyAction::Request)),
+            KeyCode::Char('T') => KeyAction::from(self.terminal().map(KeyAction::OpenTerminal)),
+            _ => return None,
+        };
+        Some(action)
+    }
+
+    fn session_change(&self, code: KeyCode) -> KeyAction {
+        match code {
             KeyCode::Char('n') => KeyAction::from(
                 self.writable()
                     .map(|()| KeyAction::Open(DialogOpening::NewSession)),
             ),
-            KeyCode::Char(' ') => KeyAction::Fold,
-            KeyCode::Char(digit @ '1'..='9') => KeyAction::JumpToRepo(Self::repo_number(digit)),
-            KeyCode::Enter => self.enter(),
-            KeyCode::Char('t') => KeyAction::from(self.shell().map(KeyAction::Request)),
-            KeyCode::Char('s') => KeyAction::from(self.restart().map(KeyAction::Request)),
-            KeyCode::Char('d') => KeyAction::from(self.delete().map(KeyAction::Request)),
-            KeyCode::Char('p') => KeyAction::from(self.pull().map(KeyAction::Request)),
             KeyCode::Char('R') => KeyAction::from(
                 self.rename()
                     .map(|session| KeyAction::Open(DialogOpening::Rename(Box::new(session)))),
             ),
+            KeyCode::Char('s') => KeyAction::from(self.restart().map(KeyAction::Request)),
+            KeyCode::Char('d') => KeyAction::from(self.delete().map(KeyAction::Request)),
+            KeyCode::Char('p') => KeyAction::from(self.pull().map(KeyAction::Request)),
             _ => KeyAction::Ignore,
         }
     }
@@ -87,13 +128,20 @@ impl<'a> ActionGate<'a> {
     }
 
     pub fn shell(&self) -> Result<AppRequest, String> {
+        self.managed_name("t cannot open a shell in it")
+            .map(AppRequest::Shell)
+    }
+
+    pub fn terminal(&self) -> Result<String, String> {
+        self.managed_name("T cannot open a terminal in it")
+    }
+
+    fn managed_name(&self, refusal: &str) -> Result<String, String> {
         let row = self.selected()?;
         let name = row.name();
         match row.state() {
-            SessionState::Unmanaged => Err(format!(
-                "{name} is unmanaged, so t cannot open a shell in it."
-            )),
-            _ => Ok(AppRequest::Shell(name.to_string())),
+            SessionState::Unmanaged => Err(format!("{name} is unmanaged, so {refusal}.")),
+            _ => Ok(name.to_string()),
         }
     }
 
@@ -166,17 +214,12 @@ impl<'a> ActionGate<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KeyAction {
     Request(AppRequest),
-    Move(isize),
-    SelectFirst,
-    SelectLast,
-    SelectHigh,
-    SelectMiddle,
-    SelectLow,
+    Navigate(Navigation),
     Fold,
-    JumpToRepo(usize),
     Open(DialogOpening),
     FindSession,
     Reload,
+    OpenTerminal(String),
     Refuse(String),
     Ignore,
 }
@@ -185,6 +228,17 @@ impl From<Result<KeyAction, String>> for KeyAction {
     fn from(action: Result<KeyAction, String>) -> Self {
         action.unwrap_or_else(KeyAction::Refuse)
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Navigation {
+    Move(isize),
+    SelectFirst,
+    SelectLast,
+    SelectHigh,
+    SelectMiddle,
+    SelectLow,
+    JumpToRepo(usize),
 }
 
 #[cfg(test)]
@@ -200,6 +254,14 @@ mod tests {
     impl GateFixture {
         fn row(state: SessionState) -> SessionSummary {
             SessionSummary::managed(ServiceFixture::session("fix-auth"), state, false)
+        }
+
+        fn unmanaged_row() -> SessionSummary {
+            let stranger = ServiceFixture::session("mystery");
+            SessionSummary::unmanaged(UnmanagedSession::new(
+                "mystery",
+                ServiceFixture::waiting(&stranger).without_metadata(),
+            ))
         }
 
         fn config_error() -> ConfigError {
@@ -320,11 +382,7 @@ mod tests {
 
     #[test]
     fn an_unmanaged_session_cannot_pull() {
-        let stranger = ServiceFixture::session("mystery");
-        let row = SessionSummary::unmanaged(UnmanagedSession::new(
-            "mystery",
-            ServiceFixture::waiting(&stranger).without_metadata(),
-        ));
+        let row = GateFixture::unmanaged_row();
 
         assert_eq!(
             ActionGate::new(Some(&row), None).pull(),
@@ -346,11 +404,7 @@ mod tests {
 
     #[test]
     fn an_unmanaged_session_opens_no_shell() {
-        let stranger = ServiceFixture::session("mystery");
-        let row = SessionSummary::unmanaged(UnmanagedSession::new(
-            "mystery",
-            ServiceFixture::waiting(&stranger).without_metadata(),
-        ));
+        let row = GateFixture::unmanaged_row();
 
         assert_eq!(
             ActionGate::new(Some(&row), None).shell(),
@@ -396,7 +450,7 @@ mod tests {
 
         assert_eq!(
             ActionGate::new(None, None).action_for(&key),
-            KeyAction::Move(-1)
+            KeyAction::Navigate(Navigation::Move(-1))
         );
     }
 
@@ -417,11 +471,13 @@ mod tests {
     fn vim_keys_and_arrows_move_the_selection() {
         let gate = ActionGate::new(None, None);
         let action = |code| gate.action_for(&KeyEvent::from(code));
+        let next = KeyAction::Navigate(Navigation::Move(1));
+        let previous = KeyAction::Navigate(Navigation::Move(-1));
 
-        assert_eq!(action(KeyCode::Char('l')), KeyAction::Move(1));
-        assert_eq!(action(KeyCode::Right), KeyAction::Move(1));
-        assert_eq!(action(KeyCode::Char('h')), KeyAction::Move(-1));
-        assert_eq!(action(KeyCode::Left), KeyAction::Move(-1));
+        assert_eq!(action(KeyCode::Char('l')), next);
+        assert_eq!(action(KeyCode::Right), next);
+        assert_eq!(action(KeyCode::Char('h')), previous);
+        assert_eq!(action(KeyCode::Left), previous);
     }
 
     #[test]
@@ -430,7 +486,7 @@ mod tests {
 
         assert_eq!(
             ActionGate::new(None, None).action_for(&key),
-            KeyAction::SelectLast
+            KeyAction::Navigate(Navigation::SelectLast)
         );
     }
 
@@ -439,9 +495,9 @@ mod tests {
         let gate = ActionGate::new(None, None);
         let action = |character| gate.action_for(&KeyEvent::from(KeyCode::Char(character)));
 
-        assert_eq!(action('H'), KeyAction::SelectHigh);
-        assert_eq!(action('M'), KeyAction::SelectMiddle);
-        assert_eq!(action('L'), KeyAction::SelectLow);
+        assert_eq!(action('H'), KeyAction::Navigate(Navigation::SelectHigh));
+        assert_eq!(action('M'), KeyAction::Navigate(Navigation::SelectMiddle));
+        assert_eq!(action('L'), KeyAction::Navigate(Navigation::SelectLow));
     }
 
     #[test]
@@ -467,11 +523,7 @@ mod tests {
 
     #[test]
     fn an_unmanaged_session_cannot_be_deleted() {
-        let stranger = ServiceFixture::session("mystery");
-        let row = SessionSummary::unmanaged(UnmanagedSession::new(
-            "mystery",
-            ServiceFixture::waiting(&stranger).without_metadata(),
-        ));
+        let row = GateFixture::unmanaged_row();
 
         assert_eq!(
             ActionGate::new(Some(&row), None).delete(),
@@ -496,11 +548,7 @@ mod tests {
     fn rename_in_a_read_only_tui_and_of_an_unmanaged_session_is_refused() {
         let error = GateFixture::config_error();
         let managed = GateFixture::row(SessionState::Waiting);
-        let stranger = ServiceFixture::session("mystery");
-        let unmanaged = SessionSummary::unmanaged(UnmanagedSession::new(
-            "mystery",
-            ServiceFixture::waiting(&stranger).without_metadata(),
-        ));
+        let unmanaged = GateFixture::unmanaged_row();
 
         assert!(
             ActionGate::new(Some(&managed), Some(&error))
@@ -549,7 +597,7 @@ mod tests {
         let gate = ActionGate::new(None, None);
         let action = |character| gate.action_for(&KeyEvent::from(KeyCode::Char(character)));
 
-        assert_eq!(action('3'), KeyAction::JumpToRepo(3));
+        assert_eq!(action('3'), KeyAction::Navigate(Navigation::JumpToRepo(3)));
         assert_eq!(action('0'), KeyAction::Ignore);
     }
 
@@ -558,7 +606,7 @@ mod tests {
         let gate = ActionGate::on_heading(None);
         let refusal = |character| gate.action_for(&KeyEvent::from(KeyCode::Char(character)));
 
-        for character in ['d', 'R', 's', 't'] {
+        for character in ['d', 'R', 's', 't', 'T'] {
             assert_eq!(
                 refusal(character),
                 KeyAction::Refuse("No session is selected.".to_string())
@@ -574,5 +622,36 @@ mod tests {
         assert_eq!(gate.attach(), refusal);
         assert_eq!(gate.shell(), refusal);
         assert_eq!(gate.restart(), refusal);
+        assert_eq!(gate.terminal(), Err("No session is selected.".to_string()));
+    }
+
+    #[test]
+    fn capital_t_opens_a_terminal_for_a_managed_session_in_every_state_even_read_only() {
+        let error = GateFixture::config_error();
+        let key = KeyEvent::from(KeyCode::Char('T'));
+
+        for state in [
+            SessionState::Working,
+            SessionState::Waiting,
+            SessionState::Exited,
+            SessionState::Stopped,
+        ] {
+            let row = GateFixture::row(state);
+
+            assert_eq!(
+                ActionGate::new(Some(&row), Some(&error)).action_for(&key),
+                KeyAction::OpenTerminal("fix-auth".to_string())
+            );
+        }
+    }
+
+    #[test]
+    fn an_unmanaged_session_opens_no_terminal() {
+        let row = GateFixture::unmanaged_row();
+
+        assert_eq!(
+            ActionGate::new(Some(&row), None).terminal(),
+            Err("mystery is unmanaged, so T cannot open a terminal in it.".to_string())
+        );
     }
 }

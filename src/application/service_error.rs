@@ -1,7 +1,10 @@
 use thiserror::Error;
 
 use super::delete_impact::DeleteImpact;
-use super::ports::{ConfigError, HostProbeError, MultiplexerError, RegistryError, WorkspaceError};
+use super::ports::{
+    ConfigError, HostProbeError, MultiplexerError, RegistryError, TerminalEmulatorError,
+    WorkspaceError,
+};
 use crate::domain::InvalidName;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,6 +97,12 @@ impl From<ConfigError> for ServiceError {
 impl From<HostProbeError> for ServiceError {
     fn from(error: HostProbeError) -> Self {
         ServiceError::Invalid(error.to_string())
+    }
+}
+
+impl From<TerminalEmulatorError> for ServiceError {
+    fn from(error: TerminalEmulatorError) -> Self {
+        ServiceError::Failed(error.to_string())
     }
 }
 

@@ -15,6 +15,9 @@ impl ProcessEnvironment {
     const GIT_PROGRAM: &'static str = "RINGLEADER_GIT";
     const SHELL: &'static str = "SHELL";
     const FALLBACK_SHELL: &'static str = "sh";
+    const TERMINAL_EMULATOR: &'static str = "TERMINAL";
+    const DISPLAYS: [&'static str; 2] = ["WAYLAND_DISPLAY", "DISPLAY"];
+    const TMUX_VARIABLES: [&'static str; 2] = ["TMUX", "TMUX_PANE"];
 
     pub fn capture() -> Self {
         Self::new(
@@ -63,6 +66,10 @@ impl ProcessEnvironment {
         self.retaining(|name| !names.iter().any(|removed| name == removed.as_str()))
     }
 
+    pub fn outside_tmux(&self) -> Self {
+        self.without(&Self::TMUX_VARIABLES.map(String::from))
+    }
+
     pub fn baseline(&self) -> Self {
         self.retaining(|name| Agent::is_baseline_variable(&name.to_string_lossy()))
     }
@@ -96,6 +103,28 @@ impl ProcessEnvironment {
     pub fn shell_variable(&self) -> Option<(OsString, OsString)> {
         let shell = self.get(Self::SHELL)?;
         Some((OsString::from(Self::SHELL), shell.to_os_string()))
+    }
+
+    pub fn terminal_emulator(&self) -> Option<&OsStr> {
+        self.non_empty(Self::TERMINAL_EMULATOR)
+    }
+
+    pub fn terminal_emulator_variable() -> &'static str {
+        Self::TERMINAL_EMULATOR
+    }
+
+    pub fn display_variables() -> [&'static str; 2] {
+        Self::DISPLAYS
+    }
+
+    pub fn has_graphical_display(&self) -> bool {
+        Self::DISPLAYS
+            .iter()
+            .any(|display| self.non_empty(display).is_some())
+    }
+
+    fn non_empty(&self, name: &str) -> Option<&OsStr> {
+        self.get(name).filter(|value| !value.is_empty())
     }
 
     fn standard_input_terminal() -> Option<OsString> {
@@ -226,5 +255,56 @@ mod tests {
 
         assert!(!filtered.contains("API_KEY"));
         assert_eq!(filtered.get("PATH"), Some(OsStr::new("/bin")));
+    }
+
+    #[test]
+    fn the_terminal_variable_names_the_terminal_emulator() {
+        let environment = EnvironmentFixture::with(&[("TERMINAL", "example-terminal")]);
+
+        assert_eq!(
+            environment.terminal_emulator(),
+            Some(OsStr::new("example-terminal"))
+        );
+    }
+
+    #[test]
+    fn an_empty_terminal_variable_names_no_terminal_emulator() {
+        let environment = EnvironmentFixture::with(&[("TERMINAL", "")]);
+
+        assert_eq!(environment.terminal_emulator(), None);
+    }
+
+    #[test]
+    fn a_wayland_or_an_x11_display_is_a_graphical_display() {
+        let wayland = EnvironmentFixture::with(&[("WAYLAND_DISPLAY", "wayland-1")]);
+        let x11 = EnvironmentFixture::with(&[("WAYLAND_DISPLAY", ""), ("DISPLAY", ":0")]);
+
+        assert!(wayland.has_graphical_display());
+        assert!(x11.has_graphical_display());
+    }
+
+    #[test]
+    fn empty_or_unset_display_variables_are_no_graphical_display() {
+        let empty = EnvironmentFixture::with(&[("WAYLAND_DISPLAY", ""), ("DISPLAY", "")]);
+        let unset = EnvironmentFixture::with(&[("PATH", "/bin")]);
+
+        assert!(!empty.has_graphical_display());
+        assert!(!unset.has_graphical_display());
+    }
+
+    #[test]
+    fn outside_tmux_drops_only_the_tmux_variables() {
+        let environment = EnvironmentFixture::with(&[
+            ("TMUX", "/tmp/tmux-1000/default,1,0"),
+            ("TMUX_PANE", "%3"),
+            ("PATH", "/bin"),
+        ]);
+
+        let outside = environment.outside_tmux();
+
+        assert_eq!(
+            outside.variables(),
+            [(OsString::from("PATH"), OsString::from("/bin"))]
+        );
     }
 }

@@ -291,6 +291,13 @@ impl SessionService {
         self.access.open_shell(reconciliation.row(name)?)
     }
 
+    pub fn open_terminal(&self, name: &str) -> Result<(), ServiceError> {
+        let session = self
+            .entry(name)
+            .ok_or_else(|| ServiceError::NotFound(format!("no managed session named {name}")))?;
+        self.access.open_terminal(session)
+    }
+
     pub fn poll_startup_input(&self) {
         self.lifecycle.poll_startup_input();
     }

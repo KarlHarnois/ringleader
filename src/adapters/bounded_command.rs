@@ -51,14 +51,7 @@ impl BoundedCommand {
             .stdin(stdin)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        // SAFETY: the closure runs in the forked child before exec and only calls setsid,
-        // which is async-signal-safe and touches no memory shared with the parent.
-        unsafe {
-            command.pre_exec(|| match libc::setsid() {
-                -1 => Err(io::Error::last_os_error()),
-                _ => Ok(()),
-            });
-        }
+        Self::start_in_own_session(&mut command);
         let mut child = command.spawn().map_err(|error| CommandError::Spawn {
             subcommand: call.subcommand.clone(),
             detail: error.to_string(),
@@ -67,6 +60,17 @@ impl BoundedCommand {
             let _ = stdin.write_all(input);
         }
         Ok(child)
+    }
+
+    pub fn start_in_own_session(command: &mut Command) {
+        // SAFETY: the closure runs in the forked child before exec and only calls setsid,
+        // which is async-signal-safe and touches no memory shared with the parent.
+        unsafe {
+            command.pre_exec(|| match libc::setsid() {
+                -1 => Err(io::Error::last_os_error()),
+                _ => Ok(()),
+            });
+        }
     }
 
     fn wait_until(child: &mut Child, deadline: Instant) -> Option<ExitStatus> {
@@ -237,6 +241,20 @@ mod tests {
 
         let child_session = ChildFixture::session_field(&output.stdout_text());
         assert_ne!(child_session, ChildFixture::session_of_this_process());
+    }
+
+    #[test]
+    fn a_program_that_cannot_lead_a_new_session_does_not_start() {
+        let mut command = Command::new("true");
+        command.process_group(0);
+        BoundedCommand::start_in_own_session(&mut command);
+
+        let started = command.spawn().map(|mut child| child.wait());
+
+        assert_eq!(
+            started.err().and_then(|error| error.raw_os_error()),
+            Some(libc::EPERM)
+        );
     }
 
     #[test]

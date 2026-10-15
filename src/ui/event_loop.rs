@@ -511,6 +511,28 @@ mod tests {
     }
 
     #[test]
+    fn capital_t_opens_terminals_without_leaving_the_screen() {
+        let fixture = ShellLoopFixture::live();
+        let harness = UiHarness::new();
+        let mut app = UiHarness::app(&fixture);
+        let mut event_loop = harness.event_loop(ScriptedInput::events(vec![
+            UiHarness::character('T'),
+            UiHarness::character('T'),
+        ]));
+
+        event_loop.run(&mut app).unwrap();
+
+        assert_eq!(harness.screen_switches(), ["enter"]);
+        assert_eq!(fixture.terminal_emulator().opened().len(), 2);
+        assert!(
+            event_loop
+                .backend()
+                .text()
+                .contains("Opened a terminal window in the worktree of fix-auth.")
+        );
+    }
+
+    #[test]
     fn the_session_table_lists_observed_sessions() {
         let session = ServiceFixture::session("fix-auth");
         let fixture = ServiceFixture::new().with_sessions(&[session]);

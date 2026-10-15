@@ -4,6 +4,7 @@ use std::process::Command;
 
 use super::bounded_command::Call;
 use super::deadlines::CallKind;
+use super::path_option::PathOption;
 
 pub struct GitInvocation {
     subcommand: String,
@@ -125,6 +126,9 @@ enum GitLocation {
 }
 
 impl GitLocation {
+    const GIT_DIR: PathOption = PathOption::new("--git-dir=");
+    const WORK_TREE: PathOption = PathOption::new("--work-tree=");
+
     fn apply(&self, command: &mut Command) {
         match self {
             GitLocation::Directory(directory, ceiling) => {
@@ -135,17 +139,11 @@ impl GitLocation {
             }
             GitLocation::GitDir(git_dir, work_tree) => {
                 command
-                    .arg(Self::option("--git-dir=", git_dir))
-                    .arg(Self::option("--work-tree=", work_tree));
+                    .arg(Self::GIT_DIR.argument(git_dir))
+                    .arg(Self::WORK_TREE.argument(work_tree));
             }
             GitLocation::Anywhere => {}
         }
-    }
-
-    fn option(name: &str, path: &Path) -> OsString {
-        let mut option = OsString::from(name);
-        option.push(path);
-        option
     }
 }
 
