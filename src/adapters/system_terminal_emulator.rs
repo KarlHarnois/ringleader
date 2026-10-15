@@ -245,15 +245,23 @@ echo $$ > "$record/pid"
         }
 
         fn environment_of(&self, name: &str) -> Vec<String> {
-            self.pid(name);
             let mut variables: Vec<String> = self
-                .recorded(name, "environ")
+                .recorded_once_started(name, "environ")
                 .split('\0')
                 .filter(|variable| !variable.is_empty())
                 .map(str::to_string)
                 .collect();
             variables.sort();
             variables
+        }
+
+        fn streams_of(&self, name: &str) -> String {
+            self.recorded_once_started(name, "streams")
+        }
+
+        fn recorded_once_started(&self, name: &str, file: &str) -> String {
+            self.pid(name);
+            self.recorded(name, file)
         }
 
         fn session_of(&self, name: &str) -> Option<u32> {
@@ -419,9 +427,8 @@ echo $$ > "$record/pid"
 
         fixture.open_with(&[TerminalFixture::WAYLAND]).unwrap();
 
-        fixture.pid(TerminalFixture::XDG_TERMINAL_EXEC);
         assert_eq!(
-            fixture.recorded(TerminalFixture::XDG_TERMINAL_EXEC, "streams"),
+            fixture.streams_of(TerminalFixture::XDG_TERMINAL_EXEC),
             "null\nnull\nnull\n"
         );
     }
