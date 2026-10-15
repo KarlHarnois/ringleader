@@ -23,6 +23,7 @@ pub mod session_name;
 pub mod session_observation;
 pub mod session_state;
 pub mod session_summary;
+pub mod terminal_text;
 pub mod unmanaged_session;
 
 pub use agent::Agent;
@@ -49,4 +50,5 @@ pub use session_name::{InvalidName, SessionName};
 pub use session_observation::{AgentPane, SessionObservation};
 pub use session_state::SessionState;
 pub use session_summary::SessionSummary;
+pub use terminal_text::TerminalText;
 pub use unmanaged_session::{PairMismatch, UnmanagedSession};

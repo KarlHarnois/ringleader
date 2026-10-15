@@ -1,5 +1,6 @@
 use crate::application::{
     CreateRequest, DeleteConfirmation, DeleteImpact, DeleteOutcome, ServiceError, SessionService,
+    StartOutcome,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,13 +28,7 @@ impl BlockingOperation {
     pub fn run(self, service: &mut SessionService) -> OperationOutcome {
         match self {
             Self::Restart(name) => Self::restart(service, name),
-            Self::Create(request) => match service.create_session(&request) {
-                Ok(session) => OperationOutcome::done(
-                    format!("Created {} on branch {}.", session.name(), session.branch()),
-                    Some(session.name().to_string()),
-                ),
-                Err(error) => OperationOutcome::Failed(error),
-            },
+            Self::Create(request) => Self::create(service, &request),
             Self::MeasureDelete(name) => Self::measure(service, name),
             Self::Delete { name, seen } => Self::delete(service, name, seen),
             Self::Rename { old, new } => Self::rename(service, &old, &new),
@@ -52,14 +47,28 @@ impl BlockingOperation {
         }
     }
 
-    fn restart(service: &mut SessionService, name: String) -> OperationOutcome {
-        match service.restart_session(&name) {
-            Ok(recovery) => OperationOutcome::done(Self::restarted(&name, recovery), Some(name)),
+    fn create(service: &mut SessionService, request: &CreateRequest) -> OperationOutcome {
+        match service.create_session(request) {
+            Ok(outcome) => OperationOutcome::started(Self::created(&outcome), &outcome),
             Err(error) => OperationOutcome::Failed(error),
         }
     }
 
-    fn restarted(name: &str, recovery: Option<String>) -> String {
+    fn created(outcome: &StartOutcome) -> String {
+        let session = outcome.session();
+        format!("Created {} on branch {}.", session.name(), session.branch())
+    }
+
+    fn restart(service: &mut SessionService, name: String) -> OperationOutcome {
+        match service.restart_session(&name) {
+            Ok(outcome) => {
+                OperationOutcome::started(Self::restarted(&name, outcome.recovery()), &outcome)
+            }
+            Err(error) => OperationOutcome::Failed(error),
+        }
+    }
+
+    fn restarted(name: &str, recovery: Option<&str>) -> String {
         match recovery {
             Some(note) => format!("Restarted {name}. Also {note}."),
             None => format!("Restarted {name}."),
@@ -136,13 +145,24 @@ impl OperationOutcome {
     fn done(message: String, select: Option<String>) -> Self {
         Self::Done { message, select }
     }
+
+    fn started(message: String, outcome: &StartOutcome) -> Self {
+        let select = Some(outcome.session().name().to_string());
+        match outcome.warning() {
+            Some(warning) => Self::Warned {
+                message: format!("{message} But {warning}."),
+                select,
+            },
+            None => Self::done(message, select),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::application::ports::MergeOutcome;
-    use crate::test_support::{FakeMultiplexer, ServiceFixture};
+    use crate::test_support::{FakeMultiplexer, ServiceFixture, UiHarness};
 
     struct MergeOperationFixture;
 
@@ -157,6 +177,47 @@ mod tests {
         fn run(fixture: &ServiceFixture) -> OperationOutcome {
             BlockingOperation::Merge(Self::NAME.to_string()).run(&mut fixture.service())
         }
+    }
+
+    struct StartOperationFixture;
+
+    impl StartOperationFixture {
+        fn warning(outcome: OperationOutcome) -> String {
+            match outcome {
+                OperationOutcome::Warned { message, .. } => message,
+                other => panic!("expected a warning, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn a_create_whose_envrc_is_not_allowed_warns_after_reporting_the_session() {
+        let fixture = ServiceFixture::new()
+            .with_directory_environment(ServiceFixture::not_allowed_envrc("fix-auth"));
+        let request = CreateRequest::new("fix-auth", ServiceFixture::repo());
+
+        let outcome = BlockingOperation::Create(request).run(&mut fixture.service());
+
+        let warning = StartOperationFixture::warning(outcome);
+        assert!(
+            warning.starts_with("Created fix-auth on branch fix-auth. But the .envrc of"),
+            "{warning}"
+        );
+    }
+
+    #[test]
+    fn a_restart_whose_envrc_is_not_allowed_warns_after_reporting_the_restart() {
+        let fixture = UiHarness::exited_session_fixture("fix-auth")
+            .with_directory_environment(ServiceFixture::not_allowed_envrc("fix-auth"));
+
+        let outcome =
+            BlockingOperation::Restart("fix-auth".to_string()).run(&mut fixture.service());
+
+        let warning = StartOperationFixture::warning(outcome);
+        assert!(
+            warning.starts_with("Restarted fix-auth. But the .envrc of"),
+            "{warning}"
+        );
     }
 
     #[test]

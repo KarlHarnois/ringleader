@@ -8,6 +8,7 @@ pub struct AgentLaunch {
     env_names: Vec<String>,
     env_assignments: Vec<(String, String)>,
     worktree: PathBuf,
+    loads_envrc: bool,
 }
 
 impl AgentLaunch {
@@ -19,6 +20,7 @@ impl AgentLaunch {
             env_names: env_names.to_vec(),
             env_assignments: Vec::new(),
             worktree: worktree.to_path_buf(),
+            loads_envrc: false,
         }
     }
 
@@ -42,6 +44,13 @@ impl AgentLaunch {
         self
     }
 
+    pub fn loading_envrc(self) -> Self {
+        Self {
+            loads_envrc: true,
+            ..self
+        }
+    }
+
     pub fn sets_temp_directory(&self) -> bool {
         self.env_assignments
             .iter()
@@ -62,6 +71,10 @@ impl AgentLaunch {
 
     pub fn worktree(&self) -> &Path {
         &self.worktree
+    }
+
+    pub fn loads_envrc(&self) -> bool {
+        self.loads_envrc
     }
 }
 

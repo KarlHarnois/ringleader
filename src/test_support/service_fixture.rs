@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::{
-    FakeClock, FakeConfigSource, FakeHostProbe, FakeMultiplexer, FakePullRequests, FakeRepoScanner,
-    FakeScratchSpace, FakeSessionRegistry, FakeWorkspace,
+    FakeClock, FakeConfigSource, FakeDirectoryEnvironment, FakeHostProbe, FakeMultiplexer,
+    FakePullRequests, FakeRepoScanner, FakeScratchSpace, FakeSessionRegistry, FakeWorkspace,
 };
 use crate::application::ports::{
     ConfigError, MergeOutcome, MultiplexerError, ScratchSpace, WorktreeEntry,
@@ -29,6 +29,7 @@ pub struct ServiceFixture {
     pull_requests: Arc<FakePullRequests>,
     clock: Arc<FakeClock>,
     scratch_space: Arc<FakeScratchSpace>,
+    directory_environment: Arc<FakeDirectoryEnvironment>,
     config_error: Option<ConfigError>,
     launch_directory: PathBuf,
     diagnostics: DiagnosticPaths,
@@ -52,6 +53,7 @@ impl ServiceFixture {
     pub const STATE_DIRECTORY: &'static str = "/state/ringleader";
     pub const TMUX_CONFIG: &'static str = "/state/ringleader/tmux.conf";
     pub const LOG_FILE: &'static str = "/state/ringleader/app.log";
+    pub const ENVRC: &'static str = "use flake\n";
 
     pub fn new() -> Self {
         Self {
@@ -65,6 +67,7 @@ impl ServiceFixture {
             pull_requests: Arc::new(FakePullRequests::new()),
             clock: Arc::new(FakeClock::at(Self::NOW)),
             scratch_space: Arc::new(FakeScratchSpace::default()),
+            directory_environment: Arc::new(FakeDirectoryEnvironment::default()),
             config_error: None,
             launch_directory: PathBuf::from(Self::REPO),
             diagnostics: Self::diagnostics(),
@@ -151,6 +154,13 @@ impl ServiceFixture {
         }
     }
 
+    pub fn with_directory_environment(self, environment: FakeDirectoryEnvironment) -> Self {
+        Self {
+            directory_environment: Arc::new(environment),
+            ..self
+        }
+    }
+
     pub fn without_home(self) -> Self {
         Self { home: None, ..self }
     }
@@ -224,6 +234,10 @@ impl ServiceFixture {
 
     pub fn scratch_space(&self) -> &FakeScratchSpace {
         &self.scratch_space
+    }
+
+    pub fn directory_environment(&self) -> &FakeDirectoryEnvironment {
+        &self.directory_environment
     }
 
     pub fn tmpdir_assignment(&self, name: &str) -> (String, String) {
@@ -358,6 +372,15 @@ impl ServiceFixture {
         FakeMultiplexer::new().failing("type_if_ready", not_ready)
     }
 
+    pub fn not_allowed_envrc(name: &str) -> FakeDirectoryEnvironment {
+        FakeDirectoryEnvironment::default().with_envrc(&Self::worktree_path(name), Self::ENVRC)
+    }
+
+    pub fn allowed_envrc(name: &str) -> FakeDirectoryEnvironment {
+        FakeDirectoryEnvironment::default()
+            .with_allowed_envrc(&Self::worktree_path(name), Self::ENVRC)
+    }
+
     pub fn with_worktree_agent(session: &Session) -> FakeHostProbe {
         Self::with_worktree_process(session)
             .serving(Self::WORKTREE_PROCESS, Path::new(FakeMultiplexer::SOCKET))
@@ -441,6 +464,7 @@ impl ServiceFixture {
                 self.scanner.clone(),
                 self.host.clone(),
                 self.pull_requests.clone(),
+                self.directory_environment.clone(),
             )
             .with_diff_workspace(self.measuring_workspace()),
             TmuxPorts::new(self.multiplexer.clone()),

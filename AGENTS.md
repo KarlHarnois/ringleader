@@ -299,6 +299,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── naming_scheme.rs      # NamingScheme, the worktree root and tmux prefix a session records
     │   ├── pull_request.rs       # PullRequest, its number, state, and opening time
     │   ├── hot_key.rs            # HotKey, a key a terminal can send, which every key binding is made of
+    │   ├── terminal_text.rs      # TerminalText, text written for a terminal, and the same text without its escape sequences
     │   └── key_bindings.rs       # KeyBindings, the return key that detaches back to Ringleader, the keys that switch to the next and previous session, and the keys that toggle between the agent and the shell
     ├── application/
     │   ├── mod.rs
@@ -321,6 +322,8 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── branch_availability.rs # BranchAvailability, refuses a branch name that exists or holds other branches, for create and rename
     │   ├── session_restart.rs    # SessionRestart: restart of an Exited or Stopped session
     │   ├── session_scratch.rs    # SessionScratch, makes a session's scratch directory before its agent starts, removes it with the session, and logs either failure
+    │   ├── session_envrc.rs      # SessionEnvrc and EnvrcChoice, whether a session's agent starts through its worktree's .envrc, with the warning when it cannot
+    │   ├── start_outcome.rs      # StartOutcome, the session a create or restart started, its .envrc warning, and the socket recovery note
     │   ├── session_merge.rs      # SessionMerge: merge of origin's copy of the base branch into a Waiting session
     │   ├── merge_report.rs       # MergeReport, what a pull did to a session and whether its agent was asked to resolve the conflicts
     │   ├── upstream_resolver.rs  # UpstreamResolver, the branch a pull fetches from origin, or why there is none
@@ -365,6 +368,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │       ├── config_source.rs      # ConfigSource trait
     │       ├── repo_scanner.rs       # RepoScanner trait
     │       ├── scratch_space.rs      # ScratchSpace trait
+    │       ├── directory_environment.rs # DirectoryEnvironment trait and Envrc, a directory's .envrc with its bytes, whether it is allowed or denied, and the command that allows it
     │       ├── pull_requests.rs      # PullRequests trait
     │       ├── host_probe.rs         # HostProbe trait
     │       ├── clock.rs              # Clock trait
@@ -372,8 +376,10 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │       └── interrupts.rs         # Interrupts trait
     ├── adapters/
     │   ├── mod.rs
-    │   ├── agent_launcher.rs     # AgentLauncher, the hidden __exec-agent mode, owns AgentHandoff and the exec seam
+    │   ├── agent_launcher.rs     # AgentLauncher, the hidden __exec-agent mode, owns AgentHandoff and the exec seam, and execs direnv in front of a second launcher for a direnv launch
+    │   ├── launcher_command.rs   # LauncherCommand and PreparedLaunch, the launcher words a pane runs and the handoff file they name
     │   ├── agent_handoff.rs      # AgentHandoff, the handoff file a launch writes and the launcher takes
+    │   ├── handoff_contents.rs   # HandoffContents and EnvrcStep, the argv, inherited and explicit variables, worktree, and .envrc step a handoff file carries
     │   ├── app_log.rs            # AppLog, the append-mode app.log behind env_logger
     │   ├── process_environment.rs # ProcessEnvironment, the environment snapshot main captures once, and the shell it names
     │   ├── xdg_paths.rs          # XdgPaths, the config, state, data, cache, and runtime directories, the scratch root, and the private tmux server's socket and config
@@ -390,7 +396,9 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── gh_query.rs           # GhQuery, the aliased GraphQL query for a repo's branches
     │   ├── gh_listing.rs         # GhListing, the viewer's or repo owner's newest pull request per branch in a gh response
     │   ├── null_pull_requests.rs # NullPullRequests, finds no pull request on a host without gh
-    │   ├── bounded_command.rs    # BoundedCommand, runs git, tmux, and gh children in a new session with a deadline
+    │   ├── direnv_directory_environment.rs # DirenvDirectoryEnvironment, reads a directory's .envrc, asks direnv whether it is allowed, and allows it
+    │   ├── null_directory_environment.rs # NullDirectoryEnvironment, finds no .envrc on a host without direnv
+    │   ├── bounded_command.rs    # BoundedCommand, runs git, tmux, gh, and direnv children in a new session with a deadline
     │   ├── deadlines.rs          # Deadlines and CallKind, the deadline of each kind of child call
     │   ├── command_output.rs     # CommandOutput, a finished child's status and output
     │   ├── host_path.rs          # HostPath, lenient canonicalization and directory listing
@@ -403,6 +411,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── branch_ref.rs         # BranchRef, the git ref name of a Branch and the Branch a ref name spells
     │   ├── git_branches.rs       # GitBranches: compare-and-swap delete, rename, the managed-branch marker, and whether a branch has been pushed
     │   ├── branch_marker.rs      # BranchMarker, the git config entry that marks a branch Ringleader created, and the command that sets it by hand
+    │   ├── shell_word.rs         # ShellWord, one word of a command Ringleader advises, quoted when a shell would split or expand it
     │   ├── branch_section.rs     # BranchSection, the git config section and upstream keys of one branch
     │   ├── upstream_merger.rs    # UpstreamMerger, fetches a branch from origin and merges origin's copy into a worktree, listing any conflicted paths
     │   ├── submodule_commits.rs  # SubmoduleCommits, the submodule walk of unmerged_commits
@@ -501,6 +510,8 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
         ├── fake_config_source.rs    # FakeConfigSource
         ├── fake_repo_scanner.rs     # FakeRepoScanner
         ├── fake_scratch_space.rs    # FakeScratchSpace
+        ├── fake_directory_environment.rs # FakeDirectoryEnvironment
+        ├── direnv_test_home.rs      # DirenvTestHome: a temporary HOME, XDG_DATA_HOME, and XDG_CONFIG_HOME for tests that run a real direnv
         ├── fake_pull_requests.rs    # FakePullRequests
         ├── log_capture.rs           # LogCapture, the test logger that keeps warnings for assertions
         ├── fake_host_probe.rs       # FakeHostProbe
@@ -542,6 +553,15 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
 - A dialog's hint line lists only keys whose meaning is Ringleader's own, such as `Enter create`, `Ctrl-S create`, and `Esc cancel`, and the keys that choose from a list, such as `↑ ↓ j k choose`. It never lists text-editing keys like cursor movement, Ctrl-U, or Ctrl-W, because every terminal user already expects them. A new editing key goes into `TextField` with its usual terminal meaning, not into a hint.
 - Logs go to `$XDG_STATE_HOME/ringleader/app.log` through `env_logger`, never to the terminal.
 - A session's scratch directory is `$XDG_CACHE_HOME/ringleader/tmp/<hash>`, where the hash is the FNV-1a hash of the recorded worktree path folded to 8 hex digits. Keep that path short: tools put unix sockets under `TMPDIR`, and a socket path cannot pass 107 bytes. The scratch root is never `/tmp` or Ringleader's own `TMPDIR`: systemd ages `/tmp` under an idle agent, `/tmp` can be `noexec` or small, and `TMPDIR` differs between the process that creates a session and the one that deletes it, since every agent's `TMPDIR` is its own scratch directory and `nix develop` exports a new `TMPDIR` per shell. Create and restart make the scratch directory and start the agent with `TMPDIR` set to it, unless the agent's `set_env` sets `TMPDIR`. Delete removes the scratch directory after the worktree, and forget keeps it. Delete keeps a scratch directory that holds a mount point, and keeps every scratch directory while the mount table cannot be read, because removing a directory that holds a mount point would delete the files of the mounted filesystem. A failure to make or remove a scratch directory is logged and never fails the use case. If making it fails, the agent starts with the inherited `TMPDIR`.
+- A direnv launch starts the agent as `direnv exec <worktree> <agent command> <agent args>`, and a plain launch starts it without direnv. Create and restart, both the respawn of an Exited session and the recreation of a Stopped one, choose the launch by the first case that matches:
+  1. If the worktree has no `.envrc`, or `direnv` is not on Ringleader's `PATH`, do a plain launch with no warning. `DirenvDirectoryEnvironment::when_installed` gives `CompositionRoot` a `NullDirectoryEnvironment` when `direnv` is missing.
+  2. If direnv reports the worktree's `.envrc` as allowed, do a direnv launch.
+  3. If direnv reports the worktree's `.envrc` as denied, do a plain launch with no warning. Never allow a denied `.envrc`: `direnv deny <worktree>` is how a user keeps one session's agent off it.
+  4. If the worktree's `.envrc` is byte-identical to the `.envrc` of the session's repo path, and direnv reports that `.envrc` as allowed, run `direnv allow <worktree>`, then do a direnv launch.
+  5. Otherwise, do a plain launch and warn that the worktree's `.envrc` is not allowed and the agent started without it, naming the worktree and telling the user to review the `.envrc` and run `direnv allow <worktree>`.
+- Never run `direnv allow` on an `.envrc` that differs from the repo path's `.envrc` by any byte, including when the repo path has none: a branch can change its `.envrc`, and allowing the changed file runs code the user has not reviewed. If `direnv allow` fails, do a plain launch and warn with direnv's error. A warning never fails the create or the restart: `new` and `restart` print it on stderr and exit 0, and the TUI shows it in the status bar.
+- Ringleader's `direnv status` and `direnv allow` calls run with only the baseline variables every agent starts with, `HOME` and `XDG_*` among them, so an `.envrc` the user allowed in their own shell counts as allowed. The `direnv exec` in the agent's pane runs with the inherited variables: the baseline variables and each variable the agent's `env` list names that Ringleader's environment sets. The `.envrc` load therefore sees those `env` values, and an `env` list that names a set `DIRENV_CONFIG` gives the load a direnv config those calls do not read.
+- In a direnv launch, the launcher in the agent pane writes a second handoff file and execs `direnv exec <worktree> ringleader __exec-agent --handoff <second file>` with the inherited variables only. Every handoff write, CLI command, and TUI start deletes the handoff files older than 60 seconds, but keeps a second handoff file while the process that wrote it runs, because `direnv exec` keeps that process through the `.envrc` load, which can outlast 60 seconds. The second launcher runs inside the environment the `.envrc` produced and execs the agent with the explicit variables on top: each variable the agent's `env` list names that Ringleader's environment sets, the `SHELL` Ringleader started with, the agent's `set_env` values, and the `TMPDIR` of the scratch directory. The explicit variables keep `SHELL` because a dev shell exports its own non-interactive bash, which would replace the user's shell. Every other variable, including `PATH`, keeps the value the `.envrc` produced. Each step execs the next, so the agent stays the pane's own process. The `t` shell never loads the `.envrc`. Rename keeps the running agent and its environment.
 - `AgentHooks` schedules an agent's `startup_input` in the background after create and restart, so the use case returns once the tmux session exists. One typing job runs per session at a time, and a second start for the same session is skipped. The job finds the agent pane once when it starts, then checks only the prompt conditions below before each line. It never rechecks the session's name or registry entry, so a rename during its wait does not reach it. The job waits up to 60 seconds for the first prompt, and each later line waits up to 2 seconds for the prompt to come back, after a short pause that lets the agent take the line before it. Every typed line is sent as its text, then Enter 300 milliseconds later: an agent reads text and an Enter that arrive together as a paste and keeps the Enter in its draft, so the line is never submitted. The TUI polls the job while it runs. On exit, the CLI after its command and the TUI after restoring the screen release the lock, note the wait on stderr, and wait for the job unless a signal arrives. Its `rename_input` is typed after a rename only when the agent is at its prompt at that moment. An agent is at its prompt when its pane is out of copy mode, shows the cursor, and the text before the cursor on its row is a bare prompt marker and a blank, with no letters or digits. Copy mode would take the keys instead of the agent. Claude hides the cursor in its trust and permission dialogs, an agent still starting has drawn no marker, and an unsent draft puts its text before the cursor. A skipped or failed typing is logged and never fails the use case.
 
 ## CLI exit codes

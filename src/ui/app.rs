@@ -954,6 +954,20 @@ mod tests {
     }
 
     #[test]
+    fn a_restart_whose_envrc_is_not_allowed_shows_the_warning_in_the_status_bar() {
+        let fixture = UiHarness::exited_session_fixture("fix-auth")
+            .with_directory_environment(ServiceFixture::not_allowed_envrc("fix-auth"));
+        let mut app = AppFixture::started(&fixture, 300, 28);
+
+        app.perform(BlockingOperation::Restart("fix-auth".to_string()));
+
+        assert!(
+            AppFixture::flattened_screen(&app, 300, 28)
+                .contains("Restarted fix-auth. But the .envrc of")
+        );
+    }
+
+    #[test]
     fn returning_from_an_attach_does_not_ring_for_the_session_just_left() {
         let fixture = AppFixture::two_working_sessions_that_ring();
         let bell = CapturedWriter::default();

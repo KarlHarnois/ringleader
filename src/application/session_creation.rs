@@ -4,12 +4,16 @@ use std::sync::Arc;
 use super::agent_hooks::AgentHooks;
 use super::branch_availability::BranchAvailability;
 use super::creation_plan::{CreateRequest, CreationPlan};
-use super::ports::{Clock, HostProbe, Multiplexer, SessionRegistry, StartPoint, Workspace};
+use super::ports::{
+    Clock, HostProbe, Multiplexer, SessionRegistry, SessionSpec, StartPoint, Workspace,
+};
 use super::reconciliation::Reconciliation;
 use super::repo_merge::RepoMerge;
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
+use super::session_envrc::SessionEnvrc;
 use super::session_scratch::SessionScratch;
+use super::start_outcome::StartOutcome;
 use super::start_point_resolver::StartPointResolver;
 use super::use_checks::UseChecks;
 use super::worktree_rollback::WorktreeRollback;
@@ -23,6 +27,7 @@ pub struct SessionCreation {
     registry: Arc<dyn SessionRegistry>,
     clock: Arc<dyn Clock>,
     scratch: SessionScratch,
+    envrc: SessionEnvrc,
     hooks: Arc<AgentHooks>,
 }
 
@@ -36,6 +41,7 @@ impl SessionCreation {
             registry: ports.state().registry(),
             clock: ports.state().clock(),
             scratch: SessionScratch::new(ports),
+            envrc: SessionEnvrc::new(ports),
             hooks,
         }
     }
@@ -46,7 +52,7 @@ impl SessionCreation {
         reconciliation: &Reconciliation,
         config: &Config,
         config_path: &Path,
-    ) -> Result<Session, ServiceError> {
+    ) -> Result<StartOutcome, ServiceError> {
         let plan = self.plan_creation(request, config, config_path)?;
         self.check_availability(&plan, reconciliation)?;
         let session_branches = RepoMerge::new(self.host.as_ref())
@@ -57,16 +63,13 @@ impl SessionCreation {
         let rollback =
             WorktreeRollback::new(self.workspace.as_ref(), self.host.as_ref(), &plan, &start);
         self.create_marked_worktree(&plan, &start, &rollback)?;
-        let socket = self.start_tmux_session(&plan, &start, &rollback)?;
+        let envrc = self.envrc.choose(&plan.worktree(), plan.repo_path());
+        let launch = envrc.applied_to(self.scratch.prepare(plan.launch()));
+        let socket = self.start_tmux_session(&plan, &plan.spec(&start, launch), &rollback)?;
         let session = plan.session(&start, &socket, self.clock.now_epoch_seconds());
-        let mut entries = reconciliation.entries().to_vec();
-        entries.push(session.clone());
-        self.registry.save(&entries).map_err(|error| {
-            ServiceError::from(error)
-                .adding_context("the session runs, and the next observe adopts it from tmux")
-        })?;
+        self.record(&session, reconciliation)?;
         self.hooks.after_start(&session, plan.agent());
-        Ok(session)
+        Ok(StartOutcome::new(session, envrc.warning()))
     }
 
     fn plan_creation(
@@ -145,12 +148,10 @@ impl SessionCreation {
     fn start_tmux_session(
         &self,
         plan: &CreationPlan,
-        start: &StartPoint,
+        spec: &SessionSpec,
         rollback: &WorktreeRollback,
     ) -> Result<PathBuf, ServiceError> {
-        let launch = self.scratch.prepare(plan.launch());
-        let spec = plan.spec(start, launch);
-        self.multiplexer.create_session(&spec).map_err(|error| {
+        self.multiplexer.create_session(spec).map_err(|error| {
             if error.is_timeout() {
                 self.after_tmux_timeout(plan, rollback, error.into())
             } else {
@@ -184,6 +185,19 @@ impl SessionCreation {
         self.scratch.discard(&plan.worktree());
         rollback.run(error)
     }
+
+    fn record(
+        &self,
+        session: &Session,
+        reconciliation: &Reconciliation,
+    ) -> Result<(), ServiceError> {
+        let mut entries = reconciliation.entries().to_vec();
+        entries.push(session.clone());
+        self.registry.save(&entries).map_err(|error| {
+            ServiceError::from(error)
+                .adding_context("the session runs, and the next observe adopts it from tmux")
+        })
+    }
 }
 
 #[cfg(test)]
@@ -195,7 +209,8 @@ mod tests {
     use crate::application::ports::{MultiplexerError, WorkspaceError, WorktreeEntry};
     use crate::domain::{Agent, AgentMode, AgentPane, BaseBranch, Branch, Repo, RepoName};
     use crate::test_support::{
-        FakeHostProbe, FakeMultiplexer, FakeScratchSpace, FakeWorkspace, ServiceFixture,
+        FakeDirectoryEnvironment, FakeHostProbe, FakeMultiplexer, FakeScratchSpace, FakeWorkspace,
+        ServiceFixture,
     };
 
     struct CreateFixture;
@@ -262,7 +277,23 @@ mod tests {
             fixture: &ServiceFixture,
             request: CreateRequest,
         ) -> Result<Session, ServiceError> {
+            Self::start(fixture, request).map(|outcome| outcome.session().clone())
+        }
+
+        fn start(
+            fixture: &ServiceFixture,
+            request: CreateRequest,
+        ) -> Result<StartOutcome, ServiceError> {
             fixture.service().create_session(&request)
+        }
+
+        fn with_envrc(environment: FakeDirectoryEnvironment) -> ServiceFixture {
+            ServiceFixture::new().with_directory_environment(environment)
+        }
+
+        fn envrc_matching_the_main_checkout() -> FakeDirectoryEnvironment {
+            ServiceFixture::not_allowed_envrc("fix-auth")
+                .with_allowed_envrc(Path::new(ServiceFixture::REPO), ServiceFixture::ENVRC)
         }
 
         fn assert_nothing_touched(fixture: &ServiceFixture) {
@@ -925,6 +956,86 @@ mod tests {
         .unwrap_err();
 
         assert!(error.to_string().contains("cannot start in plan mode"));
+        CreateFixture::assert_nothing_touched(&fixture);
+    }
+
+    #[test]
+    fn create_without_an_envrc_starts_the_agent_plainly_without_a_warning() {
+        let fixture = ServiceFixture::new();
+
+        let outcome = CreateFixture::start(&fixture, CreateFixture::request("fix-auth")).unwrap();
+
+        assert_eq!(outcome.warning(), None);
+        assert!(!fixture.multiplexer().launches()[0].loads_envrc());
+    }
+
+    #[test]
+    fn create_starts_the_agent_through_an_allowed_envrc() {
+        let fixture = CreateFixture::with_envrc(ServiceFixture::allowed_envrc("fix-auth"));
+
+        let outcome = CreateFixture::start(&fixture, CreateFixture::request("fix-auth")).unwrap();
+
+        assert_eq!(outcome.warning(), None);
+        assert!(fixture.multiplexer().launches()[0].loads_envrc());
+    }
+
+    #[test]
+    fn create_allows_an_envrc_matching_the_main_checkout_then_starts_through_it() {
+        let fixture = CreateFixture::with_envrc(CreateFixture::envrc_matching_the_main_checkout());
+
+        CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap();
+
+        assert_eq!(
+            fixture.directory_environment().allowed(),
+            [ServiceFixture::worktree_path("fix-auth")]
+        );
+        assert!(fixture.multiplexer().launches()[0].loads_envrc());
+    }
+
+    #[test]
+    fn a_not_allowed_envrc_still_creates_the_session_and_returns_the_warning() {
+        let fixture = CreateFixture::with_envrc(ServiceFixture::not_allowed_envrc("fix-auth"));
+
+        let outcome = CreateFixture::start(&fixture, CreateFixture::request("fix-auth")).unwrap();
+
+        assert!(outcome.warning().unwrap().contains("is not allowed"));
+        assert_eq!(fixture.registry().sessions(), [outcome.session().clone()]);
+        assert!(!fixture.multiplexer().launches()[0].loads_envrc());
+    }
+
+    #[test]
+    fn a_failed_allow_still_creates_the_session_and_returns_the_error() {
+        let environment = CreateFixture::envrc_matching_the_main_checkout()
+            .failing_allow("direnv: error permission denied");
+        let fixture = CreateFixture::with_envrc(environment);
+
+        let outcome = CreateFixture::start(&fixture, CreateFixture::request("fix-auth")).unwrap();
+
+        assert!(
+            outcome
+                .warning()
+                .unwrap()
+                .contains("direnv: error permission denied")
+        );
+        assert_eq!(fixture.registry().sessions(), [outcome.session().clone()]);
+    }
+
+    #[test]
+    fn an_allowed_envrc_never_excuses_an_agent_command_that_does_not_resolve() {
+        let fixture = CreateFixture::with_envrc(ServiceFixture::allowed_envrc("fix-auth"))
+            .with_host(
+                FakeHostProbe::default()
+                    .with_directory(Path::new(ServiceFixture::REPO))
+                    .with_directory(Path::new(ServiceFixture::DATA_DIR)),
+            );
+
+        let error =
+            CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "agent claude command `claude` was not found"
+        );
         CreateFixture::assert_nothing_touched(&fixture);
     }
 }
