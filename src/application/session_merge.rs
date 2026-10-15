@@ -1,15 +1,15 @@
 use std::sync::Arc;
 
-use super::ports::{
-    HostProbe, MergeOutcome, Multiplexer, MultiplexerError, UpstreamMerge, Workspace,
-};
+use super::merge_report::{ConflictHandoff, MergeReport, UpstreamMerge};
+use super::ports::{HostProbe, MergeOutcome, Multiplexer, Workspace, WorkspaceError};
 use super::reconciliation::{ManagedRow, Reconciliation};
 use super::repo_merge::RepoMerge;
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
 use super::session_monitor::SessionMonitor;
+use super::upstream_resolver::UpstreamResolver;
 use super::worktree_inspection::WorktreeInspection;
-use crate::domain::{Config, Session, SessionName, SessionState};
+use crate::domain::{BaseBranch, Branch, Config, Session, SessionState};
 
 pub struct SessionMerge {
     workspace: Arc<dyn Workspace>,
@@ -42,16 +42,90 @@ impl SessionMerge {
     ) -> Result<MergeReport, ServiceError> {
         let session = row.session();
         self.refuse_unsafe_merge(row)?;
-        let base_branch =
-            RepoMerge::new(self.host.as_ref()).base_branch_of(session, config.repos());
-        let worktree = session.worktree_path();
-        let branch_on_origin = self.workspace.fetch_upstream(worktree, base_branch)?;
+        let upstream = self.fetch_upstream(session, reconciliation, config)?;
         self.refuse_unsafe_merge_now(session, reconciliation, config)?;
-        let merge =
-            self.workspace
-                .merge_upstream(worktree, &branch_on_origin, session.base_commit())?;
+        let merge = self.merge_fetched(session, &upstream)?;
         let handoff = self.hand_off_conflicts(session, &merge);
         Ok(MergeReport::new(session.name(), merge, handoff))
+    }
+
+    fn fetch_upstream(
+        &self,
+        session: &Session,
+        reconciliation: &Reconciliation,
+        config: &Config,
+    ) -> Result<BaseBranch, ServiceError> {
+        let repo_base =
+            RepoMerge::new(self.host.as_ref()).configured_base_branch(session, config.repos());
+        let Some(requested) = session.requested_base_branch() else {
+            return self.fetch_upstream_of(session, reconciliation, repo_base);
+        };
+        let upstream = self.upstream_of(session, reconciliation, Some(requested))?;
+        match self
+            .workspace
+            .fetch_upstream(session.worktree_path(), &upstream)
+        {
+            Err(WorkspaceError::NotOnOrigin { .. }) => {
+                self.refuse_unpushed_base(session, requested)?;
+                self.fetch_upstream_of(session, reconciliation, repo_base)
+            }
+            fetched => Ok(fetched.map(|()| upstream)?),
+        }
+    }
+
+    fn refuse_unpushed_base(
+        &self,
+        session: &Session,
+        requested: &BaseBranch,
+    ) -> Result<(), ServiceError> {
+        let local = Branch::Local(requested.to_string());
+        let tips = self
+            .workspace
+            .branch_tips(session.worktree_path(), std::slice::from_ref(&local))?;
+        if tips.tip_of(&local).is_none() {
+            return Ok(());
+        }
+        Err(ServiceError::Conflict(format!(
+            "origin has no branch {requested}, push it, or delete it once it has landed, then pull again"
+        )))
+    }
+
+    fn fetch_upstream_of(
+        &self,
+        session: &Session,
+        reconciliation: &Reconciliation,
+        base_branch: Option<&BaseBranch>,
+    ) -> Result<BaseBranch, ServiceError> {
+        let upstream = self.upstream_of(session, reconciliation, base_branch)?;
+        self.workspace
+            .fetch_upstream(session.worktree_path(), &upstream)?;
+        Ok(upstream)
+    }
+
+    fn upstream_of(
+        &self,
+        session: &Session,
+        reconciliation: &Reconciliation,
+        base_branch: Option<&BaseBranch>,
+    ) -> Result<BaseBranch, ServiceError> {
+        let session_branches = RepoMerge::new(self.host.as_ref())
+            .session_branches_in(session.repo_path(), reconciliation.entries());
+        UpstreamResolver::new(self.workspace.as_ref())
+            .skipping(session_branches)
+            .resolve(session.worktree_path(), base_branch)
+    }
+
+    fn merge_fetched(
+        &self,
+        session: &Session,
+        upstream: &BaseBranch,
+    ) -> Result<UpstreamMerge, ServiceError> {
+        let outcome = self.workspace.merge_upstream(
+            session.worktree_path(),
+            upstream,
+            session.base_commit(),
+        )?;
+        Ok(UpstreamMerge::new(upstream, outcome))
     }
 
     fn refuse_unsafe_merge_now(
@@ -164,65 +238,13 @@ impl SessionMerge {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MergeReport {
-    name: SessionName,
-    merge: UpstreamMerge,
-    handoff: ConflictHandoff,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum ConflictHandoff {
-    Unneeded,
-    Asked,
-    Refused(MultiplexerError),
-}
-
-impl MergeReport {
-    fn new(name: &SessionName, merge: UpstreamMerge, handoff: ConflictHandoff) -> Self {
-        Self {
-            name: name.clone(),
-            merge,
-            handoff,
-        }
-    }
-
-    pub fn needs_attention(&self) -> bool {
-        matches!(self.handoff, ConflictHandoff::Refused(_))
-    }
-
-    pub fn summary(&self) -> String {
-        let name = &self.name;
-        let upstream = self.merge.upstream();
-        match (self.merge.outcome(), &self.handoff) {
-            (MergeOutcome::UpToDate, _) => format!("{name} already has {upstream}"),
-            (MergeOutcome::Merged, _) => format!("merged {upstream} into {name}"),
-            (MergeOutcome::Conflicted(paths), ConflictHandoff::Refused(error)) => format!(
-                "merging {upstream} into {name} stopped on {}, and its agent was not asked to finish the merge: {error}",
-                Self::conflicts(paths)
-            ),
-            (MergeOutcome::Conflicted(paths), _) => format!(
-                "merging {upstream} into {name} stopped on {}, asked its agent to finish the merge",
-                Self::conflicts(paths)
-            ),
-        }
-    }
-
-    fn conflicts(paths: &[String]) -> String {
-        match paths.len() {
-            1 => "a conflict in 1 file".to_string(),
-            count => format!("conflicts in {count} files"),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::path::Path;
 
     use super::*;
     use crate::application::ports::{DirtyState, WorkspaceError, WorktreeEntry};
-    use crate::domain::{BaseBranch, Repo, RepoName, SessionObservation};
+    use crate::domain::{Branch, Repo, RepoName, SessionObservation};
     use crate::test_support::{FakeMultiplexer, FakeWorkspace, ServiceFixture};
 
     struct MergeFixture;
@@ -236,7 +258,10 @@ mod tests {
         }
 
         fn stopped() -> ServiceFixture {
-            let session = Self::session();
+            Self::stopped_as(Self::session())
+        }
+
+        fn stopped_as(session: Session) -> ServiceFixture {
             ServiceFixture::new()
                 .with_sessions(std::slice::from_ref(&session))
                 .with_workspace(ServiceFixture::workspace_for(&[&session]))
@@ -248,7 +273,31 @@ mod tests {
         }
 
         fn waiting() -> ServiceFixture {
-            Self::observed(ServiceFixture::waiting(&Self::session()))
+            Self::waiting_as(Self::session())
+        }
+
+        fn waiting_as(session: Session) -> ServiceFixture {
+            let observation = ServiceFixture::waiting(&session);
+            Self::stopped_as(session)
+                .with_multiplexer(FakeMultiplexer::new().with_live(observation))
+        }
+
+        fn config_with_develop() -> Config {
+            let repo = Repo::explicit(
+                RepoName::parse("example-project").unwrap(),
+                Path::new(ServiceFixture::REPO),
+                BaseBranch::new("develop"),
+            );
+            ServiceFixture::config().with_repos(vec![repo])
+        }
+
+        fn worktree() -> String {
+            Self::session().worktree_path().display().to_string()
+        }
+
+        fn fetched_branch(fixture: &ServiceFixture, branch: &str) -> bool {
+            let fetch = format!("fetch_upstream {} {branch}", Self::worktree());
+            fixture.workspace().calls().contains(&fetch)
         }
 
         fn ending(outcome: MergeOutcome) -> ServiceFixture {
@@ -257,6 +306,27 @@ mod tests {
 
         fn workspace() -> FakeWorkspace {
             ServiceFixture::workspace_for(&[&Self::session()])
+        }
+
+        fn based_on_part1(workspace: FakeWorkspace) -> ServiceFixture {
+            let requested = ServiceFixture::session_based_on(Self::NAME, "part1");
+            Self::waiting_as(requested).with_workspace(workspace.without_branch_on_origin("part1"))
+        }
+
+        fn fetch_failure() -> WorkspaceError {
+            WorkspaceError::Failed {
+                subcommand: "fetch".to_string(),
+                status: "exit status: 128".to_string(),
+                stderr: "fatal: could not read from remote repository".to_string(),
+            }
+        }
+
+        fn fetches(fixture: &ServiceFixture) -> usize {
+            let calls = fixture.workspace().calls();
+            calls
+                .iter()
+                .filter(|call| call.starts_with("fetch_upstream"))
+                .count()
         }
 
         fn conflicted() -> ServiceFixture {
@@ -326,15 +396,11 @@ mod tests {
     }
 
     #[test]
-    fn conflicts_asked_of_the_agent_are_summarized() {
+    fn conflicts_handed_to_the_agent_need_no_attention() {
         let fixture = MergeFixture::conflicted();
 
         let report = MergeFixture::merge(&fixture).unwrap();
 
-        assert_eq!(
-            report.summary(),
-            "merging origin/main into fix-auth stopped on conflicts in 2 files, asked its agent to finish the merge"
-        );
         assert!(!report.needs_attention());
     }
 
@@ -354,16 +420,7 @@ mod tests {
     }
 
     #[test]
-    fn an_up_to_date_session_is_summarized() {
-        let fixture = MergeFixture::ending(MergeOutcome::UpToDate);
-
-        let report = MergeFixture::merge(&fixture).unwrap();
-
-        assert_eq!(report.summary(), "fix-auth already has origin/main");
-    }
-
-    #[test]
-    fn an_agent_that_leaves_its_prompt_during_the_merge_is_reported() {
+    fn an_agent_that_leaves_its_prompt_during_the_merge_needs_attention() {
         let fixture = ServiceFixture::merging(
             MergeFixture::NAME,
             MergeFixture::conflicts(),
@@ -373,23 +430,6 @@ mod tests {
         let report = MergeFixture::merge(&fixture).unwrap();
 
         assert!(report.needs_attention());
-        assert_eq!(
-            report.summary(),
-            "merging origin/main into fix-auth stopped on conflicts in 2 files, and its agent was not asked to finish the merge: the agent in tmux session ringleader-fix-auth is not at its prompt"
-        );
-    }
-
-    #[test]
-    fn a_single_conflict_is_named_in_the_singular() {
-        let fixture =
-            MergeFixture::ending(MergeOutcome::Conflicted(vec!["src/auth.rs".to_string()]));
-
-        let report = MergeFixture::merge(&fixture).unwrap();
-
-        assert_eq!(
-            report.summary(),
-            "merging origin/main into fix-auth stopped on a conflict in 1 file, asked its agent to finish the merge"
-        );
     }
 
     #[test]
@@ -533,43 +573,149 @@ mod tests {
     }
 
     #[test]
-    fn the_configured_base_branch_is_merged() {
-        let base = BaseBranch::new("develop");
-        let repo = Repo::explicit(
-            RepoName::parse("example-project").unwrap(),
-            Path::new(ServiceFixture::REPO),
-            base,
-        );
-        let fixture =
-            MergeFixture::waiting().with_config(ServiceFixture::config().with_repos(vec![repo]));
+    fn without_a_base_branch_origins_main_is_merged() {
+        let fixture = MergeFixture::waiting();
 
         MergeFixture::merge(&fixture).unwrap();
 
-        let worktree = MergeFixture::session()
-            .worktree_path()
-            .display()
-            .to_string();
-        assert!(
-            fixture
-                .workspace()
-                .calls()
-                .contains(&format!("fetch_upstream {worktree} develop"))
+        assert!(MergeFixture::fetched_branch(&fixture, "main"));
+    }
+
+    #[test]
+    fn another_sessions_branch_named_main_is_never_merged() {
+        let session = MergeFixture::session();
+        let worktree = session.worktree_path().to_path_buf();
+        let both_on_origin = MergeFixture::workspace().with_branch_tips(
+            &worktree,
+            &[
+                (Branch::origin_copy_of("main"), FakeWorkspace::DEFAULT_START),
+                (
+                    Branch::origin_copy_of("master"),
+                    FakeWorkspace::DEFAULT_START,
+                ),
+            ],
         );
+        let fixture = MergeFixture::waiting()
+            .with_sessions(&[session, ServiceFixture::session("main")])
+            .with_workspace(both_on_origin);
+
+        MergeFixture::merge(&fixture).unwrap();
+
+        assert!(MergeFixture::fetched_branch(&fixture, "master"));
+    }
+
+    #[test]
+    fn the_configured_base_branch_is_merged() {
+        let fixture = MergeFixture::waiting().with_config(MergeFixture::config_with_develop());
+
+        MergeFixture::merge(&fixture).unwrap();
+
+        assert!(MergeFixture::fetched_branch(&fixture, "develop"));
         assert!(fixture.workspace().calls().contains(&format!(
-            "merge_upstream {worktree} develop {}",
+            "merge_upstream {} develop {}",
+            MergeFixture::worktree(),
             FakeWorkspace::DEFAULT_START
         )));
     }
 
     #[test]
+    fn the_report_names_origins_copy_of_the_merged_branch() {
+        let fixture = MergeFixture::waiting().with_config(MergeFixture::config_with_develop());
+
+        let report = MergeFixture::merge(&fixture).unwrap();
+
+        assert_eq!(report.summary(), "merged origin/develop into fix-auth");
+    }
+
+    #[test]
+    fn a_requested_base_branch_is_merged_over_the_configured_one() {
+        let requested = ServiceFixture::session_based_on(MergeFixture::NAME, "release");
+        let fixture =
+            MergeFixture::waiting_as(requested).with_config(MergeFixture::config_with_develop());
+
+        MergeFixture::merge(&fixture).unwrap();
+
+        assert!(MergeFixture::fetched_branch(&fixture, "release"));
+    }
+
+    #[test]
+    fn a_requested_base_branch_origin_no_longer_has_gives_way_to_origins_default() {
+        let fixture = MergeFixture::based_on_part1(MergeFixture::workspace());
+
+        let report = MergeFixture::merge(&fixture).unwrap();
+
+        assert_eq!(report.summary(), "merged origin/main into fix-auth");
+    }
+
+    #[test]
+    fn a_requested_base_branch_origin_no_longer_has_gives_way_to_the_configured_one() {
+        let fixture = MergeFixture::based_on_part1(MergeFixture::workspace())
+            .with_config(MergeFixture::config_with_develop());
+
+        MergeFixture::merge(&fixture).unwrap();
+
+        assert!(MergeFixture::fetched_branch(&fixture, "develop"));
+    }
+
+    #[test]
+    fn a_requested_base_branch_still_held_locally_is_refused_when_origin_lacks_it() {
+        let requested = ServiceFixture::session_based_on(MergeFixture::NAME, "part1");
+        let worktree = requested.worktree_path().to_path_buf();
+        let unpushed = MergeFixture::workspace().with_branch_tips(
+            &worktree,
+            &[(
+                Branch::Local("part1".to_string()),
+                FakeWorkspace::DEFAULT_START,
+            )],
+        );
+        let fixture = MergeFixture::based_on_part1(unpushed);
+
+        let error = MergeFixture::merge(&fixture).unwrap_err();
+
+        assert_eq!(
+            error,
+            ServiceError::Conflict(
+                "origin has no branch part1, push it, or delete it once it has landed, then pull again"
+                    .to_string()
+            )
+        );
+        assert_eq!(MergeFixture::fetches(&fixture), 1);
+    }
+
+    #[test]
+    fn a_pull_whose_requested_and_configured_bases_left_origin_is_refused() {
+        let both_gone = MergeFixture::workspace().without_branch_on_origin("develop");
+        let fixture = MergeFixture::based_on_part1(both_gone)
+            .with_config(MergeFixture::config_with_develop());
+
+        let error = MergeFixture::merge(&fixture).unwrap_err();
+
+        assert_eq!(
+            error,
+            ServiceError::Invalid(
+                "origin has no branch develop, push it or merge by hand".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn a_requested_base_branch_that_fails_to_fetch_for_another_reason_is_not_replaced() {
+        let requested = ServiceFixture::session_based_on(MergeFixture::NAME, "part1");
+        let unreachable =
+            MergeFixture::workspace().failing("fetch_upstream", MergeFixture::fetch_failure());
+        let fixture = MergeFixture::waiting_as(requested).with_workspace(unreachable);
+
+        let error = MergeFixture::merge(&fixture).unwrap_err();
+
+        assert!(matches!(error, ServiceError::Failed(_)), "{error:?}");
+        assert_eq!(MergeFixture::fetches(&fixture), 1);
+    }
+
+    #[test]
     fn a_failed_fetch_types_nothing() {
-        let failure = WorkspaceError::Failed {
-            subcommand: "fetch".to_string(),
-            status: "exit status: 128".to_string(),
-            stderr: "fatal: could not read from remote repository".to_string(),
-        };
-        let fixture = MergeFixture::waiting()
-            .with_workspace(MergeFixture::workspace().failing("fetch_upstream", failure));
+        let fixture = MergeFixture::waiting().with_workspace(
+            MergeFixture::workspace().failing("fetch_upstream", MergeFixture::fetch_failure()),
+        );
 
         let error = MergeFixture::merge(&fixture).unwrap_err();
 

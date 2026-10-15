@@ -2,11 +2,11 @@ use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
-use super::diff_base::DiffBase;
 use super::dirty_state::DirtyState;
+use super::head::Head;
+use super::merge_outcome::MergeOutcome;
 use super::unmerged_commits::UnmergedCommits;
-use super::upstream_merge::UpstreamMerge;
-use crate::domain::{BaseBranch, DiffStat};
+use crate::domain::{BaseBranch, Branch, BranchTips, DiffStat, MergeBases};
 
 pub trait Workspace: Send + Sync {
     fn create_worktree(
@@ -44,11 +44,17 @@ pub trait Workspace: Send + Sync {
     fn list_managed_branches(&self, repo: &Path) -> Result<Vec<String>, WorkspaceError>;
     fn branch_marking_command(&self, repo: &Path, branch: &str) -> String;
     fn is_branch_published(&self, repo: &Path, branch: &str) -> Result<bool, WorkspaceError>;
-    fn resolve_start_point(
+    fn head(&self, location: &Path) -> Result<Head, WorkspaceError>;
+    fn remote_default_branch(
         &self,
-        repo: &Path,
-        base_branch: Option<&BaseBranch>,
-    ) -> Result<StartPoint, WorkspaceError>;
+        location: &Path,
+        remote: &str,
+    ) -> Result<Option<BaseBranch>, WorkspaceError>;
+    fn branch_tips(
+        &self,
+        location: &Path,
+        branches: &[Branch],
+    ) -> Result<BranchTips, WorkspaceError>;
     fn dirty_state(&self, worktree: &Path) -> Result<DirtyState, WorkspaceError>;
     fn unmerged_commits(
         &self,
@@ -56,18 +62,23 @@ pub trait Workspace: Send + Sync {
         branch: &str,
         worktree: &Path,
     ) -> Result<UnmergedCommits, WorkspaceError>;
-    fn diff_stat(&self, worktree: &Path, base: &DiffBase) -> Result<DiffStat, WorkspaceError>;
+    fn merge_bases(
+        &self,
+        worktree: &Path,
+        commits: &[String],
+    ) -> Result<MergeBases, WorkspaceError>;
+    fn diff_stat(&self, worktree: &Path, base: &StartPoint) -> Result<DiffStat, WorkspaceError>;
     fn fetch_upstream(
         &self,
         worktree: &Path,
-        base_branch: Option<&BaseBranch>,
-    ) -> Result<BaseBranch, WorkspaceError>;
+        branch_on_origin: &BaseBranch,
+    ) -> Result<(), WorkspaceError>;
     fn merge_upstream(
         &self,
         worktree: &Path,
         branch_on_origin: &BaseBranch,
         started_from: &str,
-    ) -> Result<UpstreamMerge, WorkspaceError>;
+    ) -> Result<MergeOutcome, WorkspaceError>;
     fn validate_repo(&self, path: &Path) -> Result<PathBuf, WorkspaceError>;
     fn version(&self) -> Result<String, WorkspaceError>;
 }
@@ -186,12 +197,6 @@ pub enum WorkspaceError {
     LinkedWorktree { path: PathBuf },
     #[error("{path} is a submodule, add its superproject instead")]
     Submodule { path: PathBuf },
-    #[error("{repo} has no origin/HEAD, main, or master branch, set base_branch for it")]
-    NoBaseBranch { repo: PathBuf },
-    #[error(
-        "{worktree} has no origin/HEAD, origin/main, or origin/master: add an origin remote, or set base_branch for its repo when origin's default has another name"
-    )]
-    NoUpstream { worktree: PathBuf },
     #[error("{worktree} has a merge in progress, finish or abort it before merging again")]
     MergeInProgress { worktree: PathBuf },
     #[error(
@@ -200,18 +205,20 @@ pub enum WorkspaceError {
     StartedElsewhere { upstream: String },
     #[error("{worktree} has staged changes, commit them before merging")]
     StagedChanges { worktree: PathBuf },
+    #[error("origin has no branch {branch}, push it or merge by hand")]
+    NotOnOrigin { branch: String },
     #[error("{cause}; the merge commit had already landed, so it stays")]
     MergeLanded { cause: String },
     #[error("{cause}; undid the unfinished merge, so the worktree is back where it was")]
     MergeAborted { cause: String },
-    #[error(
-        "base branch {base} matches neither {local_ref} nor {remote_ref}{}",
-        .suggestion.as_ref().map(|name| format!(", did you mean {name}?")).unwrap_or_default()
-    )]
-    BaseBranchNotFound {
-        base: String,
-        local_ref: String,
-        remote_ref: String,
-        suggestion: Option<String>,
-    },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_empty_recorded_commit_starts_an_orphan() {
+        assert_eq!(StartPoint::from_base_commit(""), StartPoint::Orphan);
+    }
 }

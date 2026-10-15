@@ -8,6 +8,7 @@ use super::delete_outcome::DeleteOutcome;
 use super::diagnostic_paths::DiagnosticPaths;
 use super::doctor::Doctor;
 use super::doctor_report::DoctorReport;
+use super::merge_report::MergeReport;
 use super::pending::Pending;
 use super::ports::{ConfigError, ConfigSource, RegistryError, SessionRegistry};
 use super::pull_request_catalog::PullRequestCatalog;
@@ -20,7 +21,6 @@ use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
 use super::session_access::{SessionAccess, ShellOutcome};
 use super::session_lifecycle::SessionLifecycle;
-use super::session_merge::MergeReport;
 use super::session_monitor::SessionMonitor;
 use super::start_outcome::StartOutcome;
 use crate::domain::{
@@ -192,7 +192,9 @@ impl SessionService {
             .iter()
             .filter_map(|name| self.entry(name))
             .map(|session| {
-                let diff = self.monitor.diff_stat(session, self.config());
+                let diff = self
+                    .monitor
+                    .diff_stat(session, &self.entries, self.config());
                 (session.name().to_string(), diff)
             })
             .collect()
@@ -200,7 +202,10 @@ impl SessionService {
 
     pub fn start_diff(&self, name: &str) -> Option<Pending<DiffStat>> {
         let session = self.entry(name)?;
-        Some(self.monitor.start_diff(session, self.config()))
+        Some(
+            self.monitor
+                .start_diff(session, &self.entries, self.config()),
+        )
     }
 
     pub fn start_preview(&self, tmux_name: &str) -> Pending<String> {

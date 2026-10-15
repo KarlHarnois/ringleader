@@ -8,6 +8,7 @@ use std::time::Duration;
 use tempfile::TempDir;
 
 use crate::adapters::git_invocation::GitInvocation;
+use crate::adapters::git_runner::GitRunner;
 use crate::adapters::{BoundedCommand, Deadlines, GitWorkspace};
 
 static CONTENT_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -70,6 +71,14 @@ impl GitTestRepo {
 
     pub fn workspace_with_deadline(&self, deadline: Duration) -> GitWorkspace {
         self.workspace_with(Deadlines::uniform(deadline))
+    }
+
+    pub fn runner(&self) -> GitRunner {
+        GitRunner::new(
+            &OsString::from("git"),
+            BoundedCommand::new(Deadlines::standard()),
+        )
+        .with_environment(self.environment())
     }
 
     pub fn git(&self, directory: &Path, args: &[&str]) -> String {

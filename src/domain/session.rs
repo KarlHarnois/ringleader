@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use super::base_branch::BaseBranch;
 use super::naming_scheme::NamingScheme;
 use super::repo_name::RepoName;
 use super::session_metadata::SessionMetadata;
@@ -47,6 +48,10 @@ impl Session {
 
     pub fn base_commit(&self) -> &str {
         self.metadata.base_commit()
+    }
+
+    pub fn requested_base_branch(&self) -> Option<&BaseBranch> {
+        self.metadata.requested_base_branch()
     }
 
     pub fn agent(&self) -> &str {

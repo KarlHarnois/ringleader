@@ -1,17 +1,22 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
+use super::base_branch_resolver::BaseBranchResolver;
+use super::diff_base_resolver::DiffBaseResolver;
 use super::pending::Pending;
-use super::ports::{Clock, DiffBase, HostProbe, Multiplexer, Workspace};
+use super::ports::{Clock, HostProbe, Multiplexer, StartPoint, Workspace};
 use super::reconciliation::Reconciliation;
 use super::repo_merge::RepoMerge;
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
 use super::session_reconciler::SessionReconciler;
-use crate::domain::{BaseBranch, Config, DiffStat, KeyBindings, Session, SessionObservation};
+use crate::domain::{
+    BaseBranch, Branch, Config, DiffStat, KeyBindings, Session, SessionObservation,
+};
 
 pub struct SessionMonitor {
     multiplexer: Arc<dyn Multiplexer>,
-    workspace: Arc<dyn Workspace>,
+    diff_workspace: Arc<dyn Workspace>,
     host: Arc<dyn HostProbe>,
     clock: Arc<dyn Clock>,
 }
@@ -20,7 +25,7 @@ impl SessionMonitor {
     pub fn new(ports: &ServicePorts) -> Self {
         Self {
             multiplexer: ports.tmux().multiplexer(),
-            workspace: ports.repos().workspace(),
+            diff_workspace: ports.repos().diff_workspace(),
             host: ports.repos().host(),
             clock: ports.state().clock(),
         }
@@ -46,16 +51,23 @@ impl SessionMonitor {
         reconciler.reconcile(entries, observations)
     }
 
-    pub fn diff_stat(&self, session: &Session, config: &Config) -> Result<DiffStat, ServiceError> {
-        let base = self.diff_base(session, config);
-        Ok(self.workspace.diff_stat(session.worktree_path(), &base)?)
+    pub fn diff_stat(
+        &self,
+        session: &Session,
+        sessions: &[Session],
+        config: &Config,
+    ) -> Result<DiffStat, ServiceError> {
+        self.diff_measurement(session, sessions, config).measure()
     }
 
-    pub fn start_diff(&self, session: &Session, config: &Config) -> Pending<DiffStat> {
-        let workspace = Arc::clone(&self.workspace);
-        let worktree = session.worktree_path().to_path_buf();
-        let base = self.diff_base(session, config);
-        Pending::start(move || Ok(workspace.diff_stat(&worktree, &base)?))
+    pub fn start_diff(
+        &self,
+        session: &Session,
+        sessions: &[Session],
+        config: &Config,
+    ) -> Pending<DiffStat> {
+        let measurement = self.diff_measurement(session, sessions, config);
+        Pending::start(move || measurement.measure())
     }
 
     pub fn start_preview(&self, tmux_name: &str) -> Pending<String> {
@@ -72,17 +84,47 @@ impl SessionMonitor {
         running.key_bindings().cloned()
     }
 
-    fn diff_base(&self, session: &Session, config: &Config) -> DiffBase {
-        let base_branch = self.configured_base_branch(session, config);
-        DiffBase::new(session.base_commit(), base_branch)
-    }
-
-    fn configured_base_branch<'c>(
+    fn diff_measurement(
         &self,
         session: &Session,
-        config: &'c Config,
-    ) -> Option<&'c BaseBranch> {
-        RepoMerge::new(self.host.as_ref()).base_branch_of(session, config.repos())
+        sessions: &[Session],
+        config: &Config,
+    ) -> DiffMeasurement {
+        let repos = RepoMerge::new(self.host.as_ref());
+        DiffMeasurement {
+            workspace: Arc::clone(&self.diff_workspace),
+            worktree: session.worktree_path().to_path_buf(),
+            recorded: StartPoint::from_base_commit(session.base_commit()),
+            requested: session.requested_base_branch().cloned(),
+            configured: repos
+                .configured_base_branch(session, config.repos())
+                .cloned(),
+            session_branches: repos.session_branches_in(session.repo_path(), sessions),
+        }
+    }
+}
+
+struct DiffMeasurement {
+    workspace: Arc<dyn Workspace>,
+    worktree: PathBuf,
+    recorded: StartPoint,
+    requested: Option<BaseBranch>,
+    configured: Option<BaseBranch>,
+    session_branches: Vec<Branch>,
+}
+
+impl DiffMeasurement {
+    fn measure(self) -> Result<DiffStat, ServiceError> {
+        let workspace = self.workspace.as_ref();
+        let base_branch = BaseBranchResolver::new(workspace).resolve(
+            &self.worktree,
+            self.requested.as_ref(),
+            self.configured.as_ref(),
+        )?;
+        let measured_from = DiffBaseResolver::new(workspace)
+            .skipping(self.session_branches)
+            .resolve(&self.worktree, &self.recorded, base_branch)?;
+        Ok(workspace.diff_stat(&self.worktree, &measured_from)?)
     }
 }
 
@@ -90,7 +132,8 @@ impl SessionMonitor {
 mod tests {
     use std::path::Path;
 
-    use crate::domain::{BaseBranch, Config, Repo, RepoName};
+    use crate::application::ports::StartPoint;
+    use crate::domain::{BaseBranch, BaseBranchLadder, Branch, Config, DiffStat, Repo, RepoName};
     use crate::test_support::{FakeWorkspace, ServiceFixture};
 
     struct MonitorFixture;
@@ -117,28 +160,33 @@ mod tests {
             ServiceFixture::config().with_repos(vec![repo])
         }
 
-        fn diff_calls(fixture: &ServiceFixture) -> Vec<String> {
+        fn measure(fixture: &ServiceFixture) {
             fixture.service().diff_stats(&[Self::SESSION.to_string()]);
-            Self::recorded_diff_calls(fixture)
         }
 
-        fn background_diff_calls(fixture: &ServiceFixture) -> Vec<String> {
+        fn measure_in_the_background(fixture: &ServiceFixture) {
             let measurement = fixture.service().start_diff(Self::SESSION).unwrap();
             measurement.wait_unless(|| false);
-            Self::recorded_diff_calls(fixture)
         }
 
-        fn recorded_diff_calls(fixture: &ServiceFixture) -> Vec<String> {
-            let calls = fixture.workspace().calls();
-            calls
-                .into_iter()
-                .filter(|call| call.starts_with("diff_stat"))
-                .collect()
+        fn branch_lookups(fixture: &ServiceFixture) -> Vec<Vec<Branch>> {
+            Self::measure(fixture);
+            Self::recorded_branch_lookups(fixture)
         }
 
-        fn diff_call_against(base_branch: &str) -> String {
-            let worktree = ServiceFixture::worktree_path(Self::SESSION);
-            format!("diff_stat {} {base_branch}", worktree.display())
+        fn background_branch_lookups(fixture: &ServiceFixture) -> Vec<Vec<Branch>> {
+            Self::measure_in_the_background(fixture);
+            Self::recorded_branch_lookups(fixture)
+        }
+
+        fn recorded_branch_lookups(fixture: &ServiceFixture) -> Vec<Vec<Branch>> {
+            let requests = fixture.workspace().branch_tip_requests();
+            requests.into_iter().map(|(_, branches)| branches).collect()
+        }
+
+        fn configured_lookups() -> Vec<Vec<Branch>> {
+            let base_branch = BaseBranch::new(Self::BASE_BRANCH).unwrap();
+            vec![base_branch.branches_and_origin_copy()]
         }
     }
 
@@ -147,10 +195,8 @@ mod tests {
         let fixture = MonitorFixture::fixture_with_repo_at(ServiceFixture::REPO);
 
         assert_eq!(
-            MonitorFixture::diff_calls(&fixture),
-            [MonitorFixture::diff_call_against(
-                MonitorFixture::BASE_BRANCH
-            )]
+            MonitorFixture::branch_lookups(&fixture),
+            MonitorFixture::configured_lookups()
         );
     }
 
@@ -159,10 +205,8 @@ mod tests {
         let fixture = MonitorFixture::fixture_with_repo_at(ServiceFixture::REPO);
 
         assert_eq!(
-            MonitorFixture::background_diff_calls(&fixture),
-            [MonitorFixture::diff_call_against(
-                MonitorFixture::BASE_BRANCH
-            )]
+            MonitorFixture::background_branch_lookups(&fixture),
+            MonitorFixture::configured_lookups()
         );
     }
 
@@ -176,10 +220,8 @@ mod tests {
             MonitorFixture::fixture_with_repo_at(MonitorFixture::SYMLINKED_REPO).with_host(host);
 
         assert_eq!(
-            MonitorFixture::diff_calls(&fixture),
-            [MonitorFixture::diff_call_against(
-                MonitorFixture::BASE_BRANCH
-            )]
+            MonitorFixture::branch_lookups(&fixture),
+            MonitorFixture::configured_lookups()
         );
     }
 
@@ -188,10 +230,97 @@ mod tests {
         let fixture = MonitorFixture::fixture_with_repo_at(MonitorFixture::OTHER_REPO);
 
         assert_eq!(
-            MonitorFixture::diff_calls(&fixture),
-            [MonitorFixture::diff_call_against(
-                FakeWorkspace::NO_BASE_BRANCH
-            )]
+            MonitorFixture::branch_lookups(&fixture),
+            [BaseBranchLadder::new(None).diff_lookups()]
+        );
+    }
+
+    #[test]
+    fn the_diff_is_measured_through_the_diff_poll_workspace() {
+        let worktree = ServiceFixture::worktree_path(MonitorFixture::SESSION);
+        let diff = DiffStat::from_changes([], 4);
+        let fixture = MonitorFixture::fixture_with_repo_at(ServiceFixture::REPO)
+            .with_diff_workspace(FakeWorkspace::default().with_diff(&worktree, diff));
+
+        let measured = fixture
+            .service()
+            .diff_stats(&[MonitorFixture::SESSION.to_string()]);
+
+        assert_eq!(measured[0].1, Ok(diff));
+    }
+
+    #[test]
+    fn the_diff_measures_from_the_merge_base_it_finds() {
+        let merge_base = "6666666666666666666666666666666666666666";
+        let worktree = ServiceFixture::worktree_path(MonitorFixture::SESSION);
+        let fixture = MonitorFixture::fixture_with_repo_at(ServiceFixture::REPO)
+            .with_workspace(FakeWorkspace::default().with_merge_bases(&worktree, &[merge_base]));
+
+        MonitorFixture::measure(&fixture);
+
+        assert_eq!(
+            fixture.workspace().diff_bases(),
+            [StartPoint::Commit(merge_base.to_string())]
+        );
+    }
+
+    #[test]
+    fn another_sessions_branch_named_main_is_not_measured_with() {
+        let master_tip = "8888888888888888888888888888888888888888";
+        let session = ServiceFixture::session(MonitorFixture::SESSION);
+        let worktree = ServiceFixture::worktree_path(MonitorFixture::SESSION);
+        let workspace = FakeWorkspace::default()
+            .with_branch_tip(
+                &worktree,
+                Branch::Local("main".to_string()),
+                FakeWorkspace::DEFAULT_START,
+            )
+            .with_branch_tip(&worktree, Branch::Local("master".to_string()), master_tip);
+        let fixture = ServiceFixture::new()
+            .with_sessions(&[session.clone(), ServiceFixture::session("main")])
+            .with_workspace(workspace);
+
+        MonitorFixture::measure(&fixture);
+
+        assert_eq!(
+            fixture.workspace().merge_base_requests(),
+            [vec![
+                session.base_commit().to_string(),
+                master_tip.to_string()
+            ]]
+        );
+    }
+
+    #[test]
+    fn a_requested_base_branch_wins_over_the_configured_one() {
+        let session = ServiceFixture::session_based_on(MonitorFixture::SESSION, "release");
+        let worktree = session.worktree_path().to_path_buf();
+        let release_tip = (
+            Branch::Local("release".to_string()),
+            FakeWorkspace::DEFAULT_START,
+        );
+        let fixture = ServiceFixture::new()
+            .with_sessions(&[session])
+            .with_workspace(FakeWorkspace::default().with_branch_tips(&worktree, &[release_tip]))
+            .with_config(MonitorFixture::config_with_repo_at(ServiceFixture::REPO));
+        let release = BaseBranch::new("release").unwrap();
+
+        assert_eq!(
+            MonitorFixture::branch_lookups(&fixture).last(),
+            Some(&release.branches_and_origin_copy())
+        );
+    }
+
+    #[test]
+    fn a_requested_base_branch_that_no_longer_exists_gives_way_to_the_configured_one() {
+        let session = ServiceFixture::session_based_on(MonitorFixture::SESSION, "part1");
+        let fixture = ServiceFixture::new()
+            .with_sessions(&[session])
+            .with_config(MonitorFixture::config_with_repo_at(ServiceFixture::REPO));
+
+        assert_eq!(
+            MonitorFixture::branch_lookups(&fixture).last(),
+            MonitorFixture::configured_lookups().last()
         );
     }
 }

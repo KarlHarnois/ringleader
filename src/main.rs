@@ -290,7 +290,11 @@ impl CompositionRoot {
             host,
             pull_requests,
             directory_environment,
-        );
+        )
+        .with_diff_workspace(Arc::new(GitWorkspace::new(
+            self.programs.git(),
+            BoundedCommand::new(Deadlines::diff_poll()),
+        )));
         let tmux_ports = TmuxPorts::new(Arc::new(TmuxMultiplexer::new(tmux, self.launcher())));
         let context = ServiceContext::new(loaded, &self.launch_directory)
             .with_home(self.paths.home())

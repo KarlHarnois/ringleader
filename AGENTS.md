@@ -281,6 +281,7 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── session_observation.rs # SessionObservation
     │   ├── session_classifier.rs # SessionClassifier, the pure state classifier
     │   ├── diff_stat.rs          # DiffStat
+    │   ├── merge_bases.rs        # MergeBases, the best common ancestors a session diff may measure from, and the one it prefers
     │   ├── session_summary.rs    # SessionSummary
     │   ├── unmanaged_session.rs  # UnmanagedSession, a live tmux session Ringleader does not manage, its label, and the note or kill-session advice that explains why
     │   ├── agent.rs              # Agent
@@ -288,7 +289,10 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── repo.rs               # Repo
     │   ├── repo_name.rs          # RepoName
     │   ├── repo_draft.rs         # RepoDraft, a [[repos]] entry before the load checks
-    │   ├── base_branch.rs        # BaseBranch
+    │   ├── base_branch.rs        # BaseBranch, a requested, configured, or origin default base branch and the branches it is looked up as
+    │   ├── base_branch_ladder.rs # BaseBranchLadder, the origin default, main, and master branches tried when no base branch is set, never a recorded session's branch
+    │   ├── branch.rs             # Branch, a local or remote-tracking branch named as users type it, and origin's copy of a branch
+    │   ├── branch_tips.rs        # BranchTips, the commits the existing ones of some branches point at
     │   ├── config.rs             # Config, the parsed config.toml
     │   ├── config_draft.rs       # ConfigDraft, the raw config values the Config constructor checks
     │   ├── config_checks.rs      # ConfigChecks, the checks every config load runs
@@ -307,6 +311,9 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── busy_worktree.rs      # BusyWorktree, the tmux server processes that keep a stopped entry from restarting, with the advice for each case
     │   ├── unseen_session.rs     # UnseenSession, a tmux server Ringleader cannot see that may still hold a stopped entry's session, which rename refuses and delete refuses or warns about
     │   ├── session_creation.rs   # SessionCreation: create_session with its rollbacks
+    │   ├── start_point_resolver.rs # StartPointResolver, the commit a new worktree starts from, or why there is none
+    │   ├── base_branch_resolver.rs # BaseBranchResolver, the base branch a session's diff follows: its recorded branch while that still exists, else its repo's configured one
+    │   ├── base_branch_ladders.rs # BaseBranchLadders, the base branch ladder of a checkout, led by origin's default and skipping the repo's session branches, which the start point, diff base, and upstream resolvers share
     │   ├── worktree_rollback.rs  # WorktreeRollback, removes the worktree and branch of a failed create
     │   ├── creation_plan.rs      # CreationPlan and CreateRequest
     │   ├── use_checks.rs         # UseChecks, the checks a create or a restart runs before acting
@@ -318,7 +325,9 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── session_scratch.rs    # SessionScratch, makes a session's scratch directory before its agent starts, removes it with the session, and logs either failure
     │   ├── session_envrc.rs      # SessionEnvrc and EnvrcChoice, whether a session's agent starts through its worktree's .envrc, with the warning when it cannot
     │   ├── start_outcome.rs      # StartOutcome, the session a create or restart started, its .envrc warning, and the socket recovery note
-    │   ├── session_merge.rs      # SessionMerge: merge of origin's copy of the base branch into a Waiting session, with MergeReport
+    │   ├── session_merge.rs      # SessionMerge: merge of origin's copy of the base branch into a Waiting session
+    │   ├── merge_report.rs       # MergeReport, what a pull did to a session and whether its agent was asked to resolve the conflicts
+    │   ├── upstream_resolver.rs  # UpstreamResolver, the branch a pull fetches from origin, or why there is none
     │   ├── agent_hooks.rs        # AgentHooks, schedules an agent's startup input in the background and types its rename input
     │   ├── worktree_inspection.rs # WorktreeInspection, the worktree checks restart, delete, and doctor share
     │   ├── session_deletion.rs   # SessionDeletion: delete_session steps 5 to 8 and forget
@@ -328,12 +337,13 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── delete_outcome.rs     # DeleteOutcome
     │   ├── worktree_containment.rs # WorktreeContainment, shared by delete step 3 and reconciliation
     │   ├── session_monitor.rs    # SessionMonitor: observation, reconciliation, diff measurement, and the background jobs for observation, diff measurement, and preview capture
+    │   ├── diff_base_resolver.rs # DiffBaseResolver, the commit a session diff measures from
     │   ├── session_reconciler.rs # SessionReconciler, pairs registry entries with live tmux sessions
     │   ├── reconciliation.rs     # Reconciliation, the reconciled entries and rows
     │   ├── session_access.rs     # SessionAccess: attach and open_shell, and the refusal from a pane of the private server
     │   ├── repo_catalog.rs       # RepoCatalog: discover, find, add, and remove repos
     │   ├── pull_request_catalog.rs # PullRequestCatalog, looks up the pull requests of sessions in the background
-    │   ├── repo_merge.rs         # RepoMerge, joins configured and scanned repos, configured entries winning
+    │   ├── repo_merge.rs         # RepoMerge, joins configured and scanned repos, configured entries winning, and finds the config entry and the sessions of a repo by its canonical path
     │   ├── home_repo_search.rs   # HomeRepoSearch, the repos under home the repo search offers
     │   ├── default_repo.rs       # DefaultRepo, the launch repo or the newest session's repo
     │   ├── typed_paths.rs        # TypedPaths, a typed path read as a directory or as a repo
@@ -350,10 +360,10 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │       ├── mod.rs
     │       ├── session_registry.rs   # SessionRegistry trait
     │       ├── workspace.rs          # Workspace trait
-    │       ├── diff_base.rs          # DiffBase, the recorded commit and configured base branch a session diff measures from
     │       ├── dirty_state.rs        # DirtyState, the uncommitted files and nested repos of a worktree
+    │       ├── head.rs               # Head, whether a checkout's HEAD is unborn, detached, or on a branch
     │       ├── unmerged_commits.rs   # UnmergedCommits, commits on no other ref with the tip and HEAD
-    │       ├── upstream_merge.rs     # UpstreamMerge and MergeOutcome, the origin branch a worktree merged and whether it was up to date, merged, or conflicted
+    │       ├── merge_outcome.rs      # MergeOutcome, whether a worktree's merge of a branch from origin was up to date, merged, or conflicted
     │       ├── multiplexer.rs        # Multiplexer trait
     │       ├── agent_launch.rs       # AgentLaunch, the argv, environment, and worktree an agent starts with
     │       ├── config_source.rs      # ConfigSource trait
@@ -397,15 +407,14 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
     │   ├── git_runner.rs         # GitRunner, runs a GitInvocation through BoundedCommand
     │   ├── git_invocation.rs     # GitInvocation, one git call with its child environment
     │   ├── git_porcelain.rs      # GitPorcelain, parses git's machine-readable output
+    │   ├── git_refs.rs           # GitRefs, HEAD, the default branch a remote's HEAD names, and the tips of branches
+    │   ├── git_diffs.rs          # GitDiffs, the merge bases of a worktree's HEAD and its diff stat
+    │   ├── branch_ref.rs         # BranchRef, the git ref name of a Branch and the Branch a ref name spells
     │   ├── git_branches.rs       # GitBranches: compare-and-swap delete, rename, the managed-branch marker, and whether a branch has been pushed
     │   ├── branch_marker.rs      # BranchMarker, the git config entry that marks a branch Ringleader created, and the command that sets it by hand
     │   ├── shell_word.rs         # ShellWord, one word of a command Ringleader advises, quoted when a shell would split or expand it
     │   ├── branch_section.rs     # BranchSection, the git config section and upstream keys of one branch
-    │   ├── start_point_resolver.rs # StartPointResolver, the commit a new worktree starts from
-    │   ├── base_branch_ladder.rs # BaseBranchLadder, the origin default, main, and master refs tried when no base branch is set
-    │   ├── base_branch_refs.rs   # BaseBranchRefs, the local, remote-tracking, and origin refs a configured base branch is looked up by
-    │   ├── diff_base_resolver.rs # DiffBaseResolver, the merge base of a worktree's HEAD with its base branch, which its diff measures from
-    │   ├── upstream_merger.rs    # UpstreamMerger, fetches origin's copy of the base branch and merges it into a worktree, listing any conflicted paths
+    │   ├── upstream_merger.rs    # UpstreamMerger, fetches a branch from origin and merges origin's copy into a worktree, listing any conflicted paths
     │   ├── submodule_commits.rs  # SubmoduleCommits, the submodule walk of unmerged_commits
     │   ├── system_clock.rs       # SystemClock, reads `SystemTime`
     │   ├── system_host_probe.rs  # SystemHostProbe
@@ -540,7 +549,8 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
 - Blocking TUI operations (create, delete, rename, restart, merge, and the delete measurement) run behind a busy message, and the event loop drops the key and paste events queued while they ran.
 - **No background job blocks input.** A background job is a `Pending` worker that runs the tmux, git, or gh calls of one observation, preview capture, diff measurement, or pull request lookup for the TUI. An observation is one tmux listing of every session, which the TUI reconciles with the registry. A background job is in flight from its start until the event loop collects it. The event loop collects finished observations, preview captures, and diff measurements on every wake. The event loop starts and collects pull request lookups only on its 100 millisecond tick. While an observation, a preview capture, or a diff measurement is in flight, the event loop wakes every 16 milliseconds. A pull request lookup never shortens the event loop's wait: a lookup may run up to 20 seconds for each repo. A preview capture is shown only under the row the capture was taken for.
 - **A synchronous observation is an observation the TUI runs on its own thread instead of as a background job.** The TUI runs a synchronous observation before its first frame: without one, the first frame and the keys typed at launch see no sessions. The TUI runs a synchronous observation after every attach, shell, reload, and blocking operation. A synchronous observation drops any observation in flight: an observation listed before a delete would bring the deleted session back. A synchronous observation restarts the `state_poll_ms` interval.
-- `p` pulls: it merges origin's copy of a session's base branch into its worktree. It runs only on a `Waiting` session whose agent is at its prompt, by the conditions below, and whose worktree has no uncommitted changes and is on the session's branch, so the merge never changes files under a turn that is still running. The branch is the repo's configured `base_branch` without any `origin/` prefix, or else the first of origin's default, `origin/main`, and `origin/master` that exists. It fetches only that branch, refuses when it does not hold the commit the session started from, which catches a session created with its own `--base-branch` only once that branch has moved away from the merged one, since a session records its start commit and not its base branch, observes the session again and checks the guards on that fresh state, so the fetch's network time stays outside the window they close, merges it with `--no-edit`, and when the merge stops on conflicts it leaves the merge in progress and types one line into the agent naming the first 20 conflicted paths, counting the rest, and asking it to resolve them and commit. It refuses a worktree with staged changes or a merge already in progress, so a merge that then fails without conflicts, such as a merge commit a hook refuses or a merge killed at its deadline before git recorded it, is undone with `git merge --abort` or `git reset --merge HEAD`, unless its merge commit had already landed, as when a slow `post-merge` hook is killed, which is kept and reported as landed. The line goes through `type_if_ready`, so an agent that left its prompt is not typed into, and the status bar says so as an error.
+- Diff measurements read git through their own `GitWorkspace`, which `CompositionRoot` hands `RepoPorts::with_diff_workspace` and whose reads share the 5 second diff deadline, so a slow repo keeps a measurement in flight, and the event loop on its 16 millisecond wakes, for at most 5 seconds per git call. Create, pull, and the other use cases read under the 60 second deadline.
+- `p` pulls: it merges origin's copy of a session's base branch into its worktree. It runs only on a `Waiting` session whose agent is at its prompt, by the conditions below, and whose worktree has no uncommitted changes and is on the session's branch, so the merge never changes files under a turn that is still running. The branch is the base branch the session recorded from `--base-branch`, else the repo's configured `base_branch`, without any `origin/` prefix. Without either, it is origin's default, else the first of `origin/main` and `origin/master` that exists, skipping `main` and `master` when a session works on them. Unlike the diff, which looks for `main` and `master` locally, it looks for them on origin. It fetches only that branch. When origin no longer has the recorded branch and no local branch of that name is left, as after it landed and its session was deleted, the pull fetches the configured branch or origin's default instead. While a local branch of that name is left, it refuses, since an unpushed base would otherwise give way to origin's default. It refuses when origin has no branch by the name it fetches. It never deletes origin's copy of a branch origin dropped: that copy can be the last ref holding commits. It refuses when the branch does not hold the commit the session started from, which catches a session that started from another branch, such as one created with `--base-branch` before sessions recorded it, only once that branch has moved away from the merged one, observes the session again and checks the guards on that fresh state, so the fetch's network time stays outside the window they close, merges it with `--no-edit`, and when the merge stops on conflicts it leaves the merge in progress and types one line into the agent naming the first 20 conflicted paths, counting the rest, and asking it to resolve them and commit. It refuses a worktree with staged changes or a merge already in progress, so a merge that then fails without conflicts, such as a merge commit a hook refuses or a merge killed at its deadline before git recorded it, is undone with `git merge --abort` or `git reset --merge HEAD`, unless its merge commit had already landed, as when a slow `post-merge` hook is killed, which is kept and reported as landed. The line goes through `type_if_ready`, so an agent that left its prompt is not typed into, and the status bar says so as an error.
 - A dialog's hint line lists only keys whose meaning is Ringleader's own, such as `Enter create`, `Ctrl-S create`, and `Esc cancel`, and the keys that choose from a list, such as `↑ ↓ j k choose`. It never lists text-editing keys like cursor movement, Ctrl-U, or Ctrl-W, because every terminal user already expects them. A new editing key goes into `TextField` with its usual terminal meaning, not into a hint.
 - Logs go to `$XDG_STATE_HOME/ringleader/app.log` through `env_logger`, never to the terminal.
 - A session's scratch directory is `$XDG_CACHE_HOME/ringleader/tmp/<hash>`, where the hash is the FNV-1a hash of the recorded worktree path folded to 8 hex digits. Keep that path short: tools put unix sockets under `TMPDIR`, and a socket path cannot pass 107 bytes. The scratch root is never `/tmp` or Ringleader's own `TMPDIR`: systemd ages `/tmp` under an idle agent, `/tmp` can be `noexec` or small, and `TMPDIR` differs between the process that creates a session and the one that deletes it, since every agent's `TMPDIR` is its own scratch directory and `nix develop` exports a new `TMPDIR` per shell. Create and restart make the scratch directory and start the agent with `TMPDIR` set to it, unless the agent's `set_env` sets `TMPDIR`. Delete removes the scratch directory after the worktree, and forget keeps it. Delete keeps a scratch directory that holds a mount point, and keeps every scratch directory while the mount table cannot be read, because removing a directory that holds a mount point would delete the files of the mounted filesystem. A failure to make or remove a scratch directory is logged and never fails the use case. If making it fails, the agent starts with the inherited `TMPDIR`.

@@ -79,7 +79,7 @@ impl CreateRequest {
 pub struct CreationPlan {
     name: SessionName,
     repo: Repo,
-    base_branch: Option<BaseBranch>,
+    requested_base_branch: Option<BaseBranch>,
     naming: NamingScheme,
     agent: Agent,
     argv: Vec<String>,
@@ -99,10 +99,7 @@ impl CreationPlan {
             argv: agent.launch_argv(&name, request.mode, &request.prompt),
             name,
             repo: request.repo.clone(),
-            base_branch: request
-                .base_branch
-                .clone()
-                .or_else(|| request.repo.base_branch().cloned()),
+            requested_base_branch: request.base_branch.clone(),
             naming: config.naming().clone(),
             agent: agent.clone(),
             removed_env_names: config.agent_env_union(),
@@ -129,7 +126,9 @@ impl CreationPlan {
     }
 
     pub fn base_branch(&self) -> Option<&BaseBranch> {
-        self.base_branch.as_ref()
+        self.requested_base_branch
+            .as_ref()
+            .or_else(|| self.repo.base_branch())
     }
 
     pub fn worktree(&self) -> PathBuf {
@@ -164,7 +163,8 @@ impl CreationPlan {
     fn metadata(&self, start: &StartPoint) -> SessionMetadata {
         SessionMetadata::new(
             SessionRepo::new(self.repo.name().clone(), self.repo.path()),
-            SessionWorktree::new(&self.worktree(), &self.branch(), start.base_commit()),
+            SessionWorktree::new(&self.worktree(), &self.branch(), start.base_commit())
+                .based_on(self.requested_base_branch.clone()),
             self.agent.name(),
         )
     }

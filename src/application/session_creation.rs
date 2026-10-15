@@ -8,11 +8,13 @@ use super::ports::{
     Clock, HostProbe, Multiplexer, SessionRegistry, SessionSpec, StartPoint, Workspace,
 };
 use super::reconciliation::Reconciliation;
+use super::repo_merge::RepoMerge;
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
 use super::session_envrc::SessionEnvrc;
 use super::session_scratch::SessionScratch;
 use super::start_outcome::StartOutcome;
+use super::start_point_resolver::StartPointResolver;
 use super::use_checks::UseChecks;
 use super::worktree_rollback::WorktreeRollback;
 use crate::domain::{Config, Session};
@@ -53,9 +55,11 @@ impl SessionCreation {
     ) -> Result<StartOutcome, ServiceError> {
         let plan = self.plan_creation(request, config, config_path)?;
         self.check_availability(&plan, reconciliation)?;
-        let start = self
-            .workspace
-            .resolve_start_point(plan.repo_path(), plan.base_branch())?;
+        let session_branches = RepoMerge::new(self.host.as_ref())
+            .session_branches_in(plan.repo_path(), reconciliation.entries());
+        let start = StartPointResolver::new(self.workspace.as_ref())
+            .skipping(session_branches)
+            .resolve(plan.repo_path(), plan.base_branch())?;
         let rollback =
             WorktreeRollback::new(self.workspace.as_ref(), self.host.as_ref(), &plan, &start);
         self.create_marked_worktree(&plan, &start, &rollback)?;
@@ -203,7 +207,7 @@ mod tests {
 
     use super::*;
     use crate::application::ports::{MultiplexerError, WorkspaceError, WorktreeEntry};
-    use crate::domain::{Agent, AgentMode, AgentPane};
+    use crate::domain::{Agent, AgentMode, AgentPane, BaseBranch, Branch, Repo, RepoName};
     use crate::test_support::{
         FakeDirectoryEnvironment, FakeHostProbe, FakeMultiplexer, FakeScratchSpace, FakeWorkspace,
         ServiceFixture,
@@ -212,8 +216,29 @@ mod tests {
     struct CreateFixture;
 
     impl CreateFixture {
+        const DEVELOP_TIP: &'static str = "5555555555555555555555555555555555555555";
+        const RELEASE_TIP: &'static str = "6666666666666666666666666666666666666666";
+
         fn request(name: &str) -> CreateRequest {
             CreateRequest::new(name, ServiceFixture::repo())
+        }
+
+        fn repo_on_develop() -> Repo {
+            Repo::explicit(
+                RepoName::parse("example-project").unwrap(),
+                Path::new(ServiceFixture::REPO),
+                BaseBranch::new("develop"),
+            )
+        }
+
+        fn with_local_tips(tips: &[(&str, &str)]) -> ServiceFixture {
+            let local_tips: Vec<(Branch, &str)> = tips
+                .iter()
+                .map(|(name, tip)| (Branch::Local(name.to_string()), *tip))
+                .collect();
+            let workspace = FakeWorkspace::default()
+                .with_branch_tips(Path::new(ServiceFixture::REPO), &local_tips);
+            ServiceFixture::new().with_workspace(workspace)
         }
 
         fn branch(name: &str) -> String {
@@ -304,6 +329,107 @@ mod tests {
                 "mark_branch_managed fix-auth".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn a_requested_base_branch_tip_becomes_the_recorded_start() {
+        let fixture = CreateFixture::with_local_tips(&[("develop", CreateFixture::DEVELOP_TIP)]);
+        let request = CreateFixture::request("fix-auth")
+            .with_base_branch(BaseBranch::new("develop").unwrap());
+
+        let session = CreateFixture::create(&fixture, request).unwrap();
+
+        assert_eq!(session.base_commit(), CreateFixture::DEVELOP_TIP);
+    }
+
+    #[test]
+    fn the_repo_base_branch_is_started_from_without_a_requested_one() {
+        let fixture = CreateFixture::with_local_tips(&[
+            ("main", FakeWorkspace::DEFAULT_START),
+            ("develop", CreateFixture::DEVELOP_TIP),
+        ]);
+        let request = CreateRequest::new("fix-auth", CreateFixture::repo_on_develop());
+
+        let session = CreateFixture::create(&fixture, request).unwrap();
+
+        assert_eq!(session.base_commit(), CreateFixture::DEVELOP_TIP);
+    }
+
+    #[test]
+    fn a_requested_base_branch_is_started_from_over_the_repo_one() {
+        let fixture = CreateFixture::with_local_tips(&[
+            ("develop", CreateFixture::DEVELOP_TIP),
+            ("release", CreateFixture::RELEASE_TIP),
+        ]);
+        let request = CreateRequest::new("fix-auth", CreateFixture::repo_on_develop())
+            .with_base_branch(BaseBranch::new("release").unwrap());
+
+        let session = CreateFixture::create(&fixture, request).unwrap();
+
+        assert_eq!(session.base_commit(), CreateFixture::RELEASE_TIP);
+    }
+
+    #[test]
+    fn create_records_a_requested_base_branch_on_the_session() {
+        let develop = BaseBranch::new("develop").unwrap();
+        let fixture =
+            ServiceFixture::new().with_workspace(FakeWorkspace::default().with_branch_tip(
+                Path::new(ServiceFixture::REPO),
+                Branch::Local("develop".to_string()),
+                FakeWorkspace::DEFAULT_START,
+            ));
+        let request = CreateFixture::request("fix-auth").with_base_branch(develop.clone());
+
+        let session = CreateFixture::create(&fixture, request).unwrap();
+
+        assert_eq!(session.requested_base_branch(), Some(&develop));
+    }
+
+    #[test]
+    fn create_leaves_a_configured_base_branch_off_the_session() {
+        let fixture =
+            ServiceFixture::new().with_workspace(FakeWorkspace::default().with_branch_tip(
+                Path::new(ServiceFixture::REPO),
+                Branch::Local("develop".to_string()),
+                FakeWorkspace::DEFAULT_START,
+            ));
+        let request = CreateRequest::new("fix-auth", CreateFixture::repo_on_develop());
+
+        let session = CreateFixture::create(&fixture, request).unwrap();
+
+        assert_eq!(session.requested_base_branch(), None);
+    }
+
+    #[test]
+    fn a_missing_requested_base_branch_is_refused_before_anything_is_touched() {
+        let fixture = ServiceFixture::new();
+        let request = CreateFixture::request("fix-auth")
+            .with_base_branch(BaseBranch::new("develop").unwrap());
+
+        let error = CreateFixture::create(&fixture, request).unwrap_err();
+
+        assert!(matches!(error, ServiceError::Invalid(_)));
+        CreateFixture::assert_nothing_touched(&fixture);
+    }
+
+    #[test]
+    fn a_new_session_never_starts_from_another_sessions_branch() {
+        let master_tip = "7777777777777777777777777777777777777777";
+        let repo = Path::new(ServiceFixture::REPO);
+        let workspace = FakeWorkspace::default()
+            .with_branch_tip(
+                repo,
+                Branch::Local("main".to_string()),
+                FakeWorkspace::DEFAULT_START,
+            )
+            .with_branch_tip(repo, Branch::Local("master".to_string()), master_tip);
+        let fixture = ServiceFixture::new()
+            .with_sessions(&[ServiceFixture::session("main")])
+            .with_workspace(workspace);
+
+        let session = CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap();
+
+        assert_eq!(session.base_commit(), master_tip);
     }
 
     #[test]

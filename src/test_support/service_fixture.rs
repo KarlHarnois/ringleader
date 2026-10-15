@@ -13,14 +13,15 @@ use crate::application::{
     SessionService, StatePorts, TmuxPorts,
 };
 use crate::domain::{
-    Agent, AgentPane, Config, HotKey, KeyBindings, NamingScheme, PullRequest, PullRequestState,
-    Registration, Repo, RepoName, Session, SessionMetadata, SessionName, SessionObservation,
-    SessionRepo, SessionState, SessionSummary, SessionWorktree, TmuxAddress,
+    Agent, AgentPane, BaseBranch, Config, HotKey, KeyBindings, NamingScheme, PullRequest,
+    PullRequestState, Registration, Repo, RepoName, Session, SessionMetadata, SessionName,
+    SessionObservation, SessionRepo, SessionState, SessionSummary, SessionWorktree, TmuxAddress,
 };
 
 pub struct ServiceFixture {
     registry: Arc<FakeSessionRegistry>,
     workspace: Arc<FakeWorkspace>,
+    diff_workspace: Option<Arc<FakeWorkspace>>,
     multiplexer: Arc<FakeMultiplexer>,
     config_source: Arc<FakeConfigSource>,
     scanner: Arc<FakeRepoScanner>,
@@ -58,6 +59,7 @@ impl ServiceFixture {
         Self {
             registry: Arc::new(FakeSessionRegistry::empty()),
             workspace: Arc::new(FakeWorkspace::default()),
+            diff_workspace: None,
             multiplexer: Arc::new(FakeMultiplexer::new()),
             config_source: Arc::new(FakeConfigSource::with_config(Self::config())),
             scanner: Arc::new(FakeRepoScanner::finding(vec![Self::repo()])),
@@ -88,6 +90,13 @@ impl ServiceFixture {
     pub fn with_workspace(self, workspace: FakeWorkspace) -> Self {
         Self {
             workspace: Arc::new(workspace),
+            ..self
+        }
+    }
+
+    pub fn with_diff_workspace(self, diff_workspace: FakeWorkspace) -> Self {
+        Self {
+            diff_workspace: Some(Arc::new(diff_workspace)),
             ..self
         }
     }
@@ -302,16 +311,26 @@ impl ServiceFixture {
 
     pub fn session_with_agent(name: &str, agent: &str) -> Session {
         let session = Self::session(name);
-        let recorded = session.metadata();
-        let metadata = SessionMetadata::new(
-            SessionRepo::new(recorded.repo_name().clone(), recorded.repo_path()),
-            SessionWorktree::new(
-                recorded.worktree_path(),
-                recorded.branch(),
-                recorded.base_commit(),
-            ),
-            agent,
-        );
+        Self::rebuilt(&session, Self::recorded_worktree(&session), agent)
+    }
+
+    pub fn session_based_on(name: &str, base_branch: &str) -> Session {
+        let session = Self::session(name);
+        let worktree = Self::recorded_worktree(&session).based_on(BaseBranch::new(base_branch));
+        Self::rebuilt(&session, worktree, session.agent())
+    }
+
+    fn recorded_worktree(session: &Session) -> SessionWorktree {
+        SessionWorktree::new(
+            session.worktree_path(),
+            session.branch(),
+            session.base_commit(),
+        )
+    }
+
+    fn rebuilt(session: &Session, worktree: SessionWorktree, agent: &str) -> Session {
+        let repo = SessionRepo::new(session.repo_name().clone(), session.repo_path());
+        let metadata = SessionMetadata::new(repo, worktree, agent);
         let tmux = TmuxAddress::new(session.tmux_name(), session.socket_path());
         session.rekeyed(session.name().clone(), metadata, tmux)
     }
@@ -341,7 +360,7 @@ impl ServiceFixture {
         let session = Self::session(name);
         Self::new()
             .with_sessions(std::slice::from_ref(&session))
-            .with_workspace(Self::workspace_for(&[&session]).with_upstream_merge(outcome))
+            .with_workspace(Self::workspace_for(&[&session]).with_merge_outcome(outcome))
             .with_host(Self::host_for(&[&session]))
             .with_multiplexer(multiplexer.with_live(Self::waiting(&session)))
     }
@@ -446,9 +465,15 @@ impl ServiceFixture {
                 self.host.clone(),
                 self.pull_requests.clone(),
                 self.directory_environment.clone(),
-            ),
+            )
+            .with_diff_workspace(self.measuring_workspace()),
             TmuxPorts::new(self.multiplexer.clone()),
         )
+    }
+
+    fn measuring_workspace(&self) -> Arc<FakeWorkspace> {
+        let diff_workspace = self.diff_workspace.as_ref().unwrap_or(&self.workspace);
+        Arc::clone(diff_workspace)
     }
 
     fn context(&self) -> ServiceContext {

@@ -1,34 +1,61 @@
 use std::path::Path;
 
-use super::base_branch_ladder::BaseBranchLadder;
-use super::base_branch_refs::BaseBranchRefs;
+use super::branch_ref::BranchRef;
 use super::git_invocation::GitInvocation;
 use super::git_runner::GitRunner;
-use super::start_point_resolver::StartPointResolver;
-use crate::application::ports::{MergeOutcome, UpstreamMerge, WorkspaceError};
-use crate::domain::BaseBranch;
+use crate::application::ports::{MergeOutcome, WorkspaceError};
+use crate::domain::{BaseBranch, Branch};
 
 pub struct UpstreamMerger<'a> {
     git: &'a GitRunner,
 }
 
 impl<'a> UpstreamMerger<'a> {
-    const REMOTE: &'static str = "origin";
     const MERGE_HEAD: &'static str = "MERGE_HEAD";
     const HEAD: &'static str = "HEAD";
+    const NO_MATCHING_REFS: i32 = 2;
 
     pub fn new(git: &'a GitRunner) -> Self {
         Self { git }
     }
 
-    pub fn fetch(
+    pub fn fetch(&self, worktree: &Path, branch: &BaseBranch) -> Result<(), WorkspaceError> {
+        let refspec = format!(
+            "+{}:{}",
+            Self::ref_on_origin(branch),
+            Self::origin_ref(branch)
+        );
+        let fetch = GitInvocation::in_worktree(worktree, "fetch")
+            .writing()
+            .args([Branch::ORIGIN, &refspec]);
+        self.git
+            .run_checked(&fetch)
+            .map(drop)
+            .map_err(|failure| self.explain_failed_fetch(worktree, branch, failure))
+    }
+
+    fn explain_failed_fetch(
         &self,
         worktree: &Path,
-        base_branch: Option<&BaseBranch>,
-    ) -> Result<BaseBranch, WorkspaceError> {
-        let branch = self.upstream_branch(worktree, base_branch)?;
-        self.fetch_branch(worktree, &branch)?;
-        Ok(branch)
+        branch: &BaseBranch,
+        failure: WorkspaceError,
+    ) -> WorkspaceError {
+        if !self.origin_lacks(worktree, branch) {
+            return failure;
+        }
+        WorkspaceError::NotOnOrigin {
+            branch: branch.to_string(),
+        }
+    }
+
+    fn origin_lacks(&self, worktree: &Path, branch: &BaseBranch) -> bool {
+        let listing = GitInvocation::in_worktree(worktree, "ls-remote")
+            .probing()
+            .args(["--exit-code", Branch::ORIGIN, &Self::ref_on_origin(branch)]);
+        matches!(
+            self.git.run(&listing),
+            Ok(output) if output.exit_code() == Some(Self::NO_MATCHING_REFS)
+        )
     }
 
     pub fn merge(
@@ -36,16 +63,12 @@ impl<'a> UpstreamMerger<'a> {
         worktree: &Path,
         branch: &BaseBranch,
         started_from: &str,
-    ) -> Result<UpstreamMerge, WorkspaceError> {
+    ) -> Result<MergeOutcome, WorkspaceError> {
         self.refuse_merge_in_progress(worktree)?;
         self.refuse_staged_changes(worktree)?;
         self.refuse_another_start(worktree, branch, started_from)?;
-        let commit = self.commit_of(worktree, &BaseBranchRefs::new(branch).origin_ref())?;
-        let outcome = self.merge_unless_contained(worktree, branch, &commit)?;
-        Ok(UpstreamMerge::new(
-            &BaseBranchRefs::new(branch).origin_suggestion(),
-            outcome,
-        ))
+        let commit = self.commit_of(worktree, &Self::origin_ref(branch))?;
+        self.merge_unless_contained(worktree, branch, &commit)
     }
 
     fn refuse_merge_in_progress(&self, worktree: &Path) -> Result<(), WorkspaceError> {
@@ -73,53 +96,13 @@ impl<'a> UpstreamMerger<'a> {
         started_from: &str,
     ) -> Result<(), WorkspaceError> {
         let started_on_upstream = !started_from.is_empty()
-            && self.is_ancestor(
-                worktree,
-                started_from,
-                &BaseBranchRefs::new(branch).origin_ref(),
-            )?;
+            && self.is_ancestor(worktree, started_from, &Self::origin_ref(branch))?;
         if started_on_upstream {
             return Ok(());
         }
         Err(WorkspaceError::StartedElsewhere {
-            upstream: BaseBranchRefs::new(branch).origin_suggestion(),
+            upstream: branch.origin_copy().name().to_string(),
         })
-    }
-
-    fn upstream_branch(
-        &self,
-        worktree: &Path,
-        base_branch: Option<&BaseBranch>,
-    ) -> Result<BaseBranch, WorkspaceError> {
-        let branch = match base_branch {
-            Some(base) => BaseBranchRefs::new(base).on_origin(),
-            None => self.origin_default(worktree)?,
-        };
-        branch.ok_or_else(|| WorkspaceError::NoUpstream {
-            worktree: worktree.to_path_buf(),
-        })
-    }
-
-    fn origin_default(&self, worktree: &Path) -> Result<Option<BaseBranch>, WorkspaceError> {
-        let origin_head = StartPointResolver::new(self.git).existing_origin_default(worktree)?;
-        for candidate in BaseBranchLadder::new(origin_head).origin_candidates() {
-            if self.git.resolve(worktree, &candidate)?.is_some() {
-                return Ok(BaseBranchLadder::origin_branch(&candidate));
-            }
-        }
-        Ok(None)
-    }
-
-    fn fetch_branch(&self, worktree: &Path, branch: &BaseBranch) -> Result<(), WorkspaceError> {
-        let refspec = format!(
-            "+{}:{}",
-            BaseBranchRefs::new(branch).local_ref(),
-            BaseBranchRefs::new(branch).origin_ref()
-        );
-        let fetch = GitInvocation::in_worktree(worktree, "fetch")
-            .writing()
-            .args([Self::REMOTE, &refspec]);
-        self.git.run_checked(&fetch).map(drop)
     }
 
     fn commit_of(&self, worktree: &Path, reference: &str) -> Result<String, WorkspaceError> {
@@ -146,7 +129,7 @@ impl<'a> UpstreamMerger<'a> {
                 "--no-overwrite-ignore",
                 "-m",
                 &message,
-                &BaseBranchRefs::new(branch).origin_ref(),
+                &Self::origin_ref(branch),
             ]);
         match self.git.run_checked(&merge) {
             Ok(_) => Ok(MergeOutcome::Merged),
@@ -161,7 +144,7 @@ impl<'a> UpstreamMerger<'a> {
     ) -> Result<String, WorkspaceError> {
         let message = format!(
             "Merge remote-tracking branch '{}'",
-            BaseBranchRefs::new(branch).origin_suggestion()
+            branch.origin_copy().name()
         );
         let checked_out = GitInvocation::in_worktree(worktree, "symbolic-ref").args([
             "--short",
@@ -172,6 +155,14 @@ impl<'a> UpstreamMerger<'a> {
             Some(current) => format!("{message} into {current}"),
             None => message,
         })
+    }
+
+    fn origin_ref(branch: &BaseBranch) -> String {
+        BranchRef::new(&branch.origin_copy()).full_name()
+    }
+
+    fn ref_on_origin(branch: &BaseBranch) -> String {
+        BranchRef::new(&Branch::Local(branch.to_string())).full_name()
     }
 
     fn head_contains(&self, worktree: &Path, commit: &str) -> Result<bool, WorkspaceError> {
@@ -332,25 +323,26 @@ mod tests {
             }
         }
 
-        fn merge(&self) -> Result<UpstreamMerge, WorkspaceError> {
-            self.merge_from(None)
+        fn merge(&self) -> Result<MergeOutcome, WorkspaceError> {
+            self.merge_from(GitTestRepo::BRANCH)
         }
 
-        fn merge_from(&self, base: Option<&BaseBranch>) -> Result<UpstreamMerge, WorkspaceError> {
-            self.fetch_and_merge(&self.origin.workspace(), base, &self.start)
+        fn merge_from(&self, branch: &str) -> Result<MergeOutcome, WorkspaceError> {
+            self.fetch_and_merge(&self.origin.workspace(), branch, &self.start)
         }
 
-        fn merge_started_from(&self, start: &str) -> Result<UpstreamMerge, WorkspaceError> {
-            self.fetch_and_merge(&self.origin.workspace(), None, start)
+        fn merge_started_from(&self, start: &str) -> Result<MergeOutcome, WorkspaceError> {
+            self.fetch_and_merge(&self.origin.workspace(), GitTestRepo::BRANCH, start)
         }
 
         fn fetch_and_merge(
             &self,
             workspace: &GitWorkspace,
-            base: Option<&BaseBranch>,
+            branch: &str,
             start: &str,
-        ) -> Result<UpstreamMerge, WorkspaceError> {
-            let branch = workspace.fetch_upstream(&self.worktree, base)?;
+        ) -> Result<MergeOutcome, WorkspaceError> {
+            let branch = BaseBranch::new(branch).unwrap();
+            workspace.fetch_upstream(&self.worktree, &branch)?;
             workspace.merge_upstream(&self.worktree, &branch, start)
         }
 
@@ -396,27 +388,6 @@ mod tests {
             tip
         }
 
-        fn point_origin_head_at(&self, branch: &str) {
-            self.origin.git(&self.clone, &["fetch", "-q", "origin"]);
-            self.origin
-                .git(&self.clone, &["remote", "set-head", "origin", branch]);
-        }
-
-        fn without_origin_head(self) -> Self {
-            self.origin
-                .git(&self.clone, &["remote", "set-head", "origin", "-d"]);
-            self
-        }
-
-        fn without_origin_default(self) -> Self {
-            let fixture = self.without_origin_head();
-            let tracking = format!("refs/remotes/origin/{}", GitTestRepo::BRANCH);
-            fixture
-                .origin
-                .git(&fixture.clone, &["update-ref", "-d", &tracking]);
-            fixture
-        }
-
         fn with_local_branch_shadowing_origin(self) -> Self {
             let shadow = format!("origin/{}", GitTestRepo::BRANCH);
             self.origin.git(&self.clone, &["branch", &shadow]);
@@ -441,9 +412,9 @@ mod tests {
             fs::set_permissions(&hook, fs::Permissions::from_mode(Self::EXECUTABLE)).unwrap();
         }
 
-        fn merge_within(&self, deadline: Duration) -> Result<UpstreamMerge, WorkspaceError> {
+        fn merge_within(&self, deadline: Duration) -> Result<MergeOutcome, WorkspaceError> {
             let workspace = self.origin.workspace_with_deadline(deadline);
-            self.fetch_and_merge(&workspace, None, &self.start)
+            self.fetch_and_merge(&workspace, GitTestRepo::BRANCH, &self.start)
         }
 
         fn stage_a_change(&self) {
@@ -455,6 +426,28 @@ mod tests {
             self.origin
                 .git(&self.worktree, &["status", "--porcelain"])
                 .is_empty()
+        }
+
+        fn with_unreachable_origin(self) -> Self {
+            let missing = self.origin.sibling("missing-origin");
+            self.origin.git(
+                &self.clone,
+                &["remote", "set-url", "origin", &Self::text(&missing)],
+            );
+            self
+        }
+
+        fn keep_origin_copy_of(&self, branch: &str) {
+            let copy = format!("refs/remotes/origin/{branch}");
+            self.origin
+                .git(&self.clone, &["update-ref", &copy, &self.start]);
+        }
+
+        fn has_ref(&self, reference: &str) -> bool {
+            let verify = self
+                .origin
+                .try_git(&self.clone, &["rev-parse", "-q", "--verify", reference]);
+            verify.status.success()
         }
 
         fn without_remote(self) -> Self {
@@ -505,8 +498,8 @@ mod tests {
             self.origin.git(&self.worktree, &["add", Self::SHARED_FILE]);
         }
 
-        fn conflicted_paths(merge: &UpstreamMerge) -> Vec<String> {
-            match merge.outcome() {
+        fn conflicted_paths(outcome: &MergeOutcome) -> Vec<String> {
+            match outcome {
                 MergeOutcome::Conflicted(paths) => paths.clone(),
                 other => panic!("expected conflicts, got {other:?}"),
             }
@@ -523,12 +516,9 @@ mod tests {
         fixture.commit_on_branch("work.txt");
         let upstream_tip = fixture.commit_upstream("news.txt");
 
-        let merge = fixture.merge().unwrap();
+        let outcome = fixture.merge().unwrap();
 
-        assert_eq!(
-            merge,
-            UpstreamMerge::new("origin/main", MergeOutcome::Merged)
-        );
+        assert_eq!(outcome, MergeOutcome::Merged);
         assert!(fixture.has_merged(&upstream_tip));
     }
 
@@ -552,9 +542,9 @@ mod tests {
         fixture.commit_on_branch("work.txt");
         let head = fixture.head();
 
-        let merge = fixture.merge().unwrap();
+        let outcome = fixture.merge().unwrap();
 
-        assert_eq!(merge.outcome(), &MergeOutcome::UpToDate);
+        assert_eq!(outcome, MergeOutcome::UpToDate);
         assert_eq!(fixture.head(), head);
     }
 
@@ -563,10 +553,10 @@ mod tests {
         let fixture = MergeFixture::new();
         fixture.conflicting_edits();
 
-        let merge = fixture.merge().unwrap();
+        let outcome = fixture.merge().unwrap();
 
         assert_eq!(
-            MergeFixture::conflicted_paths(&merge),
+            MergeFixture::conflicted_paths(&outcome),
             [MergeFixture::SHARED_FILE]
         );
     }
@@ -582,53 +572,14 @@ mod tests {
     }
 
     #[test]
-    fn a_configured_base_branch_merges_its_origin_copy() {
+    fn another_branch_merges_its_origin_copy() {
         let fixture = MergeFixture::new();
         let develop_tip = fixture.upstream_branch("develop");
-        let base = BaseBranch::new("develop").unwrap();
 
-        let merge = fixture.merge_from(Some(&base)).unwrap();
+        let outcome = fixture.merge_from("develop").unwrap();
 
-        assert_eq!(
-            merge,
-            UpstreamMerge::new("origin/develop", MergeOutcome::Merged)
-        );
+        assert_eq!(outcome, MergeOutcome::Merged);
         assert!(fixture.has_merged(&develop_tip));
-    }
-
-    #[test]
-    fn an_origin_tracking_base_branch_merges_the_same_branch() {
-        let fixture = MergeFixture::new();
-        let develop_tip = fixture.upstream_branch("develop");
-        let base = BaseBranch::new("origin/develop").unwrap();
-
-        let merge = fixture.merge_from(Some(&base)).unwrap();
-
-        assert_eq!(merge.upstream(), "origin/develop");
-        assert!(fixture.has_merged(&develop_tip));
-    }
-
-    #[test]
-    fn origin_head_picks_the_default_branch_over_main() {
-        let fixture = MergeFixture::new();
-        let develop_tip = fixture.upstream_branch("develop");
-        fixture.point_origin_head_at("develop");
-
-        let merge = fixture.merge().unwrap();
-
-        assert_eq!(merge.upstream(), "origin/develop");
-        assert!(fixture.has_merged(&develop_tip));
-    }
-
-    #[test]
-    fn without_origin_head_the_conventional_default_branch_is_merged() {
-        let fixture = MergeFixture::new().without_origin_head();
-        let upstream_tip = fixture.commit_upstream("news.txt");
-
-        let merge = fixture.merge().unwrap();
-
-        assert_eq!(merge.upstream(), "origin/main");
-        assert!(fixture.has_merged(&upstream_tip));
     }
 
     #[test]
@@ -666,10 +617,10 @@ mod tests {
         fixture.merge().unwrap();
         fixture.record_a_resolution_and_undo_the_merge();
 
-        let merge = fixture.merge().unwrap();
+        let outcome = fixture.merge().unwrap();
 
         assert_eq!(
-            MergeFixture::conflicted_paths(&merge),
+            MergeFixture::conflicted_paths(&outcome),
             [MergeFixture::SHARED_FILE]
         );
         assert_eq!(fixture.shared_text(), MergeFixture::RESOLUTION);
@@ -780,15 +731,35 @@ mod tests {
     }
 
     #[test]
-    fn a_worktree_with_no_origin_default_has_no_upstream() {
-        let fixture = MergeFixture::new().without_origin_default();
+    fn a_branch_origin_dropped_keeps_its_origin_copy() {
+        let fixture = MergeFixture::new();
+        fixture.keep_origin_copy_of("part1");
+
+        fixture.merge_from("part1").unwrap_err();
+
+        assert!(fixture.has_ref("refs/remotes/origin/part1"));
+    }
+
+    #[test]
+    fn a_fetch_from_an_unreachable_origin_keeps_origins_refs() {
+        let fixture = MergeFixture::new().with_unreachable_origin();
 
         let error = fixture.merge().unwrap_err();
 
+        assert!(matches!(error, WorkspaceError::Failed { .. }), "{error:?}");
+        assert!(fixture.has_ref("refs/remotes/origin/main"));
+    }
+
+    #[test]
+    fn a_branch_origin_does_not_have_is_refused_by_name() {
+        let fixture = MergeFixture::new();
+
+        let error = fixture.merge_from("part1").unwrap_err();
+
         assert_eq!(
             error,
-            WorkspaceError::NoUpstream {
-                worktree: fixture.worktree.clone()
+            WorkspaceError::NotOnOrigin {
+                branch: "part1".to_string()
             }
         );
     }
@@ -796,9 +767,8 @@ mod tests {
     #[test]
     fn a_failed_fetch_is_reported() {
         let fixture = MergeFixture::new().without_remote();
-        let base = BaseBranch::new(GitTestRepo::BRANCH).unwrap();
 
-        let error = fixture.merge_from(Some(&base)).unwrap_err();
+        let error = fixture.merge().unwrap_err();
 
         assert!(
             matches!(&error, WorkspaceError::Failed { subcommand, .. } if subcommand == "fetch"),

@@ -1,160 +1,79 @@
 use std::path::Path;
 
-use super::base_branch_ladder::BaseBranchLadder;
-use super::base_branch_refs::BaseBranchRefs;
 use super::git_invocation::GitInvocation;
 use super::git_runner::GitRunner;
-use crate::application::ports::{DiffBase, StartPoint, WorkspaceError};
-use crate::domain::BaseBranch;
+use crate::application::ports::{StartPoint, WorkspaceError};
+use crate::domain::{DiffStat, MergeBases};
 
-pub struct DiffBaseResolver<'a> {
+pub struct GitDiffs<'a> {
     git: &'a GitRunner,
 }
 
-impl<'a> DiffBaseResolver<'a> {
+impl<'a> GitDiffs<'a> {
     const HEAD: &'static str = "HEAD";
-    const NAME_AND_TARGET_FORMAT: &'static str = "--format=%(refname) %(symref)";
 
     pub fn new(git: &'a GitRunner) -> Self {
         Self { git }
     }
 
-    pub fn resolve(&self, worktree: &Path, base: &DiffBase) -> Result<String, WorkspaceError> {
-        match base.start() {
-            StartPoint::Commit(recorded) => {
-                self.merge_base_or_recorded(worktree, recorded, base.base_branch())
-            }
-            StartPoint::Orphan => self.empty_tree(worktree),
+    pub fn merge_bases(
+        &self,
+        worktree: &Path,
+        commits: &[String],
+    ) -> Result<MergeBases, WorkspaceError> {
+        let existing = self.existing_commits(worktree, commits)?;
+        if existing.is_empty() {
+            return Ok(MergeBases::default());
         }
-    }
-
-    fn merge_base_or_recorded(
-        &self,
-        worktree: &Path,
-        recorded: &str,
-        base_branch: Option<&BaseBranch>,
-    ) -> Result<String, WorkspaceError> {
-        let merge_base = self.merge_base(worktree, recorded, base_branch)?;
-        Ok(merge_base.unwrap_or_else(|| recorded.to_string()))
-    }
-
-    fn merge_base(
-        &self,
-        worktree: &Path,
-        recorded: &str,
-        base_branch: Option<&BaseBranch>,
-    ) -> Result<Option<String>, WorkspaceError> {
-        let Some(checked_out) = self.checked_out_ref(worktree)? else {
-            return Ok(None);
-        };
-        let branch_refs = self.branch_refs(worktree, base_branch, &checked_out)?;
-        let commits = self.existing_commits(worktree, recorded, &branch_refs)?;
-        if commits.is_empty() {
-            return Ok(None);
-        }
-        let bases = self.best_common_ancestors(worktree, &commits)?;
-        Ok(Self::preferred_base(bases, recorded))
-    }
-
-    fn checked_out_ref(&self, worktree: &Path) -> Result<Option<String>, WorkspaceError> {
-        let verify = GitInvocation::in_worktree(worktree, "rev-parse")
+        let find = GitInvocation::in_worktree(worktree, "merge-base")
             .diffing()
-            .args(["--verify", "-q", "--symbolic-full-name", Self::HEAD]);
-        self.git.resolved_from(&verify)
+            .args(["--all", Self::HEAD])
+            .args(&existing);
+        let bases = self.git.lookup(&find)?;
+        Ok(MergeBases::new(bases.map_or_else(Vec::new, |found| {
+            found.lines().into_iter().map(str::to_string).collect()
+        })))
     }
 
-    fn branch_refs(
+    pub fn diff_stat(
         &self,
         worktree: &Path,
-        base_branch: Option<&BaseBranch>,
-        checked_out: &str,
-    ) -> Result<Vec<String>, WorkspaceError> {
-        let mut branch_refs = match base_branch {
-            Some(branch) => Self::configured_refs(branch),
-            None => self.ladder_rung(worktree, checked_out)?,
-        };
-        branch_refs.retain(|branch_ref| branch_ref != checked_out);
-        Ok(branch_refs)
-    }
-
-    fn configured_refs(branch: &BaseBranch) -> Vec<String> {
-        let refs = BaseBranchRefs::new(branch);
-        let origin_copy = refs.origin_ref();
-        refs.candidate_refs()
-            .into_iter()
-            .chain([origin_copy])
-            .collect()
-    }
-
-    fn ladder_rung(
-        &self,
-        worktree: &Path,
-        checked_out: &str,
-    ) -> Result<Vec<String>, WorkspaceError> {
-        let listed = self.listed_rung_refs(worktree)?;
-        let origin_default = Self::symbolic_origin_head_target(&listed);
-        let existing_branches: Vec<&str> = listed
-            .iter()
-            .map(|(name, _)| name.as_str())
-            .filter(|name| *name != checked_out)
-            .collect();
-        Ok(BaseBranchLadder::new(origin_default).first_rung(&existing_branches))
-    }
-
-    fn symbolic_origin_head_target(listed: &[(String, String)]) -> Option<String> {
-        listed
-            .iter()
-            .find(|(name, target)| name == BaseBranchLadder::ORIGIN_HEAD && !target.is_empty())
-            .map(|(_, target)| target.clone())
-    }
-
-    fn listed_rung_refs(&self, worktree: &Path) -> Result<Vec<(String, String)>, WorkspaceError> {
-        let list = GitInvocation::in_worktree(worktree, "for-each-ref")
+        base: &StartPoint,
+    ) -> Result<DiffStat, WorkspaceError> {
+        let base_commit = self.base_commit(worktree, base)?;
+        let numstat = GitInvocation::in_worktree(worktree, "diff-index")
             .diffing()
-            .arg(Self::NAME_AND_TARGET_FORMAT)
-            .args(BaseBranchLadder::rung_lookup_refs());
-        let listing = self.git.run_checked(&list)?;
-        Ok(listing
-            .lines()
-            .into_iter()
-            .filter_map(|line| line.split_once(' '))
-            .map(|(name, target)| (name.to_string(), target.to_string()))
-            .collect())
+            .args(["--numstat", "--no-renames", &base_commit]);
+        let untracked = GitInvocation::in_worktree(worktree, "ls-files")
+            .diffing()
+            .args(["--others", "--exclude-standard", "-z"]);
+        let changes = self.git.run_checked(&numstat)?.file_changes();
+        let untracked_count = self.git.run_checked(&untracked)?.record_count();
+        Ok(DiffStat::from_changes(changes, untracked_count))
     }
 
     fn existing_commits(
         &self,
         worktree: &Path,
-        recorded: &str,
-        branch_refs: &[String],
-    ) -> Result<Vec<String>, WorkspaceError> {
-        let filter = GitInvocation::in_worktree(worktree, "rev-list")
-            .diffing()
-            .args(["--no-walk", "--ignore-missing", recorded])
-            .args(branch_refs)
-            .arg("--");
-        let commits = self.git.run_checked(&filter)?;
-        Ok(commits.lines().into_iter().map(str::to_string).collect())
-    }
-
-    fn best_common_ancestors(
-        &self,
-        worktree: &Path,
         commits: &[String],
     ) -> Result<Vec<String>, WorkspaceError> {
-        let find = GitInvocation::in_worktree(worktree, "merge-base")
+        if commits.is_empty() {
+            return Ok(Vec::new());
+        }
+        let filter = GitInvocation::in_worktree(worktree, "rev-list")
             .diffing()
-            .args(["--all", Self::HEAD])
-            .args(commits);
-        let bases = self.git.lookup(&find)?;
-        Ok(bases
-            .map(|found| found.lines().into_iter().map(str::to_string).collect())
-            .unwrap_or_default())
+            .args(["--no-walk", "--ignore-missing"])
+            .args(commits)
+            .arg("--");
+        let listed = self.git.run_checked(&filter)?;
+        Ok(listed.lines().into_iter().map(str::to_string).collect())
     }
 
-    fn preferred_base(bases: Vec<String>, recorded: &str) -> Option<String> {
-        let through_the_base_branch = bases.iter().find(|base| *base != recorded).cloned();
-        through_the_base_branch.or_else(|| bases.into_iter().next())
+    fn base_commit(&self, worktree: &Path, base: &StartPoint) -> Result<String, WorkspaceError> {
+        match base {
+            StartPoint::Commit(commit) => Ok(commit.clone()),
+            StartPoint::Orphan => self.empty_tree(worktree),
+        }
     }
 
     fn empty_tree(&self, worktree: &Path) -> Result<String, WorkspaceError> {
@@ -171,9 +90,99 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+    use crate::adapters::branch_ref::BranchRef;
+    use crate::application::base_branch_resolver::BaseBranchResolver;
+    use crate::application::diff_base_resolver::DiffBaseResolver;
     use crate::application::ports::Workspace;
-    use crate::domain::DiffStat;
+    use crate::domain::{BaseBranch, Branch};
     use crate::test_support::GitTestRepo;
+
+    struct HistoryFixture {
+        repo: GitTestRepo,
+        git: GitRunner,
+    }
+
+    impl HistoryFixture {
+        const RECORDED: &'static str = "recorded";
+        const MISSING: &'static str = "0123456789abcdef0123456789abcdef01234567";
+
+        fn new() -> Self {
+            let repo = GitTestRepo::new();
+            let git = repo.runner();
+            Self { repo, git }
+        }
+
+        fn run(&self, args: &[&str]) -> String {
+            self.repo.git(self.repo.path(), args)
+        }
+
+        fn commit(&self, file: &str) -> String {
+            self.repo.commit(self.repo.path(), file)
+        }
+
+        fn merge(&self, revision: &str) -> String {
+            self.run(&["merge", "-q", "--no-ff", "-m", "Merge", revision]);
+            self.run(&["rev-parse", "HEAD"])
+        }
+
+        fn merge_bases(&self, commits: &[&str]) -> MergeBases {
+            let commits: Vec<String> = commits.iter().map(ToString::to_string).collect();
+            GitDiffs::new(&self.git)
+                .merge_bases(self.repo.path(), &commits)
+                .unwrap()
+        }
+
+        fn criss_cross(&self) -> (String, String, String) {
+            self.run(&["checkout", "-q", "-b", "left"]);
+            let left = self.commit("left.md");
+            self.run(&["checkout", "-q", "-b", "right", "HEAD~1"]);
+            let right = self.commit("right.md");
+            let right_merge = self.merge(&left);
+            self.run(&["checkout", "-q", "left"]);
+            self.merge(&right);
+            (left, right, right_merge)
+        }
+    }
+
+    #[test]
+    fn a_missing_commit_is_skipped() {
+        let fixture = HistoryFixture::new();
+        let tip = fixture.run(&["rev-parse", "HEAD"]);
+
+        let bases = fixture.merge_bases(&[HistoryFixture::MISSING, &tip]);
+
+        assert_eq!(bases.measured_from(HistoryFixture::RECORDED), tip);
+    }
+
+    #[test]
+    fn an_unrelated_history_has_no_merge_base() {
+        let fixture = HistoryFixture::new();
+        fixture.run(&["checkout", "-q", "--orphan", "unrelated"]);
+        let unrelated = fixture.commit("unrelated.md");
+        fixture.run(&["checkout", "-q", GitTestRepo::BRANCH]);
+
+        let bases = fixture.merge_bases(&[&unrelated]);
+
+        assert_eq!(bases, MergeBases::default());
+    }
+
+    #[test]
+    fn a_criss_cross_merge_has_both_sides_as_merge_bases() {
+        let fixture = HistoryFixture::new();
+        let (left, right, right_merge) = fixture.criss_cross();
+
+        let bases = fixture.merge_bases(&[&right_merge]);
+
+        assert_eq!(bases.measured_from(&left), right);
+        assert_eq!(bases.measured_from(&right), left);
+    }
+
+    #[test]
+    fn asking_about_no_commit_finds_no_merge_base() {
+        let fixture = HistoryFixture::new();
+
+        assert_eq!(fixture.merge_bases(&[]), MergeBases::default());
+    }
 
     struct DiffBaseFixture {
         repo: GitTestRepo,
@@ -185,8 +194,13 @@ mod tests {
         const SESSION: &'static str = "fix-auth";
         const ORIGIN_DEFAULT: &'static str = "refs/remotes/origin/main";
         const ORIGIN_SHORT_NAME: &'static str = "origin/main";
+        const ORIGIN_HEAD: &'static str = "refs/remotes/origin/HEAD";
         const EARLIER: &'static str = "2080-01-01T00:00:00Z";
         const LATER: &'static str = "2090-01-01T00:00:00Z";
+
+        fn origin_ref(branch: &str) -> String {
+            BranchRef::new(&Branch::origin_copy_of(branch)).full_name()
+        }
 
         fn started() -> Self {
             Self::started_in(GitTestRepo::new())
@@ -239,12 +253,11 @@ mod tests {
             let repo = Self::repo_on_new_branch("develop");
             repo.commit(repo.path(), "unreleased-1.md");
             let develop = repo.commit(repo.path(), "unreleased-2.md");
-            let origin_copy =
-                BaseBranchRefs::new(&BaseBranch::new("develop").unwrap()).origin_ref();
+            let origin_copy = Self::origin_ref("develop");
             repo.git(repo.path(), &["update-ref", &origin_copy, &develop]);
             repo.git(
                 repo.path(),
-                &["symbolic-ref", BaseBranchLadder::ORIGIN_HEAD, &origin_copy],
+                &["symbolic-ref", Self::ORIGIN_HEAD, &origin_copy],
             );
             repo
         }
@@ -266,25 +279,16 @@ mod tests {
         fn make_origin_head_a_plain_ref(&self) {
             let repo = self.repo.path();
             let tip = self.repo.git(repo, &["rev-parse", "HEAD"]);
-            self.repo.git(
-                repo,
-                &[
-                    "update-ref",
-                    "--no-deref",
-                    BaseBranchLadder::ORIGIN_HEAD,
-                    &tip,
-                ],
-            );
+            self.repo
+                .git(repo, &["update-ref", "--no-deref", Self::ORIGIN_HEAD, &tip]);
         }
 
         fn leave_a_pruned_origin_default_beside_its_local_branch(&self, branch: &str) {
             let repo = self.repo.path();
             self.repo.git(repo, &["branch", branch]);
-            let pruned = BaseBranchRefs::new(&BaseBranch::new(branch).unwrap()).origin_ref();
-            self.repo.git(
-                repo,
-                &["symbolic-ref", BaseBranchLadder::ORIGIN_HEAD, &pruned],
-            );
+            let pruned = Self::origin_ref(branch);
+            self.repo
+                .git(repo, &["symbolic-ref", Self::ORIGIN_HEAD, &pruned]);
         }
 
         fn commit_on(&self, branch: &str, file: &str) {
@@ -329,7 +333,7 @@ mod tests {
 
         fn commit_only_on_the_origin_copy_of(&self, branch: &str, file: &str) {
             let fetched = self.commit_beside_the_checked_out_branch(file);
-            let origin_copy = BaseBranchRefs::new(&BaseBranch::new(branch).unwrap()).origin_ref();
+            let origin_copy = Self::origin_ref(branch);
             self.repo
                 .git(self.repo.path(), &["update-ref", &origin_copy, &fetched]);
         }
@@ -380,11 +384,7 @@ mod tests {
                 .git(repo, &["update-ref", Self::ORIGIN_DEFAULT, commit]);
             self.repo.git(
                 repo,
-                &[
-                    "symbolic-ref",
-                    BaseBranchLadder::ORIGIN_HEAD,
-                    Self::ORIGIN_DEFAULT,
-                ],
+                &["symbolic-ref", Self::ORIGIN_HEAD, Self::ORIGIN_DEFAULT],
             );
         }
 
@@ -397,11 +397,37 @@ mod tests {
         }
 
         fn diff_with_base_branch(&self, base_branch: Option<&BaseBranch>) -> DiffStat {
-            let base = DiffBase::new(&self.recorded, base_branch);
+            let workspace = self.repo.workspace();
+            let recorded = StartPoint::from_base_commit(&self.recorded);
+            let measured_from = DiffBaseResolver::new(&workspace)
+                .resolve(&self.worktree, &recorded, base_branch)
+                .unwrap();
+            workspace.diff_stat(&self.worktree, &measured_from).unwrap()
+        }
+
+        fn diff_requesting(&self, requested: &str) -> DiffStat {
+            let workspace = self.repo.workspace();
+            let requested = BaseBranch::new(requested).unwrap();
+            let base_branch = BaseBranchResolver::new(&workspace)
+                .resolve(&self.worktree, Some(&requested), None)
+                .unwrap();
+            self.diff_with_base_branch(base_branch)
+        }
+
+        fn stacked_on(branch: &str) -> Self {
+            let repo = Self::repo_on_new_branch(branch);
+            repo.commit(repo.path(), "base.md");
+            Self::started_in(repo)
+        }
+
+        fn land_on_main_beside_other_work(&self, branch: &str) {
+            let repo = self.repo.path();
             self.repo
-                .workspace()
-                .diff_stat(&self.worktree, &base)
-                .unwrap()
+                .git(repo, &["checkout", "-q", GitTestRepo::BRANCH]);
+            self.repo
+                .git(repo, &["merge", "-q", "--no-ff", "-m", "Land", branch]);
+            self.repo.git(repo, &["branch", "-q", "-d", branch]);
+            self.repo.commit(repo, "other.md");
         }
 
         fn line_counts(diff: DiffStat) -> (u64, u64, u64) {
@@ -437,6 +463,39 @@ mod tests {
         fixture.merge_into_session(DiffBaseFixture::ORIGIN_SHORT_NAME);
 
         assert_eq!(fixture.diff().files(), 1);
+    }
+
+    #[test]
+    fn a_stacked_session_measures_from_main_once_its_base_landed_was_deleted_and_main_merged() {
+        let fixture = DiffBaseFixture::stacked_on("part1");
+        fixture.commit_in_session("session.md");
+        fixture.land_on_main_beside_other_work("part1");
+        fixture.merge_into_session(GitTestRepo::BRANCH);
+
+        assert_eq!(fixture.diff_requesting("part1").files(), 1);
+    }
+
+    #[test]
+    fn a_stacked_session_measures_from_its_base_after_merging_the_base_again() {
+        let fixture = DiffBaseFixture::stacked_on("part1");
+        fixture.commit_in_session("session.md");
+        fixture.commit_on("part1", "base-2.md");
+        fixture.merge_into_session("part1");
+
+        assert_eq!(fixture.diff_requesting("part1").files(), 1);
+    }
+
+    #[test]
+    fn a_session_based_on_develop_never_counts_unreleased_develop_work_after_a_main_hotfix() {
+        let repo = DiffBaseFixture::repo_on_new_branch("develop");
+        repo.commit(repo.path(), "unreleased-1.md");
+        repo.commit(repo.path(), "unreleased-2.md");
+        let fixture = DiffBaseFixture::started_in(repo);
+        fixture.commit_in_session("session.md");
+        fixture.commit_on(GitTestRepo::BRANCH, "hotfix.md");
+        fixture.merge_into_session(GitTestRepo::BRANCH);
+
+        assert_eq!(fixture.diff_requesting("develop").files(), 2);
     }
 
     #[test]
