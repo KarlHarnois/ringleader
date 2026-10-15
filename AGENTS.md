@@ -254,23 +254,21 @@ nix flake check
 
 **Ringleader follows hexagonal architecture, also called ports and adapters.** The core is the `domain` and `application` layers.
 
-- The core never imports an adapter, `crossterm`, `ratatui`, or `std::process`.
-- The core never runs tmux or git, and never touches the filesystem or the terminal.
 - The core reaches the outside through traits it owns, which adapters outside the core implement.
 - The core never spells out an outside tool's syntax. Git refs, git config keys, tmux targets, and command lines belong to the adapters.
 - If the core shows the user a command, the core asks a port for the command. For example, `BranchOwnership` asks `Workspace::branch_marking_command`.
 
-**Dependencies point inward only.** An inner layer never imports an outer layer.
+**Dependencies point inward only.** The tests in `main.rs` check the imports of every layer.
 
 ### `domain`
 
-`domain` holds the entities, value types, and pure rules. `domain` imports nothing else from the crate.
+`domain` holds the entities, value types, and pure rules.
 
 ### `application`
 
-`application` holds the use cases and the ports, and imports only `domain`.
+`application` holds the use cases and the ports.
 
-- `application` never shells out, never touches the filesystem directly, and never reads the system clock.
+- `application` never reads the system clock.
 - An `application` error says what kind of failure happened. Only `CliExit` in `cli` turns an error into an exit code.
 - A port is a trait in `application/ports/`, named after the role it plays, such as `Workspace` or `Multiplexer`.
 - If a port has an error type, the error type lives in the port's file.
@@ -282,14 +280,12 @@ nix flake check
 `adapters` holds the driven adapters. A driven adapter implements a port with git, tmux, files, or `/proc`.
 
 - `adapters` also holds the process-level types that `CompositionRoot` uses directly, such as `ProcessEnvironment`, `XdgPaths`, and `AgentLauncher`.
-- `adapters` imports `application` and `domain`, never `ui` or `cli`.
 - Name each port adapter after its technology and its port, such as `GitWorkspace` or `TmuxMultiplexer`.
 
 ### `ui` and `cli`
 
 `ui` and `cli` are the driving adapters.
 
-- `ui` and `cli` import `application` and `domain`, never `adapters` or each other.
 - `ui` and `cli` reach the use cases only through the `SessionService` facade.
 - `SessionService` composes these use cases, which `ui` and `cli` never call directly:
   - `SessionLifecycle`
@@ -307,11 +303,6 @@ nix flake check
 
 - `main.rs` builds and wires. The Wiring section says what `main.rs` builds.
 - The driving adapter, not `main.rs`, calls the use cases a run starts with. For example, `Cli::execute` calls them for the CLI.
-
-### Test code
-
-- `src/test_support/` MAY import any layer: it fakes the ports and drives the outer layers under test.
-- An inline `#[cfg(test)]` module follows its layer's rule. Any inline `#[cfg(test)]` module MAY also import `src/test_support/`.
 
 ### Known violations
 
