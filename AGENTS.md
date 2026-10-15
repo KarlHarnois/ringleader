@@ -358,7 +358,7 @@ To add a port:
    - If the use cases need the port, add the port to a bundle in `ServicePorts` as an `Arc<dyn Trait>`.
    - Otherwise, hand the port from `CompositionRoot` to the type that uses it, as with `Lock`.
 5. Build the adapter in `CompositionRoot` and pass it in.
-   - If the host can lack the technology behind the port, pass a null adapter that does nothing on such a host. `NullPullRequests` is the null adapter for a host without `gh`.
+   - If the host can lack the technology behind the port, pass a null adapter. A null adapter does nothing on such a host. `NullPullRequests` is the null adapter for a host without `gh`.
    - A port is never an `Option`.
 
 ### Driving adapter I/O
