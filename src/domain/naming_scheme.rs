@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use super::repo_name::RepoName;
-use super::session_name::SessionName;
+use crate::domain::RepoName;
+use crate::domain::SessionName;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct NamingScheme {

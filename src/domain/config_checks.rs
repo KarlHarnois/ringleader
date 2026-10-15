@@ -5,7 +5,7 @@ use super::agent::Agent;
 use super::config_draft::ConfigDraft;
 use super::hot_key::HotKey;
 use super::key_bindings::KeyBindings;
-use super::repo_name::RepoName;
+use crate::domain::RepoName;
 
 pub struct ConfigChecks<'a> {
     draft: &'a ConfigDraft,

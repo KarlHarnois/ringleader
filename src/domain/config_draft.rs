@@ -8,8 +8,8 @@ use super::config_checks::ConfigChecks;
 use super::hot_key::HotKey;
 use super::key_bindings::KeyBindings;
 use super::naming_scheme::NamingScheme;
-use super::repo::Repo;
 use super::repo_draft::RepoDraft;
+use crate::domain::Repo;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfigDraft {

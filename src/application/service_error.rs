@@ -1,10 +1,10 @@
 use thiserror::Error;
 
-use super::delete_impact::DeleteImpact;
 use super::ports::{
     ConfigError, HostProbeError, MultiplexerError, RegistryError, TerminalEmulatorError,
     WorkspaceError,
 };
+use crate::application::DeleteImpact;
 use crate::domain::InvalidName;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

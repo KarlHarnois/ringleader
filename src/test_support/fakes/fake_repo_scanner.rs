@@ -1,0 +1,84 @@
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+
+use crate::application::ports::{RepoScanner, ScanError, ScanOutcome};
+use crate::domain::{Repo, RepoScope};
+use crate::test_support::Gate;
+
+pub struct FakeRepoScanner {
+    repos: Vec<Repo>,
+    enclosing_repo: Option<PathBuf>,
+    scan_error: Option<ScanError>,
+    cut_short: bool,
+    gate: Gate,
+    scans: Mutex<Vec<(PathBuf, usize)>>,
+}
+
+impl FakeRepoScanner {
+    pub fn finding(repos: Vec<Repo>) -> Self {
+        Self {
+            repos,
+            enclosing_repo: None,
+            scan_error: None,
+            cut_short: false,
+            gate: Gate::open(),
+            scans: Mutex::new(Vec::new()),
+        }
+    }
+
+    pub fn inside_repo(self, top_level: &Path) -> Self {
+        Self {
+            enclosing_repo: Some(top_level.to_path_buf()),
+            ..self
+        }
+    }
+
+    pub fn failing(self, error: ScanError) -> Self {
+        Self {
+            scan_error: Some(error),
+            ..self
+        }
+    }
+
+    pub fn cut_short(self) -> Self {
+        Self {
+            cut_short: true,
+            ..self
+        }
+    }
+
+    pub fn blocked(self) -> Self {
+        Self {
+            gate: Gate::closed(),
+            ..self
+        }
+    }
+
+    pub fn release(&self) {
+        self.gate.open_now();
+    }
+
+    pub fn scans(&self) -> Vec<(PathBuf, usize)> {
+        self.scans.lock().unwrap().clone()
+    }
+}
+
+impl RepoScanner for FakeRepoScanner {
+    fn resolve_scope(&self, launch_directory: &Path) -> Result<RepoScope, ScanError> {
+        let scope = RepoScope::new(launch_directory);
+        Ok(match &self.enclosing_repo {
+            Some(top_level) => scope.inside_repo(top_level),
+            None => scope,
+        })
+    }
+
+    fn scan(&self, scope: &RepoScope, depth: usize) -> Result<ScanOutcome, ScanError> {
+        let scan = (scope.root().to_path_buf(), depth);
+        self.scans.lock().unwrap().push(scan);
+        self.gate.wait();
+        match &self.scan_error {
+            Some(error) => Err(error.clone()),
+            None => Ok(ScanOutcome::new(self.repos.clone(), self.cut_short)),
+        }
+    }
+}

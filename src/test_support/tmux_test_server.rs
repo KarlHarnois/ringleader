@@ -10,13 +10,13 @@ use tempfile::TempDir;
 
 use super::InheritedPath;
 use crate::adapters::Deadlines;
-use crate::adapters::agent_handoff::AgentHandoff;
-use crate::adapters::launcher_command::LauncherCommand;
-use crate::adapters::process_environment::ProcessEnvironment;
-use crate::adapters::server_files::ServerFiles;
-use crate::adapters::tmux_command::TmuxCommand;
-use crate::adapters::tmux_multiplexer::TmuxMultiplexer;
-use crate::adapters::tmux_server_config::TmuxServerConfig;
+use crate::adapters::agent_launch::agent_handoff::AgentHandoff;
+use crate::adapters::agent_launch::launcher_command::LauncherCommand;
+use crate::adapters::host::process_environment::ProcessEnvironment;
+use crate::adapters::tmux::server_files::ServerFiles;
+use crate::adapters::tmux::tmux_command::TmuxCommand;
+use crate::adapters::tmux::tmux_multiplexer::TmuxMultiplexer;
+use crate::adapters::tmux::tmux_server_config::TmuxServerConfig;
 use crate::application::ports::{AgentLaunch, Multiplexer, SessionSpec};
 use crate::domain::{KeyBindings, RepoName, SessionMetadata, SessionRepo, SessionWorktree};
 

@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use super::base_branch::BaseBranch;
-use super::repo::Repo;
-use super::repo_name::RepoName;
+use crate::domain::BaseBranch;
+use crate::domain::Repo;
+use crate::domain::RepoName;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RepoDraft {

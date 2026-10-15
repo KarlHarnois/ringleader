@@ -7,14 +7,14 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use super::delete_session_dialog::DeleteSessionDialog;
 use super::dialog_labels::DialogLabels;
 use super::home_path::HomePath;
-use super::new_session_dialog::NewSessionDialog;
 use super::rename_session_dialog::RenameSessionDialog;
 use super::session_finder::SessionFinder;
 use crate::application::{DeleteImpact, SessionService};
 use crate::domain::{Session, SessionSummary};
 use crate::ui::app::AppRequest;
-use crate::ui::help_view::HelpView;
-use crate::ui::home_view::LayoutTier;
+use crate::ui::dialogs::new_session::new_session_dialog::NewSessionDialog;
+use crate::ui::help::help_view::HelpView;
+use crate::ui::home::home_view::LayoutTier;
 use crate::ui::theme::Theme;
 
 pub enum Dialog {

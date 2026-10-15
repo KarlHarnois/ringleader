@@ -6,7 +6,7 @@ use std::process::Command;
 use tempfile::TempDir;
 
 use super::InheritedPath;
-use crate::adapters::process_environment::ProcessEnvironment;
+use crate::adapters::host::process_environment::ProcessEnvironment;
 
 pub struct DirenvTestHome {
     directory: TempDir,
