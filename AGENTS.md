@@ -431,7 +431,7 @@ Add a new editing key to `TextField` with its usual terminal meaning, never to a
 - Test one concept per test.
 - Test only through public interfaces.
 - Git adapter tests run real git in `tempfile` repos with the hermetic git environment. Set that environment on each `Command`.
-- Use a child process to write every file that a test executes. A file that the test process writes itself can fail to execute with `Text file busy`. If the file is a script, write the script with `ExecutableScript`.
+- Use a child process to write every file that a test executes. A file that the test process writes itself can fail to execute with `Text file busy`. A child that another test thread forks during the write keeps the file open. If the file is a script, write the script with `ExecutableScript`.
 - UI tests render with `TestBackend`.
 - UI tests drive `EventLoop` with scripted input, a recording screen mode, and a recording shell runner.
 - No test calls crossterm or needs a terminal.
