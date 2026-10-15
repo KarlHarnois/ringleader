@@ -40,7 +40,7 @@ ringleader new --name <n> --repo <r> [--agent <a>] [--base-branch <b>] [--prompt
 ringleader delete <name> [--force] [--forget]
 ringleader attach <name>
 ringleader rename <old> <new>
-ringleader restart <name>
+ringleader restart (<name> | --all)
 ringleader repo add <path> [--name <n>] [--base-branch <b>]
 ringleader repo remove <name>
 ringleader repo list

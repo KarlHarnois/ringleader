@@ -24,6 +24,10 @@ impl SessionState {
         matches!(self, SessionState::Working | SessionState::Waiting)
     }
 
+    pub fn allows_restart(self) -> bool {
+        matches!(self, SessionState::Exited | SessionState::Stopped)
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             SessionState::Working => "working",
@@ -48,6 +52,16 @@ mod tests {
             .collect();
 
         assert_eq!(running, [Working, Waiting]);
+    }
+
+    #[test]
+    fn only_exited_and_stopped_allow_restart() {
+        let restartable: Vec<SessionState> = SessionState::ALL
+            .into_iter()
+            .filter(|state| state.allows_restart())
+            .collect();
+
+        assert_eq!(restartable, [Exited, Stopped]);
     }
 
     #[test]

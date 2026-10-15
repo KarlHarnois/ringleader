@@ -55,8 +55,8 @@ enum CliCommand {
     Attach(NameArgs),
     #[command(about = "Rename a session and its branch")]
     Rename(RenameArgs),
-    #[command(about = "Restart an exited or stopped session")]
-    Restart(NameArgs),
+    #[command(about = "Restart an exited or stopped session, or with --all every one")]
+    Restart(RestartArgs),
     #[command(about = "Add, remove, or list repos")]
     Repo {
         #[command(subcommand)]
@@ -124,6 +124,14 @@ struct DeleteArgs {
 #[derive(Debug, Args)]
 struct NameArgs {
     name: String,
+}
+
+#[derive(Debug, Args)]
+#[group(required = true, multiple = false)]
+struct RestartArgs {
+    name: Option<String>,
+    #[arg(long)]
+    all: bool,
 }
 
 #[derive(Debug, Args)]
@@ -260,7 +268,10 @@ impl Cli {
             Some(CliCommand::Delete(args)) => commands.delete(args),
             Some(CliCommand::Attach(args)) => commands.attach(&args.name),
             Some(CliCommand::Rename(args)) => commands.rename(args),
-            Some(CliCommand::Restart(args)) => commands.restart(&args.name),
+            Some(CliCommand::Restart(args)) => match &args.name {
+                Some(name) => commands.restart(name),
+                None => commands.restart_all(),
+            },
             Some(CliCommand::Repo { action }) => {
                 let mut repos = RepoCommands::new(service, session);
                 match action {
@@ -533,6 +544,19 @@ mod tests {
     }
 
     #[test]
+    fn restart_with_both_a_name_and_all_exits_one() {
+        assert_eq!(
+            ParseFixture::exit_code(&["ringleader", "restart", "fix-auth", "--all"]),
+            1
+        );
+    }
+
+    #[test]
+    fn restart_without_a_name_or_all_exits_one() {
+        assert_eq!(ParseFixture::exit_code(&["ringleader", "restart"]), 1);
+    }
+
+    #[test]
     fn help_exits_zero() {
         assert_eq!(ParseFixture::exit_code(&["ringleader", "--help"]), 0);
     }
@@ -562,5 +586,12 @@ mod tests {
 
         assert!(!list.is_mutating());
         assert!(delete.is_mutating());
+    }
+
+    #[test]
+    fn restart_all_takes_the_write_lock() {
+        let restart_all = Cli::try_parse_from(["ringleader", "restart", "--all"]).unwrap();
+
+        assert!(restart_all.is_mutating());
     }
 }

@@ -61,6 +61,7 @@ Each way comes from an ecosystem users already know, and keeps the meaning it ha
   - delete
   - rename
   - restart
+  - restart all
   - attach
 
 ### Side work never blocks or breaks the main action
@@ -612,6 +613,7 @@ after the completion steps pass.** None of the metrics tools runs `clippy`.
     │   ├── rename_request.rs     # RenameRequest, the old and new names
     │   ├── branch_availability.rs # BranchAvailability, refuses a branch name that exists or holds other branches, for create and rename
     │   ├── session_restart.rs    # SessionRestart: restart of an Exited or Stopped session
+    │   ├── restart_report.rs     # RestartReport, the outcome of each restart in a restart all, and the summary the TUI shows
     │   ├── session_scratch.rs    # SessionScratch, makes a session's scratch directory before its agent starts, removes it with the session, and logs either failure
     │   ├── session_envrc.rs      # SessionEnvrc and EnvrcChoice, whether a session's agent starts through its worktree's .envrc, with the warning when it cannot
     │   ├── start_outcome.rs      # StartOutcome, the session a create or restart started, its .envrc warning, and the socket recovery note
@@ -969,6 +971,7 @@ Logs go to `$XDG_STATE_HOME/ringleader/app.log` through `env_logger`.
 - delete
 - rename
 - restart
+- restart all
 - pull
 - the delete measurement
 
@@ -1021,6 +1024,13 @@ An observation is one tmux listing of every session. The TUI reconciles each obs
 - A Stopped session lost its tmux server, such as to a reboot. `resume_args` resumes the conversation that the lost server cut off.
 - Never add `resume_args` to a respawn: a respawn is the fallback for a resume that found no conversation and exited.
 - Create never adds `resume_args`.
+
+**Restart all is a restart of every Exited or Stopped session, one at a time, in name order.** `ringleader restart --all` and the `S` key start a restart all.
+
+- Never let one reconciliation serve several restarts in a restart all. Each recreation saves the registry from its reconciliation, so a shared reconciliation drops the sockets of earlier recreations.
+- A failed restart never stops the rest. Restart all reports each failure.
+- `restart --all` exits with the code of its first failed restart. If no restart failed, it exits 0.
+- If a signal arrives during a restart all, the current restart finishes and Ringleader skips the rest.
 
 ### Pull
 
