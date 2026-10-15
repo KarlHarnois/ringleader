@@ -409,8 +409,9 @@ nix run .#mutator -- --help
 - Name each module or file to mutate as an argument. One run MAY name several. A run's files share one baseline test run.
 - The flake applies `patches/mutator-copy-debug-build.patch` to `mutator`. With the patch, each worker under `target/mutation-workers/` starts from a copy of `target/debug`. A worker's build then recompiles only the `ringleader` crate.
 - `flake.nix` pins `mutator`, and the `crapper` that `mutator` imports, to the revisions the patch was tested with. `nix flake update` therefore leaves both in place.
-- If you move either pin, move both pins together. Then run `nix develop .#metrics -c true`: the `mutator` build refuses a patch that applies only with fuzz.
+- If you move either pin, move both pins together. Then run `nix develop .#metrics -c mutator --scan src/main.rs`. The `mutator` build refuses a patch that applies only with fuzz. The scan imports every `crapper` module that `mutator` uses.
 - If the `mutator` build fails on the patch, rewrite the patch against the new `mutator` revision.
+- If `nix develop .#metrics -c mutator --scan src/main.rs` fails for any other reason, stop and show its output to the project owner.
 - Keep `--max-workers 2` and `--timeout-factor 60`.
 - A mutant that times out counts as killed. Under load, a worker's build can take several times longer than the baseline test run. A smaller factor then records kills that no test made.
 - If you change `--max-workers` or `--timeout-factor`, raise the timeout factor before the worker count: parallel builds slow each other.
