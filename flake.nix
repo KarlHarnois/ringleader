@@ -76,6 +76,10 @@
           crapperTool = buildTool "crapper" crapper [ ];
           mutatorTool = (buildTool "mutator" mutator [ crapperTool ]).overridePythonAttrs {
             patches = [ ./patches/mutator-copy-debug-build.patch ];
+            patchFlags = [
+              "-p1"
+              "--fuzz=0"
+            ];
           };
           llvm = pkgs.rustc.llvmPackages.llvm;
           llvmCoverageEnv = {
