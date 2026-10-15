@@ -42,6 +42,8 @@ jobs:
         run: nix develop -c cargo test
       - name: Version badge
         run: nix build --no-link .#checks.x86_64-linux.readme-version-badge
+      - name: Check agent docs
+        run: nix build --no-link .#checks.x86_64-linux.agent-docs
       - name: Build
         if: github.event_name != 'pull_request'
         run: nix build .#
