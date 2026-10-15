@@ -8,11 +8,11 @@
       flake = false;
     };
     crapper = {
-      url = "github:unclebob/crapper";
+      url = "github:unclebob/crapper/9f1bead298b5a9d576bdd6319289fcf426e5b18a";
       flake = false;
     };
     mutator = {
-      url = "github:unclebob/mutator";
+      url = "github:unclebob/mutator/c57f03879a08d2afe8c7e044e86c80bb164afd30";
       flake = false;
     };
     uml-viewer = {
@@ -74,7 +74,13 @@
             };
           dryerTool = buildTool "dryer" dryer [ ];
           crapperTool = buildTool "crapper" crapper [ ];
-          mutatorTool = buildTool "mutator" mutator [ crapperTool ];
+          mutatorTool = (buildTool "mutator" mutator [ crapperTool ]).overridePythonAttrs {
+            patches = [ ./patches/mutator-copy-debug-build.patch ];
+            patchFlags = [
+              "-p1"
+              "--fuzz=0"
+            ];
+          };
           llvm = pkgs.rustc.llvmPackages.llvm;
           llvmCoverageEnv = {
             LLVM_COV = "${llvm}/bin/llvm-cov";

@@ -265,14 +265,13 @@ impl<'a> UpstreamMerger<'a> {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
     use std::time::Duration;
 
     use super::*;
     use crate::adapters::GitWorkspace;
     use crate::application::ports::Workspace;
-    use crate::test_support::GitTestRepo;
+    use crate::test_support::{ExecutableScript, GitTestRepo};
 
     struct MergeFixture {
         origin: GitTestRepo,
@@ -284,7 +283,6 @@ mod tests {
     impl MergeFixture {
         const BRANCH: &'static str = "fix-auth";
         const SHARED_FILE: &'static str = "shared.txt";
-        const EXECUTABLE: u32 = 0o755;
         const RESOLUTION: &'static str = "both sides kept\n";
         const SHORT_DEADLINE: Duration = Duration::from_secs(1);
         const IGNORED_FILE: &'static str = "settings.local";
@@ -408,8 +406,7 @@ mod tests {
 
         fn install_hook(&self, name: &str, body: &str) {
             let hook = self.clone.join(".git/hooks").join(name);
-            fs::write(&hook, format!("#!/bin/sh\n{body}\n")).unwrap();
-            fs::set_permissions(&hook, fs::Permissions::from_mode(Self::EXECUTABLE)).unwrap();
+            ExecutableScript::write(&hook, &format!("#!/bin/sh\n{body}\n"));
         }
 
         fn merge_within(&self, deadline: Duration) -> Result<MergeOutcome, WorkspaceError> {
