@@ -91,8 +91,8 @@ mod tests {
 
     use super::*;
     use crate::adapters::git::branch_ref::BranchRef;
-    use crate::application::base_branch_resolver::BaseBranchResolver;
-    use crate::application::diff_base_resolver::DiffBaseResolver;
+    use crate::application::monitor::base_branch_resolver::BaseBranchResolver;
+    use crate::application::monitor::diff_base_resolver::DiffBaseResolver;
     use crate::application::ports::Workspace;
     use crate::domain::{BaseBranch, Branch};
     use crate::test_support::GitTestRepo;

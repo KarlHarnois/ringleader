@@ -2,23 +2,23 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::agent_hooks::AgentHooks;
-use super::busy_worktree::BusyWorktree;
-use super::creation_plan::CreateRequest;
-use super::delete_impact::{DeleteConfirmation, DeleteImpact};
-use super::delete_outcome::DeleteOutcome;
-use super::merge_report::MergeReport;
 use super::ports::{HostProbe, Multiplexer};
 use super::reconciliation::{ManagedRow, Reconciliation};
-use super::rename_request::RenameRequest;
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
-use super::session_creation::SessionCreation;
-use super::session_deletion::SessionDeletion;
-use super::session_merge::SessionMerge;
-use super::session_renaming::SessionRenaming;
-use super::session_restart::SessionRestart;
-use super::start_outcome::StartOutcome;
-use super::worktree_containment::WorktreeContainment;
+use crate::application::CreateRequest;
+use crate::application::DeleteOutcome;
+use crate::application::StartOutcome;
+use crate::application::checks::busy_worktree::BusyWorktree;
+use crate::application::checks::worktree_containment::WorktreeContainment;
+use crate::application::deletion::session_deletion::SessionDeletion;
+use crate::application::merge::merge_report::MergeReport;
+use crate::application::merge::session_merge::SessionMerge;
+use crate::application::renaming::rename_request::RenameRequest;
+use crate::application::renaming::session_renaming::SessionRenaming;
+use crate::application::start::session_creation::SessionCreation;
+use crate::application::start::session_restart::SessionRestart;
+use crate::application::{DeleteConfirmation, DeleteImpact};
 use crate::domain::{Config, KeyBindings, Session, SessionState};
 
 pub struct SessionLifecycle {

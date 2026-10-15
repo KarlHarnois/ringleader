@@ -1,6 +1,6 @@
 use super::ports::HostProbe;
 use super::reconciliation::Reconciliation;
-use super::worktree_containment::WorktreeContainment;
+use crate::application::checks::worktree_containment::WorktreeContainment;
 use crate::domain::{
     Config, NamingScheme, PairMismatch, Registration, Session, SessionClassifier, SessionMetadata,
     SessionName, SessionObservation, SessionState, SessionSummary, UnmanagedSession,

@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use super::diagnostic_paths::DiagnosticPaths;
 use super::ports::ConfigError;
+use crate::application::DiagnosticPaths;
 use crate::domain::Config;
 
 pub struct ServiceContext {

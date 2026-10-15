@@ -303,8 +303,8 @@ mod tests {
     use super::*;
     use crate::adapters::Deadlines;
     use crate::application::ServiceError;
-    use crate::application::diff_base_resolver::DiffBaseResolver;
-    use crate::application::start_point_resolver::StartPointResolver;
+    use crate::application::monitor::diff_base_resolver::DiffBaseResolver;
+    use crate::application::start::start_point_resolver::StartPointResolver;
     use crate::domain::{BaseBranch, Branch, SessionName};
     use crate::test_support::{ExecutableScript, GitTestRepo};
 

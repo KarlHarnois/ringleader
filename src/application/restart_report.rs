@@ -1,5 +1,5 @@
 use super::service_error::ServiceError;
-use super::start_outcome::StartOutcome;
+use crate::application::StartOutcome;
 
 pub struct RestartReport {
     restarts: Vec<(String, Result<StartOutcome, ServiceError>)>,
