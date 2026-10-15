@@ -17,9 +17,6 @@ pub struct SystemTerminalEmulator {
 
 impl SystemTerminalEmulator {
     const XDG_TERMINAL_EXEC: &'static str = "xdg-terminal-exec";
-    const NO_DISPLAY_REASON: &'static str = "WAYLAND_DISPLAY and DISPLAY are unset or empty";
-    const NO_TERMINAL_REASON: &'static str =
-        "xdg-terminal-exec is not on PATH and $TERMINAL is unset or empty";
 
     pub fn detect(
         host: &dyn HostProbe,
@@ -52,14 +49,19 @@ impl SystemTerminalEmulator {
     }
 
     fn no_display() -> TerminalEmulatorError {
+        let displays = ProcessEnvironment::display_variables().join(" and ");
         TerminalEmulatorError::NoDisplay {
-            reason: Self::NO_DISPLAY_REASON.to_string(),
+            reason: format!("{displays} are unset or empty"),
         }
     }
 
     fn no_terminal() -> TerminalEmulatorError {
+        let terminal = ProcessEnvironment::terminal_emulator_variable();
         TerminalEmulatorError::NoTerminal {
-            reason: Self::NO_TERMINAL_REASON.to_string(),
+            reason: format!(
+                "{} is not on PATH and ${terminal} is unset or empty",
+                Self::XDG_TERMINAL_EXEC
+            ),
         }
     }
 
@@ -426,8 +428,10 @@ echo $$ > "$record/pid"
             .unwrap_err();
 
         assert_eq!(error, SystemTerminalEmulator::no_terminal());
-        assert!(error.to_string().contains("xdg-terminal-exec"));
-        assert!(error.to_string().contains("$TERMINAL"));
+        assert_eq!(
+            error.to_string(),
+            "no terminal to open, xdg-terminal-exec is not on PATH and $TERMINAL is unset or empty"
+        );
     }
 
     #[test]
@@ -440,7 +444,10 @@ echo $$ > "$record/pid"
             .unwrap_err();
 
         assert_eq!(error, SystemTerminalEmulator::no_display());
-        assert!(error.to_string().contains("no graphical display"));
+        assert_eq!(
+            error.to_string(),
+            "no graphical display is available, WAYLAND_DISPLAY and DISPLAY are unset or empty"
+        );
         assert_eq!(
             fs::read_dir(fixture.record_directory(TerminalFixture::XDG_TERMINAL_EXEC))
                 .unwrap()

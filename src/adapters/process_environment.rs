@@ -109,6 +109,14 @@ impl ProcessEnvironment {
         self.non_empty(Self::TERMINAL_EMULATOR)
     }
 
+    pub fn terminal_emulator_variable() -> &'static str {
+        Self::TERMINAL_EMULATOR
+    }
+
+    pub fn display_variables() -> [&'static str; 2] {
+        Self::DISPLAYS
+    }
+
     pub fn has_graphical_display(&self) -> bool {
         Self::DISPLAYS
             .iter()
