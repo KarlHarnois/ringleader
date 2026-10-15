@@ -173,7 +173,7 @@ The codebase already uses these patterns:
 
 **An ad-hoc tmux command is a tmux command you run by hand, such as a binding experiment.** Run every ad-hoc tmux command on a throwaway server:
 
-1. Make a directory with `mktemp -d` under `/tmp`. That directory is `<tempdir>`.
+1. If a manual run made `<tempdir>`, use that directory. Otherwise, make a directory with `mktemp -d` under `/tmp`. That directory is `<tempdir>`.
 2. Run each command as `env -u TMUX -u TMUX_PANE tmux -u -S <tempdir>/x.sock -f /dev/null ...`. Without that prefix, a tmux command reaches the project owner's tmux server: `nix develop` passes `$TMUX` through.
 3. End with `kill-server` on `<tempdir>/x.sock`.
 
@@ -217,6 +217,11 @@ To make a manual run:
 | Nested | In the same pane, with the run prefix minus `-u TMUX -u TMUX_PANE`, so the client opens nested |
 | Shell | In a `t` shell of a session. The binary MUST refuse with exit code 3. |
 
+**If a check fails, run steps 8 and 9, then report the failure to the project owner.** A failed check is one of these:
+
+- a check whose step 7 assertion fails
+- a Shell check whose binary does not refuse with exit code 3
+
 Send every tmux command for a manual run's private tmux server with the run prefix and `-S <tempdir>/run/ringleader/tmux/tmux.sock`.
 
 ### Hermetic git environment
@@ -256,7 +261,7 @@ nix flake check
 
 **The Commands are the six commands above.** `.github/workflows/ci.yml` runs all six on pushes to `master` and on merge-queue runs. The workflow runs the first four on pull requests too.
 
-**A change is done when the Commands pass.** If the change edits a file under `src/`, the change is done only after the completion steps also pass.
+**A change is done when the Commands pass.** If the change edits a file under `src/`, the change is done only after the completion steps also pass. If one of the Commands also fails without the change, stop and show its output to the project owner.
 
 ## Architecture
 
@@ -817,7 +822,7 @@ after the completion steps pass.** None of the metrics tools runs `clippy`.
 
 ### Files
 
-- **Put one primary type in each file, and name the file after that type in snake case.**
+- **Put one primary type in each file.** Name the file after that type in snake case.
 - Supporting types that the primary type owns live in the same file.
 - Unit tests live inline.
 - A `mod.rs` file only declares and re-exports.
@@ -829,7 +834,7 @@ after the completion steps pass.** None of the metrics tools runs `clippy`.
 
 **The size target of a source file is 200 lines, excluding tests.** The files under `src/test_support/` count as tests.
 
-- If a file passes the size target, extract its largest behavior-bearing type into its own file.
+- If a file is over the size target, extract its largest behavior-bearing type into its own file.
 - If a file's only behavior-bearing type is its primary type, the file MAY stay over the size target.
 - Even if the clap argument structs keep `cli.rs` over the size target, they stay in `cli.rs`.
 - Never split one type's own behavior across new collaborators only to meet the size target.
@@ -873,10 +878,15 @@ after the completion steps pass.** None of the metrics tools runs `clippy`.
 - a window id
 - a pane id
 
+**Never pass a bare `-t <name>`:** tmux resolves a name with no exact match by prefix. A bare `-t fix` would reach `fix-auth`.
+
 - If a session's name starts with `$`, target the session by its id. tmux reads `=$0:` as the session whose id is `$0`.
 - `TmuxMultiplexer` looks up a session's id by its name.
-- Never pass a bare `-t <name>`: tmux resolves a name with no exact match by prefix. A bare `-t fix` would reach `fix-auth`.
-- Every `new-session`, `new-window`, and `respawn-window` passes `-c` with the worktree. Without `-c`, tmux starts the pane in the caller's directory and still exits 0.
+
+### tmux start directories
+
+**Every `new-session`, `new-window`, and `respawn-window` passes `-c` with the worktree.** Without `-c`, tmux starts the pane in the caller's directory and still exits 0.
+
 - A command Ringleader sends gets its `-c` from `TmuxScripts::start_in`.
 - A binding in the generated config passes `-c '#{session_path}'`. Ringleader renders the config before any session exists, and `create_session` starts each session in its worktree.
 
@@ -969,8 +979,8 @@ A background job is a `Pending` worker that runs the tmux, git, or gh calls of o
 - a diff measurement
 - a pull request lookup
 
-- An observation is one tmux listing of every session. The TUI reconciles each observation with the registry.
-- A background job is in flight from its start until the event loop collects it.
+An observation is one tmux listing of every session. The TUI reconciles each observation with the registry. A background job is in flight from its start until the event loop collects it.
+
 - The event loop collects finished observations, preview captures, and diff measurements on every wake.
 - The event loop starts and collects pull request lookups only on its 100 millisecond tick.
 - While an observation, a preview capture, or a diff measurement is in flight, the event loop wakes every 16 milliseconds.
@@ -1210,6 +1220,6 @@ The explicit variables are:
   - first run
   - the CLI synopsis
   - the exit codes
-- Never put architecture or agent instructions in `README.md`.
+- Never put architecture or the rules of this file in `README.md`.
 - This repository holds no `CLAUDE.md` or `CLAUDE.local.md`: either file would hide this file from Claude Code.
 - If one of those files is ever needed, make its first line `@AGENTS.md`.
