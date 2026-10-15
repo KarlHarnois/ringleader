@@ -5,6 +5,7 @@ use std::process::Command;
 
 use tempfile::TempDir;
 
+use super::InheritedPath;
 use crate::adapters::process_environment::ProcessEnvironment;
 
 pub struct DirenvTestHome {
@@ -35,10 +36,7 @@ impl DirenvTestHome {
 
     pub fn variables(&self) -> Vec<(OsString, OsString)> {
         vec![
-            (
-                OsString::from("PATH"),
-                std::env::var_os("PATH").unwrap_or_default(),
-            ),
+            (OsString::from("PATH"), InheritedPath::value()),
             (OsString::from("HOME"), self.home().into_os_string()),
             (
                 OsString::from("XDG_DATA_HOME"),

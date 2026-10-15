@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 use tempfile::TempDir;
 
+use super::InheritedPath;
 use crate::adapters::Deadlines;
 use crate::adapters::agent_handoff::AgentHandoff;
 use crate::adapters::launcher_command::LauncherCommand;
@@ -92,10 +93,7 @@ impl TmuxTestServer {
     }
 
     pub fn environment_with(&self, extra: &[(&str, &str)]) -> ProcessEnvironment {
-        let mut variables = vec![(
-            OsString::from("PATH"),
-            std::env::var_os("PATH").unwrap_or_default(),
-        )];
+        let mut variables = vec![(OsString::from("PATH"), InheritedPath::value())];
         variables.push((
             OsString::from("HOME"),
             self.directory().as_os_str().to_os_string(),
@@ -326,11 +324,7 @@ impl TmuxTestServer {
     }
 
     fn tmux_on_path() -> PathBuf {
-        let search_path = std::env::var_os("PATH").unwrap_or_default();
-        std::env::split_paths(&search_path)
-            .map(|directory| directory.join("tmux"))
-            .find(|candidate| candidate.is_file())
-            .expect("tmux is on PATH")
+        InheritedPath::program("tmux").expect("tmux is on PATH")
     }
 
     fn client_named_by_pid(&self, pid: &str) -> Option<String> {

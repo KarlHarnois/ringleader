@@ -49,7 +49,7 @@ If `cargo llvm-cov` fails, from a missing tool or one failing test, every functi
 | Changed function | A production function the change's diff adds or edits |
 | Changed file | A file under `src/` that holds a changed function |
 | Added line | A line the change's diff adds |
-| Untestable function | A production function that needs a terminal or reads the process environment. The Tests rules in `AGENTS.md` keep both out of every test. |
+| Untestable function | A production function that needs a terminal or reads the process environment. The Tests rules in `AGENTS.md` keep a terminal out of every test, and `clippy.toml` keeps the process environment out. |
 | Step edit | Any change to a file under `src/` after step 1 first runs. A change made to pass a later Commands run is a step edit too. |
 
 **Never run a completion step alongside another command:** the tests start real tmux servers and share `target/`.

@@ -230,6 +230,7 @@ impl ConfigSource for TomlConfigSource {
 mod tests {
     use super::*;
     use crate::domain::{Agent, AgentMode, HotKey, KeyBindings, SessionName};
+    use crate::test_support::InheritedPath;
 
     const FIXTURE: &str = include_str!("../../tests/fixtures/config.toml");
 
@@ -265,8 +266,7 @@ mod tests {
         }
 
         fn store_file() -> PathBuf {
-            let path = std::env::var_os("PATH").unwrap_or_default();
-            std::env::split_paths(&path)
+            std::env::split_paths(&InheritedPath::value())
                 .map(|directory| directory.join("tmux"))
                 .filter_map(|candidate| fs::canonicalize(candidate).ok())
                 .find(|candidate| candidate.starts_with("/nix/store"))

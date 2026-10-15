@@ -155,7 +155,7 @@ mod tests {
     use crate::adapters::deadlines::Deadlines;
     use crate::adapters::live_process::LiveProcess;
     use crate::adapters::system_host_probe::SystemHostProbe;
-    use crate::test_support::{Deadline, LogCapture};
+    use crate::test_support::{Deadline, InheritedPath, LogCapture};
 
     struct TerminalFixture {
         directory: tempfile::TempDir,
@@ -268,11 +268,7 @@ echo $$ > "$record/pid"
         }
 
         fn tool(name: &str) -> PathBuf {
-            let search_path = std::env::var_os("PATH").unwrap_or_default();
-            std::env::split_paths(&search_path)
-                .map(|directory| directory.join(name))
-                .find(|candidate| candidate.is_file())
-                .expect("the test PATH holds the tool")
+            InheritedPath::program(name).expect("the test PATH holds the tool")
         }
 
         fn record_directory(&self, name: &str) -> PathBuf {

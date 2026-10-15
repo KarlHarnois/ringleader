@@ -393,19 +393,17 @@ nix flake check
 
 ### Process inputs
 
-**No code below `main` does any of these:**
+**Only `main` reads the process inputs, and `main` injects them.** The process inputs are these:
 
-- call `std::env::current_exe`
-- read the process environment. The process environment includes `$TMUX`, `$TMUX_PANE`, `$HOME`, and `$SHELL`.
-- read the process working directory
-- resolve XDG paths
-- ask which terminal standard input is
+- the environment
+- the working directory
+- the executable path
+- the XDG paths
+- the terminal of standard input
 
-`main` reads these inputs once and injects them. Environment values travel in the `ProcessEnvironment` snapshot.
+`clippy.toml` refuses every other read. Never add an `#[expect(clippy::disallowed_methods)]`: each existing one marks a reader that `main` calls, or the `PATH` that tests inherit.
 
-`ProcessEnvironment::capture` reads the terminal name of standard input with `libc::ttyname_r` on descriptor 0. That call is the type's only `unsafe` block.
-
-- Confine each `unsafe` block to one adapter method.
+Confine each `unsafe` block to one adapter method.
 
 ### tmux targets
 
@@ -544,12 +542,11 @@ Add a new editing key to `TextField` with its usual terminal meaning, never to a
 - Never add a mocking crate.
 - Test one concept per test.
 - Test only through public interfaces.
-- Git adapter tests run real git in `tempfile` repos with the hermetic git environment. Set that environment on each `Command`, never through `std::env::set_var`.
+- Git adapter tests run real git in `tempfile` repos with the hermetic git environment. Set that environment on each `Command`.
 - UI tests render with `TestBackend`.
 - UI tests drive `EventLoop` with scripted input, a recording screen mode, and a recording shell runner.
 - No test calls crossterm or needs a terminal.
 - No test reads wall-clock time to classify a session.
-- No test reads the process environment, except its own `PATH`.
 - Mark a constructor, accessor, or helper that only tests call with `#[cfg(test)]`: `cargo clippy --all-targets -- -D warnings` then stays clean without any dead-code allowance.
 
 ### tmux tests

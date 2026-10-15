@@ -62,6 +62,10 @@ struct CompositionRoot {
     launch_directory: PathBuf,
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the composition root reads the process inputs and injects them"
+)]
 impl CompositionRoot {
     fn capture() -> Self {
         let snapshot = ProcessEnvironment::capture();

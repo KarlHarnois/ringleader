@@ -15,6 +15,10 @@ pub struct XdgPaths {
 impl XdgPaths {
     const APPLICATION: &'static str = "ringleader";
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "main resolves the XDG paths through this constructor"
+    )]
     pub fn from_environment(environment: &ProcessEnvironment) -> Self {
         let home = environment
             .get("HOME")
