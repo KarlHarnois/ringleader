@@ -23,9 +23,8 @@ nix run .#mutator -- --help
 **Never run `mutator` on the whole repository:** it runs every covered mutant, and many tests start real tmux servers.
 
 - Name each module or file to mutate as an argument. One run MAY name several. A run's files share one baseline test run.
-- The flake applies `patches/mutator-copy-debug-build.patch` to `mutator`. With the patch, each worker under `target/mutation-workers/` starts from a copy of `target/debug` without its `incremental` directory. A worker's build then recompiles only the `ringleader` crate.
-- `flake.nix` pins `mutator`, and the `crapper` that `mutator` imports, to the revisions the patch was tested with. `nix flake update` therefore leaves both in place.
-- If you move either pin, move both pins together. Then run `nix develop .#metrics -c mutator --scan src/main.rs`. The `mutator` build refuses a patch that applies only with fuzz. The scan imports every `crapper` module that `mutator` uses.
+- If you move the `mutator` pin or the `crapper` pin in `flake.nix`, move both pins together. `mutator` imports `crapper`, and the `mutator` patch was tested against both pinned revisions.
+- After you move the pins, run `nix develop .#metrics -c mutator --scan src/main.rs`. The run builds the patched `mutator` and imports every `crapper` module that `mutator` uses.
 - If the `mutator` build fails on the patch, rewrite the patch against the new `mutator` revision.
 - If `nix develop .#metrics -c mutator --scan src/main.rs` fails for any other reason, stop and show its output to the project owner.
 - Keep `--max-workers 2` and `--timeout-factor 60`.
