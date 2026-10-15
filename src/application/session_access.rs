@@ -122,20 +122,11 @@ mod tests {
 
     struct AttachFixture;
 
-    struct TerminalFixture;
-
-    impl TerminalFixture {
-        fn stopped() -> ServiceFixture {
+    impl AttachFixture {
+        fn live() -> ServiceFixture {
             let session = ServiceFixture::session("fix-auth");
             ServiceFixture::new()
                 .with_sessions(std::slice::from_ref(&session))
-                .with_host(ServiceFixture::host_for(&[&session]))
-        }
-
-        fn live() -> ServiceFixture {
-            let session = ServiceFixture::session("fix-auth");
-            Self::stopped()
-                .with_workspace(ServiceFixture::workspace_for(&[&session]))
                 .with_multiplexer(
                     FakeMultiplexer::new().with_live(ServiceFixture::waiting(&session)),
                 )
@@ -156,11 +147,20 @@ mod tests {
         }
     }
 
-    impl AttachFixture {
-        fn live() -> ServiceFixture {
+    struct TerminalFixture;
+
+    impl TerminalFixture {
+        fn stopped() -> ServiceFixture {
             let session = ServiceFixture::session("fix-auth");
             ServiceFixture::new()
                 .with_sessions(std::slice::from_ref(&session))
+                .with_host(ServiceFixture::host_for(&[&session]))
+        }
+
+        fn live() -> ServiceFixture {
+            let session = ServiceFixture::session("fix-auth");
+            Self::stopped()
+                .with_workspace(ServiceFixture::workspace_for(&[&session]))
                 .with_multiplexer(
                     FakeMultiplexer::new().with_live(ServiceFixture::waiting(&session)),
                 )
