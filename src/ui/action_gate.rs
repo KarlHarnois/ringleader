@@ -249,6 +249,14 @@ mod tests {
             SessionSummary::managed(ServiceFixture::session("fix-auth"), state, false)
         }
 
+        fn unmanaged_row() -> SessionSummary {
+            let stranger = ServiceFixture::session("mystery");
+            SessionSummary::unmanaged(UnmanagedSession::new(
+                "mystery",
+                ServiceFixture::waiting(&stranger).without_metadata(),
+            ))
+        }
+
         fn config_error() -> ConfigError {
             ConfigError::Parse {
                 path: PathBuf::from("/config/ringleader/config.toml"),
@@ -367,11 +375,7 @@ mod tests {
 
     #[test]
     fn an_unmanaged_session_cannot_pull() {
-        let stranger = ServiceFixture::session("mystery");
-        let row = SessionSummary::unmanaged(UnmanagedSession::new(
-            "mystery",
-            ServiceFixture::waiting(&stranger).without_metadata(),
-        ));
+        let row = GateFixture::unmanaged_row();
 
         assert_eq!(
             ActionGate::new(Some(&row), None).pull(),
@@ -393,11 +397,7 @@ mod tests {
 
     #[test]
     fn an_unmanaged_session_opens_no_shell() {
-        let stranger = ServiceFixture::session("mystery");
-        let row = SessionSummary::unmanaged(UnmanagedSession::new(
-            "mystery",
-            ServiceFixture::waiting(&stranger).without_metadata(),
-        ));
+        let row = GateFixture::unmanaged_row();
 
         assert_eq!(
             ActionGate::new(Some(&row), None).shell(),
@@ -514,11 +514,7 @@ mod tests {
 
     #[test]
     fn an_unmanaged_session_cannot_be_deleted() {
-        let stranger = ServiceFixture::session("mystery");
-        let row = SessionSummary::unmanaged(UnmanagedSession::new(
-            "mystery",
-            ServiceFixture::waiting(&stranger).without_metadata(),
-        ));
+        let row = GateFixture::unmanaged_row();
 
         assert_eq!(
             ActionGate::new(Some(&row), None).delete(),
@@ -543,11 +539,7 @@ mod tests {
     fn rename_in_a_read_only_tui_and_of_an_unmanaged_session_is_refused() {
         let error = GateFixture::config_error();
         let managed = GateFixture::row(SessionState::Waiting);
-        let stranger = ServiceFixture::session("mystery");
-        let unmanaged = SessionSummary::unmanaged(UnmanagedSession::new(
-            "mystery",
-            ServiceFixture::waiting(&stranger).without_metadata(),
-        ));
+        let unmanaged = GateFixture::unmanaged_row();
 
         assert!(
             ActionGate::new(Some(&managed), Some(&error))
@@ -646,11 +638,7 @@ mod tests {
 
     #[test]
     fn an_unmanaged_session_opens_no_terminal() {
-        let stranger = ServiceFixture::session("mystery");
-        let row = SessionSummary::unmanaged(UnmanagedSession::new(
-            "mystery",
-            ServiceFixture::waiting(&stranger).without_metadata(),
-        ));
+        let row = GateFixture::unmanaged_row();
 
         assert_eq!(
             ActionGate::new(Some(&row), None).terminal(),
