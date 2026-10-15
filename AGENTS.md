@@ -453,7 +453,7 @@ The viewer still looks for a companion with `tmux has-session`. The `env` prefix
 
 ### Completion steps
 
-**The completion steps are the four numbered steps below.** Run them after the Commands pass. A `crapper` run takes about a minute. A step 4 run takes about 45 seconds for each changed file with five or fewer mutation sites.
+**The completion steps are the four numbered steps below.** Run them after the Commands pass. A `crapper` run takes about a minute. A step 4 run takes about 20 seconds per changed file, plus about 6 seconds per mutation site.
 
 | Term | Meaning |
 | --- | --- |
