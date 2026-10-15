@@ -1,7 +1,8 @@
 use std::fmt;
 use std::path::Path;
 
-use super::session_name::{InvalidName, Slug};
+use crate::domain::InvalidName;
+use crate::domain::sessions::session_name::Slug;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RepoName(Slug);

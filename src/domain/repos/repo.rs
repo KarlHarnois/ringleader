@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use super::base_branch::BaseBranch;
 use super::repo_name::RepoName;
+use crate::domain::BaseBranch;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Repo {

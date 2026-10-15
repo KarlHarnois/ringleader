@@ -39,10 +39,10 @@ mod tests {
     use std::path::Path;
 
     use super::*;
-    use crate::domain::repo_name::RepoName;
-    use crate::domain::session::TmuxAddress;
-    use crate::domain::session_metadata::{SessionMetadata, SessionRepo, SessionWorktree};
-    use crate::domain::session_observation::AgentPane;
+    use crate::domain::AgentPane;
+    use crate::domain::RepoName;
+    use crate::domain::TmuxAddress;
+    use crate::domain::{SessionMetadata, SessionRepo, SessionWorktree};
 
     const NOW: u64 = 1_700_000_100;
     const IDLE_SECONDS: u64 = 3;

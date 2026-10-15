@@ -5,7 +5,7 @@ use super::agent::Agent;
 use super::config_draft::ConfigDraft;
 use super::key_bindings::KeyBindings;
 use super::naming_scheme::NamingScheme;
-use super::repo::Repo;
+use crate::domain::Repo;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {

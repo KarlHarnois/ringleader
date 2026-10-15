@@ -1,5 +1,5 @@
 use super::agent_mode::AgentMode;
-use super::session_name::SessionName;
+use crate::domain::SessionName;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Agent {

@@ -117,7 +117,7 @@ mod tests {
     use std::path::Path;
 
     use super::*;
-    use crate::domain::session::TmuxAddress;
+    use crate::domain::TmuxAddress;
 
     #[test]
     fn a_shadowing_session_advises_how_to_end_it() {

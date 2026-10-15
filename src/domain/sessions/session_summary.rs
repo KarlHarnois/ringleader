@@ -1,9 +1,9 @@
-use super::diff_stat::DiffStat;
-use super::pull_request::PullRequest;
 use super::session::Session;
 use super::session_metadata::SessionMetadata;
 use super::session_state::SessionState;
 use super::unmanaged_session::UnmanagedSession;
+use crate::domain::DiffStat;
+use crate::domain::PullRequest;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionSummary {
@@ -118,8 +118,8 @@ mod tests {
     use std::path::Path;
 
     use super::*;
-    use crate::domain::session::TmuxAddress;
-    use crate::domain::session_observation::SessionObservation;
+    use crate::domain::SessionObservation;
+    use crate::domain::TmuxAddress;
 
     #[test]
     fn an_unmanaged_summary_never_carries_a_diff() {

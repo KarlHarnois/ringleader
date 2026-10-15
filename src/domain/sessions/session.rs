@@ -1,10 +1,10 @@
 use std::path::{Path, PathBuf};
 
-use super::base_branch::BaseBranch;
-use super::naming_scheme::NamingScheme;
-use super::repo_name::RepoName;
 use super::session_metadata::SessionMetadata;
 use super::session_name::SessionName;
+use crate::domain::BaseBranch;
+use crate::domain::NamingScheme;
+use crate::domain::RepoName;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Session {
@@ -157,7 +157,7 @@ impl TmuxAddress {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::session_metadata::{SessionRepo, SessionWorktree};
+    use crate::domain::{SessionRepo, SessionWorktree};
 
     struct SessionFixture;
 
