@@ -11,7 +11,7 @@ use super::process_environment::ProcessEnvironment;
 use crate::application::ports::{HostProbe, TerminalEmulator, TerminalEmulatorError};
 
 pub struct SystemTerminalEmulator {
-    program: OsString,
+    program: TerminalProgram,
     environment: ProcessEnvironment,
 }
 
@@ -26,14 +26,14 @@ impl SystemTerminalEmulator {
         environment: &ProcessEnvironment,
     ) -> Arc<dyn TerminalEmulator> {
         match Self::program(host, environment) {
-            Ok(program) => Arc::new(Self::new(&program, environment)),
+            Ok(program) => Arc::new(Self::new(program, environment)),
             Err(missing) => Arc::new(NullTerminalEmulator::new(missing)),
         }
     }
 
-    fn new(program: &OsStr, environment: &ProcessEnvironment) -> Self {
+    fn new(program: TerminalProgram, environment: &ProcessEnvironment) -> Self {
         Self {
-            program: program.to_os_string(),
+            program,
             environment: environment.outside_tmux(),
         }
     }
@@ -41,13 +41,13 @@ impl SystemTerminalEmulator {
     fn program(
         host: &dyn HostProbe,
         environment: &ProcessEnvironment,
-    ) -> Result<OsString, TerminalEmulatorError> {
+    ) -> Result<TerminalProgram, TerminalEmulatorError> {
         if !environment.has_graphical_display() {
             return Err(Self::no_display());
         }
         host.resolve_command(Self::XDG_TERMINAL_EXEC)
-            .map(PathBuf::into_os_string)
-            .or_else(|| environment.terminal_emulator().map(OsStr::to_os_string))
+            .map(TerminalProgram::xdg_terminal_exec)
+            .or_else(|| environment.terminal_emulator().map(TerminalProgram::named))
             .ok_or_else(Self::no_terminal)
     }
 
@@ -64,9 +64,8 @@ impl SystemTerminalEmulator {
     }
 
     fn command(&self, directory: &Path) -> Command {
-        let mut command = Command::new(&self.program);
+        let mut command = self.program.command_in(directory);
         command
-            .current_dir(directory)
             .env_clear()
             .envs(self.environment.variables().iter().cloned())
             .stdin(Stdio::null())
@@ -97,7 +96,7 @@ impl SystemTerminalEmulator {
     }
 
     fn shown_program(&self) -> String {
-        self.program.to_string_lossy().into_owned()
+        self.program.shown()
     }
 }
 
@@ -109,6 +108,49 @@ impl TerminalEmulator for SystemTerminalEmulator {
             .map_err(|error| self.start_failure(&error))?;
         self.reap_in_background(child);
         Ok(())
+    }
+}
+
+struct TerminalProgram {
+    path: OsString,
+    directory_option: Option<&'static str>,
+}
+
+impl TerminalProgram {
+    const XDG_TERMINAL_EXEC_DIRECTORY: &'static str = "--dir=";
+
+    fn xdg_terminal_exec(path: PathBuf) -> Self {
+        Self {
+            path: path.into_os_string(),
+            directory_option: Some(Self::XDG_TERMINAL_EXEC_DIRECTORY),
+        }
+    }
+
+    fn named(name: &OsStr) -> Self {
+        Self {
+            path: name.to_os_string(),
+            directory_option: None,
+        }
+    }
+
+    fn command_in(&self, directory: &Path) -> Command {
+        let mut command = Command::new(&self.path);
+        command
+            .current_dir(directory)
+            .args(self.directory_argument(directory));
+        command
+    }
+
+    fn directory_argument(&self, directory: &Path) -> Option<OsString> {
+        self.directory_option.map(|option| {
+            let mut argument = OsString::from(option);
+            argument.push(directory);
+            argument
+        })
+    }
+
+    fn shown(&self) -> String {
+        self.path.to_string_lossy().into_owned()
     }
 }
 
@@ -141,7 +183,10 @@ record='{record}'
 read -r stat < /proc/$$/stat
 echo "$stat" > "$record/stat"
 pwd -P > "$record/cwd"
-echo "$#" > "$record/arguments"
+: > "$record/arguments"
+for argument in "$@"; do
+  printf '%s\n' "$argument" >> "$record/arguments"
+done
 for descriptor in 0 1 2; do
   if [ /proc/$$/fd/$descriptor -ef /dev/null ]; then
     echo null >> "$record/streams"
@@ -263,6 +308,10 @@ echo $$ > "$record/pid"
             self.recorded_once_started(name, "streams")
         }
 
+        fn arguments_of(&self, name: &str) -> String {
+            self.recorded_once_started(name, "arguments")
+        }
+
         fn recorded_once_started(&self, name: &str, file: &str) -> String {
             self.pid(name);
             self.recorded(name, file)
@@ -291,9 +340,18 @@ echo $$ > "$record/pid"
             fixture.ran_in(TerminalFixture::XDG_TERMINAL_EXEC),
             Some(fixture.canonical_worktree())
         );
+    }
+
+    #[test]
+    fn xdg_terminal_exec_passes_the_directory_on_to_a_running_terminal() {
+        let fixture = TerminalFixture::new();
+        fixture.install(TerminalFixture::XDG_TERMINAL_EXEC);
+
+        fixture.open_with(&[TerminalFixture::WAYLAND]).unwrap();
+
         assert_eq!(
-            fixture.recorded(TerminalFixture::XDG_TERMINAL_EXEC, "arguments"),
-            "0\n"
+            fixture.arguments_of(TerminalFixture::XDG_TERMINAL_EXEC),
+            format!("--dir={}\n", fixture.worktree().display())
         );
     }
 
@@ -344,6 +402,7 @@ echo $$ > "$record/pid"
             fixture.ran_in(TerminalFixture::NAMED_TERMINAL),
             Some(fixture.canonical_worktree())
         );
+        assert_eq!(fixture.arguments_of(TerminalFixture::NAMED_TERMINAL), "");
     }
 
     #[test]
