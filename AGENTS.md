@@ -419,6 +419,8 @@ nix run .#mutator -- --help
 - If a run used a smaller timeout factor, rerun its files once with `--mutate-all`.
 - Never pass `--changed` with a path: `mutator` then drops the path and mutates every changed file in `git status`.
 - Never pass `mutator` a filtered `--test-command`. Many modules are tested only through their callers. A module-path filter runs zero tests, exits 0, and lets every mutant survive.
+- Never edit a file in this repository while a `mutator` run is in progress. An edit made during a run reaches the mutant builds. `mutator` also overwrites an edited file when the file's mutants finish.
+- Never start a `mutator` run in the background. If the shell moves a run to the background, wait for the run to end.
 
 ### Coverage
 
@@ -514,11 +516,6 @@ The viewer still looks for a companion with `tmux has-session`. The `env` prefix
      smaller runs. The estimate is an average, and load slows a run.
    - If twice one file's estimate alone passes the run limit, stop and show
      the estimate to the project owner.
-   - Never edit a file in this repository while a step 4 run is in progress.
-     An edit made during a run reaches the mutant builds. `mutator` also
-     overwrites an edited file when the file's mutants finish.
-   - Never start a step 4 run in the background. If the shell moves a run to
-     the background, wait for the run to end.
    - Never judge step 4 by its exit code. Exit 3 means a mutant survived
      anywhere in the run, and a run with uncovered sites exits 0.
    - If the run exits 2, the baseline tests failed. Fix the baseline tests,
