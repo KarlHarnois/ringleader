@@ -120,7 +120,7 @@ mod tests {
     }
 
     #[test]
-    fn ghostty_opens_a_new_window_in_the_directory() {
+    fn ghostty_opens_a_new_window_because_a_running_ghostty_ignores_the_launch_directory() {
         let ghostty = TerminalProgram::named(OsStr::new("ghostty"));
 
         assert_eq!(

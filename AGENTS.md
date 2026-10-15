@@ -228,7 +228,6 @@ nix flake check
 
 | Reference file | Read the file before you |
 | --- | --- |
-| `docs/agents/layout.md` | add, move, rename, or remove a file under `src/` |
 | `docs/agents/completion-steps.md` | run a metrics tool or the completion steps |
 | `docs/agents/manual-runs.md` | make a manual run |
 | `docs/agents/new-ports.md` | add a port |
@@ -358,9 +357,7 @@ nix flake check
 - Supporting types that the primary type owns live in the same file.
 - Unit tests live inline.
 - A `mod.rs` file only declares and re-exports.
-- **The Layout tree in `docs/agents/layout.md` is the file contract.** Every listed file exists and holds its one primary type.
 - Never merge primary types into one file.
-- If a commit adds or removes a file under `src/`, update the Layout tree in that commit. A move or a rename counts as both.
 
 ### File size
 
@@ -379,7 +376,7 @@ nix flake check
 - The type carries behavior or invariants.
 - The type changes for its own reasons.
 
-**Otherwise, keep the type in its primary type's file, with no tree entry.** Such support types include a parser result, a doctor finding, a session spec, and a dialog's in-progress state.
+**Otherwise, keep the type in its primary type's file.** Such support types include a parser result, a doctor finding, a session spec, and a dialog's in-progress state.
 
 - `cli.rs` owns every clap argument struct, such as `ListArgs` and `NewArgs`, as a support type of `Cli`.
 - `src/test_support/` is `#[cfg(test)]` only and never appears in the binary. It holds the hand-written doubles and fixtures that tests across modules share.
