@@ -93,6 +93,11 @@ impl ProcessEnvironment {
             .unwrap_or_else(|| Self::FALLBACK_SHELL.to_string())
     }
 
+    pub fn shell_variable(&self) -> Option<(OsString, OsString)> {
+        let shell = self.get(Self::SHELL)?;
+        Some((OsString::from(Self::SHELL), shell.to_os_string()))
+    }
+
     fn standard_input_terminal() -> Option<OsString> {
         let mut buffer = vec![0_u8; Self::TERMINAL_NAME_LIMIT];
         // SAFETY: ttyname_r writes at most buffer.len() bytes, including the terminating
@@ -194,6 +199,23 @@ mod tests {
         let environment = EnvironmentFixture::with(&[("PATH", "/bin")]);
 
         assert_eq!(environment.shell(), "sh");
+    }
+
+    #[test]
+    fn the_shell_variable_pairs_its_name_with_its_value() {
+        let environment = EnvironmentFixture::with(&[("SHELL", "/bin/example-shell")]);
+
+        assert_eq!(
+            environment.shell_variable(),
+            Some(("SHELL".into(), "/bin/example-shell".into()))
+        );
+    }
+
+    #[test]
+    fn without_a_shell_variable_there_is_no_shell_variable() {
+        let environment = EnvironmentFixture::with(&[("PATH", "/bin")]);
+
+        assert_eq!(environment.shell_variable(), None);
     }
 
     #[test]

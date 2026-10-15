@@ -42,7 +42,9 @@ impl AgentHandoff {
     pub fn write(&self, launch: &AgentLaunch) -> io::Result<PathBuf> {
         let named = self.named_variables(launch);
         let inherited = [self.baseline_variables(), named.clone()].concat();
-        let explicit = Self::overridden(named, Self::assigned_variables(launch));
+        let shell = self.environment.shell_variable().into_iter().collect();
+        let kept = Self::overridden(shell, named);
+        let explicit = Self::overridden(kept, Self::assigned_variables(launch));
         let contents = HandoffContents::for_launch(launch, &inherited, &explicit);
         self.write_file(Self::LAUNCH_PREFIX, &contents)
     }
@@ -306,6 +308,32 @@ mod tests {
                 "EXAMPLE_ACCOUNT_DIR",
                 "/accounts/example"
             )]
+        );
+    }
+
+    #[test]
+    fn the_shell_ringleader_started_with_is_explicit() {
+        let fixture = HandoffFixture::new();
+        let pairs = [("PATH", "/bin"), ("SHELL", "/bin/example-shell")];
+
+        let contents = fixture.handed(&pairs, &HandoffFixture::launch(&[]));
+
+        assert_eq!(
+            contents.explicit(),
+            [HandoffFixture::pair("SHELL", "/bin/example-shell")]
+        );
+    }
+
+    #[test]
+    fn a_set_shell_replaces_the_one_ringleader_started_with() {
+        let fixture = HandoffFixture::new();
+        let launch = HandoffFixture::launch_setting("SHELL", "/bin/set-shell");
+
+        let contents = fixture.handed(&[("SHELL", "/bin/example-shell")], &launch);
+
+        assert_eq!(
+            contents.explicit(),
+            [HandoffFixture::pair("SHELL", "/bin/set-shell")]
         );
     }
 

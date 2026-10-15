@@ -348,6 +348,7 @@ mod tests {
                 vec![
                     ("PATH".into(), "/devshell/bin:/creator/bin".into()),
                     ("TMPDIR".into(), "/envrc/tmp".into()),
+                    ("SHELL".into(), "/envrc/bin/bash".into()),
                     ("EXAMPLE_ACCOUNT_DIR".into(), "/envrc/accounts".into()),
                     ("EXAMPLE_API_KEY".into(), "from-envrc".into()),
                     ("EXAMPLE_FROM_ENVRC".into(), "loaded".into()),
@@ -427,7 +428,11 @@ mod tests {
         }
 
         fn inside_envrc(&self) -> CapturingExec {
-            let first = self.handoff(&Self::envrc_launch(&self.worktree()));
+            self.inside_envrc_from(&Self::creating_snapshot())
+        }
+
+        fn inside_envrc_from(&self, creating: &ProcessEnvironment) -> CapturingExec {
+            let first = self.handoff_from(creating, &Self::envrc_launch(&self.worktree()));
             let contents = AgentHandoff::take(&first).unwrap().inside_envrc();
             let envrc = Self::envrc_snapshot();
             let handoff = AgentHandoff::beside(&first, &envrc)
@@ -657,6 +662,16 @@ mod tests {
         let seam = LauncherFixture::new().inside_envrc();
 
         assert_eq!(seam.environment()["EXAMPLE_API_KEY"], "fixture-secret");
+    }
+
+    #[test]
+    fn the_shell_ringleader_started_with_wins_over_the_envrc_one() {
+        let creating =
+            ProcessEnvironment::new(vec![("SHELL".into(), "/bin/example-shell".into())], None);
+
+        let seam = LauncherFixture::new().inside_envrc_from(&creating);
+
+        assert_eq!(seam.environment()["SHELL"], "/bin/example-shell");
     }
 
     #[test]
