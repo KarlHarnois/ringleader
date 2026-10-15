@@ -84,6 +84,15 @@ Ringleader stays minimal in what it shows, what it asks for, and what it documen
   - The new session dialog starts on the repo Ringleader was launched in, else on the newest session's repo.
 - Add a setting only for a case that convention cannot serve.
 
+### Let the code speak
+
+The code, its names, and its tests describe what Ringleader does. This file and its reference files hold only what the code cannot say.
+
+- Never write prose that restates what the code shows. Such prose includes a file listing, a type's responsibilities, and the steps a function takes.
+- If a name, a type, or a test can carry an intent, carry the intent there instead of in prose. A test name MAY state the reason for the behavior the test checks.
+- An automated check is a test, a lint, or a CI command. If an automated check can enforce a rule, enforce the rule there instead of in prose.
+- If a reader of the code alone would make a mistake without a statement, keep the statement. Otherwise, delete the statement.
+
 ## Ground rules
 
 ### Functions
