@@ -1,44 +1,247 @@
 # Ringleader agent guide
 
-This file is the living reference for agents working in this repository.
+This file is the living reference for working in this repository. If a change makes a statement in this file false, update the statement in the same commit.
+
+## Terms
+
+| Term | Meaning |
+| --- | --- |
+| Project owner | The person you work for in this repository |
+| User | A person who runs Ringleader. The project owner is also a user. |
+| Agent | A program from Ringleader's config that a session runs in its tmux pane |
+| Repo | A git repository that a session can work in, including a fixture repo |
+| This repository | Ringleader's own source repository |
+| Private tmux server | The tmux server that Ringleader starts on its own socket |
+| Manual run | A run of the `ringleader` binary that you start by hand, TUI or CLI |
+| Marked branch | A branch that carries the `ringleaderManaged` git config marker |
 
 ## Values
 
-When no rule covers a case, choose what these values favor. When two conflict, the earlier one wins.
+**If no rule covers a case, choose what these values favor.** If two values conflict, the earlier value wins.
 
-- **The user's own setup stays untouched.** Ringleader runs its own tmux server and never changes the user's tmux server, tmux config, or key bindings. It deletes or renames only the branches it marked as its own, and it assumes no particular personal setup. The private socket on every tmux call, the throwaway state for manual runs, the `ringleaderManaged` marker, and the consumer-agnostic repository all come from this.
-- **Refuse before losing work.** When an action could destroy work, Ringleader stops and says why instead of guessing. Delete measures uncommitted files and unmerged commits and asks first, rename refuses a branch that has been pushed, a failed create or rename undoes what it did, and a refused action exits with code 3.
-- **Fast and light.** A key press shows its effect on the next frame, and Ringleader's CPU time, memory, and child processes stay small however many sessions it lists and however long it runs.
-- **Intuitive, with several ways to do each thing.** Each way comes from an ecosystem users already know and keeps the meaning it has there, so a user who guesses a key is right.
-  - Vim: `j k` move, `gg G` jump to the ends, `H M L` select the top, middle, or bottom row on screen, and `/` would open a session finder.
-  - fzf and readline: `Ctrl-J Ctrl-K` and `Ctrl-N Ctrl-P` move in the repo search, and `Ctrl-W Ctrl-U` edit text.
-  - Command palettes: `Ctrl-K` would also open the session finder.
-  - The arrows work wherever `j k` do, `?` `Esc` `q` all close the help, and create, delete, rename, restart, and attach work from both the TUI and the CLI.
-- **Side work never blocks or breaks the main action.** Typing an agent's startup input and looking up pull requests run in the background, and their failures are logged, never raised. A missing tool such as `gh` turns its feature off instead of failing the program. Logs go to a file, never to the terminal.
-- **Less is more.** Ringleader stays minimal in what it shows, what it asks for, and what it documents. Hint lines name only Ringleader's own keys and leave out the editing keys every terminal user already knows, and the README stays short with no architecture. Convention wins over configuration: every setting except the agent list has a working default, repos are found by scanning home, a session's branch and tmux session follow from its name, the diff base is found without a setting, and the new session dialog starts on the repo Ringleader was launched in or the newest session's repo. A new setting needs a case the convention cannot serve.
+### The user's own setup stays untouched
+
+- Ringleader runs the private tmux server and never changes the user's tmux server, tmux config, or key bindings.
+- Ringleader deletes or renames only its marked branches.
+- Ringleader assumes no particular personal setup.
+- Four rules come from this value:
+  - Every tmux call passes the private tmux server's socket.
+  - Every manual run uses throwaway state.
+  - Ringleader marks each branch it creates with `ringleaderManaged`.
+  - This repository stays consumer-agnostic.
+
+### Refuse before losing work
+
+If an action could destroy work, Ringleader stops and says why instead of guessing.
+
+- Delete measures uncommitted files and unmerged commits, and asks before it deletes.
+- Rename refuses a branch that has been pushed.
+- A failed create or rename undoes what it did.
+- A refused action exits with code 3.
+
+### Fast and light
+
+- A key press shows its effect on the next frame.
+- Ringleader's CPU time, memory, and child processes stay small however many sessions it lists and however long it runs.
+
+### Intuitive, with several ways to do each thing
+
+Each way comes from an ecosystem users already know, and keeps the meaning it has there. A user who guesses a key is right.
+
+| Ecosystem | Keys |
+| --- | --- |
+| Vim | `j k` move. `gg G` jump to the ends. `H M L` select the top, middle, or bottom row on screen. `/` opens the session finder. |
+| fzf and readline | `Ctrl-J Ctrl-K` and `Ctrl-N Ctrl-P` move in the repo search. `Ctrl-W Ctrl-U` edit text. |
+| Command palettes | `Ctrl-K` opens the session finder. |
+
+- The arrows work wherever `j k` do.
+- `?`, `Esc`, and `q` each close the help.
+- Both the TUI and the CLI offer each of these actions:
+  - create
+  - delete
+  - rename
+  - restart
+  - attach
+
+### Side work never blocks or breaks the main action
+
+- Typing an agent's startup input and looking up pull requests run in the background.
+- Ringleader logs each failure of side work and never raises it.
+- If a tool such as `gh` is missing, Ringleader turns off that tool's feature instead of failing.
+- Logs go to a file, never to the terminal.
+
+### Less is more
+
+Ringleader stays minimal in what it shows, what it asks for, and what it documents.
+
+- Hint lines name only Ringleader's own keys, never the editing keys every terminal user knows.
+- The README stays short and holds no architecture.
+- Convention wins over configuration:
+  - Every setting except the agent list has a working default.
+  - Ringleader finds repos by scanning home.
+  - A session's branch and tmux session follow from its name.
+  - Ringleader finds the diff base without a setting.
+  - The new session dialog starts on the repo Ringleader was launched in, else on the newest session's repo.
+- Add a setting only for a case that convention cannot serve.
 
 ## Ground rules
 
-- Keep functions small, each doing one thing at one level of abstraction, with callers above the functions they call. Avoid flag arguments and side effects a name does not announce, keep commands separate from queries, and state each piece of knowledge once. Talk to direct collaborators instead of reaching through chains of objects. Errors use `Result` with the operation that failed in their message, and absence uses `Option`.
-- Comments are failures to express intent in code. Every comment is a signal, not documentation: revisit the code it explains and improve it until the comment is unnecessary, then delete it. Rename the variable, extract the function, introduce the type, or restructure the control flow. Never add a comment to justify messy code or to stand in for a better name. The only surviving comments are these exceptions: legal headers, non-obvious intent that cannot be encoded in structure, warnings of real consequences, and TODOs that reference a tracked issue. Doc comments are comments and follow the same rule. When a comment seems to survive, stop and justify it to the project owner before committing, and never announce it in the commit body. If the justification against an exception is not convincing, delete the comment and fix the code. A commit that adds an unjustified comment is not done.
-- Write object-oriented Rust: state in structs with private fields, behavior in `impl` blocks, traits as interfaces, composition over inheritance, dependencies injected through constructors. No public data fields and no free functions except `main` and `#[test]` functions, which Rust requires to be free. A test helper that is not a `#[test]` function is a method or associated function of a fixture struct. A fixture struct used by one file's tests lives in that file's `mod tests`, and one shared across files lives in `src/test_support/` with a tree entry.
-- Names reveal intent. Types are nouns, methods that act are verbs, and accessors are named after what they return. No abbreviations, no number series, no noise words, and no magic numbers or strings: a value whose meaning is not obvious becomes a named constant. Files are named after their primary type in snake case.
-- When a type's role matches an established pattern, name it after that pattern instead of inventing a name. The sign to look for one is a first name that is a gerund, or that says how the type works rather than what role it plays. User-configured actions that run when an event happens are hooks, so the type that runs them is `AgentHooks` with `after_start` and `after_rename`, not `AgentTyping`. This codebase already names adapters, guards, plans, requests, fakes, and fixtures this way. When no pattern fits, name the type after its domain role. Never reshape a type to fit a pattern, and never give a type a pattern name for a role it does not play.
-- Build, test, and run every tool inside `nix develop`. The host `PATH` may carry other versions of `cargo`, `rustc`, and `tmux`, so never rely on what the host provides. `.envrc` loads the same dev shell through direnv with `use flake` once `direnv allow` has been run in the repository. The commands below keep `nix develop -c`, so they also work without direnv.
-- Stage each new file by path with `git add` before running any `nix` command, because `nix develop`, `nix build`, and `nix flake check` ignore files outside the git index.
-- Every ad-hoc tmux command, such as a binding experiment, runs as `env -u TMUX -u TMUX_PANE tmux -u -S <tempdir>/x.sock -f /dev/null ...` and ends with `kill-server` on that socket. `nix develop` passes `$TMUX` through, so a bare `tmux` command reaches the user's live server. Never touch the default server, the server named in `$TMUX`, or the owner's real Ringleader server at `$XDG_RUNTIME_DIR/ringleader/tmux/tmux.sock`. Keep the socket path under 100 bytes, because tmux rejects a longer one with `File name too long`. Use a directory from `mktemp -d` under `/tmp`.
-- Every manual run of the `ringleader` binary, TUI or CLI, uses throwaway state, because `main` resolves the real XDG paths, and the private tmux server's socket lives under `XDG_RUNTIME_DIR`.
-  - Create `<tempdir>` with `mktemp -d /tmp/rl.XXXXXX`, and inside it `config/ringleader`, `state`, `data`, `cache`, `run`, `repos`, and `home`.
-  - The prefix is `env -u TMUX -u TMUX_PANE -u RINGLEADER_CONFIG XDG_CONFIG_HOME=<tempdir>/config XDG_STATE_HOME=<tempdir>/state XDG_DATA_HOME=<tempdir>/data XDG_CACHE_HOME=<tempdir>/cache XDG_RUNTIME_DIR=<tempdir>/run HOME=<tempdir>/home SHELL=sh` followed by the hermetic git environment below. The throwaway `XDG_RUNTIME_DIR`, `XDG_STATE_HOME`, and `XDG_CACHE_HOME` keep a run off the owner's real private server, state, and scratch directories, and the rest keeps the owner's shell and git startup files out of the run.
-  - Every tmux command typed for Ringleader's server uses the prefix and passes `-S <tempdir>/run/ringleader/tmux/tmux.sock`.
-  - Before the first run, write `<tempdir>/config/ringleader/config.toml` with one stand-in agent, `name = "stand-in"` and `command = "sh"`, never `claude` or `opencode`.
-  - Build fixture repos under `<tempdir>/repos` with the hermetic git environment, and run the binary by absolute path with `<tempdir>/repos` as the working directory, so no real repository is in scope.
-  - Runs happen in a pane of an outer server started under the ad-hoc tmux rule, which stands in for the user's tmux and is driven with `send-keys` on that server. Three checks cover the contexts: the binary with the prefix in a plain pane, the binary in the same pane with the prefix minus `-u TMUX -u TMUX_PANE` so the client opens nested, and the binary in a `t` shell of a session, which must refuse with exit 3. Each ends by asserting that the outer server's `list-keys` output and session list are unchanged.
-  - End with `kill-server` on the outer server and on `<tempdir>/run/ringleader/tmux/tmux.sock` by explicit `-S` path, then remove `<tempdir>`. Never run the binary against the user's tmux server, config, state, data, or repositories.
-- The hermetic git environment is `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_NOSYSTEM=1`, `HOME=<tempdir>`, and fake `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME`, and `GIT_COMMITTER_EMAIL` values. Fixture repos are created with `git init -b <branch>`, never relying on `init.defaultBranch`.
-- The private GitHub repository exists and is configured as `origin`. Do not create another repository or add another remote. Push only when the project owner asks.
-- Keep the repository consumer-agnostic. Never reference or assume any specific downstream setup, local directory layout, or personal configuration. Examples and fixtures use generic names such as `example-project`.
-- Human-facing prose uses "Ringleader". Identifiers stay lowercase: binary, crate, repo, flake input, config paths, the tmux prefix, JSON fields. The git config marker `ringleaderManaged` keeps git's camelCase.
+### Functions
+
+- Keep each function small. Make each function do one thing at one level of abstraction.
+- Place each caller above the functions it calls.
+- Never write a flag argument.
+- Never write a side effect that the function's name does not announce.
+- Follow command-query separation: a function either changes state or answers a question, never both.
+- State each piece of knowledge once.
+- Talk to direct collaborators instead of reaching through chains of objects.
+- Return a failure as a `Result` whose message names the operation that failed.
+- Return absence as an `Option`.
+
+### Comments
+
+**A comment is a failure to express intent in code.** A doc comment is a comment and follows the same rules.
+
+For each comment:
+
+1. Revisit the code the comment explains.
+2. Improve the code until the comment is unnecessary. Rename a variable, extract a function, introduce a type, or restructure the control flow.
+3. If the comment does not convincingly fall under an exception below, delete the comment.
+4. Otherwise, justify the comment to the project owner before you commit.
+
+The exceptions are:
+
+- a legal header
+- non-obvious intent that structure cannot encode
+- a warning of a real consequence
+- a TODO that references a tracked issue
+
+Never add a comment to justify messy code or to stand in for a better name. Never announce a surviving comment in the commit body. A commit that adds an unjustified comment is not done.
+
+### Object-oriented Rust
+
+- Keep state in structs with private fields. Never write a public data field.
+- Put behavior in `impl` blocks.
+- Use traits as interfaces.
+- Use composition instead of inheritance.
+- Inject dependencies through constructors.
+- Never write a free function except `main` and `#[test]` functions: Rust requires those to be free.
+- Make each test helper that is not a `#[test]` function a method or associated function of a fixture struct.
+- If one file's tests use a fixture struct, put the struct in that file's `mod tests`.
+- If tests in several files share a fixture struct, put the struct in `src/test_support/`.
+
+### Names
+
+**Names reveal intent.**
+
+- Name a type with a noun.
+- Name a method that acts with a verb.
+- Name an accessor after what it returns.
+- Never put an abbreviation, a number series, or a noise word in a name.
+- Never write a magic number or a magic string. If a value's meaning is not obvious, make the value a named constant.
+
+### Pattern names
+
+**If a type's role matches an established pattern, name the type after that pattern instead of inventing a name.**
+
+- If your first name for a type is a gerund, look for a pattern.
+- If your first name for a type says how the type works, not its role, look for a pattern.
+- If no pattern fits, name the type after its domain role.
+- Never reshape a type to fit a pattern.
+- Never give a type a pattern name for a role it does not play.
+
+A hook is a user-configured action that runs when an event happens. The type that runs an agent's hooks is therefore `AgentHooks`, with `after_start` and `after_rename`, never `AgentTyping`.
+
+The codebase already uses these patterns:
+
+- adapters
+- guards
+- plans
+- requests
+- fakes
+- fixtures
+
+### `nix develop`
+
+**Build, test, and run every tool inside `nix develop`.** The host `PATH` can carry other versions of `cargo`, `rustc`, and `tmux`.
+
+- If `direnv allow` has run in this repository, `.envrc` loads the same dev shell through direnv.
+- Run the commands in this file as written. Their `nix develop -c` prefix makes them work without direnv.
+- Stage each new file by path with `git add` before any `nix` command: flake commands ignore files outside the git index.
+
+### Ad-hoc tmux commands
+
+**An ad-hoc tmux command is a tmux command you run by hand, such as a binding experiment.** Run every ad-hoc tmux command on a throwaway server:
+
+1. Make a directory with `mktemp -d` under `/tmp`. That directory is `<tempdir>`.
+2. Run each command as `env -u TMUX -u TMUX_PANE tmux -u -S <tempdir>/x.sock -f /dev/null ...`. Without that prefix, a tmux command reaches the project owner's tmux server: `nix develop` passes `$TMUX` through.
+3. End with `kill-server` on `<tempdir>/x.sock`.
+
+- Keep the socket path under 100 bytes: tmux rejects a longer path with `File name too long`.
+- Never touch these tmux servers:
+  - the default server
+  - the server named in `$TMUX`
+  - the project owner's private tmux server, at `$XDG_RUNTIME_DIR/ringleader/tmux/tmux.sock`
+
+### Manual runs
+
+**Every manual run uses throwaway state and fixture repos.** `main` resolves the real XDG paths, which hold the private tmux server's socket.
+
+**The run prefix is the command prefix below, followed by the hermetic git environment.** The prefix's `HOME=<tempdir>/home` is the hermetic git environment's `HOME`.
+
+```sh
+env -u TMUX -u TMUX_PANE -u RINGLEADER_CONFIG \
+  XDG_CONFIG_HOME=<tempdir>/config XDG_STATE_HOME=<tempdir>/state \
+  XDG_DATA_HOME=<tempdir>/data XDG_CACHE_HOME=<tempdir>/cache \
+  XDG_RUNTIME_DIR=<tempdir>/run HOME=<tempdir>/home SHELL=sh
+```
+
+- Each throwaway XDG directory keeps the run off the project owner's real one, including the real private tmux server.
+- `HOME`, `SHELL`, and the hermetic git environment keep the project owner's shell and git startup files out of the run.
+
+To make a manual run:
+
+1. Make `<tempdir>` with `mktemp -d /tmp/rl.XXXXXX`.
+2. In `<tempdir>`, run `mkdir -p config/ringleader state data cache run repos home`.
+3. Write `<tempdir>/config/ringleader/config.toml` with one stand-in agent: `name = "stand-in"` and `command = "sh"`. Never configure `claude` or `opencode` as the agent.
+4. Build fixture repos under `<tempdir>/repos` with the hermetic git environment.
+5. Start an outer tmux server under the ad-hoc tmux command rules. The outer server stands in for the user's tmux server. Drive the outer server with `send-keys`.
+6. Run each check in the table below in a pane of the outer server. Run the binary by absolute path from `<tempdir>/repos`, so no real repo is in scope.
+7. After each check, assert that the outer server's `list-keys` output and session list are unchanged.
+8. Run `kill-server` on the outer server. Then run `kill-server` with `-S <tempdir>/run/ringleader/tmux/tmux.sock`.
+9. Remove `<tempdir>`.
+
+| Check | How to run the binary |
+| --- | --- |
+| Plain | In a plain pane, with the run prefix |
+| Nested | In the same pane, with the run prefix minus `-u TMUX -u TMUX_PANE`, so the client opens nested |
+| Shell | In a `t` shell of a session. The binary MUST refuse with exit code 3. |
+
+Send every tmux command for a manual run's private tmux server with the run prefix and `-S <tempdir>/run/ringleader/tmux/tmux.sock`.
+
+### Hermetic git environment
+
+**The hermetic git environment is these variables:**
+
+- `GIT_CONFIG_GLOBAL=/dev/null`
+- `GIT_CONFIG_NOSYSTEM=1`
+- `HOME` set to a throwaway directory
+- fake values for `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME`, and `GIT_COMMITTER_EMAIL`
+
+Create each fixture repo with `git init -b <branch>`. Never rely on `init.defaultBranch`.
+
+### This repository
+
+- The private GitHub repository exists and is the `origin` remote. Never create another repository. Never add another remote.
+- **Keep this repository consumer-agnostic.** Never reference or assume a specific downstream setup, local directory layout, or personal configuration.
+- Give examples and fixtures generic names, such as `example-project`.
+- Capitalize the name Ringleader in human-facing prose.
+- Keep identifiers lowercase:
+  - the binary, the crate, and the repository name
+  - the flake input and config paths
+  - the tmux prefix
+  - JSON fields
+- The git config marker `ringleaderManaged` keeps git's camelCase.
 
 ## Commands
 
@@ -51,54 +254,139 @@ nix build .#
 nix flake check
 ```
 
-These are the commands `.github/workflows/ci.yml` runs. All of them run on pushes to `master` and on merge-queue runs, and the first four also run on pull requests. A change is done when all of them pass. If a change edits a file under `src/`, the change is done only when the completion steps in Metrics also pass.
+**The Commands are the six commands above.** `.github/workflows/ci.yml` runs all six on pushes to `master` and on merge-queue runs. The workflow runs the first four on pull requests too.
+
+**A change is done when the Commands pass.** If the change edits a file under `src/`, the change is done only after the completion steps also pass.
 
 ## Architecture
 
-Ringleader follows hexagonal architecture, also called ports and adapters. The core holds the domain and the use cases. It never imports an adapter, `crossterm`, `ratatui`, or `std::process`. It never runs tmux or git or touches the filesystem or the terminal itself, and reaches them through traits it owns, which adapters outside the core implement. It never spells out their syntax either: git refs and config keys, tmux targets, and command lines belong to the adapters. When the core shows the user a command, it asks a port for it, the way `BranchOwnership` asks `Workspace::branch_marking_command`.
+**Ringleader follows hexagonal architecture, also called ports and adapters.** The core is the `domain` and `application` layers.
 
-Dependencies point inward only. An inner layer never imports an outer one.
+- The core never imports an adapter, `crossterm`, `ratatui`, or `std::process`.
+- The core never runs tmux or git, and never touches the filesystem or the terminal.
+- The core reaches the outside through traits it owns, which adapters outside the core implement.
+- The core never spells out an outside tool's syntax. Git refs, git config keys, tmux targets, and command lines belong to the adapters.
+- If the core shows the user a command, the core asks a port for the command. For example, `BranchOwnership` asks `Workspace::branch_marking_command`.
 
-- `domain` holds the entities, value types, and pure rules. It imports nothing else from the crate.
-- `application` holds the use cases and the ports, and imports only `domain`. It never shells out, never touches the filesystem directly, and never reads the system clock. Its errors say what kind of failure happened, and `CliExit` in `cli` alone turns them into exit codes. Ports are traits in `application/ports/`, named after the role they play, such as `Workspace` and `Multiplexer`, with any error type in the same file. A port's error describes the failure in the port's terms, with no field for the tool's subcommand, exit status, or output, and nothing outside the adapters branches on which tool failed.
-- `adapters` holds the driven adapters, which implement the ports with git, tmux, files, and `/proc`, and the process-level types `CompositionRoot` uses directly, such as `ProcessEnvironment`, `XdgPaths`, and `AgentLauncher`. They import `application` and `domain`, never `ui` or `cli`. Each port adapter is named after its technology and the port it implements, such as `GitWorkspace` and `TmuxMultiplexer`.
-- `ui` and `cli` are the driving adapters. They import `application` and `domain`, never `adapters` or each other. They reach the use cases only through the `SessionService` facade, which composes `SessionLifecycle`, `SessionMonitor`, `SessionAccess`, `RepoCatalog`, `PullRequestCatalog`, and `Doctor`, so `ui` and `cli` never call those directly. A port handed to a `ui` or `cli` type, like `Lock`, is called by that type. They hold no business rules: what each session state allows is decided in `domain` or `application`, so the TUI and the CLI cannot disagree.
-- `main.rs` is the composition root and the only production code that imports every layer. The Wiring section says what it builds. It builds and wires, and leaves the use cases a run starts with to the driving adapter, the way `Cli::execute` does for the CLI.
-- `src/test_support/` may import any layer, because it fakes the ports and drives the outer layers under test. Inline `#[cfg(test)]` modules follow their layer's rule, except that any of them may also import `src/test_support/`.
+**Dependencies point inward only.** An inner layer never imports an outer layer.
 
-The code breaks these rules in four places today. They are violations to fix, not precedent to copy.
+### `domain`
 
-- Advice in `domain/unmanaged_session.rs`, `application/busy_worktree.rs`, `application/server_audit.rs`, `application/delete_outcome.rs`, `application/deletion_guards.rs`, and `application/session_renaming.rs` spells out tmux and git command lines. The tmux ones repeat the exact-target syntax that `TmuxScripts::exact` owns.
-- `WorkspaceError`, `MultiplexerError`, and `PullRequestError` name the git, tmux, or gh subcommand that failed, and `WorkspaceError` and `PullRequestError` keep its exit status and stderr in fields. `ServiceError::TimedOut` names the tool, and `ui/diff_queue.rs` and `ui/home_state.rs` branch on it.
-- `ui/action_gate.rs` decides which actions each session state allows, such as restart only for an Exited or Stopped session. The use cases enforce their own versions of those rules.
-- `CompositionRoot::run_tui` in `main.rs` calls the TUI's startup use cases itself: `restore_server_socket`, `refuse_own_pane`, `load_registry`, and `reapply_server_config`.
+`domain` holds the entities, value types, and pure rules. `domain` imports nothing else from the crate.
 
-A new capability that `application`, `ui`, or `cli` needs from outside the process goes through a port, because none of them may import `adapters`. `CompositionRoot` and the types in `adapters` reach the outside directly. Logging needs no port: every layer writes through the `log` macros, and `CompositionRoot` installs `AppLog` behind them. The steps for a port:
+### `application`
 
-1. Define the trait in a new file under `application/ports/`, named after the role, with an error type beside it when any of its methods can fail, and re-export them from `ports/mod.rs`.
-2. Implement it in `adapters/`, named after the technology and the role.
-3. Add a hand-written fake in `src/test_support/`. Wire the fake of a port the use cases need into `ServiceFixture`, and the fake of any other port into `CliHarness` or `UiHarness`.
-4. Inject the port as a trait object. A port the use cases need joins a bundle in `ServicePorts` as an `Arc<dyn Trait>`. Any other port, like `Lock`, is handed by `CompositionRoot` to the type that uses it.
-5. Build the adapter in `CompositionRoot` and pass it in. When the host can lack the technology behind the port, pass a null adapter that does nothing instead, like `NullPullRequests` without `gh`, so a port is never an `Option`.
+`application` holds the use cases and the ports, and imports only `domain`.
 
-The one exception is a driving adapter's own channel to the user: the terminal for the TUI, including the shell it runs there, and the standard streams for the CLI. That I/O stays in `ui` or `cli`, behind a trait beside its real implementation or a std `Read` or `Write`, with its fake in `src/test_support/`. The TUI owns `InputSource`, `ScreenMode`, and `ShellRunner` this way, and the CLI writes through the `Write` streams `CliOutput` holds. A test seam inside `adapters`, like `AgentLauncher`'s `ExecSeam`, has the same shape with its fake in the adapter's own tests.
+- `application` never shells out, never touches the filesystem directly, and never reads the system clock.
+- An `application` error says what kind of failure happened. Only `CliExit` in `cli` turns an error into an exit code.
+- A port is a trait in `application/ports/`, named after the role it plays, such as `Workspace` or `Multiplexer`.
+- If a port has an error type, the error type lives in the port's file.
+- A port's error describes the failure in the port's terms. The error has no field for the tool's subcommand, exit status, or output.
+- Nothing outside the adapters branches on which tool failed.
+
+### `adapters`
+
+`adapters` holds the driven adapters. A driven adapter implements a port with git, tmux, files, or `/proc`.
+
+- `adapters` also holds the process-level types that `CompositionRoot` uses directly, such as `ProcessEnvironment`, `XdgPaths`, and `AgentLauncher`.
+- `adapters` imports `application` and `domain`, never `ui` or `cli`.
+- Name each port adapter after its technology and its port, such as `GitWorkspace` or `TmuxMultiplexer`.
+
+### `ui` and `cli`
+
+`ui` and `cli` are the driving adapters.
+
+- `ui` and `cli` import `application` and `domain`, never `adapters` or each other.
+- `ui` and `cli` reach the use cases only through the `SessionService` facade.
+- `SessionService` composes these use cases, which `ui` and `cli` never call directly:
+  - `SessionLifecycle`
+  - `SessionMonitor`
+  - `SessionAccess`
+  - `RepoCatalog`
+  - `PullRequestCatalog`
+  - `Doctor`
+- A `ui` or `cli` type that receives a port, such as `Lock`, calls that port itself.
+- `ui` and `cli` hold no business rules. `domain` or `application` decides what each session state allows, so the TUI and the CLI cannot disagree.
+
+### `main.rs`
+
+`main.rs` is the composition root, and the only production code that imports every layer.
+
+- `main.rs` builds and wires. The Wiring section says what `main.rs` builds.
+- The driving adapter, not `main.rs`, calls the use cases a run starts with. For example, `Cli::execute` calls them for the CLI.
+
+### Test code
+
+- `src/test_support/` MAY import any layer: it fakes the ports and drives the outer layers under test.
+- An inline `#[cfg(test)]` module follows its layer's rule. Any inline `#[cfg(test)]` module MAY also import `src/test_support/`.
+
+### Known violations
+
+**The code breaks these rules in four places.** Each place is a violation to fix. Never copy a violation as precedent.
+
+1. Advice in these files spells out tmux and git command lines:
+   - `domain/unmanaged_session.rs`
+   - `application/busy_worktree.rs`
+   - `application/server_audit.rs`
+   - `application/delete_outcome.rs`
+   - `application/deletion_guards.rs`
+   - `application/session_renaming.rs`
+
+   The tmux command lines repeat the exact-target syntax that `TmuxScripts::exact` owns.
+2. `WorkspaceError`, `MultiplexerError`, and `PullRequestError` each name the subcommand that failed. `WorkspaceError` and `PullRequestError` also keep the subcommand's exit status and stderr in fields. `ServiceError::TimedOut` names the tool, and `ui/diff_queue.rs` and `ui/home_state.rs` branch on the tool.
+3. `ui/action_gate.rs` decides which actions each session state allows, such as restart only for an Exited or Stopped session. The use cases enforce their own versions of those rules.
+4. `CompositionRoot::run_tui` in `main.rs` calls the TUI's startup use cases itself: `restore_server_socket`, `refuse_own_pane`, `load_registry`, and `reapply_server_config`.
+
+### New ports
+
+**If `application`, `ui`, or `cli` needs a capability from outside the process, route the capability through a port.** None of those layers imports `adapters`.
+
+- `CompositionRoot` and the types in `adapters` reach the outside directly.
+- Logging needs no port. Every layer writes through the `log` macros, and `CompositionRoot` installs `AppLog` behind them.
+
+To add a port:
+
+1. Define the trait in a new file under `application/ports/`, named after the role.
+   - If any of the trait's methods can fail, define an error type beside the trait.
+   - Re-export the trait and its error type from `ports/mod.rs`.
+2. Implement the trait in `adapters/`, in a type named after the technology and the role.
+3. Add a hand-written fake in `src/test_support/`.
+   - If the use cases need the port, wire the fake into `ServiceFixture`.
+   - Otherwise, wire the fake into `CliHarness` or `UiHarness`.
+4. Inject the port as a trait object.
+   - If the use cases need the port, add the port to a bundle in `ServicePorts` as an `Arc<dyn Trait>`.
+   - Otherwise, hand the port from `CompositionRoot` to the type that uses it, as with `Lock`.
+5. Build the adapter in `CompositionRoot` and pass it in.
+   - If the host can lack the technology behind the port, pass a null adapter. A null adapter does nothing on such a host. `NullPullRequests` is the null adapter for a host without `gh`.
+   - A port is never an `Option`.
+
+### Driving adapter I/O
+
+**A driving adapter's own channel to the user needs no port.**
+
+- For the TUI, the channel is the terminal, including the shell the TUI runs there.
+- For the CLI, the channel is the standard streams.
+- Keep the channel's I/O in `ui` or `cli`.
+- Put the channel behind a trait beside its real implementation, or behind a std `Read` or `Write`.
+- Put the channel's fake in `src/test_support/`.
+- The TUI owns `InputSource`, `ScreenMode`, and `ShellRunner` this way. The CLI writes through the `Write` streams that `CliOutput` holds.
+- A test seam inside `adapters`, such as `AgentLauncher`'s `ExecSeam`, has the same shape. Its fake lives in the adapter's own tests.
 
 ## Metrics
 
-The metrics tools are `dryer`, `crapper`, and `mutator`, local code-health tools
-that agents run in the completion steps below. CI never builds or runs them. Do
-not add them to `checks`, to the default dev shell, or to
-`.github/workflows/ci.yml`. The flake builds them as `apps` so `nix flake check`
-only evaluates them, and puts them in the `metrics` dev shell, which extends the
-default one. That evaluation still downloads the four upstream inputs, so if one
-can no longer be fetched, CI's flake check fails until its input is repinned or
-removed. `dryer`, `crapper`, and `mutator` write snapshots under `.metrics/`,
-which is gitignored.
-Run them from the repository root, and pass `dryer` and `crapper` the `src` path.
-A pathless run also walks nested checkouts such as `.claude/worktrees` and scores
-every copy under the same namespaces, and `crapper` reruns coverage for each.
-`dryer --changed` compares the changed files only with each other, so it misses
-code copied from an unchanged file.
+**The metrics tools are `dryer`, `crapper`, and `mutator`.** They are local code-health tools that you run in the completion steps.
+
+- CI never builds or runs the metrics tools. Never add them to `checks`, to the default dev shell, or to `.github/workflows/ci.yml`.
+- The flake builds the metrics tools as `apps`, so `nix flake check` only evaluates them.
+- The `metrics` dev shell extends the default one and holds the metrics tools.
+- `nix flake check` still downloads the four upstream inputs. If an upstream input can no longer be fetched, CI's flake check fails until someone repins or removes the input.
+- The metrics tools write snapshots under `.metrics/`, which is gitignored.
+
+**Run the metrics tools from the repository root.**
+
+- Pass `dryer` and `crapper` the `src` path: a pathless run also walks nested checkouts such as `.claude/worktrees`. A pathless run scores every copy under the same namespaces, and `crapper` reruns coverage for each copy.
+- Never run `dryer --changed`: it compares the changed files only with each other. It misses code copied from an unchanged file.
 
 ```sh
 nix develop .#metrics -c dryer src             # duplicate candidates; writes .metrics/dry.edn
@@ -109,30 +397,31 @@ nix run .#crapper -- --help
 nix run .#mutator -- --help
 ```
 
-`mutator` runs every covered mutant and many tests start real tmux servers. Never
-run it whole-repo. Name one module or file, and keep `--max-workers 2` and
-`--timeout-factor 60`. Each run builds the crate from scratch in new worker
-directories under `target/mutation-workers/`, and a mutant that times out counts
-as killed. The default factor of 10 times the warm baseline ends those builds
-early, so every mutant reads as killed before a test runs. Parallel cold builds
-slow each other, so raise the factor before the worker count. Once a
-snapshot exists, a rerun only runs survivors and sites in changed functions, so a
-kill recorded by a timeout stays. After a run with a smaller factor, rerun that
-file once with `--mutate-all`.
-Never pass `--changed` with a path: it drops the path and mutates every changed
-file in `git status`. `crapper` and `mutator` need `cargo-llvm-cov`
-and the LLVM tools named by `LLVM_COV` and `LLVM_PROFDATA`, which the `metrics`
-shell and the apps set. When `cargo llvm-cov` fails, whether from a missing tool
-or one failing test, every function scores 0% coverage and the run still exits 0.
-Check the output for `Rust coverage will score 0%` before trusting the snapshot.
-Do not pass `mutator` a filtered `--test-command`. Many modules are tested only
-through their callers, so a module-path filter runs zero tests, exits 0, and lets
-every mutant survive.
+### Running `mutator`
 
-uml-viewer reads `.metrics/crap.edn` and `.metrics/mutate/`. It ignores
-`.metrics/dry.edn`, so `dryer` output stays a text report and never reaches the
-diagram. It needs a display and downloads Maven dependencies on first run. Write
-the policy to the gitignored `.uml-viewer/ringleader.policy.edn`:
+**Never run `mutator` on the whole repository:** it runs every covered mutant, and many tests start real tmux servers.
+
+- Name one module or file per run.
+- Keep `--max-workers 2` and `--timeout-factor 60`.
+- Each run builds the crate from scratch in new worker directories under `target/mutation-workers/`. A mutant that times out counts as killed.
+- The default factor, 10 times the warm baseline, ends those builds early. Every mutant then reads as killed before a test runs.
+- If you change either value, raise the timeout factor before the worker count: parallel cold builds slow each other.
+- If a snapshot exists, a rerun runs only survivors and sites in changed functions. A kill recorded by a timeout therefore stays.
+- If a run used a smaller timeout factor, rerun that file once with `--mutate-all`.
+- Never pass `--changed` with a path: `mutator` then drops the path and mutates every changed file in `git status`.
+- Never pass `mutator` a filtered `--test-command`. Many modules are tested only through their callers. A module-path filter runs zero tests, exits 0, and lets every mutant survive.
+
+### Coverage
+
+**`crapper` and `mutator` need `cargo-llvm-cov` and the LLVM tools named by `LLVM_COV` and `LLVM_PROFDATA`.** The `metrics` shell and the apps set both variables.
+
+If `cargo llvm-cov` fails, from a missing tool or one failing test, every function scores 0% coverage. The run still exits 0. Before you trust a snapshot, check the output for `Rust coverage will score 0%`.
+
+### uml-viewer
+
+uml-viewer reads `.metrics/crap.edn` and `.metrics/mutate/`. uml-viewer ignores `.metrics/dry.edn`, so `dryer` output stays a text report and never reaches the diagram. uml-viewer needs a display, and downloads Maven dependencies on its first run.
+
+Write this policy to the gitignored `.uml-viewer/ringleader.policy.edn`:
 
 ```edn
 {:title "Ringleader"
@@ -141,11 +430,9 @@ the policy to the gitignored `.uml-viewer/ringleader.policy.edn`:
  :out ".uml-viewer/ringleader.edn"}
 ```
 
-Leave the policy-level `:prefix` unset. The overlay joins a `crate::module::Type`
-snapshot to the module class through the class id's crate path, and stripping the
-crate name from the id breaks that join. `$UML_VIEWER_DEPS`, set by the `metrics`
-shell, points the Clojure CLI at the `uml-viewer` flake input. Inside
-`nix develop .#metrics`, generate the IR, then open the viewer:
+**Leave the policy-level `:prefix` unset.** The overlay joins a `crate::module::Type` snapshot to the module class through the class id's crate path. Stripping the crate name from the id breaks that join.
+
+The `metrics` shell sets `$UML_VIEWER_DEPS`, which points the Clojure CLI at the `uml-viewer` flake input. Inside `nix develop .#metrics`, generate the IR, then open the viewer:
 
 ```sh
 clojure -Sdeps "$UML_VIEWER_DEPS" -M:ir .uml-viewer/ringleader.policy.edn
@@ -155,18 +442,13 @@ env -u TMUX -u TMUX_PANE TMUX_TMPDIR="$viewer_tmux_dir" \
 rm -rf "$viewer_tmux_dir"
 ```
 
-Always pass `--restart`. Without it the viewer starts `grok --yolo --trust` as its
-companion in a new session on the user's tmux server, and opens on a blank canvas
-until that companion answers. `--restart` skips the companion and loads the EDN
-at once. It still looks for a companion with `tmux has-session`, so the `env`
-prefix sends those lookups to an empty private directory, removed after the
-viewer exits.
+**Always pass `--restart`.** Without `--restart`, the viewer starts `grok --yolo --trust` as its companion, in a new session on the project owner's tmux server. The viewer then opens on a blank canvas until that companion answers. `--restart` skips the companion and loads the EDN at once.
+
+The viewer still looks for a companion with `tmux has-session`. The `env` prefix sends those lookups to an empty private directory, which the commands remove after the viewer exits.
 
 ### Completion steps
 
-**The completion steps are the four numbered steps below.** Run them after the
-Commands pass. A `crapper` run takes about a minute, and a step 4 run takes two
-to three minutes.
+**The completion steps are the four numbered steps below.** Run them after the Commands pass. A `crapper` run takes about a minute. A step 4 run takes two to three minutes.
 
 | Term | Meaning |
 | --- | --- |
@@ -175,34 +457,34 @@ to three minutes.
 | Changed function | A production function the change's diff adds or edits |
 | Changed file | A file under `src/` that holds a changed function |
 | Added line | A line the change's diff adds |
-| Untestable function | A production function that needs a terminal or reads the process environment, which the Tests rules keep out of every test |
-| Step edit | Any change to a file under `src/` after step 1 first runs, including one made to pass a later Commands run |
+| Untestable function | A production function that needs a terminal or reads the process environment. The Tests rules keep both out of every test. |
+| Step edit | Any change to a file under `src/` after step 1 first runs. A change made to pass a later Commands run is a step edit too. |
 
-**Never run a completion step alongside another command:** the tests start real
-tmux servers and share `target/`.
+**Never run a completion step alongside another command:** the tests start real tmux servers and share `target/`.
 
-**Only changed functions decide whether step 1 or step 4 passes.** Never work on
-the score or the mutants of a function the change did not touch.
+**Only changed functions decide whether step 1 or step 4 passes.** Never work on the score or the mutants of a function the change did not touch.
 
-**If a command in these steps fails to run, or exits with a code this section
-does not name, stop and show its output to the project owner.**
+**If either case below holds for a command in these steps, stop and show its output to the project owner:**
+
+- The command fails to run.
+- The command exits with a code this section does not name.
 
 1. Run `nix develop .#metrics -c crapper src`. Step 1 passes when every changed
    function scores 8 or less.
    - If the output contains `Rust coverage will score 0%`, the coverage run
-     failed and no score is real: fix the cause, then rerun step 1.
+     failed and no score is real. Fix the cause, then rerun step 1.
    - If a changed function scores above 8, reduce the function's complexity or
      add tests for it.
 2. Run `nix develop .#metrics -c dryer src`. Step 2 passes when every candidate
    that includes an added line is resolved.
-   - A candidate whose two sides are both builders, each with one
-     `Self { field: value, ..self }` expression as its whole body, is resolved:
-     these builders configure fakes and plans across the codebase and make up
+   - If both sides of a candidate are builders whose whole body is one
+     `Self { field: value, ..self }` expression, the candidate is resolved.
+     Such builders configure fakes and plans across the codebase and make up
      most candidates.
    - If any other candidate that includes an added line is real duplication,
      remove the duplication.
-   - Otherwise, tell the project owner why the pair is not real duplication,
-     which resolves the candidate.
+   - Otherwise, resolve the candidate by telling the project owner why the
+     pair is not real duplication.
 3. For each changed file, run `nix develop .#metrics -c mutator --scan <file>`.
    The first output line, `Scan: N mutation sites in <file>`, gives the file's
    site count. If N is over 50, tell the project owner and offer to split the
@@ -210,39 +492,42 @@ does not name, stop and show its output to the project owner.**
 4. For each changed file, run
    `nix develop .#metrics -c mutator --reuse-coverage --max-workers 2 --timeout-factor 60 <file>`.
    `--reuse-coverage` reads the coverage step 1 wrote. Step 4 passes when every
-   changed function's row reads 0 under `Survived` and `Uncovered`, apart from
-   survivors and uncovered sites this section has you report to the project
-   owner.
-   - Never judge step 4 by its exit code: exit 3 means a mutant survived
+   changed function's row reads 0 under `Survived` and `Uncovered`. A survivor
+   or uncovered site that this section has you report to the project owner
+   does not count.
+   - Never judge step 4 by its exit code. Exit 3 means a mutant survived
      anywhere in the file, and a run with uncovered sites exits 0.
-   - If the run exits 2, the baseline tests failed: fix them, which is a step
-     edit.
-   - If a changed function has an uncovered site, add a test that runs the
-     site, unless the function is untestable.
+   - If the run exits 2, the baseline tests failed. Fix the baseline tests,
+     which is a step edit.
+   - If a changed function that is not untestable has an uncovered site, add
+     a test that runs the site.
    - If a test can kill a survivor, add or strengthen that test.
    - If no test can kill a survivor and removing the code it mutates keeps the
      behavior, remove that code.
    - Otherwise, tell the project owner which mutant survived and why no test
      can kill it.
 
-**If a change edits an untestable function, move its logic into functions that
-tests reach until the untestable function has complexity 2 or less**, the most
-that scores 8 or less at 0% coverage. Then tell the project owner which of the
-untestable function's sites step 4 reports as uncovered.
+**If a change edits an untestable function, move the function's logic into
+functions that tests reach.** Move logic out until the untestable function has
+complexity 2 or less. Complexity 2 is the most that scores 8 or less at 0%
+coverage. Then tell the project owner which of the untestable function's sites
+step 4 reports as uncovered.
 
 **After a step edit, run `nix develop -c cargo fmt`, then restart the completion
-steps from step 1.** Restart even when the step edit touched test code only:
-`crapper` is the only coverage check for a function with no mutation sites.
+steps from step 1.**
 
-- If the step edit changed only test code, skip each step 3 or step 4 run that
-  passed with the current production code, unless the step 4 run is for a
-  changed file the edited tests cover.
-- If the step edit rewrote or deleted an existing test, add `--mutate-all` to
-  the next step 4 run of each changed file that test covered: a rerun keeps
-  every kill recorded for a function whose text did not change.
+- If the step edit changed only test code:
+  - Still restart from step 1. `crapper` is the only coverage check for a
+    function with no mutation sites.
+  - Skip each step 3 or step 4 run that passed on the current production code.
+  - Never skip a step 4 run for a changed file that the edited tests cover.
+- If the step edit rewrote or deleted an existing test, find each changed file
+  that test covered. Add `--mutate-all` to the next step 4 run of each such
+  file. Without the flag, a rerun keeps every kill recorded for a function
+  whose text did not change.
 
 **If a step edit happened since the Commands last passed, run the Commands again
-once the completion steps pass:** none of the metrics tools runs `clippy`.
+after the completion steps pass.** None of the metrics tools runs `clippy`.
 
 ## Layout
 
@@ -534,67 +819,401 @@ once the completion steps pass:** none of the metrics tools runs `clippy`.
 
 ## Layout rules
 
-- One primary type per file, named after it in snake case. Supporting types owned by the primary type live in the same file. Unit tests live inline. `mod.rs` declares and re-exports only. The tree in this file is the file contract: every listed file exists and holds its one type, and primary types are never merged into one file. Source files target under 200 lines excluding tests, and the files under `src/test_support/` count as tests. When one outgrows that, extract its largest behavior-bearing type into its own file. A file may stay over the target when its primary type is the only behavior-bearing type left in it. The types the next rule places in `cli.rs` stay there even when that keeps the file over the target. Never split one type's own behavior across new collaborators only to meet the target. A commit that adds a file under `src/` that the tree does not list, or moves, renames, or removes a listed file, updates the tree in this file in the same commit.
-- `cli.rs` owns the clap argument structs (`ListArgs`, `NewArgs`, and so on) as support types of `Cli`. They get no files of their own.
-- Prefer a separate file for a type that is used across modules, carries behavior or invariants, and changes for its own reasons. Merging files later is mechanical, and splitting a file that grew is disruptive. The reverse also holds: do not invent files for types that need none.
+### Files
+
+- **Put one primary type in each file, and name the file after that type in snake case.**
+- Supporting types that the primary type owns live in the same file.
+- Unit tests live inline.
+- A `mod.rs` file only declares and re-exports.
+- **The Layout tree is the file contract.** Every listed file exists and holds its one primary type.
+- Never merge primary types into one file.
+- If a commit adds or removes a file under `src/`, update the Layout tree in that commit. A move or a rename counts as both.
+
+### File size
+
+**The size target of a source file is 200 lines, excluding tests.** The files under `src/test_support/` count as tests.
+
+- If a file passes the size target, extract its largest behavior-bearing type into its own file.
+- If a file's only behavior-bearing type is its primary type, the file MAY stay over the size target.
+- Even if the clap argument structs keep `cli.rs` over the size target, they stay in `cli.rs`.
+- Never split one type's own behavior across new collaborators only to meet the size target.
+
+### Which types get a file
+
+**If a type meets all three tests below, give the type its own file.** Merging files later is mechanical, and splitting a file that grew is disruptive.
+
+- The type is used across modules.
+- The type carries behavior or invariants.
+- The type changes for its own reasons.
+
+**Otherwise, keep the type in its primary type's file, with no tree entry.** Such support types include a parser result, a doctor finding, a session spec, and a dialog's in-progress state.
+
+- `cli.rs` owns every clap argument struct, such as `ListArgs` and `NewArgs`, as a support type of `Cli`.
 - `src/test_support/` is `#[cfg(test)]` only and never appears in the binary. It holds the hand-written doubles and fixtures that tests across modules share.
-- Other support types, such as a parser result, a doctor finding, a session spec, or a dialog's in-progress state, live in their primary type's file and get no tree entry.
-- No code below `main` calls `std::env::current_exe`, reads the process environment (including `$TMUX`, `$TMUX_PANE`, `$HOME`, and `$SHELL`) or the process cwd, resolves XDG paths, or asks which terminal standard input is. `main` reads them once and injects them, with environment values in the `ProcessEnvironment` snapshot. `ProcessEnvironment::capture` reads the terminal name of standard input with `libc::ttyname_r` on descriptor 0, in the type's only `unsafe` block.
-- Every `unsafe` block carries one `// SAFETY:` comment that states why the call is sound, and is confined to one adapter method.
-- Every tmux target is exact: `=<session>:` from `TmuxScripts::exact`, a session id, a window id, or a pane id. tmux reads `=$0:` as the session whose id is `$0`, so a session whose name starts with `$` is targeted by its own id, which `TmuxMultiplexer` looks up by name. Never pass a bare `-t <name>`, because tmux resolves a name with no exact match by prefix, so `fix` would reach `fix-auth`. Every `new-session`, `new-window`, and `respawn-window` passes `-c` with the worktree, because without `-c` tmux starts the pane in the caller's directory and still exits 0. A command Ringleader sends gets its `-c` from `TmuxScripts::start_in`. A binding in the generated config passes `-c '#{session_path}'`, because the config is rendered before any session exists and `create_session` starts each session in its worktree.
+
+### Process inputs
+
+**No code below `main` does any of these:**
+
+- call `std::env::current_exe`
+- read the process environment. The process environment includes `$TMUX`, `$TMUX_PANE`, `$HOME`, and `$SHELL`.
+- read the process working directory
+- resolve XDG paths
+- ask which terminal standard input is
+
+`main` reads these inputs once and injects them. Environment values travel in the `ProcessEnvironment` snapshot.
+
+`ProcessEnvironment::capture` reads the terminal name of standard input with `libc::ttyname_r` on descriptor 0. That call is the type's only `unsafe` block.
+
+- Every `unsafe` block carries one `// SAFETY:` comment that states why the call is sound.
+- Confine each `unsafe` block to one adapter method.
+
+### tmux targets
+
+**Every tmux target is exact.** An exact target is one of these:
+
+- `=<session>:` from `TmuxScripts::exact`
+- a session id
+- a window id
+- a pane id
+
+- If a session's name starts with `$`, target the session by its id. tmux reads `=$0:` as the session whose id is `$0`.
+- `TmuxMultiplexer` looks up a session's id by its name.
+- Never pass a bare `-t <name>`: tmux resolves a name with no exact match by prefix. A bare `-t fix` would reach `fix-auth`.
+- Every `new-session`, `new-window`, and `respawn-window` passes `-c` with the worktree. Without `-c`, tmux starts the pane in the caller's directory and still exits 0.
+- A command Ringleader sends gets its `-c` from `TmuxScripts::start_in`.
+- A binding in the generated config passes `-c '#{session_path}'`. Ringleader renders the config before any session exists, and `create_session` starts each session in its worktree.
 
 ## Wiring
 
-- `main.rs` holds `fn main` and `CompositionRoot`, whose methods build the adapters, the `SessionService`, and the TUI or the CLI run. Argument parsing and dispatch stay in `Cli`.
-- `ringleader` with no subcommand opens the TUI. Any subcommand runs the CLI and never starts the TUI. The hidden `__exec-agent` path loads no config, opens no log, and takes no lock.
-- The TUI takes the lifetime lock, and the mutating commands (`new`, `delete`, `rename`, `restart`, `repo add`, `repo remove`) take the write lock. `list`, `doctor`, `attach`, `repo list`, and `__exec-agent` take no lock.
-- A session's branch is its name, and its tmux session is the tmux prefix followed by its name. Create and rename never record a branch that differs from the name, and rename always moves the branch with the name. Rename refuses a branch that has been pushed, because the remote branch and any pull request keep the old name, and it never moves the worktree, because the running agent and its transcripts are keyed by that path. A session recorded on another branch, from before the branch prefix was dropped, from an adopted tmux session, or from a tmux session renamed by hand, keeps working. When its branch is marked and not pushed, `doctor` warns about it, and renaming it to a new name moves its branch.
-- Key bindings come only from the generated config of the private tmux server, which `create_session` writes, and which the TUI at start, `new`, and `restart` re-source on the running server when its `@ringleader_config` hash differs from the current render, and `r` re-sources whenever the server runs, since a `tmux source-file` run from a pane changes the server without changing that hash. Only lock holders do either, so only one process ever writes that config, and the reapply is skipped while the config failed to load. Every tmux call passes `-S <private socket>` and `-f`, so Ringleader never reads or writes the user's tmux server. An entry recorded on another socket is checked only through `/proc`. The TUI and the CLI attach through the same foreground child.
-- Blocking TUI operations (create, delete, rename, restart, merge, and the delete measurement) run behind a busy message, and the event loop drops the key and paste events queued while they ran.
-- **No background job blocks input.** A background job is a `Pending` worker that runs the tmux, git, or gh calls of one observation, preview capture, diff measurement, or pull request lookup for the TUI. An observation is one tmux listing of every session, which the TUI reconciles with the registry. A background job is in flight from its start until the event loop collects it. The event loop collects finished observations, preview captures, and diff measurements on every wake. The event loop starts and collects pull request lookups only on its 100 millisecond tick. While an observation, a preview capture, or a diff measurement is in flight, the event loop wakes every 16 milliseconds. A pull request lookup never shortens the event loop's wait: a lookup may run up to 20 seconds for each repo. A preview capture is shown only under the row the capture was taken for.
-- **A synchronous observation is an observation the TUI runs on its own thread instead of as a background job.** The TUI runs a synchronous observation before its first frame: without one, the first frame and the keys typed at launch see no sessions. The TUI runs a synchronous observation after every attach, shell, reload, and blocking operation. A synchronous observation drops any observation in flight: an observation listed before a delete would bring the deleted session back. A synchronous observation restarts the `state_poll_ms` interval.
-- Diff measurements read git through their own `GitWorkspace`, which `CompositionRoot` hands `RepoPorts::with_diff_workspace` and whose reads share the 5 second diff deadline, so a slow repo keeps a measurement in flight, and the event loop on its 16 millisecond wakes, for at most 5 seconds per git call. Create, pull, and the other use cases read under the 60 second deadline.
-- `p` pulls: it merges origin's copy of a session's base branch into its worktree. It runs only on a `Waiting` session whose agent is at its prompt, by the conditions below, and whose worktree has no uncommitted changes and is on the session's branch, so the merge never changes files under a turn that is still running. The branch is the base branch the session recorded from `--base-branch`, else the repo's configured `base_branch`, without any `origin/` prefix. Without either, it is origin's default, else the first of `origin/main` and `origin/master` that exists, skipping `main` and `master` when a session works on them. Unlike the diff, which looks for `main` and `master` locally, it looks for them on origin. It fetches only that branch. When origin no longer has the recorded branch and no local branch of that name is left, as after it landed and its session was deleted, the pull fetches the configured branch or origin's default instead. While a local branch of that name is left, it refuses, since an unpushed base would otherwise give way to origin's default. It refuses when origin has no branch by the name it fetches. It never deletes origin's copy of a branch origin dropped: that copy can be the last ref holding commits. It refuses when the branch does not hold the commit the session started from, which catches a session that started from another branch, such as one created with `--base-branch` before sessions recorded it, only once that branch has moved away from the merged one, observes the session again and checks the guards on that fresh state, so the fetch's network time stays outside the window they close, merges it with `--no-edit`, and when the merge stops on conflicts it leaves the merge in progress and types one line into the agent naming the first 20 conflicted paths, counting the rest, and asking it to resolve them and commit. It refuses a worktree with staged changes or a merge already in progress, so a merge that then fails without conflicts, such as a merge commit a hook refuses or a merge killed at its deadline before git recorded it, is undone with `git merge --abort` or `git reset --merge HEAD`, unless its merge commit had already landed, as when a slow `post-merge` hook is killed, which is kept and reported as landed. The line goes through `type_if_ready`, so an agent that left its prompt is not typed into, and the status bar says so as an error.
-- A dialog's hint line lists only keys whose meaning is Ringleader's own, such as `Enter create`, `Ctrl-S create`, and `Esc cancel`, and the keys that choose from a list, such as `↑ ↓ j k choose`. It never lists text-editing keys like cursor movement, Ctrl-U, or Ctrl-W, because every terminal user already expects them. A new editing key goes into `TextField` with its usual terminal meaning, not into a hint.
-- Logs go to `$XDG_STATE_HOME/ringleader/app.log` through `env_logger`, never to the terminal.
-- A session's scratch directory is `$XDG_CACHE_HOME/ringleader/tmp/<hash>`, where the hash is the FNV-1a hash of the recorded worktree path folded to 8 hex digits. Keep that path short: tools put unix sockets under `TMPDIR`, and a socket path cannot pass 107 bytes. The scratch root is never `/tmp` or Ringleader's own `TMPDIR`: systemd ages `/tmp` under an idle agent, `/tmp` can be `noexec` or small, and `TMPDIR` differs between the process that creates a session and the one that deletes it, since every agent's `TMPDIR` is its own scratch directory and `nix develop` exports a new `TMPDIR` per shell. Create and restart make the scratch directory and start the agent with `TMPDIR` set to it, unless the agent's `set_env` sets `TMPDIR`. Delete removes the scratch directory after the worktree, and forget keeps it. Delete keeps a scratch directory that holds a mount point, and keeps every scratch directory while the mount table cannot be read, because removing a directory that holds a mount point would delete the files of the mounted filesystem. A failure to make or remove a scratch directory is logged and never fails the use case. If making it fails, the agent starts with the inherited `TMPDIR`.
-- A direnv launch starts the agent as `direnv exec <worktree> <agent command> <agent args>`, and a plain launch starts it without direnv. Create and restart, both the respawn of an Exited session and the recreation of a Stopped one, choose the launch by the first case that matches:
-  1. If the worktree has no `.envrc`, or `direnv` is not on Ringleader's `PATH`, do a plain launch with no warning. `DirenvDirectoryEnvironment::when_installed` gives `CompositionRoot` a `NullDirectoryEnvironment` when `direnv` is missing.
-  2. If direnv reports the worktree's `.envrc` as allowed, do a direnv launch.
-  3. If direnv reports the worktree's `.envrc` as denied, do a plain launch with no warning. Never allow a denied `.envrc`: `direnv deny <worktree>` is how a user keeps one session's agent off it.
-  4. If the worktree's `.envrc` is byte-identical to the `.envrc` of the session's repo path, and direnv reports that `.envrc` as allowed, run `direnv allow <worktree>`, then do a direnv launch.
-  5. Otherwise, do a plain launch and warn that the worktree's `.envrc` is not allowed and the agent started without it, naming the worktree and telling the user to review the `.envrc` and run `direnv allow <worktree>`.
-- Never run `direnv allow` on an `.envrc` that differs from the repo path's `.envrc` by any byte, including when the repo path has none: a branch can change its `.envrc`, and allowing the changed file runs code the user has not reviewed. If `direnv allow` fails, do a plain launch and warn with direnv's error. A warning never fails the create or the restart: `new` and `restart` print it on stderr and exit 0, and the TUI shows it in the status bar.
-- Ringleader's `direnv status` and `direnv allow` calls run with only the baseline variables every agent starts with, `HOME` and `XDG_*` among them, so an `.envrc` the user allowed in their own shell counts as allowed. The `direnv exec` in the agent's pane runs with the inherited variables: the baseline variables and each variable the agent's `env` list names that Ringleader's environment sets. The `.envrc` load therefore sees those `env` values, and an `env` list that names a set `DIRENV_CONFIG` gives the load a direnv config those calls do not read.
-- In a direnv launch, the launcher in the agent pane writes a second handoff file and execs `direnv exec <worktree> ringleader __exec-agent --handoff <second file>` with the inherited variables only. Every handoff write, CLI command, and TUI start deletes the handoff files older than 60 seconds, but keeps a second handoff file while the process that wrote it runs, because `direnv exec` keeps that process through the `.envrc` load, which can outlast 60 seconds. The second launcher runs inside the environment the `.envrc` produced and execs the agent with the explicit variables on top: each variable the agent's `env` list names that Ringleader's environment sets, the `SHELL` Ringleader started with, the agent's `set_env` values, and the `TMPDIR` of the scratch directory. The explicit variables keep `SHELL` because a dev shell exports its own non-interactive bash, which would replace the user's shell. Every other variable, including `PATH`, keeps the value the `.envrc` produced. Each step execs the next, so the agent stays the pane's own process. The `t` shell never loads the `.envrc`. Rename keeps the running agent and its environment.
-- `AgentHooks` schedules an agent's `startup_input` in the background after create and restart, so the use case returns once the tmux session exists. One typing job runs per session at a time, and a second start for the same session is skipped. The job finds the agent pane once when it starts, then checks only the prompt conditions below before each line. It never rechecks the session's name or registry entry, so a rename during its wait does not reach it. The job waits up to 60 seconds for the first prompt, and each later line waits up to 2 seconds for the prompt to come back, after a short pause that lets the agent take the line before it. Every typed line is sent as its text, then Enter 300 milliseconds later: an agent reads text and an Enter that arrive together as a paste and keeps the Enter in its draft, so the line is never submitted. The TUI polls the job while it runs. On exit, the CLI after its command and the TUI after restoring the screen release the lock, note the wait on stderr, and wait for the job unless a signal arrives. Its `rename_input` is typed after a rename only when the agent is at its prompt at that moment. An agent is at its prompt when its pane is out of copy mode, shows the cursor, and the text before the cursor on its row is a bare prompt marker and a blank, with no letters or digits. Copy mode would take the keys instead of the agent. Claude hides the cursor in its trust and permission dialogs, an agent still starting has drawn no marker, and an unsent draft puts its text before the cursor. A skipped or failed typing is logged and never fails the use case.
+### Entry points
+
+- `main.rs` holds `fn main` and `CompositionRoot`.
+- `CompositionRoot`'s methods build the adapters, the `SessionService`, and the TUI or CLI run.
+- Argument parsing and dispatch stay in `Cli`.
+- `ringleader` with no subcommand opens the TUI.
+- Any subcommand runs the CLI and never starts the TUI.
+- The hidden `__exec-agent` path loads no config, opens no log, and takes no lock.
+
+### Locks
+
+| Entry point | Lock it takes |
+| --- | --- |
+| The TUI | The lifetime lock |
+| `new` | The write lock |
+| `delete` | The write lock |
+| `rename` | The write lock |
+| `restart` | The write lock |
+| `repo add` | The write lock |
+| `repo remove` | The write lock |
+| `list` | None |
+| `doctor` | None |
+| `attach` | None |
+| `repo list` | None |
+| `__exec-agent` | None |
+
+### Logs
+
+Logs go to `$XDG_STATE_HOME/ringleader/app.log` through `env_logger`.
+
+### Sessions and branches
+
+- **A session's branch is its name.** A session's tmux session is the tmux prefix followed by its name.
+- Create and rename never record a branch that differs from the session's name.
+- Rename always moves the branch with the name.
+- Rename refuses a branch that has been pushed: the remote branch and any pull request keep the old name.
+- Rename never moves the worktree: the running agent and its transcripts are keyed by the worktree path.
+- A session recorded on another branch keeps working. Such a session comes from one of these:
+  - a session created before the branch prefix was dropped
+  - an adopted tmux session
+  - a tmux session renamed by hand
+- If such a session's branch is marked and not pushed:
+  - `doctor` warns about the session.
+  - A rename of the session to a new name moves its branch.
+
+### Generated tmux config
+
+**Key bindings come only from the generated config of the private tmux server.** `create_session` writes the generated config.
+
+- If the running server's `@ringleader_config` hash differs from the current render, three callers re-source the generated config:
+  - the TUI at start
+  - `new`
+  - `restart`
+- `r` re-sources the generated config whenever the server runs. A `tmux source-file` run from a pane can change the server without changing the `@ringleader_config` hash.
+- Only a lock holder writes or re-sources the generated config, so only one process ever writes the generated config.
+- If `config.toml` failed to load, Ringleader skips every re-source.
+
+### Private tmux server
+
+- Every tmux call passes `-S <private socket>` and `-f`, so Ringleader never reads or writes the user's tmux server.
+- Ringleader checks a registry entry recorded on another socket only through `/proc`.
+- The TUI and the CLI attach through the same foreground child.
+
+### Blocking operations
+
+**The TUI runs each blocking operation behind a busy message.** The blocking operations are:
+
+- create
+- delete
+- rename
+- restart
+- pull
+- the delete measurement
+
+After a blocking operation, the event loop drops the key and paste events queued while the operation ran.
+
+### Background jobs
+
+**No background job blocks input.**
+
+A background job is a `Pending` worker that runs the tmux, git, or gh calls of one TUI task. The task is one of these:
+
+- an observation
+- a preview capture
+- a diff measurement
+- a pull request lookup
+
+- An observation is one tmux listing of every session. The TUI reconciles each observation with the registry.
+- A background job is in flight from its start until the event loop collects it.
+- The event loop collects finished observations, preview captures, and diff measurements on every wake.
+- The event loop starts and collects pull request lookups only on its 100 millisecond tick.
+- While an observation, a preview capture, or a diff measurement is in flight, the event loop wakes every 16 milliseconds.
+- A pull request lookup never shortens the event loop's wait: one lookup can take 20 seconds per repo.
+- The TUI shows a preview capture only under the row the capture was taken for.
+
+### Synchronous observations
+
+**A synchronous observation is an observation the TUI runs on its own thread instead of as a background job.**
+
+- The TUI runs a synchronous observation before its first frame. Without that observation, the first frame and the keys typed at launch see no sessions.
+- The TUI runs a synchronous observation after every attach, shell, reload, and blocking operation.
+- A synchronous observation drops any observation in flight: an observation listed before a delete would bring the deleted session back.
+- A synchronous observation restarts the `state_poll_ms` interval.
+
+### Diff measurements
+
+- Diff measurements read git through their own `GitWorkspace`. `CompositionRoot` hands that `GitWorkspace` to `RepoPorts::with_diff_workspace`.
+- Every read of the diff `GitWorkspace` has the 5 second diff deadline.
+- A slow repo therefore keeps a measurement in flight for at most 5 seconds per git call. The event loop stays on its 16 millisecond wakes for that time.
+- Create, pull, and the other use cases read under the 60 second deadline.
+
+### Pull
+
+**A pull merges origin's copy of a session's base branch into the session's worktree.** The `p` key starts a pull.
+
+**If any guard below fails, the pull refuses.** The guards keep the merge from changing files under a turn that is still running.
+
+- The session is `Waiting`.
+- The session's agent is at its prompt, as the Agent hooks section defines.
+- The worktree has no uncommitted changes.
+- The worktree is on the session's branch.
+
+**The pull fetches the first branch below that applies:**
+
+1. the base branch the session recorded from `--base-branch`
+2. the repo's configured `base_branch`
+3. origin's default branch
+4. the first of `origin/main` and `origin/master` that exists
+
+- The pull drops any `origin/` prefix from a recorded or configured base branch.
+- If a session works on `main` or `master`, case 4 skips that branch.
+- Unlike the diff, which looks for `main` and `master` locally, the pull looks for them on origin.
+- The pull fetches only the chosen branch.
+- If origin has no branch by the name the pull fetches, the pull refuses.
+- The pull never deletes origin's copy of a branch origin dropped: the copy can be the last ref holding commits.
+
+**If origin no longer has the recorded base branch, the pull checks for a local branch of that name.**
+
+- If a local branch of that name remains, the pull refuses. An unpushed base would otherwise give way to origin's default.
+- Otherwise, the pull falls back to cases 2 to 4. This case arises after the base branch landed and its session was deleted.
+
+**A pull runs these steps:**
+
+1. Check the guards.
+2. Fetch the base branch from origin.
+3. Observe the session again, and check the guards on that fresh state. The fetch's network time then stays outside the window the guards close.
+4. If the fetched branch does not hold the commit the session started from, refuse. This check catches a session that started from another branch only after that branch moves away from the fetched one.
+5. Merge the fetched branch with `--no-edit`.
+6. If the merge stops on conflicts, leave the merge in progress, and type the conflict line into the agent.
+7. If the merge fails without conflicts, undo the merge with `git merge --abort` or `git reset --merge HEAD`. A merge commit that a hook refuses fails this way. A merge killed at its deadline before git recorded it fails this way too.
+   - If the merge commit had already landed, keep the commit and report it as landed. A slow `post-merge` hook that gets killed leaves such a commit.
+
+The pull also refuses a worktree with staged changes or a merge already in progress. That refusal makes the undo in step 7 safe.
+
+**The conflict line names the first 20 conflicted paths and counts the rest.** The line asks the agent to resolve the conflicts and commit.
+
+- The pull types the conflict line through `type_if_ready`.
+- If the agent left its prompt, the pull types nothing and the status bar shows an error.
+
+### Hint lines
+
+**A dialog's hint line lists only two kinds of keys:**
+
+- keys whose meaning is Ringleader's own, such as `Enter create`, `Ctrl-S create`, and `Esc cancel`
+- keys that choose from a list, such as `↑ ↓ j k choose`
+
+A hint line never lists a text-editing key: every terminal user already expects those keys. Text-editing keys include cursor movement, `Ctrl-U`, and `Ctrl-W`.
+
+Add a new editing key to `TextField` with its usual terminal meaning, never to a hint.
+
+### Scratch directories
+
+**A session's scratch directory is `$XDG_CACHE_HOME/ringleader/tmp/<hash>`.** The hash is the FNV-1a hash of the recorded worktree path, folded to 8 hex digits.
+
+- Keep the scratch directory's path short: tools put unix sockets under `TMPDIR`, and a socket path cannot pass 107 bytes.
+- The scratch root is never `/tmp` or Ringleader's own `TMPDIR`, for these reasons:
+  - systemd ages `/tmp` under an idle agent.
+  - `/tmp` can be `noexec` or small.
+  - `TMPDIR` differs between the process that creates a session and the process that deletes it. Every agent's `TMPDIR` is its own scratch directory, and `nix develop` exports a new `TMPDIR` per shell.
+- Create and restart make the scratch directory. Unless the agent's `set_env` sets `TMPDIR`, they start the agent with `TMPDIR` set to the scratch directory.
+- If making the scratch directory fails, the agent starts with the inherited `TMPDIR`.
+- Delete removes the scratch directory after the worktree. Forget keeps the scratch directory.
+- Delete keeps a scratch directory that holds a mount point: removing it would delete the files of the mounted filesystem.
+- If the mount table cannot be read, delete keeps every scratch directory.
+- Ringleader logs a failure to make or remove a scratch directory. The failure never fails the use case.
+
+### direnv launches
+
+**A direnv launch starts the agent as `direnv exec <worktree> <agent command> <agent args>`.** A plain launch starts the agent without direnv.
+
+Create and restart choose the launch by the first case below that matches. Restart includes the respawn of an Exited session and the recreation of a Stopped one.
+
+1. If the worktree has no `.envrc`, or `direnv` is not on Ringleader's `PATH`, do a plain launch with no warning.
+2. If direnv reports the worktree's `.envrc` as allowed, do a direnv launch.
+3. If direnv reports the worktree's `.envrc` as denied, do a plain launch with no warning.
+4. If both conditions below hold, run `direnv allow <worktree>`, then do a direnv launch.
+   - The worktree's `.envrc` is byte-identical to the `.envrc` of the session's repo path.
+   - direnv reports the repo path's `.envrc` as allowed.
+5. Otherwise, do a plain launch and warn the user. The warning names the worktree and says that its `.envrc` is not allowed. The warning says that the agent started without that `.envrc`. The warning tells the user to review the `.envrc` and run `direnv allow <worktree>`.
+
+- If `direnv` is missing, `DirenvDirectoryEnvironment::when_installed` gives `CompositionRoot` a `NullDirectoryEnvironment`.
+- Never allow a denied `.envrc`: `direnv deny <worktree>` is how a user keeps one session's agent off that `.envrc`.
+- **Never run `direnv allow` on an `.envrc` that differs by any byte from the repo path's `.envrc`.** A branch can change its `.envrc`, and allowing the changed file runs code the user has not reviewed.
+- A repo path with no `.envrc` differs from every worktree `.envrc`.
+- If `direnv allow` fails, do a plain launch and warn with direnv's error.
+- A warning never fails the create or the restart. `new` and `restart` print the warning on stderr and exit 0. The TUI shows the warning in the status bar.
+
+### direnv variables
+
+| Term | Meaning |
+| --- | --- |
+| Baseline variables | The variables every agent starts with, including `HOME` and `XDG_*` |
+| Inherited variables | The baseline variables, plus each variable in the agent's `env` list that Ringleader's environment sets |
+| Explicit variables | The variables the second launcher sets on top of the `.envrc` environment, listed below |
+
+- Ringleader's `direnv status` and `direnv allow` calls run with only the baseline variables. An `.envrc` the user allowed in their own shell therefore counts as allowed.
+- The `direnv exec` in the agent's pane runs with the inherited variables. The `.envrc` load therefore sees the agent's `env` values.
+- If the agent's `env` list names a set `DIRENV_CONFIG`, the `.envrc` load reads that direnv config. Ringleader's `direnv status` and `direnv allow` calls do not read it.
+
+The explicit variables are:
+
+- each variable in the agent's `env` list that Ringleader's environment sets
+- the `SHELL` Ringleader started with
+- the agent's `set_env` values
+- the `TMPDIR` of the scratch directory
+
+### direnv launch steps
+
+1. The launcher in the agent pane writes a second handoff file.
+2. The launcher execs `direnv exec <worktree> ringleader __exec-agent --handoff <second file>` with only the inherited variables.
+3. The second launcher runs inside the environment the `.envrc` produced. The second launcher execs the agent with the explicit variables on top.
+
+- Each step execs the next, so the agent stays the pane's own process.
+- The explicit variables keep `SHELL`: a dev shell exports its own non-interactive bash, which would replace the user's shell.
+- Every other variable, including `PATH`, keeps the value the `.envrc` produced.
+- Every handoff write, CLI command, and TUI start deletes the handoff files older than 60 seconds.
+- The cleanup keeps a second handoff file while the process that wrote the file still runs. `direnv exec` keeps that process through the `.envrc` load, which can outlast 60 seconds.
+- The `t` shell never loads the `.envrc`.
+- Rename keeps the running agent and its environment.
+
+### Agent hooks
+
+**After create and restart, `AgentHooks` schedules the agent's `startup_input` in the background.** The use case returns once the tmux session exists. A typing job is the background work that types one agent's `startup_input`.
+
+- One typing job runs per session at a time. `AgentHooks` skips a second start for the same session.
+- The job finds the agent pane once, when the job starts. Before each line, the job checks only the prompt conditions below.
+- The job never rechecks the session's name or registry entry. A rename during the job's wait therefore does not reach the job.
+- The job waits up to 60 seconds for the first prompt.
+- Before each later line, the job pauses briefly so the agent can take the previous line. The job then waits up to 2 seconds for the prompt to come back.
+- The job sends each line as its text, then sends Enter 300 milliseconds later. An agent reads text and an Enter that arrive together as a paste. The agent then keeps the Enter in its draft and never submits the line.
+- The TUI polls the job while the job runs.
+- If the agent is at its prompt right after a rename, `AgentHooks` types the agent's `rename_input`. Otherwise, `AgentHooks` skips the `rename_input`.
+- Ringleader logs a skipped or failed typing. The typing never fails the use case.
+
+**On exit, the CLI and the TUI each run these steps.** The CLI runs them after its command, and the TUI runs them after restoring the screen.
+
+1. Release the lock.
+2. Note the wait on stderr.
+3. Wait for the typing job. If a signal arrives, stop waiting.
+
+**If all three conditions below hold, the agent is at its prompt:**
+
+| Condition | Reason |
+| --- | --- |
+| The pane is out of copy mode. | Copy mode would take the keys instead of the agent. |
+| The pane shows the cursor. | Claude hides the cursor in its trust and permission dialogs. |
+| The text before the cursor on its row is a bare prompt marker and a blank. That text holds no letters or digits. | An agent still starting has drawn no marker. An unsent draft puts its text before the cursor. |
 
 ## CLI exit codes
 
-- 0: success.
-- 1: a user or validation error, including an argument error, and any other failure.
-- 2: a session name that was not found.
-- 3: a conflict, including a refused guard, an `Unmanaged` target, a session that is live and healthy, or the lock being held.
+| Code | Meaning |
+| --- | --- |
+| 0 | Success |
+| 1 | A user or validation error, including an argument error, and any other failure |
+| 2 | A session name that was not found |
+| 3 | A conflict. Conflicts include a refused guard, an `Unmanaged` target, a live and healthy session, and a held lock. |
 
-A command interrupted by a signal before its use case starts never runs it, and one interrupted during its use case finishes it and then ends by that signal. One interrupted while it waits for queued startup input stops waiting, logs the abandoned input, and ends by that signal, though its use case succeeded.
+**If a signal interrupts a command, the command's behavior depends on when the signal arrives:**
+
+| The signal arrives | The command |
+| --- | --- |
+| Before its use case starts | Never runs the use case |
+| During its use case | Finishes the use case, then ends by that signal |
+| While it waits for queued startup input | Stops waiting, logs the abandoned input, and ends by that signal. The use case still succeeded. |
 
 ## Tests
 
-- All tests are unit tests inside `src/`, in `#[cfg(test)] mod tests` or `src/test_support/`. `tests/fixtures/` holds fixtures only, with fake data, and there are no `tests/*.rs` integration tests.
-- Application tests run against the hand-written fakes in `src/test_support/`, wired by `ServiceFixture`. There is no mocking crate. One concept per test, public interfaces only.
-- Git adapter tests run real git in `tempfile` repos with the hermetic git environment set on each `Command`, never through `std::env::set_var`.
-- tmux tests never skip. Each starts its own server through `TmuxTestServer` on a private socket under `/tmp` with the rendered generated config, or with a fixture config when the test is about the config itself, and builds its snapshot from the test process's own `PATH`. Tests that need a client hold a control-mode client, and they press keys through it with `send-keys -K -c <client>`, never with `send-keys -t <pane>`, which skips the key tables. The one exception types raw terminal bytes with `send-keys -t <pane> -H` into a pane of a second test server that holds a nested client, so the nested client's own parsing of those bytes is what gets tested.
-- UI tests render with `TestBackend` and drive `EventLoop` with scripted input, a recording screen mode, and a recording shell runner. No test calls crossterm or needs a terminal.
-- No test reads wall-clock time to classify a session, and tests read nothing from the process environment except their own `PATH`.
-- A constructor, accessor, or helper that only tests call carries `#[cfg(test)]`, so `cargo clippy --all-targets -- -D warnings` stays clean without any dead-code allowance.
+- All tests are unit tests inside `src/`, in `#[cfg(test)] mod tests` or `src/test_support/`.
+- `tests/fixtures/` holds only fixtures, with fake data.
+- Never write a `tests/*.rs` integration test.
+- Run application tests against the hand-written fakes in `src/test_support/`, wired by `ServiceFixture`.
+- Never add a mocking crate.
+- Test one concept per test.
+- Test only through public interfaces.
+- Git adapter tests run real git in `tempfile` repos with the hermetic git environment. Set that environment on each `Command`, never through `std::env::set_var`.
+- UI tests render with `TestBackend`.
+- UI tests drive `EventLoop` with scripted input, a recording screen mode, and a recording shell runner.
+- No test calls crossterm or needs a terminal.
+- No test reads wall-clock time to classify a session.
+- No test reads the process environment, except its own `PATH`.
+- Mark a constructor, accessor, or helper that only tests call with `#[cfg(test)]`: `cargo clippy --all-targets -- -D warnings` then stays clean without any dead-code allowance.
+
+### tmux tests
+
+- tmux tests never skip.
+- Each tmux test starts its own server through `TmuxTestServer`, on a private socket under `/tmp`.
+- The test server loads the rendered generated config. If the test is about the config itself, the test server loads a fixture config instead.
+- Each tmux test builds its snapshot from the test process's own `PATH`.
+- A test that needs a client holds a control-mode client.
+- Press keys through the control-mode client with `send-keys -K -c <client>`. Never press keys with `send-keys -t <pane>`, which skips the key tables.
+- Only a test of a nested client's own parsing MAY type raw terminal bytes with `send-keys -t <pane> -H`. That test types into a pane of a second test server that holds the nested client.
 
 ## Commits
 
-- Give each change one commit, made after the change is done as Commands defines it.
-- The title starts with a capital letter, uses the imperative mood, and stays under 72 characters. The body says what changed in plain language.
+- Give each change one commit. Make the commit after the change is done, as the Commands section defines done.
+- Start the title with a capital letter, write it in the imperative mood, and keep it under 72 characters.
+- Write the body in plain language, and say what changed.
 - Push only when the project owner asks.
 
 ## Documentation
 
-- `README.md` stays terse and human-facing: what Ringleader is, install, first run, the CLI synopsis, and the exit codes. No architecture and no agent instructions.
-- The repository holds no `CLAUDE.md` or `CLAUDE.local.md`, because either would hide this file from Claude Code. If one is ever needed, its first line is `@AGENTS.md`.
+- Keep `README.md` terse and human-facing.
+- `README.md` covers only these topics:
+  - what Ringleader is
+  - install
+  - first run
+  - the CLI synopsis
+  - the exit codes
+- Never put architecture or agent instructions in `README.md`.
+- This repository holds no `CLAUDE.md` or `CLAUDE.local.md`: either file would hide this file from Claude Code.
+- If one of those files is ever needed, make its first line `@AGENTS.md`.
