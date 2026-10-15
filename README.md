@@ -20,7 +20,6 @@ Linux only.
 ## Install
 
 ```sh
-nix run github:KarlHarnois/ringleader
 nix profile add github:KarlHarnois/ringleader
 ```
 
