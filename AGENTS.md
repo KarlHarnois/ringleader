@@ -505,11 +505,11 @@ The viewer still looks for a companion with `tmux has-session`. The `env` prefix
    Step 4 passes when every changed function's row reads 0 under `Survived`
    and `Uncovered`. A survivor or uncovered site that this section has you
    report to the project owner does not count.
+   - Give each step 4 run the longest timeout your shell allows.
    - Estimate each run's time with the step 4 run time at the top of this
-     section. Give the run a timeout of at least that estimate.
-   - If the estimate passes the longest timeout your shell allows, split the
-     run into smaller runs that fit.
-   - If one file's estimate alone passes that timeout, stop and show the
+     section. If twice the estimate passes that timeout, split the run into
+     smaller runs. The estimate is an average, and load slows a run.
+   - If twice one file's estimate alone passes that timeout, stop and show the
      estimate to the project owner.
    - Never start a step 4 run in the background. An edit made during a run
      reaches the mutant builds, or `mutator` overwrites it when the edited
