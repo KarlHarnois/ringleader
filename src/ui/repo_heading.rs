@@ -18,6 +18,7 @@ pub struct RepoHeading<'a> {
 }
 
 impl<'a> RepoHeading<'a> {
+    pub const LEAD_WIDTH: usize = 4;
     const LAST_NUMBERED: usize = 9;
     const UNNUMBERED: &'static str = " ";
     const UNFOLDED: char = '▾';
@@ -210,5 +211,16 @@ mod tests {
         let heading = RepoHeading::new(10, &rows);
 
         assert_eq!(HeadingFixture::text(&heading), "  ▾ alpha");
+    }
+
+    #[test]
+    fn every_repo_name_starts_after_the_lead_width() {
+        let rows = [HeadingFixture::row("docs", SessionState::Waiting)];
+
+        for number in [1, 10] {
+            let text = HeadingFixture::text(&RepoHeading::new(number, &rows));
+            let name: String = text.chars().skip(RepoHeading::LEAD_WIDTH).collect();
+            assert_eq!(name, "alpha");
+        }
     }
 }
