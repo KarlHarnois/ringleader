@@ -1009,6 +1009,19 @@ An observation is one tmux listing of every session. The TUI reconciles each obs
 - A slow repo therefore keeps a measurement in flight for at most 5 seconds per git call. The event loop stays on its 16 millisecond wakes for that time.
 - Create, pull, and the other use cases read under the 60 second deadline.
 
+### Restart
+
+**Restart revives an Exited or Stopped session in its worktree.**
+
+| State | Restart | The agent starts with |
+| --- | --- | --- |
+| Exited | Respawns the agent in the session's tmux session | The agent's `args` |
+| Stopped | Recreates the session's tmux session | The agent's `args`, then its `resume_args` |
+
+- A Stopped session lost its tmux server, such as to a reboot. `resume_args` resumes the conversation that the lost server cut off.
+- Never add `resume_args` to a respawn: a respawn is the fallback for a resume that found no conversation and exited.
+- Create never adds `resume_args`.
+
 ### Pull
 
 **A pull merges origin's copy of a session's base branch into the session's worktree.** The `p` key starts a pull.

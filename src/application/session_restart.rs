@@ -51,7 +51,7 @@ impl SessionRestart {
         let envrc = self
             .envrc
             .choose(session.worktree_path(), session.repo_path());
-        let launch = envrc.applied_to(self.scratch.prepare(Self::launch(agent, session)));
+        let launch = envrc.applied_to(self.scratch.prepare(Self::launch(agent, row)));
         let restarted = self.revive(row, launch, reconciliation, config)?;
         self.hooks.after_start(&restarted, agent);
         Ok(StartOutcome::new(restarted, envrc.warning()))
@@ -67,9 +67,18 @@ impl SessionRestart {
         Ok(())
     }
 
-    fn launch(agent: &Agent, session: &Session) -> AgentLaunch {
-        let argv = agent.restart_argv(session.name());
-        AgentLaunch::for_agent(agent, argv, session.worktree_path())
+    fn launch(agent: &Agent, row: &ManagedRow) -> AgentLaunch {
+        let argv = Self::argv(agent, row);
+        AgentLaunch::for_agent(agent, argv, row.session().worktree_path())
+    }
+
+    fn argv(agent: &Agent, row: &ManagedRow) -> Vec<String> {
+        let name = row.session().name();
+        if row.is_live() {
+            agent.restart_argv(name)
+        } else {
+            agent.resume_argv(name)
+        }
     }
 
     fn revive(
@@ -178,6 +187,16 @@ mod tests {
                 .pop()
                 .unwrap()
                 .loads_envrc()
+        }
+
+        fn resuming_config() -> Config {
+            let agent = ServiceFixture::agent().with_resume_args(&["--continue".to_string()]);
+            ServiceFixture::config().with_agents(vec![agent])
+        }
+
+        fn recreated_argv(fixture: &ServiceFixture) -> Vec<String> {
+            let spec = fixture.multiplexer().specs().pop().unwrap();
+            spec.launch().argv().to_vec()
         }
 
         fn restart(fixture: &ServiceFixture) -> Result<(), ServiceError> {
@@ -399,6 +418,42 @@ mod tests {
             ServiceFixture::CREATED_AT
         );
         assert!(fixture.workspace().state_changing_calls().is_empty());
+    }
+
+    #[test]
+    fn a_stopped_session_is_recreated_with_the_agent_resume_args() {
+        let fixture = RestartFixture::stopped().with_config(RestartFixture::resuming_config());
+
+        RestartFixture::restart(&fixture).unwrap();
+
+        assert_eq!(
+            RestartFixture::recreated_argv(&fixture),
+            ["claude", "--continue"]
+        );
+    }
+
+    #[test]
+    fn an_exited_session_is_respawned_without_the_agent_resume_args() {
+        let fixture = RestartFixture::exited().with_config(RestartFixture::resuming_config());
+
+        RestartFixture::restart(&fixture).unwrap();
+
+        let launch = fixture.multiplexer().launches().pop().unwrap();
+        assert_eq!(launch.argv(), ["claude"]);
+    }
+
+    #[test]
+    fn a_stopped_session_recreated_through_its_envrc_keeps_the_resume_args() {
+        let fixture = RestartFixture::stopped()
+            .with_config(RestartFixture::resuming_config())
+            .with_directory_environment(ServiceFixture::allowed_envrc("fix-auth"));
+
+        RestartFixture::restart(&fixture).unwrap();
+
+        assert_eq!(
+            RestartFixture::recreated_argv(&fixture),
+            ["claude", "--continue"]
+        );
     }
 
     #[test]

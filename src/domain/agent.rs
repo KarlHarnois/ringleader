@@ -10,6 +10,7 @@ pub struct Agent {
     env_assignments: Vec<(String, String)>,
     prompt_args: Vec<String>,
     plan_args: Vec<String>,
+    resume_args: Vec<String>,
     startup_input: Vec<String>,
     rename_input: Vec<String>,
 }
@@ -70,6 +71,7 @@ impl Agent {
             env_assignments: Vec::new(),
             prompt_args: Vec::new(),
             plan_args: Vec::new(),
+            resume_args: Vec::new(),
             startup_input: Vec::new(),
             rename_input: Vec::new(),
         }
@@ -109,6 +111,13 @@ impl Agent {
     pub fn with_plan_args(self, args: &[String]) -> Self {
         Self {
             plan_args: args.to_vec(),
+            ..self
+        }
+    }
+
+    pub fn with_resume_args(self, args: &[String]) -> Self {
+        Self {
+            resume_args: args.to_vec(),
             ..self
         }
     }
@@ -195,6 +204,12 @@ impl Agent {
         argv
     }
 
+    pub fn resume_argv(&self, session: &SessionName) -> Vec<String> {
+        let mut argv = self.restart_argv(session);
+        argv.extend(Self::named(&self.resume_args, session));
+        argv
+    }
+
     pub fn startup_input(&self, session: &SessionName) -> Vec<String> {
         Self::named(&self.startup_input, session)
     }
@@ -255,6 +270,10 @@ mod tests {
 
         fn planning() -> Agent {
             Self::with_template(&["{prompt}"]).with_plan_args(&Self::words(&["--mode", "plan"]))
+        }
+
+        fn resuming() -> Agent {
+            Self::named().with_resume_args(&Self::words(&["--continue", "--title={name}"]))
         }
 
         fn session() -> SessionName {
@@ -408,6 +427,50 @@ mod tests {
     #[test]
     fn the_name_placeholder_expands_in_args_on_restart() {
         let argv = AgentFixture::named().restart_argv(&AgentFixture::session());
+
+        assert_eq!(argv, ["example-agent", "--name", "fix-auth"]);
+    }
+
+    #[test]
+    fn resume_puts_the_resume_args_after_the_args_with_the_name_expanded() {
+        let argv = AgentFixture::resuming().resume_argv(&AgentFixture::session());
+
+        assert_eq!(
+            argv,
+            [
+                "example-agent",
+                "--name",
+                "fix-auth",
+                "--continue",
+                "--title=fix-auth"
+            ]
+        );
+    }
+
+    #[test]
+    fn restart_leaves_out_the_resume_args() {
+        let argv = AgentFixture::resuming().restart_argv(&AgentFixture::session());
+
+        assert_eq!(argv, ["example-agent", "--name", "fix-auth"]);
+    }
+
+    #[test]
+    fn launch_leaves_out_the_resume_args() {
+        let argv = AgentFixture::resuming().launch_argv(
+            &AgentFixture::session(),
+            AgentMode::Build,
+            "fix the tests",
+        );
+
+        assert_eq!(
+            argv,
+            ["example-agent", "--name", "fix-auth", "fix the tests"]
+        );
+    }
+
+    #[test]
+    fn resume_without_resume_args_is_a_restart() {
+        let argv = AgentFixture::named().resume_argv(&AgentFixture::session());
 
         assert_eq!(argv, ["example-agent", "--name", "fix-auth"]);
     }
