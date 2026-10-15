@@ -506,8 +506,11 @@ The viewer still looks for a companion with `tmux has-session`. The `env` prefix
    and `Uncovered`. A survivor or uncovered site that this section has you
    report to the project owner does not count.
    - Estimate each run's time with the step 4 run time at the top of this
-     section. If the estimate passes your shell's time limit for one command,
-     split the run into smaller runs that fit.
+     section. Give the run a timeout of at least that estimate.
+   - If the estimate passes the longest timeout your shell allows, split the
+     run into smaller runs that fit.
+   - If one file's estimate alone passes that timeout, stop and show the
+     estimate to the project owner.
    - Never start a step 4 run in the background. An edit made during a run
      reaches the mutant builds, or `mutator` overwrites it when the edited
      file's mutants finish.
