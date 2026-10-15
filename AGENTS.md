@@ -505,6 +505,11 @@ The viewer still looks for a companion with `tmux has-session`. The `env` prefix
    Step 4 passes when every changed function's row reads 0 under `Survived`
    and `Uncovered`. A survivor or uncovered site that this section has you
    report to the project owner does not count.
+   - Estimate each run's time with the step 4 run time at the top of this
+     section. If the estimate passes the time limit your shell puts on one
+     command, start the run in the background.
+   - If your shell cannot run commands in the background, split the run into
+     smaller runs that fit the limit.
    - Never judge step 4 by its exit code. Exit 3 means a mutant survived
      anywhere in `<files>`, and a run with uncovered sites exits 0.
    - If the run exits 2, the baseline tests failed. Fix the baseline tests,
