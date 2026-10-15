@@ -405,7 +405,6 @@ nix flake check
 
 `ProcessEnvironment::capture` reads the terminal name of standard input with `libc::ttyname_r` on descriptor 0. That call is the type's only `unsafe` block.
 
-- Every `unsafe` block carries one `// SAFETY:` comment that states why the call is sound.
 - Confine each `unsafe` block to one adapter method.
 
 ### tmux targets
