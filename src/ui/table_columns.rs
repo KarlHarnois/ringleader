@@ -10,6 +10,7 @@ pub struct TableColumns {
 
 impl TableColumns {
     pub const MINIMUM_NAME_WIDTH: usize = 12;
+    pub const NAME_COLUMN: usize = Self::INDICATOR_WIDTH + Self::INDICATOR_GAP.len();
     const INDICATOR_WIDTH: usize = 1;
     const INDICATOR_GAP: &'static str = " ";
     const COLUMN_GAP: &'static str = "  ";
@@ -61,26 +62,33 @@ impl TableColumns {
         self
     }
 
-    pub fn header(&self) -> String {
+    pub fn header(&self, lead: usize, name_title_column: usize) -> String {
         let titles = RowCells::new(Self::NAME_TITLE)
             .with_agent(Self::AGENT_TITLE)
             .with_pull_request(Self::PULL_REQUEST_TITLE)
             .with_diff(Self::DIFF_TITLE);
-        format!("{}{}", " ".repeat(Self::INDICATOR_WIDTH), self.row(&titles))
+        let name_end = lead + Self::NAME_COLUMN + self.name;
+        let name_title =
+            Self::fit_text(Self::NAME_TITLE, name_end.saturating_sub(name_title_column));
+        let indent = " ".repeat(name_title_column);
+        format!("{indent}{name_title}{}", self.optional_text(&titles))
     }
 
     pub fn row(&self, cells: &RowCells) -> String {
-        let mut text = format!("{}{}", Self::INDICATOR_GAP, self.name_cell(&cells.name));
-        for (width, cell) in self.optional_cells(cells) {
-            text.push_str(Self::COLUMN_GAP);
-            text.push_str(&Self::fit_text(cell, width));
-        }
+        let name = self.name_cell(&cells.name);
+        let text = format!("{}{name}{}", Self::INDICATOR_GAP, self.optional_text(cells));
         let width = self.inner_width.saturating_sub(Self::INDICATOR_WIDTH);
         format!("{text:<width$}")
     }
 
     pub fn name_cell(&self, name: &str) -> String {
         Self::fit_text(name, self.name)
+    }
+
+    fn optional_text(&self, cells: &RowCells) -> String {
+        self.optional_cells(cells)
+            .map(|(width, cell)| format!("{}{}", Self::COLUMN_GAP, Self::fit_text(cell, width)))
+            .collect()
     }
 
     fn optional_cells<'c>(&self, cells: &'c RowCells) -> impl Iterator<Item = (usize, &'c str)> {
@@ -104,7 +112,7 @@ impl TableColumns {
             .flatten();
         let column_gap = Self::COLUMN_GAP.chars().count();
         let optional_width: usize = optional.map(|width| width + column_gap).sum();
-        Self::INDICATOR_WIDTH + Self::INDICATOR_GAP.chars().count() + self.name + optional_width
+        Self::NAME_COLUMN + self.name + optional_width
     }
 
     fn fit_text(text: &str, width: usize) -> String {
@@ -210,6 +218,13 @@ mod tests {
         fn row_with_agent(inner_width: usize) -> String {
             Self::fitted_with_agent(inner_width).row(&Self::cells(Self::NAME))
         }
+
+        fn header(columns: &TableColumns) -> String {
+            columns
+                .header(0, TableColumns::NAME_COLUMN)
+                .trim_end()
+                .to_string()
+        }
     }
 
     #[test]
@@ -266,7 +281,7 @@ mod tests {
         let columns = ColumnsFixture::fitted_with_agent(41);
 
         assert_eq!(
-            columns.header().trim_end(),
+            ColumnsFixture::header(&columns),
             "  Name          Agent   PR    Diff"
         );
     }
@@ -275,13 +290,26 @@ mod tests {
     fn the_header_names_each_shown_column() {
         let columns = ColumnsFixture::fitted(32, ColumnsFixture::NAME);
 
-        assert_eq!(columns.header().trim_end(), "  Name          Diff");
+        assert_eq!(ColumnsFixture::header(&columns), "  Name          Diff");
     }
 
     #[test]
     fn a_wide_header_names_the_pull_request_column() {
         let columns = ColumnsFixture::fitted(33, ColumnsFixture::NAME);
 
-        assert_eq!(columns.header().trim_end(), "  Name          PR    Diff");
+        assert_eq!(
+            ColumnsFixture::header(&columns),
+            "  Name          PR    Diff"
+        );
+    }
+
+    #[test]
+    fn the_name_title_can_start_inside_the_lead() {
+        let columns = ColumnsFixture::fitted(33, ColumnsFixture::NAME);
+
+        assert_eq!(
+            columns.header(5, 4).trim_end(),
+            "    Name             PR    Diff"
+        );
     }
 }

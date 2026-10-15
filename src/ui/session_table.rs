@@ -9,6 +9,7 @@ use super::colored_row::ColoredRow;
 use super::empty_state::EmptyState;
 use super::home_view::LayoutTier;
 use super::list_selection::ListSelection;
+use super::repo_heading::RepoHeading;
 use super::session_tree::{SessionTree, TreeBranch, TreeLine};
 use super::state_indicator::StateIndicator;
 use super::table_columns::{RowCells, TableColumns};
@@ -91,7 +92,7 @@ impl<'a> SessionTable<'a> {
     }
 
     fn header(&self, columns: &TableColumns) -> String {
-        format!("{}{}", " ".repeat(self.branch_width()), columns.header())
+        columns.header(self.branch_width(), self.name_title_column())
     }
 
     fn branch_width(&self) -> usize {
@@ -99,6 +100,13 @@ impl<'a> SessionTable<'a> {
             return TreeBranch::WIDTH;
         }
         0
+    }
+
+    fn name_title_column(&self) -> usize {
+        if self.tree.is_grouped() {
+            return RepoHeading::LEAD_WIDTH;
+        }
+        TableColumns::NAME_COLUMN
     }
 
     fn columns(&self, inner_width: usize) -> TableColumns {
@@ -319,6 +327,12 @@ mod tests {
             (0..buffer.area.width)
                 .map(|column| buffer[(column, row)].symbol())
                 .collect()
+        }
+
+        fn column(terminal: &Terminal<TestBackend>, row: u16, text: &str) -> usize {
+            let line = Self::line(terminal, row);
+            let byte = line.find(text).unwrap();
+            line[..byte].chars().count()
         }
     }
 
@@ -555,10 +569,24 @@ mod tests {
     }
 
     #[test]
-    fn the_column_header_is_indented_past_the_branches() {
+    fn the_name_title_lines_up_with_the_repo_names() {
         let terminal = TableFixture::render(&TableFixture::two_repos(), None, 0, 8);
 
-        assert!(TableFixture::line(&terminal, 1).starts_with("│       Name "));
+        assert!(TableFixture::line(&terminal, 1).starts_with("│    Name "));
+        assert!(TableFixture::line(&terminal, 2).starts_with("│1 ▾ alpha"));
+    }
+
+    #[test]
+    fn the_titles_after_the_name_stay_over_their_cells() {
+        let mut rows = TableFixture::two_repos();
+        rows[0] = rows[0].clone().with_diff(DiffStat::from_changes([], 2));
+
+        let terminal = TableFixture::render(&rows, None, 0, 8);
+
+        assert_eq!(
+            TableFixture::column(&terminal, 1, "Diff"),
+            TableFixture::column(&terminal, 3, "+0 -0 ?2")
+        );
     }
 
     #[test]

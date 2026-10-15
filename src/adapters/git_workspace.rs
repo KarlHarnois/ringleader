@@ -306,7 +306,7 @@ mod tests {
     use crate::application::diff_base_resolver::DiffBaseResolver;
     use crate::application::start_point_resolver::StartPointResolver;
     use crate::domain::{BaseBranch, Branch, SessionName};
-    use crate::test_support::GitTestRepo;
+    use crate::test_support::{ExecutableScript, GitTestRepo};
 
     const BRANCH: &str = "ringleader/fix-auth";
     const RENAMED: &str = "ringleader/fix-login";
@@ -511,8 +511,7 @@ mod tests {
             let hooks = fixture.path().join(".git/hooks");
             fs::create_dir_all(&hooks).unwrap();
             let hook = hooks.join(name);
-            fs::write(&hook, format!("#!/bin/sh\n{script}\n")).unwrap();
-            fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+            ExecutableScript::write(&hook, &format!("#!/bin/sh\n{script}\n"));
         }
 
         fn roll_back(fixture: &GitTestRepo, worktree: &Path, start: &StartPoint) {
@@ -1257,12 +1256,10 @@ mod tests {
         let fixture = GitTestRepo::new();
         let marker = fixture.sibling("fsmonitor-ran");
         let hook = fixture.sibling("fsmonitor-hook");
-        fs::write(
+        ExecutableScript::write(
             &hook,
-            format!("#!/bin/sh\necho ran >> '{}'\n", marker.display()),
-        )
-        .unwrap();
-        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+            &format!("#!/bin/sh\necho ran >> '{}'\n", marker.display()),
+        );
         fixture.git(
             fixture.path(),
             &["config", "core.fsmonitor", &hook.to_string_lossy()],

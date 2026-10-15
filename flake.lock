@@ -13,6 +13,7 @@
       "original": {
         "owner": "unclebob",
         "repo": "crapper",
+        "rev": "9f1bead298b5a9d576bdd6319289fcf426e5b18a",
         "type": "github"
       }
     },
@@ -45,6 +46,7 @@
       "original": {
         "owner": "unclebob",
         "repo": "mutator",
+        "rev": "c57f03879a08d2afe8c7e044e86c80bb164afd30",
         "type": "github"
       }
     },

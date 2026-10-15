@@ -83,14 +83,13 @@ impl TmuxShellToggle {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
 
     use crate::adapters::tmux_multiplexer::TmuxMultiplexer;
     use crate::application::ports::Multiplexer;
     use crate::domain::KeyBindings;
-    use crate::test_support::TmuxTestServer;
     use crate::test_support::tmux_test_server::ControlClient;
+    use crate::test_support::{ExecutableScript, TmuxTestServer};
 
     struct ToggleFixture;
 
@@ -149,8 +148,7 @@ mod tests {
 
         fn shell_named(server: &TmuxTestServer, name: &str) -> PathBuf {
             let shell = server.directory().join(name);
-            fs::write(&shell, Self::SHELL_SCRIPT).unwrap();
-            fs::set_permissions(&shell, fs::Permissions::from_mode(0o755)).unwrap();
+            ExecutableScript::write(&shell, Self::SHELL_SCRIPT);
             shell
         }
 
