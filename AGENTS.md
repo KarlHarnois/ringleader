@@ -406,13 +406,13 @@ nix run .#mutator -- --help
 
 **Never run `mutator` on the whole repository:** it runs every covered mutant, and many tests start real tmux servers.
 
-- Name one module or file per run.
+- Name each module or file to mutate as an argument. One run MAY name several. A run's files share one baseline test run.
 - Keep `--max-workers 2` and `--timeout-factor 60`.
-- Each run builds the crate from scratch in new worker directories under `target/mutation-workers/`. A mutant that times out counts as killed.
-- The default factor, 10 times the warm baseline, ends those builds early. Every mutant then reads as killed before a test runs.
-- If you change either value, raise the timeout factor before the worker count: parallel cold builds slow each other.
+- The flake patches `mutator` so that each worker under `target/mutation-workers/` starts from a copy of `target/debug`. A worker's build then recompiles only the `ringleader` crate.
+- A mutant that times out counts as killed. Under load, a worker's build can take several times the warm baseline. A smaller factor then records kills that no test made.
+- If you change either value, raise the timeout factor before the worker count: parallel builds slow each other.
 - If a snapshot exists, a rerun runs only survivors and sites in changed functions. A kill recorded by a timeout therefore stays.
-- If a run used a smaller timeout factor, rerun that file once with `--mutate-all`.
+- If a run used a smaller timeout factor, rerun its files once with `--mutate-all`.
 - Never pass `--changed` with a path: `mutator` then drops the path and mutates every changed file in `git status`.
 - Never pass `mutator` a filtered `--test-command`. Many modules are tested only through their callers. A module-path filter runs zero tests, exits 0, and lets every mutant survive.
 
@@ -453,7 +453,7 @@ The viewer still looks for a companion with `tmux has-session`. The `env` prefix
 
 ### Completion steps
 
-**The completion steps are the four numbered steps below.** Run them after the Commands pass. A `crapper` run takes about a minute. A step 4 run takes two to three minutes.
+**The completion steps are the four numbered steps below.** Run them after the Commands pass. A `crapper` run takes about a minute. A step 4 run takes about 45 seconds for each changed file with five or fewer mutation sites.
 
 | Term | Meaning |
 | --- | --- |
@@ -494,14 +494,15 @@ The viewer still looks for a companion with `tmux has-session`. The `env` prefix
    The first output line, `Scan: N mutation sites in <file>`, gives the file's
    site count. If N is over 50, tell the project owner and offer to split the
    file. Step 3 always passes.
-4. For each changed file, run
-   `nix develop .#metrics -c mutator --reuse-coverage --max-workers 2 --timeout-factor 60 <file>`.
+4. Run
+   `nix develop .#metrics -c mutator --reuse-coverage --max-workers 2 --timeout-factor 60 <files>`
+   once. `<files>` is every changed file, separated by spaces.
    `--reuse-coverage` reads the coverage step 1 wrote. Step 4 passes when every
    changed function's row reads 0 under `Survived` and `Uncovered`. A survivor
    or uncovered site that this section has you report to the project owner
    does not count.
    - Never judge step 4 by its exit code. Exit 3 means a mutant survived
-     anywhere in the file, and a run with uncovered sites exits 0.
+     anywhere in `<files>`, and a run with uncovered sites exits 0.
    - If the run exits 2, the baseline tests failed. Fix the baseline tests,
      which is a step edit.
    - If a changed function that is not untestable has an uncovered site, add
@@ -524,12 +525,15 @@ steps from step 1.**
 - If the step edit changed only test code:
   - Still restart from step 1. `crapper` is the only coverage check for a
     function with no mutation sites.
-  - Skip each step 3 or step 4 run that passed on the current production code.
-  - Never skip a step 4 run for a changed file that the edited tests cover.
+  - Skip each step 3 run that passed on the current production code.
+  - If a changed file's functions passed step 4 on the current production
+    code, leave the file out of `<files>`.
+  - Never leave out of `<files>` a changed file that the edited tests cover.
+  - If `<files>` is then empty, skip step 4.
 - If the step edit rewrote or deleted an existing test, find each changed file
-  that test covered. Add `--mutate-all` to the next step 4 run of each such
-  file. Without the flag, a rerun keeps every kill recorded for a function
-  whose text did not change.
+  that test covered. If `<files>` holds such a file, add `--mutate-all` to the
+  next step 4 run. Without the flag, a rerun keeps every kill recorded for a
+  function whose text did not change.
 
 **If a step edit happened since the Commands last passed, run the Commands again
 after the completion steps pass.** None of the metrics tools runs `clippy`.
@@ -545,6 +549,8 @@ after the completion steps pass.** None of the metrics tools runs `clippy`.
 ├── .gitignore              # /target, /result, /result-*, /.direnv, /.claude/worktrees, /.metrics, /.uml-viewer, /uml-viewer-log.txt
 ├── flake.nix
 ├── flake.lock
+├── patches/
+│   └── mutator-copy-debug-build.patch # each mutator worker starts from a copy of target/debug
 ├── .envrc                  # direnv: use flake, loads the dev shell
 ├── .github/workflows/ci.yml
 ├── README.md               # human readers, terse

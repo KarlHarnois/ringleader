@@ -1,0 +1,36 @@
+--- a/src/mutator/workers.py
++++ b/src/mutator/workers.py
+@@ -10,6 +10,7 @@
+ 
+ import os
+ import re
++import shutil
+ import sys
+ import uuid
+ from concurrent.futures import ThreadPoolExecutor
+@@ -267,6 +268,17 @@
+     destination.write_bytes(original)
+ 
+ 
++def _copy_debug_build(worker: Path, root: Path) -> None:
++    """Cargo reuses every dependency in the copy and rebuilds only the mutated crate.
++
++    copytree keeps modification times, which Cargo compares to find stale units.
++    """
++
++    debug_build = root / "target" / "debug"
++    if debug_build.is_dir():
++        shutil.copytree(debug_build, worker / "target" / "debug", symlinks=True)
++
++
+ def create_workers(
+     base: Path, root: Path, relative: str, original: bytes, count: int
+ ) -> list[Path]:
+@@ -281,6 +293,7 @@
+         _overlay(worker, root, relative, original)
+         for importer in importers:
+             _copy_importer(worker, root, importer)
++        _copy_debug_build(worker, root)
+         created.append(worker)
+     return created
+ 

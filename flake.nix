@@ -74,7 +74,9 @@
             };
           dryerTool = buildTool "dryer" dryer [ ];
           crapperTool = buildTool "crapper" crapper [ ];
-          mutatorTool = buildTool "mutator" mutator [ crapperTool ];
+          mutatorTool = (buildTool "mutator" mutator [ crapperTool ]).overridePythonAttrs {
+            patches = [ ./patches/mutator-copy-debug-build.patch ];
+          };
           llvm = pkgs.rustc.llvmPackages.llvm;
           llvmCoverageEnv = {
             LLVM_COV = "${llvm}/bin/llvm-cov";
