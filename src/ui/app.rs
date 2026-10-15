@@ -4,7 +4,7 @@ use std::time::Instant;
 use crossterm::event::{Event, KeyEvent, KeyEventKind};
 use ratatui::Frame;
 
-use super::action_gate::{ActionGate, KeyAction};
+use super::action_gate::{ActionGate, KeyAction, Navigation};
 use super::bell::Bell;
 use super::blocking_operation::{BlockingOperation, OperationOutcome};
 use super::dialogs::{Dialog, DialogSlot, DialogStep};
@@ -187,8 +187,8 @@ impl App {
 
     fn act_on(&mut self, action: KeyAction) {
         match action {
+            KeyAction::Navigate(navigation) => self.navigate(navigation),
             KeyAction::Fold => self.home.toggle_fold(&self.service),
-            KeyAction::JumpToRepo(number) => self.home.jump_to_repo(number, &self.service),
             KeyAction::Open(opening) => {
                 self.dialogs.open(Dialog::open(opening, &self.service));
             }
@@ -198,19 +198,19 @@ impl App {
             }
             KeyAction::Reload => self.reload(),
             KeyAction::OpenTerminal(name) => self.open_terminal(&name),
-            other => self.navigate(&other),
+            KeyAction::Request(_) | KeyAction::Refuse(_) | KeyAction::Ignore => {}
         }
     }
 
-    fn navigate(&mut self, action: &KeyAction) {
-        match action {
-            KeyAction::Move(offset) => self.home.move_selection(*offset, &self.service),
-            KeyAction::SelectFirst => self.home.select_first(&self.service),
-            KeyAction::SelectLast => self.home.select_last(&self.service),
-            KeyAction::SelectHigh => self.home.select_high(&self.service),
-            KeyAction::SelectMiddle => self.home.select_middle(&self.service),
-            KeyAction::SelectLow => self.home.select_low(&self.service),
-            _ => {}
+    fn navigate(&mut self, navigation: Navigation) {
+        match navigation {
+            Navigation::Move(offset) => self.home.move_selection(offset, &self.service),
+            Navigation::SelectFirst => self.home.select_first(&self.service),
+            Navigation::SelectLast => self.home.select_last(&self.service),
+            Navigation::SelectHigh => self.home.select_high(&self.service),
+            Navigation::SelectMiddle => self.home.select_middle(&self.service),
+            Navigation::SelectLow => self.home.select_low(&self.service),
+            Navigation::JumpToRepo(number) => self.home.jump_to_repo(number, &self.service),
         }
     }
 

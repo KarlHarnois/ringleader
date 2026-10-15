@@ -61,22 +61,24 @@ impl<'a> ActionGate<'a> {
     }
 
     fn selection_move(code: KeyCode) -> Option<KeyAction> {
-        let action = match code {
-            KeyCode::Down | KeyCode::Right | KeyCode::Char('j' | 'l') => KeyAction::Move(1),
-            KeyCode::Up | KeyCode::Left | KeyCode::Char('k' | 'h') => KeyAction::Move(-1),
-            KeyCode::Char('G') => KeyAction::SelectLast,
-            KeyCode::Char('H') => KeyAction::SelectHigh,
-            KeyCode::Char('M') => KeyAction::SelectMiddle,
-            KeyCode::Char('L') => KeyAction::SelectLow,
+        let navigation = match code {
+            KeyCode::Down | KeyCode::Right | KeyCode::Char('j' | 'l') => Navigation::Move(1),
+            KeyCode::Up | KeyCode::Left | KeyCode::Char('k' | 'h') => Navigation::Move(-1),
+            KeyCode::Char('G') => Navigation::SelectLast,
+            KeyCode::Char('H') => Navigation::SelectHigh,
+            KeyCode::Char('M') => Navigation::SelectMiddle,
+            KeyCode::Char('L') => Navigation::SelectLow,
             _ => return None,
         };
-        Some(action)
+        Some(KeyAction::Navigate(navigation))
     }
 
     fn repo_action(code: KeyCode) -> Option<KeyAction> {
         let action = match code {
             KeyCode::Char(' ') => KeyAction::Fold,
-            KeyCode::Char(digit @ '1'..='9') => KeyAction::JumpToRepo(Self::repo_number(digit)),
+            KeyCode::Char(digit @ '1'..='9') => {
+                KeyAction::Navigate(Navigation::JumpToRepo(Self::repo_number(digit)))
+            }
             _ => return None,
         };
         Some(action)
@@ -212,14 +214,8 @@ impl<'a> ActionGate<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KeyAction {
     Request(AppRequest),
-    Move(isize),
-    SelectFirst,
-    SelectLast,
-    SelectHigh,
-    SelectMiddle,
-    SelectLow,
+    Navigate(Navigation),
     Fold,
-    JumpToRepo(usize),
     Open(DialogOpening),
     FindSession,
     Reload,
@@ -232,6 +228,17 @@ impl From<Result<KeyAction, String>> for KeyAction {
     fn from(action: Result<KeyAction, String>) -> Self {
         action.unwrap_or_else(KeyAction::Refuse)
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Navigation {
+    Move(isize),
+    SelectFirst,
+    SelectLast,
+    SelectHigh,
+    SelectMiddle,
+    SelectLow,
+    JumpToRepo(usize),
 }
 
 #[cfg(test)]
@@ -443,7 +450,7 @@ mod tests {
 
         assert_eq!(
             ActionGate::new(None, None).action_for(&key),
-            KeyAction::Move(-1)
+            KeyAction::Navigate(Navigation::Move(-1))
         );
     }
 
@@ -464,11 +471,13 @@ mod tests {
     fn vim_keys_and_arrows_move_the_selection() {
         let gate = ActionGate::new(None, None);
         let action = |code| gate.action_for(&KeyEvent::from(code));
+        let next = KeyAction::Navigate(Navigation::Move(1));
+        let previous = KeyAction::Navigate(Navigation::Move(-1));
 
-        assert_eq!(action(KeyCode::Char('l')), KeyAction::Move(1));
-        assert_eq!(action(KeyCode::Right), KeyAction::Move(1));
-        assert_eq!(action(KeyCode::Char('h')), KeyAction::Move(-1));
-        assert_eq!(action(KeyCode::Left), KeyAction::Move(-1));
+        assert_eq!(action(KeyCode::Char('l')), next);
+        assert_eq!(action(KeyCode::Right), next);
+        assert_eq!(action(KeyCode::Char('h')), previous);
+        assert_eq!(action(KeyCode::Left), previous);
     }
 
     #[test]
@@ -477,7 +486,7 @@ mod tests {
 
         assert_eq!(
             ActionGate::new(None, None).action_for(&key),
-            KeyAction::SelectLast
+            KeyAction::Navigate(Navigation::SelectLast)
         );
     }
 
@@ -486,9 +495,9 @@ mod tests {
         let gate = ActionGate::new(None, None);
         let action = |character| gate.action_for(&KeyEvent::from(KeyCode::Char(character)));
 
-        assert_eq!(action('H'), KeyAction::SelectHigh);
-        assert_eq!(action('M'), KeyAction::SelectMiddle);
-        assert_eq!(action('L'), KeyAction::SelectLow);
+        assert_eq!(action('H'), KeyAction::Navigate(Navigation::SelectHigh));
+        assert_eq!(action('M'), KeyAction::Navigate(Navigation::SelectMiddle));
+        assert_eq!(action('L'), KeyAction::Navigate(Navigation::SelectLow));
     }
 
     #[test]
@@ -588,7 +597,7 @@ mod tests {
         let gate = ActionGate::new(None, None);
         let action = |character| gate.action_for(&KeyEvent::from(KeyCode::Char(character)));
 
-        assert_eq!(action('3'), KeyAction::JumpToRepo(3));
+        assert_eq!(action('3'), KeyAction::Navigate(Navigation::JumpToRepo(3)));
         assert_eq!(action('0'), KeyAction::Ignore);
     }
 

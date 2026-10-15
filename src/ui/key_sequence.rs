@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
-use super::action_gate::{ActionGate, KeyAction};
+use super::action_gate::{ActionGate, KeyAction, Navigation};
 
 #[derive(Debug, Default)]
 pub struct KeySequence {
@@ -11,7 +11,7 @@ impl KeySequence {
     pub fn handle_key(&mut self, key: &KeyEvent, gate: &ActionGate) -> KeyAction {
         let pending_g = std::mem::take(&mut self.pending_g);
         match key.code {
-            KeyCode::Char('g') if pending_g => KeyAction::SelectFirst,
+            KeyCode::Char('g') if pending_g => KeyAction::Navigate(Navigation::SelectFirst),
             KeyCode::Char('g') => {
                 self.pending_g = true;
                 KeyAction::Ignore
@@ -43,7 +43,10 @@ mod tests {
     fn gg_selects_the_first_session() {
         assert_eq!(
             SequenceFixture::actions("gg"),
-            [KeyAction::Ignore, KeyAction::SelectFirst]
+            [
+                KeyAction::Ignore,
+                KeyAction::Navigate(Navigation::SelectFirst)
+            ]
         );
     }
 
@@ -56,7 +59,7 @@ mod tests {
     fn g_then_j_moves_by_one() {
         assert_eq!(
             SequenceFixture::actions("gj"),
-            [KeyAction::Ignore, KeyAction::Move(1)]
+            [KeyAction::Ignore, KeyAction::Navigate(Navigation::Move(1))]
         );
     }
 
@@ -66,9 +69,9 @@ mod tests {
             SequenceFixture::actions("gjgg"),
             [
                 KeyAction::Ignore,
-                KeyAction::Move(1),
+                KeyAction::Navigate(Navigation::Move(1)),
                 KeyAction::Ignore,
-                KeyAction::SelectFirst
+                KeyAction::Navigate(Navigation::SelectFirst)
             ]
         );
     }
