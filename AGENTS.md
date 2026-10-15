@@ -495,9 +495,10 @@ The viewer still looks for a companion with `tmux has-session`. The `env` prefix
    site count. If N is over 50, tell the project owner and offer to split the
    file. Step 3 always passes.
 4. Run
-   `nix develop .#metrics -c mutator --reuse-coverage --max-workers 2 --timeout-factor 60 <files>`
-   once. `<files>` is every changed file, separated by spaces.
-   `--reuse-coverage` reads the coverage step 1 wrote. Step 4 passes when every
+   `nix develop .#metrics -c mutator --reuse-coverage --max-workers 2 --timeout-factor 60 <files>`.
+   `<files>` is every changed file, separated by spaces. If a step edit rule
+   below splits `<files>`, make one run per part. Otherwise, pass all of
+   `<files>` to one run. `--reuse-coverage` reads the coverage step 1 wrote. Step 4 passes when every
    changed function's row reads 0 under `Survived` and `Uncovered`. A survivor
    or uncovered site that this section has you report to the project owner
    does not count.
@@ -530,10 +531,13 @@ steps from step 1.**
     code, leave the file out of `<files>`.
   - Never leave out of `<files>` a changed file that the edited tests cover.
   - If `<files>` is then empty, skip step 4.
-- If the step edit rewrote or deleted an existing test, find each changed file
-  that test covered. If `<files>` holds such a file, add `--mutate-all` to the
-  next step 4 run. Without the flag, a rerun keeps every kill recorded for a
-  function whose text did not change.
+- If the step edit rewrote or deleted an existing test, find each file in
+  `<files>` that the test covered. Split `<files>` into two step 4 runs:
+  - Run the covered files with `--mutate-all`. Without the flag, a rerun keeps
+    every kill recorded for a function whose text did not change.
+  - Run the other files without the flag: `--mutate-all` reruns every killed
+    mutant of every file in its run.
+  - If either run would name no file, skip that run.
 
 **If a step edit happened since the Commands last passed, run the Commands again
 after the completion steps pass.** None of the metrics tools runs `clippy`.
