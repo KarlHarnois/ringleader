@@ -91,6 +91,7 @@ mod tests {
 
     use super::*;
     use crate::adapters::branch_ref::BranchRef;
+    use crate::application::base_branch_resolver::BaseBranchResolver;
     use crate::application::diff_base_resolver::DiffBaseResolver;
     use crate::application::ports::Workspace;
     use crate::domain::{BaseBranch, Branch};
@@ -396,25 +397,21 @@ mod tests {
         }
 
         fn diff_with_base_branch(&self, base_branch: Option<&BaseBranch>) -> DiffStat {
-            self.diff_with_bases(None, base_branch)
-        }
-
-        fn diff_requesting(&self, requested: &str) -> DiffStat {
-            self.diff_with_bases(BaseBranch::new(requested), None)
-        }
-
-        fn diff_with_bases(
-            &self,
-            requested: Option<BaseBranch>,
-            repo_base: Option<&BaseBranch>,
-        ) -> DiffStat {
             let workspace = self.repo.workspace();
             let recorded = StartPoint::from_base_commit(&self.recorded);
             let measured_from = DiffBaseResolver::new(&workspace)
-                .requesting(requested)
-                .resolve(&self.worktree, &recorded, repo_base)
+                .resolve(&self.worktree, &recorded, base_branch)
                 .unwrap();
             workspace.diff_stat(&self.worktree, &measured_from).unwrap()
+        }
+
+        fn diff_requesting(&self, requested: &str) -> DiffStat {
+            let workspace = self.repo.workspace();
+            let requested = BaseBranch::new(requested).unwrap();
+            let base_branch = BaseBranchResolver::new(&workspace)
+                .resolve(&self.worktree, Some(&requested), None)
+                .unwrap();
+            self.diff_with_base_branch(base_branch)
         }
 
         fn stacked_on(branch: &str) -> Self {
@@ -429,6 +426,7 @@ mod tests {
                 .git(repo, &["checkout", "-q", GitTestRepo::BRANCH]);
             self.repo
                 .git(repo, &["merge", "-q", "--no-ff", "-m", "Land", branch]);
+            self.repo.git(repo, &["branch", "-q", "-d", branch]);
             self.repo.commit(repo, "other.md");
         }
 
@@ -468,7 +466,7 @@ mod tests {
     }
 
     #[test]
-    fn a_stacked_session_measures_from_main_once_its_base_landed_and_main_was_merged() {
+    fn a_stacked_session_measures_from_main_once_its_base_landed_was_deleted_and_main_merged() {
         let fixture = DiffBaseFixture::stacked_on("part1");
         fixture.commit_in_session("session.md");
         fixture.land_on_main_beside_other_work("part1");
@@ -485,6 +483,19 @@ mod tests {
         fixture.merge_into_session("part1");
 
         assert_eq!(fixture.diff_requesting("part1").files(), 1);
+    }
+
+    #[test]
+    fn a_session_based_on_develop_never_counts_unreleased_develop_work_after_a_main_hotfix() {
+        let repo = DiffBaseFixture::repo_on_new_branch("develop");
+        repo.commit(repo.path(), "unreleased-1.md");
+        repo.commit(repo.path(), "unreleased-2.md");
+        let fixture = DiffBaseFixture::started_in(repo);
+        fixture.commit_in_session("session.md");
+        fixture.commit_on(GitTestRepo::BRANCH, "hotfix.md");
+        fixture.merge_into_session(GitTestRepo::BRANCH);
+
+        assert_eq!(fixture.diff_requesting("develop").files(), 2);
     }
 
     #[test]

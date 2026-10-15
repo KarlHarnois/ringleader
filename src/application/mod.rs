@@ -1,5 +1,6 @@
 pub mod agent_hooks;
 pub mod base_branch_ladders;
+pub mod base_branch_resolver;
 pub mod branch_availability;
 pub mod branch_ownership;
 pub mod branch_renaming;
