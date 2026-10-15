@@ -1,11 +1,11 @@
 use std::ffi::{OsStr, OsString};
 use std::io;
-use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::Arc;
 use std::thread;
 
+use super::bounded_command::BoundedCommand;
 use super::null_terminal_emulator::NullTerminalEmulator;
 use super::process_environment::ProcessEnvironment;
 use crate::application::ports::{HostProbe, TerminalEmulator, TerminalEmulatorError};
@@ -72,19 +72,8 @@ impl SystemTerminalEmulator {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
-        Self::start_in_own_session(&mut command);
+        BoundedCommand::start_in_own_session(&mut command);
         command
-    }
-
-    fn start_in_own_session(command: &mut Command) {
-        // SAFETY: the closure runs in the forked child before exec and only calls setsid,
-        // which is async-signal-safe and touches no memory shared with the parent.
-        unsafe {
-            command.pre_exec(|| match libc::setsid() {
-                -1 => Err(io::Error::last_os_error()),
-                _ => Ok(()),
-            });
-        }
     }
 
     fn reap_in_background(&self, mut child: Child) {
@@ -458,20 +447,6 @@ echo $$ > "$record/pid"
         let pid = fixture.pid(TerminalFixture::XDG_TERMINAL_EXEC);
         assert!(pid.is_some());
         assert_eq!(fixture.session_of(TerminalFixture::XDG_TERMINAL_EXEC), pid);
-    }
-
-    #[test]
-    fn a_program_that_cannot_lead_a_new_session_does_not_start() {
-        let mut command = Command::new(TerminalFixture::tool("true"));
-        command.process_group(0);
-        SystemTerminalEmulator::start_in_own_session(&mut command);
-
-        let started = command.spawn().map(|mut child| child.wait());
-
-        assert_eq!(
-            started.err().and_then(|error| error.raw_os_error()),
-            Some(libc::EPERM)
-        );
     }
 
     #[test]
