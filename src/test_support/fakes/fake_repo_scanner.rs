@@ -1,9 +1,9 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use super::gate::Gate;
 use crate::application::ports::{RepoScanner, ScanError, ScanOutcome};
 use crate::domain::{Repo, RepoScope};
+use crate::test_support::Gate;
 
 pub struct FakeRepoScanner {
     repos: Vec<Repo>,

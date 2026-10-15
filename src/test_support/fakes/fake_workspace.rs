@@ -2,12 +2,12 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use super::CallHooks;
 use crate::application::ports::{
     DirtyState, Head, MergeOutcome, StartPoint, UnmergedCommits, Workspace, WorkspaceError,
     WorktreeEntry,
 };
 use crate::domain::{BaseBranch, Branch, BranchTips, DiffStat, MergeBases};
+use crate::test_support::CallHooks;
 
 #[derive(Default)]
 pub struct FakeWorkspace {

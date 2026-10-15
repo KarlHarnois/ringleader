@@ -304,7 +304,7 @@ nix flake check
 - For the CLI, the channel is the standard streams.
 - Keep the channel's I/O in `ui` or `cli`.
 - Put the channel behind a trait beside its real implementation, or behind a std `Read` or `Write`.
-- Put the channel's fake in `src/test_support/`.
+- Put the channel's fake in `src/test_support/`. If the fake is its file's primary type, put the file in `src/test_support/fakes/`.
 - A test seam inside `adapters` has the same shape. Its fake lives in the adapter's own tests.
 
 ## Metrics

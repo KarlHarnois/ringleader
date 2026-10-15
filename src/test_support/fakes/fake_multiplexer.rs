@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use super::{CallHooks, Deadline, Gate};
 use crate::application::ports::{
     AgentLaunch, AttachTarget, Multiplexer, MultiplexerError, ServerConfig, ServerState,
     SessionSpec,
@@ -11,6 +10,7 @@ use crate::application::ports::{
 use crate::domain::{
     AgentPane, HotKey, KeyBindings, SessionMetadata, SessionObservation, TmuxAddress,
 };
+use crate::test_support::{CallHooks, Deadline, Gate};
 
 pub struct FakeMultiplexer {
     state: Mutex<MultiplexerState>,
