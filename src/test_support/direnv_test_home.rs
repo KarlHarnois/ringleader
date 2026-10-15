@@ -64,14 +64,26 @@ impl DirenvTestHome {
     }
 
     pub fn allow_as_the_user(&self, project: &Path) {
+        self.run_as_the_user("allow", project);
+    }
+
+    pub fn deny_as_the_user(&self, project: &Path) {
+        self.run_as_the_user("deny", project);
+    }
+
+    fn run_as_the_user(&self, subcommand: &str, project: &Path) {
         let status = Command::new(Self::PROGRAM)
-            .arg("allow")
+            .arg(subcommand)
             .arg(project)
             .env_clear()
             .envs(self.variables())
             .status()
             .expect("direnv runs");
-        assert!(status.success(), "direnv allows {}", project.display());
+        assert!(
+            status.success(),
+            "direnv {subcommand} succeeds for {}",
+            project.display()
+        );
     }
 
     pub fn allow_list(&self) -> PathBuf {

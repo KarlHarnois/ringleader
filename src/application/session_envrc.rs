@@ -22,6 +22,9 @@ impl SessionEnvrc {
         if envrc.is_allowed() {
             return EnvrcChoice::Load;
         }
+        if envrc.is_denied() {
+            return Self::denied(worktree);
+        }
         if self.main_checkout_vouches_for(main_checkout, &envrc) {
             return self.allow(worktree, main_checkout);
         }
@@ -48,6 +51,14 @@ impl SessionEnvrc {
                 EnvrcChoice::Warn(format!("the agent started without its .envrc, {error}"))
             }
         }
+    }
+
+    fn denied(worktree: &Path) -> EnvrcChoice {
+        log::info!(
+            "the .envrc of {} is denied, so the agent started without it",
+            worktree.display()
+        );
+        EnvrcChoice::Skip
     }
 
     fn not_allowed(worktree: &Path, envrc: &Envrc) -> EnvrcChoice {
@@ -149,6 +160,26 @@ mod tests {
             fixture.directory_environment().allowed(),
             [EnvrcFixture::worktree()]
         );
+    }
+
+    #[test]
+    fn a_denied_envrc_starts_plainly_without_a_warning() {
+        let environment = EnvrcFixture::with_main_checkout(EnvrcFixture::FLAKE)
+            .with_denied_envrc(&EnvrcFixture::worktree(), EnvrcFixture::FLAKE);
+
+        let (_, choice) = EnvrcFixture::choose(environment);
+
+        assert_eq!(choice, EnvrcChoice::Skip);
+    }
+
+    #[test]
+    fn a_denied_envrc_identical_to_the_allowed_main_checkout_one_is_never_allowed() {
+        let environment = EnvrcFixture::with_main_checkout(EnvrcFixture::FLAKE)
+            .with_denied_envrc(&EnvrcFixture::worktree(), EnvrcFixture::FLAKE);
+
+        let (fixture, _) = EnvrcFixture::choose(environment);
+
+        assert!(fixture.directory_environment().allowed().is_empty());
     }
 
     #[test]

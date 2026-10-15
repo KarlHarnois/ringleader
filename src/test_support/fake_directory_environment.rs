@@ -27,6 +27,11 @@ impl FakeDirectoryEnvironment {
         self.storing(directory, envrc)
     }
 
+    pub fn with_denied_envrc(self, directory: &Path, contents: &str) -> Self {
+        let envrc = Self::envrc_of(directory, contents).denied();
+        self.storing(directory, envrc)
+    }
+
     pub fn failing_allow(self, reason: &str) -> Self {
         self.state.lock().unwrap().allow_failure = Some(reason.to_string());
         self

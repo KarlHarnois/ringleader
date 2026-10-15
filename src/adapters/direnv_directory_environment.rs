@@ -30,6 +30,7 @@ impl DirenvDirectoryEnvironment {
     const JSON: &'static str = "--json";
     const ALLOW: &'static str = "allow";
     const ALLOWED_STATUS: u64 = 0;
+    const DENIED_STATUS: u64 = 2;
 
     pub fn new(program: &OsStr, environment: &ProcessEnvironment, bounded: BoundedCommand) -> Self {
         Self {
@@ -50,21 +51,20 @@ impl DirenvDirectoryEnvironment {
         }
     }
 
-    fn is_allowed(&self, directory: &Path) -> bool {
+    fn allow_status(&self, directory: &Path) -> Option<u64> {
         let mut status = self.direnv(directory);
         status.args([Self::STATUS, Self::JSON]);
         self.bounded
             .run(status, &Call::new(Self::STATUS, CallKind::Direnv))
             .ok()
             .filter(CommandOutput::succeeded)
-            .is_some_and(|output| Self::reports_allowed(&output.stdout_text()))
+            .and_then(|output| Self::reported_allow_status(&output.stdout_text()))
     }
 
-    fn reports_allowed(status: &str) -> bool {
-        let allowed = serde_json::from_str::<Value>(status)
+    fn reported_allow_status(status: &str) -> Option<u64> {
+        serde_json::from_str::<Value>(status)
             .ok()
-            .and_then(|status| status["state"]["foundRC"]["allowed"].as_u64());
-        allowed == Some(Self::ALLOWED_STATUS)
+            .and_then(|status| status["state"]["foundRC"]["allowed"].as_u64())
     }
 
     fn direnv(&self, directory: &Path) -> Command {
@@ -105,9 +105,10 @@ impl DirectoryEnvironment for DirenvDirectoryEnvironment {
             return None;
         }
         let envrc = Envrc::new(fs::read(&path).ok(), &Self::allow_command(directory));
-        match self.is_allowed(directory) {
-            true => Some(envrc.allowed()),
-            false => Some(envrc),
+        match self.allow_status(directory) {
+            Some(Self::ALLOWED_STATUS) => Some(envrc.allowed()),
+            Some(Self::DENIED_STATUS) => Some(envrc.denied()),
+            _ => Some(envrc),
         }
     }
 
@@ -225,6 +226,15 @@ mod tests {
     }
 
     #[test]
+    fn an_envrc_the_user_denied_reads_as_denied() {
+        let fixture = DirenvFixture::new();
+        let project = fixture.project_with_envrc();
+        fixture.home.deny_as_the_user(&project);
+
+        assert!(fixture.direnv().envrc(&project).unwrap().is_denied());
+    }
+
+    #[test]
     fn a_whitelist_in_a_direnv_config_the_agent_never_sees_does_not_allow_the_envrc() {
         let fixture = DirenvFixture::new();
         let project = fixture.project_with_envrc();
@@ -291,10 +301,20 @@ mod tests {
     }
 
     #[test]
-    fn a_status_without_an_allowed_found_envrc_is_not_allowed() {
+    fn a_status_reports_the_allow_status_of_the_found_envrc() {
         let blocked = r#"{"state": {"foundRC": {"allowed": 1, "path": "/repos/.envrc"}}}"#;
 
-        assert!(!DirenvDirectoryEnvironment::reports_allowed(blocked));
-        assert!(!DirenvDirectoryEnvironment::reports_allowed("not json"));
+        assert_eq!(
+            DirenvDirectoryEnvironment::reported_allow_status(blocked),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn a_status_that_is_not_json_reports_no_allow_status() {
+        assert_eq!(
+            DirenvDirectoryEnvironment::reported_allow_status("not json"),
+            None
+        );
     }
 }

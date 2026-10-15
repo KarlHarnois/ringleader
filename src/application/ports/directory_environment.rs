@@ -10,28 +10,46 @@ pub trait DirectoryEnvironment: Send + Sync {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Envrc {
     contents: Option<Vec<u8>>,
-    allowed: bool,
+    permission: EnvrcPermission,
     allow_command: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EnvrcPermission {
+    NotAllowed,
+    Allowed,
+    Denied,
 }
 
 impl Envrc {
     pub fn new(contents: Option<Vec<u8>>, allow_command: &str) -> Self {
         Self {
             contents,
-            allowed: false,
+            permission: EnvrcPermission::NotAllowed,
             allow_command: allow_command.to_string(),
         }
     }
 
     pub fn allowed(self) -> Self {
         Self {
-            allowed: true,
+            permission: EnvrcPermission::Allowed,
+            ..self
+        }
+    }
+
+    pub fn denied(self) -> Self {
+        Self {
+            permission: EnvrcPermission::Denied,
             ..self
         }
     }
 
     pub fn is_allowed(&self) -> bool {
-        self.allowed
+        self.permission == EnvrcPermission::Allowed
+    }
+
+    pub fn is_denied(&self) -> bool {
+        self.permission == EnvrcPermission::Denied
     }
 
     pub fn has_contents_of(&self, other: &Envrc) -> bool {
@@ -94,5 +112,20 @@ mod tests {
 
         assert!(!envrc.is_allowed());
         assert!(envrc.allowed().is_allowed());
+    }
+
+    #[test]
+    fn an_envrc_is_not_denied_until_marked() {
+        let envrc = EnvrcFixture::reading("use flake\n");
+
+        assert!(!envrc.is_denied());
+        assert!(envrc.denied().is_denied());
+    }
+
+    #[test]
+    fn a_denied_envrc_is_not_allowed() {
+        let envrc = EnvrcFixture::reading("use flake\n").denied();
+
+        assert!(!envrc.is_allowed());
     }
 }
