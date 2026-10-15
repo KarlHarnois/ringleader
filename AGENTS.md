@@ -328,7 +328,7 @@ nix flake check
 
    The tmux command lines repeat the exact-target syntax that `TmuxScripts::exact` owns.
 2. `WorkspaceError`, `MultiplexerError`, and `PullRequestError` each name the subcommand that failed. `WorkspaceError` and `PullRequestError` also keep the subcommand's exit status and stderr in fields. `ServiceError::TimedOut` names the tool, and `ui/diff_queue.rs` and `ui/home_state.rs` branch on the tool.
-3. `ui/action_gate.rs` decides which actions each session state allows, such as restart only for an Exited or Stopped session. The use cases enforce their own versions of those rules.
+3. `ui/action_gate.rs` decides which actions each session state allows, such as pull only for a Waiting session. The use cases enforce their own versions of those rules.
 4. `CompositionRoot::run_tui` in `main.rs` calls the TUI's startup use cases itself: `restore_server_socket`, `refuse_own_pane`, `load_registry`, and `reapply_server_config`.
 
 ### New ports
