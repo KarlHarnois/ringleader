@@ -284,11 +284,25 @@ mod tests {
             tick: u64,
             height: u16,
         ) -> Terminal<TestBackend> {
+            let expanded = SessionTree::new(rows, &HashSet::new());
+            Self::draw(expanded, selection, tick, height)
+        }
+
+        fn render_folded(rows: &[SessionSummary], height: u16) -> Terminal<TestBackend> {
+            let every_repo = rows.iter().map(RepoGroup::of).collect();
+            Self::draw(SessionTree::new(rows, &every_repo), None, 0, height)
+        }
+
+        fn draw(
+            tree: SessionTree,
+            selection: Option<&ListSelection>,
+            tick: u64,
+            height: u16,
+        ) -> Terminal<TestBackend> {
             let mut terminal = Terminal::new(TestBackend::new(50, height)).unwrap();
-            let tree = || SessionTree::new(rows, &HashSet::new());
             terminal
                 .draw(|frame| {
-                    SessionTable::new(tree(), selection, tick, Theme).render(frame, frame.area())
+                    SessionTable::new(tree, selection, tick, Theme).render(frame, frame.area())
                 })
                 .unwrap();
             terminal
@@ -491,16 +505,24 @@ mod tests {
     }
 
     #[test]
-    fn a_heading_shows_its_number_arrow_count_and_state_counts() {
+    fn a_folded_heading_shows_its_number_arrow_count_and_state_counts() {
+        let terminal = TableFixture::render_folded(&TableFixture::two_repos(), 8);
+
+        assert!(TableFixture::line(&terminal, 2).starts_with("│1 ▸ alpha (2) ⠋1 ●1 "));
+        assert!(TableFixture::line(&terminal, 3).starts_with("│2 ▸ beta (1) ✗1 "));
+    }
+
+    #[test]
+    fn an_expanded_heading_shows_only_its_number_arrow_and_repo() {
         let terminal = TableFixture::render(&TableFixture::two_repos(), None, 0, 8);
 
-        assert!(TableFixture::line(&terminal, 2).starts_with("│1 ▾ alpha (2) ⠋1 ●1 "));
-        assert!(TableFixture::line(&terminal, 5).starts_with("│2 ▾ beta (1) ✗1 "));
+        let heading = TableFixture::line(&terminal, 2);
+        assert_eq!(heading.trim_end_matches(['│', ' ']), "│1 ▾ alpha");
     }
 
     #[test]
     fn a_heading_dims_its_number_and_count_and_bolds_its_repo() {
-        let terminal = TableFixture::render(&TableFixture::two_repos(), None, 0, 8);
+        let terminal = TableFixture::render_folded(&TableFixture::two_repos(), 8);
         let buffer = terminal.backend().buffer();
 
         assert!(buffer[(1, 2)].modifier.contains(Modifier::DIM));
