@@ -1222,7 +1222,7 @@ The explicit variables are:
 - Test one concept per test.
 - Test only through public interfaces.
 - Git adapter tests run real git in `tempfile` repos with the hermetic git environment. Set that environment on each `Command`, never through `std::env::set_var`.
-- Use `ExecutableScript` to write every file that a test executes. A file that the test process writes itself can fail to execute with `Text file busy`.
+- Use a child process to write every file that a test executes. A file that the test process writes itself can fail to execute with `Text file busy`. If the file is a script, write the script with `ExecutableScript`.
 - UI tests render with `TestBackend`.
 - UI tests drive `EventLoop` with scripted input, a recording screen mode, and a recording shell runner.
 - No test calls crossterm or needs a terminal.
