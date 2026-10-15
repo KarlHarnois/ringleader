@@ -1,37 +1,40 @@
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::os::unix::ffi::OsStringExt;
+use std::path::Path;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::Arc;
 use std::thread;
 
-use super::bounded_command::BoundedCommand;
+use super::bounded_command::{BoundedCommand, Call};
+use super::deadlines::CallKind;
 use super::null_terminal_emulator::NullTerminalEmulator;
 use super::process_environment::ProcessEnvironment;
+use super::terminal_program::TerminalProgram;
 use crate::application::ports::{HostProbe, TerminalEmulator, TerminalEmulatorError};
 
 pub struct SystemTerminalEmulator {
     program: TerminalProgram,
     environment: ProcessEnvironment,
+    bounded: BoundedCommand,
 }
 
 impl SystemTerminalEmulator {
     const XDG_TERMINAL_EXEC: &'static str = "xdg-terminal-exec";
+    const PRINT_COMMAND: &'static str = "--print-cmd";
 
     pub fn detect(
         host: &dyn HostProbe,
         environment: &ProcessEnvironment,
+        bounded: BoundedCommand,
     ) -> Arc<dyn TerminalEmulator> {
         match Self::program(host, environment) {
-            Ok(program) => Arc::new(Self::new(program, environment)),
+            Ok(program) => Arc::new(Self {
+                program,
+                environment: environment.outside_tmux(),
+                bounded,
+            }),
             Err(missing) => Arc::new(NullTerminalEmulator::new(missing)),
-        }
-    }
-
-    fn new(program: TerminalProgram, environment: &ProcessEnvironment) -> Self {
-        Self {
-            program,
-            environment: environment.outside_tmux(),
         }
     }
 
@@ -43,7 +46,7 @@ impl SystemTerminalEmulator {
             return Err(Self::no_display());
         }
         host.resolve_command(Self::XDG_TERMINAL_EXEC)
-            .map(TerminalProgram::xdg_terminal_exec)
+            .map(TerminalProgram::XdgTerminalExec)
             .or_else(|| environment.terminal_emulator().map(TerminalProgram::named))
             .ok_or_else(Self::no_terminal)
     }
@@ -65,8 +68,37 @@ impl SystemTerminalEmulator {
         }
     }
 
-    fn command(&self, directory: &Path) -> Command {
-        let mut command = self.program.command_in(directory);
+    fn terminal_opened_by(&self, launcher: &Path) -> Option<OsString> {
+        let lookup = format!("{} {}", Self::XDG_TERMINAL_EXEC, Self::PRINT_COMMAND);
+        let call = Call::new(&lookup, CallKind::TerminalQuery);
+        match self.bounded.run(self.lookup_command(launcher), &call) {
+            Ok(output) if output.succeeded() => Self::first_line(output.stdout()),
+            Ok(output) => Self::lookup_failed(&lookup, &output.status_label()),
+            Err(error) => Self::lookup_failed(&lookup, &error.to_string()),
+        }
+    }
+
+    fn lookup_command(&self, launcher: &Path) -> Command {
+        let mut command = Command::new(launcher);
+        command
+            .arg(Self::PRINT_COMMAND)
+            .env_clear()
+            .envs(self.environment.variables().iter().cloned());
+        command
+    }
+
+    fn first_line(stdout: &[u8]) -> Option<OsString> {
+        let line = stdout.split(|byte| *byte == b'\n').next()?;
+        (!line.is_empty()).then(|| OsString::from_vec(line.to_vec()))
+    }
+
+    fn lookup_failed(lookup: &str, reason: &str) -> Option<OsString> {
+        log::warn!("{lookup} failed, so it opens the terminal itself: {reason}");
+        None
+    }
+
+    fn command(&self, program: &TerminalProgram, directory: &Path) -> Command {
+        let mut command = program.command_in(directory);
         command
             .env_clear()
             .envs(self.environment.variables().iter().cloned())
@@ -77,9 +109,9 @@ impl SystemTerminalEmulator {
         command
     }
 
-    fn reap_in_background(&self, mut child: Child) {
-        let program = self.shown_program();
-        thread::spawn(move || Self::warn_on_failure(&program, child.wait()));
+    fn reap_in_background(program: &TerminalProgram, mut child: Child) {
+        let shown = program.shown();
+        thread::spawn(move || Self::warn_on_failure(&shown, child.wait()));
     }
 
     fn warn_on_failure(program: &str, exit: io::Result<ExitStatus>) {
@@ -90,78 +122,37 @@ impl SystemTerminalEmulator {
         }
     }
 
-    fn start_failure(&self, error: &io::Error) -> TerminalEmulatorError {
+    fn start_failure(program: &TerminalProgram, error: &io::Error) -> TerminalEmulatorError {
         TerminalEmulatorError::StartFailed {
-            program: self.shown_program(),
+            program: program.shown(),
             reason: error.to_string(),
         }
-    }
-
-    fn shown_program(&self) -> String {
-        self.program.shown()
     }
 }
 
 impl TerminalEmulator for SystemTerminalEmulator {
     fn open_window(&self, directory: &Path) -> Result<(), TerminalEmulatorError> {
+        let program = self
+            .program
+            .to_start(|launcher| self.terminal_opened_by(launcher));
         let child = self
-            .command(directory)
+            .command(&program, directory)
             .spawn()
-            .map_err(|error| self.start_failure(&error))?;
-        self.reap_in_background(child);
+            .map_err(|error| Self::start_failure(&program, &error))?;
+        Self::reap_in_background(&program, child);
         Ok(())
-    }
-}
-
-struct TerminalProgram {
-    path: OsString,
-    directory_option: Option<&'static str>,
-}
-
-impl TerminalProgram {
-    const XDG_TERMINAL_EXEC_DIRECTORY: &'static str = "--dir=";
-
-    fn xdg_terminal_exec(path: PathBuf) -> Self {
-        Self {
-            path: path.into_os_string(),
-            directory_option: Some(Self::XDG_TERMINAL_EXEC_DIRECTORY),
-        }
-    }
-
-    fn named(name: &OsStr) -> Self {
-        Self {
-            path: name.to_os_string(),
-            directory_option: None,
-        }
-    }
-
-    fn command_in(&self, directory: &Path) -> Command {
-        let mut command = Command::new(&self.path);
-        command
-            .current_dir(directory)
-            .args(self.directory_argument(directory));
-        command
-    }
-
-    fn directory_argument(&self, directory: &Path) -> Option<OsString> {
-        self.directory_option.map(|option| {
-            let mut argument = OsString::from(option);
-            argument.push(directory);
-            argument
-        })
-    }
-
-    fn shown(&self) -> String {
-        self.path.to_string_lossy().into_owned()
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsStr;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
+    use std::path::PathBuf;
 
     use super::*;
+    use crate::adapters::deadlines::Deadlines;
     use crate::adapters::live_process::LiveProcess;
     use crate::adapters::system_host_probe::SystemHostProbe;
     use crate::test_support::{Deadline, LogCapture};
@@ -173,6 +164,8 @@ mod tests {
     impl TerminalFixture {
         const XDG_TERMINAL_EXEC: &'static str = "xdg-terminal-exec";
         const NAMED_TERMINAL: &'static str = "example terminal";
+        const GHOSTTY: &'static str = "ghostty";
+        const SINGLE_INSTANCE: &'static str = "--gtk-single-instance=true";
         const WAYLAND: (&'static str, &'static str) = ("WAYLAND_DISPLAY", "wayland-1");
         const EXECUTABLE: u32 = 0o755;
         const NOT_EXECUTABLE: u32 = 0o644;
@@ -180,6 +173,13 @@ mod tests {
         const FAILURE: &'static str = "exit 3";
         const LINGERING_SECONDS: u32 = 30;
         const RECORDING: &'static str = r#"#!/bin/sh
+if [ "$1" = --print-cmd ]; then
+  answer='{answer}'
+  if [ -f "$answer" ]; then
+    . "$answer"
+  fi
+  exit 0
+fi
 record='{record}'
 '{cat}' /proc/$$/environ > "$record/environ"
 read -r stat < /proc/$$/stat
@@ -206,7 +206,12 @@ echo $$ > "$record/pid"
             };
             fs::create_dir(fixture.programs()).unwrap();
             fs::create_dir(fixture.worktree()).unwrap();
+            fs::create_dir(fixture.answers()).unwrap();
             fixture
+        }
+
+        fn answers(&self) -> PathBuf {
+            self.directory.path().join("answers")
         }
 
         fn programs(&self) -> PathBuf {
@@ -239,6 +244,7 @@ echo $$ > "$record/pid"
             let record = self.record_directory(name);
             fs::create_dir_all(&record).unwrap();
             let script = Self::RECORDING
+                .replace("{answer}", &self.answers().join(name).to_string_lossy())
                 .replace("{record}", &record.to_string_lossy())
                 .replace("{cat}", &Self::tool("cat").to_string_lossy())
                 .replace("{ending}", ending);
@@ -246,6 +252,19 @@ echo $$ > "$record/pid"
             fs::write(&program, script).unwrap();
             fs::set_permissions(&program, fs::Permissions::from_mode(mode)).unwrap();
             program
+        }
+
+        fn answer_lookup_with(&self, launcher: &str, terminal: &Path) {
+            let answer = format!(
+                "printf '%s\\n' '{}' {}",
+                terminal.display(),
+                Self::SINGLE_INSTANCE
+            );
+            fs::write(self.answers().join(launcher), answer).unwrap();
+        }
+
+        fn fail_lookup(&self, launcher: &str) {
+            fs::write(self.answers().join(launcher), Self::FAILURE).unwrap();
         }
 
         fn tool(name: &str) -> PathBuf {
@@ -274,7 +293,9 @@ echo $$ > "$record/pid"
         fn open_with(&self, variables: &[(&str, &str)]) -> Result<(), TerminalEmulatorError> {
             let environment = self.environment(variables);
             let host = SystemHostProbe::new(&environment, OsStr::new("tmux"));
-            SystemTerminalEmulator::detect(&host, &environment).open_window(&self.worktree())
+            let bounded = BoundedCommand::new(Deadlines::standard());
+            SystemTerminalEmulator::detect(&host, &environment, bounded)
+                .open_window(&self.worktree())
         }
 
         fn pid(&self, name: &str) -> Option<u32> {
@@ -557,5 +578,83 @@ echo $$ > "$record/pid"
             "cannot start {}: Permission denied",
             named.display()
         )));
+    }
+
+    #[test]
+    fn xdg_terminal_exec_that_opens_ghostty_gives_way_to_a_ghostty_window() {
+        let fixture = TerminalFixture::new();
+        fixture.install(TerminalFixture::XDG_TERMINAL_EXEC);
+        let ghostty = fixture.install(TerminalFixture::GHOSTTY);
+        fixture.answer_lookup_with(TerminalFixture::XDG_TERMINAL_EXEC, &ghostty);
+
+        fixture.open_with(&[TerminalFixture::WAYLAND]).unwrap();
+
+        assert_eq!(
+            fixture.arguments_of(TerminalFixture::GHOSTTY),
+            format!(
+                "+new-window\n--working-directory={}\n",
+                fixture.worktree().display()
+            )
+        );
+        assert_eq!(
+            fixture.recorded(TerminalFixture::XDG_TERMINAL_EXEC, "pid"),
+            ""
+        );
+    }
+
+    #[test]
+    fn xdg_terminal_exec_that_opens_another_terminal_opens_it_itself() {
+        let fixture = TerminalFixture::new();
+        fixture.install(TerminalFixture::XDG_TERMINAL_EXEC);
+        let named = fixture.install(TerminalFixture::NAMED_TERMINAL);
+        fixture.answer_lookup_with(TerminalFixture::XDG_TERMINAL_EXEC, &named);
+
+        fixture.open_with(&[TerminalFixture::WAYLAND]).unwrap();
+
+        assert_eq!(
+            fixture.arguments_of(TerminalFixture::XDG_TERMINAL_EXEC),
+            format!("--dir={}\n", fixture.worktree().display())
+        );
+        assert_eq!(fixture.recorded(TerminalFixture::NAMED_TERMINAL, "pid"), "");
+    }
+
+    #[test]
+    fn a_failed_lookup_is_logged_and_xdg_terminal_exec_still_opens() {
+        let capture = LogCapture::installed();
+        let fixture = TerminalFixture::new();
+        fixture.install(TerminalFixture::XDG_TERMINAL_EXEC);
+        fixture.fail_lookup(TerminalFixture::XDG_TERMINAL_EXEC);
+
+        fixture.open_with(&[TerminalFixture::WAYLAND]).unwrap();
+
+        assert!(fixture.pid(TerminalFixture::XDG_TERMINAL_EXEC).is_some());
+        assert_eq!(
+            capture.count_containing(
+                "xdg-terminal-exec --print-cmd failed, so it opens the terminal itself: \
+                 exit status: 3"
+            ),
+            1
+        );
+    }
+
+    #[test]
+    fn a_terminal_variable_naming_ghostty_opens_a_ghostty_window() {
+        let fixture = TerminalFixture::new();
+        let ghostty = fixture.install(TerminalFixture::GHOSTTY);
+
+        fixture
+            .open_with(&[
+                TerminalFixture::WAYLAND,
+                ("TERMINAL", &ghostty.to_string_lossy()),
+            ])
+            .unwrap();
+
+        assert_eq!(
+            fixture.arguments_of(TerminalFixture::GHOSTTY),
+            format!(
+                "+new-window\n--working-directory={}\n",
+                fixture.worktree().display()
+            )
+        );
     }
 }

@@ -10,67 +10,65 @@ pub enum CallKind {
     GitProbe,
     GhQuery,
     Direnv,
+    TerminalQuery,
+}
+
+impl CallKind {
+    pub const ALL: [CallKind; 9] = [
+        Self::TmuxQuery,
+        Self::TmuxChange,
+        Self::GitDiff,
+        Self::GitRead,
+        Self::GitWrite,
+        Self::GitProbe,
+        Self::GhQuery,
+        Self::Direnv,
+        Self::TerminalQuery,
+    ];
+
+    fn index(self) -> usize {
+        self as usize
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct Deadlines {
-    tmux_query: Duration,
-    tmux_change: Duration,
-    git_diff: Duration,
-    git_read: Duration,
-    git_write: Duration,
-    git_probe: Duration,
-    gh_query: Duration,
-    direnv: Duration,
+    by_kind: [Duration; CallKind::ALL.len()],
 }
 
 impl Deadlines {
     pub fn standard() -> Self {
-        Self {
-            tmux_query: Duration::from_secs(2),
-            tmux_change: Duration::from_secs(10),
-            git_diff: Duration::from_secs(5),
-            git_read: Duration::from_secs(60),
-            git_write: Duration::from_secs(300),
-            git_probe: Duration::from_secs(5),
-            gh_query: Duration::from_secs(20),
-            direnv: Duration::from_secs(10),
-        }
+        Self::uniform(Duration::ZERO)
+            .with(CallKind::TmuxQuery, Duration::from_secs(2))
+            .with(CallKind::TmuxChange, Duration::from_secs(10))
+            .with(CallKind::GitDiff, Duration::from_secs(5))
+            .with(CallKind::GitRead, Duration::from_secs(60))
+            .with(CallKind::GitWrite, Duration::from_secs(300))
+            .with(CallKind::GitProbe, Duration::from_secs(5))
+            .with(CallKind::GhQuery, Duration::from_secs(20))
+            .with(CallKind::Direnv, Duration::from_secs(10))
+            .with(CallKind::TerminalQuery, Duration::from_secs(2))
     }
 
     pub fn diff_poll() -> Self {
         let standard = Self::standard();
-        Self {
-            git_read: standard.git_diff,
-            ..standard
-        }
+        standard.with(CallKind::GitRead, standard.for_kind(CallKind::GitDiff))
     }
 
-    #[cfg(test)]
     pub fn uniform(deadline: Duration) -> Self {
         Self {
-            tmux_query: deadline,
-            tmux_change: deadline,
-            git_diff: deadline,
-            git_read: deadline,
-            git_write: deadline,
-            git_probe: deadline,
-            gh_query: deadline,
-            direnv: deadline,
+            by_kind: [deadline; CallKind::ALL.len()],
         }
     }
 
     pub fn for_kind(&self, kind: CallKind) -> Duration {
-        match kind {
-            CallKind::TmuxQuery => self.tmux_query,
-            CallKind::TmuxChange => self.tmux_change,
-            CallKind::GitDiff => self.git_diff,
-            CallKind::GitRead => self.git_read,
-            CallKind::GitWrite => self.git_write,
-            CallKind::GitProbe => self.git_probe,
-            CallKind::GhQuery => self.gh_query,
-            CallKind::Direnv => self.direnv,
-        }
+        self.by_kind[kind.index()]
+    }
+
+    fn with(self, kind: CallKind, deadline: Duration) -> Self {
+        let mut by_kind = self.by_kind;
+        by_kind[kind.index()] = deadline;
+        Self { by_kind }
     }
 }
 
@@ -91,5 +89,42 @@ mod tests {
             Deadlines::diff_poll().for_kind(CallKind::GitRead),
             Deadlines::standard().for_kind(CallKind::GitDiff)
         );
+    }
+
+    #[test]
+    fn the_diff_poll_keeps_every_other_standard_deadline() {
+        let other_kinds = CallKind::ALL
+            .into_iter()
+            .filter(|kind| *kind != CallKind::GitRead);
+
+        for kind in other_kinds {
+            assert_eq!(
+                Deadlines::diff_poll().for_kind(kind),
+                Deadlines::standard().for_kind(kind)
+            );
+        }
+    }
+
+    #[test]
+    fn every_call_kind_has_a_standard_deadline() {
+        for kind in CallKind::ALL {
+            assert!(Deadlines::standard().for_kind(kind) > Duration::ZERO);
+        }
+    }
+
+    #[test]
+    fn every_call_kind_is_listed_in_its_place() {
+        for (place, kind) in CallKind::ALL.into_iter().enumerate() {
+            assert_eq!(kind.index(), place);
+        }
+    }
+
+    #[test]
+    fn a_uniform_deadline_holds_for_every_call_kind() {
+        let deadline = Duration::from_secs(7);
+
+        for kind in CallKind::ALL {
+            assert_eq!(Deadlines::uniform(deadline).for_kind(kind), deadline);
+        }
     }
 }

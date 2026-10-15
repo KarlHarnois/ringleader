@@ -284,6 +284,7 @@ impl CompositionRoot {
         let desktop = DesktopPorts::new(SystemTerminalEmulator::detect(
             host.as_ref(),
             &self.environment,
+            bounded,
         ));
         let repos = RepoPorts::new(
             Arc::new(GitWorkspace::new(self.programs.git(), bounded)),

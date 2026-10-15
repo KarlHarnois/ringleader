@@ -685,9 +685,10 @@ after the completion steps pass.** None of the metrics tools runs `clippy`.
     │   ├── null_pull_requests.rs # NullPullRequests, finds no pull request on a host without gh
     │   ├── direnv_directory_environment.rs # DirenvDirectoryEnvironment, reads a directory's .envrc, asks direnv whether it is allowed, and allows it
     │   ├── null_directory_environment.rs # NullDirectoryEnvironment, finds no .envrc on a host without direnv
-    │   ├── system_terminal_emulator.rs # SystemTerminalEmulator, starts xdg-terminal-exec or the program $TERMINAL names in a directory, in a session of its own, and logs a failed exit
+    │   ├── system_terminal_emulator.rs # SystemTerminalEmulator, asks xdg-terminal-exec which terminal it opens, starts the terminal program in a directory, in a session of its own, and logs a failed exit
+    │   ├── terminal_program.rs   # TerminalProgram, xdg-terminal-exec with --dir, the program $TERMINAL names, or ghostty +new-window with --working-directory, since a running Ghostty ignores the directory of a plain launch
     │   ├── null_terminal_emulator.rs # NullTerminalEmulator, opens no window on a host without a graphical display or a terminal, and says which it lacks
-    │   ├── bounded_command.rs    # BoundedCommand, runs git, tmux, gh, and direnv children in a new session with a deadline
+    │   ├── bounded_command.rs    # BoundedCommand, runs git, tmux, gh, direnv, and xdg-terminal-exec children in a new session with a deadline
     │   ├── deadlines.rs          # Deadlines and CallKind, the deadline of each kind of child call
     │   ├── command_output.rs     # CommandOutput, a finished child's status and output
     │   ├── host_path.rs          # HostPath, lenient canonicalization and directory listing
@@ -700,6 +701,7 @@ after the completion steps pass.** None of the metrics tools runs `clippy`.
     │   ├── branch_ref.rs         # BranchRef, the git ref name of a Branch and the Branch a ref name spells
     │   ├── git_branches.rs       # GitBranches: compare-and-swap delete, rename, the managed-branch marker, and whether a branch has been pushed
     │   ├── branch_marker.rs      # BranchMarker, the git config entry that marks a branch Ringleader created, and the command that sets it by hand
+    │   ├── path_option.rs        # PathOption, a command line option that takes a path in the same argument, such as --dir=<path>
     │   ├── shell_word.rs         # ShellWord, one word of a command Ringleader advises, quoted when a shell would split or expand it
     │   ├── branch_section.rs     # BranchSection, the git config section and upstream keys of one branch
     │   ├── upstream_merger.rs    # UpstreamMerger, fetches a branch from origin and merges origin's copy into a worktree, listing any conflicted paths
