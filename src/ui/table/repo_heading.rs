@@ -6,9 +6,9 @@ use ratatui::text::Span;
 use super::list_selection::ListSelection;
 use super::repo_group::RepoGroup;
 use super::state_indicator::StateIndicator;
-use super::text_fit::TextFit;
-use super::theme::Theme;
 use crate::domain::{SessionState, SessionSummary};
+use crate::ui::text_fit::TextFit;
+use crate::ui::theme::Theme;
 
 pub struct RepoHeading<'a> {
     group: RepoGroup,

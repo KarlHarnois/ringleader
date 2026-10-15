@@ -1,18 +1,18 @@
 use std::time::{Duration, Instant};
 
 use super::bell::Bell;
-use super::diff_queue::DiffQueue;
 use super::home_view::LayoutTier;
-use super::observation_feed::ObservationFeed;
-use super::preview_feed::PreviewFeed;
 use super::preview_panel::PreviewPanel;
-use super::pull_request_feed::PullRequestFeed;
-use super::session_list::SessionList;
-use super::session_table::SessionTable;
 use super::status_bar::{StatusBar, StatusNote};
-use super::theme::Theme;
 use crate::application::{ServiceError, SessionService, Tool};
 use crate::domain::SessionSummary;
+use crate::ui::background_jobs::diff_queue::DiffQueue;
+use crate::ui::background_jobs::observation_feed::ObservationFeed;
+use crate::ui::background_jobs::preview_feed::PreviewFeed;
+use crate::ui::background_jobs::pull_request_feed::PullRequestFeed;
+use crate::ui::table::session_list::SessionList;
+use crate::ui::table::session_table::SessionTable;
+use crate::ui::theme::Theme;
 
 pub struct HomeState {
     sessions: SessionList,

@@ -1,15 +1,15 @@
 use crossterm::event::KeyEvent;
 use ratatui::text::Line;
 
-use super::home_path::HomePath;
-use super::match_list::MatchList;
 use super::repo_filter::RepoFilter;
 use super::repo_scan::RepoScan;
-use super::search_query::SearchQuery;
-use super::text_field::FieldKind;
 use super::typed_repo_check::TypedRepoCheck;
 use crate::application::SessionService;
 use crate::domain::Repo;
+use crate::ui::dialogs::fuzzy_search::match_list::MatchList;
+use crate::ui::dialogs::fuzzy_search::search_query::SearchQuery;
+use crate::ui::dialogs::home_path::HomePath;
+use crate::ui::dialogs::text_field::FieldKind;
 use crate::ui::text_fit::TextFit;
 use crate::ui::theme::Theme;
 

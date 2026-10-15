@@ -2,7 +2,7 @@ use std::iter::{once, repeat};
 
 use ratatui::text::{Line, Span};
 
-use super::theme::Theme;
+use crate::ui::theme::Theme;
 
 pub struct LabelColumn {
     label: String,

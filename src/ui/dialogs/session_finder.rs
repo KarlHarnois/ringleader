@@ -2,11 +2,11 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::text::{Line, Span};
 
 use super::dialog::DialogStep;
-use super::fuzzy_ranker::FuzzyRanker;
-use super::match_list::MatchList;
-use super::search_query::SearchQuery;
 use super::text_field::FieldKind;
 use crate::ui::app::AppRequest;
+use crate::ui::dialogs::fuzzy_search::fuzzy_ranker::FuzzyRanker;
+use crate::ui::dialogs::fuzzy_search::match_list::MatchList;
+use crate::ui::dialogs::fuzzy_search::search_query::SearchQuery;
 use crate::ui::text_fit::TextFit;
 use crate::ui::theme::Theme;
 

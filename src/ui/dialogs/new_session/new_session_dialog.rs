@@ -3,17 +3,17 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 
 use super::agent_picker::AgentPicker;
-use super::dialog::DialogStep;
-use super::dialog_labels::DialogLabels;
 use super::new_session_field::NewSessionField;
 use super::new_session_view::NewSessionView;
 use super::prompt_field::PromptField;
 use super::repo_picker::{PickerStep, RepoPicker};
-use super::text_field::{FieldKind, TextField};
 use crate::application::{CreateRequest, SessionService};
 use crate::domain::AgentMode;
 use crate::ui::app::AppRequest;
 use crate::ui::blocking_operation::BlockingOperation;
+use crate::ui::dialogs::DialogStep;
+use crate::ui::dialogs::dialog_labels::DialogLabels;
+use crate::ui::dialogs::text_field::{FieldKind, TextField};
 use crate::ui::theme::Theme;
 
 pub struct NewSessionDialog {

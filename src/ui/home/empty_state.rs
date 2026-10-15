@@ -3,7 +3,7 @@ use ratatui::layout::Rect;
 use ratatui::text::Line;
 
 use super::home_view::CenteredText;
-use super::text_fit::TextFit;
+use crate::ui::text_fit::TextFit;
 
 pub struct EmptyState;
 

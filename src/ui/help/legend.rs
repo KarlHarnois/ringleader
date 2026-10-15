@@ -2,7 +2,7 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
 use super::label_column::LabelColumn;
-use super::theme::Theme;
+use crate::ui::theme::Theme;
 
 pub struct Legend {
     column: LabelColumn,

@@ -9,8 +9,8 @@ use ratatui::text::Line;
 use ratatui::widgets::{Clear, Paragraph, Widget};
 use ratatui_textarea::{CursorMove, DataCursor, TextArea, WrapMode};
 
-use super::dialog_labels::DialogLabels;
 use super::new_session_field::NewSessionField;
+use crate::ui::dialogs::dialog_labels::DialogLabels;
 use crate::ui::theme::Theme;
 
 pub struct PromptField {

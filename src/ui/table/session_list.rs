@@ -5,9 +5,9 @@ use super::repo_group::RepoGroup;
 use super::repo_heading::RepoHeading;
 use super::session_table::SessionTable;
 use super::session_tree::{SessionTree, TreeLine};
-use super::theme::Theme;
 use super::viewport::Viewport;
 use crate::domain::{DiffStat, PullRequest, SessionSummary};
+use crate::ui::theme::Theme;
 
 #[derive(Debug, Default)]
 pub struct SessionList {

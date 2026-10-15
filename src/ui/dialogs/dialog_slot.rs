@@ -3,7 +3,7 @@ use ratatui::Frame;
 
 use super::dialog::{Dialog, DialogStep};
 use crate::application::SessionService;
-use crate::ui::back_key::BackKey;
+use crate::ui::keys::back_key::BackKey;
 use crate::ui::theme::Theme;
 
 #[derive(Default)]

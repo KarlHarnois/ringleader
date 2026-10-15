@@ -6,14 +6,14 @@ use std::slice;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::text::{Line, Span};
 
-use super::dialogs::DialogStep;
-use super::dialogs::home_path::HomePath;
 use super::label_column::LabelColumn;
 use super::legend::{Legend, LegendEntry};
-use super::state_indicator::StateIndicator;
-use super::text_fit::TextFit;
-use super::theme::Theme;
 use crate::domain::{HotKey, KeyBindings, PullRequestState, SessionState};
+use crate::ui::dialogs::DialogStep;
+use crate::ui::dialogs::home_path::HomePath;
+use crate::ui::table::state_indicator::StateIndicator;
+use crate::ui::text_fit::TextFit;
+use crate::ui::theme::Theme;
 
 pub struct HelpView {
     bound_keys: Vec<(String, &'static str)>,
@@ -234,7 +234,7 @@ mod tests {
 
     use super::*;
     use crate::ui::dialogs::Dialog;
-    use crate::ui::home_view::LayoutTier;
+    use crate::ui::home::home_view::LayoutTier;
 
     struct HelpFixture;
 

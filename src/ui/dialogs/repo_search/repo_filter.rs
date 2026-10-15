@@ -1,6 +1,6 @@
-use super::fuzzy_ranker::FuzzyRanker;
-use super::home_path::HomePath;
 use crate::domain::Repo;
+use crate::ui::dialogs::fuzzy_search::fuzzy_ranker::FuzzyRanker;
+use crate::ui::dialogs::home_path::HomePath;
 
 pub struct RepoFilter {
     ranker: FuzzyRanker,

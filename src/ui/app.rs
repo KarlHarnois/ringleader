@@ -4,17 +4,17 @@ use std::time::Instant;
 use crossterm::event::{Event, KeyEvent, KeyEventKind};
 use ratatui::Frame;
 
-use super::action_gate::{ActionGate, KeyAction, Navigation};
-use super::bell::Bell;
 use super::blocking_operation::{BlockingOperation, OperationOutcome};
 use super::dialogs::{Dialog, DialogSlot, DialogStep};
-use super::home_state::HomeState;
-use super::home_view::HomeView;
-use super::key_sequence::KeySequence;
-use super::status_bar::{StatusBar, StatusMessage};
-use super::status_report::StatusReport;
 use super::theme::Theme;
 use crate::application::{EphemeralShell, ServiceError, SessionService, ShellOutcome};
+use crate::ui::home::bell::Bell;
+use crate::ui::home::home_state::HomeState;
+use crate::ui::home::home_view::HomeView;
+use crate::ui::home::status_bar::{StatusBar, StatusMessage};
+use crate::ui::home::status_report::StatusReport;
+use crate::ui::keys::action_gate::{ActionGate, KeyAction, Navigation};
+use crate::ui::keys::key_sequence::KeySequence;
 
 pub struct App {
     service: SessionService,

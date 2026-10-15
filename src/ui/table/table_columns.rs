@@ -1,4 +1,4 @@
-use super::text_fit::TextFit;
+use crate::ui::text_fit::TextFit;
 
 pub struct TableColumns {
     inner_width: usize,

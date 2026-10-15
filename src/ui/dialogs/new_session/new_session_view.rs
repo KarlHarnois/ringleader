@@ -5,13 +5,13 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use super::agent_picker::AgentPicker;
-use super::dialog_labels::DialogLabels;
 use super::new_session_field::NewSessionField;
 use super::new_session_layout::NewSessionLayout;
 use super::prompt_field::{PromptField, PromptStyle};
 use super::repo_picker::RepoPicker;
-use super::text_field::TextField;
 use crate::domain::AgentMode;
+use crate::ui::dialogs::dialog_labels::DialogLabels;
+use crate::ui::dialogs::text_field::TextField;
 use crate::ui::text_fit::TextFit;
 use crate::ui::theme::Theme;
 

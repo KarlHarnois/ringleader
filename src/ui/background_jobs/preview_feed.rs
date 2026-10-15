@@ -1,10 +1,10 @@
 use std::time::Instant;
 
-use super::home_view::LayoutTier;
-use super::preview_panel::PreviewCapture;
-use super::preview_text::PreviewText;
 use crate::application::{Pending, ServiceError, SessionService};
 use crate::domain::{SessionState, SessionSummary};
+use crate::ui::home::home_view::LayoutTier;
+use crate::ui::home::preview_panel::PreviewCapture;
+use crate::ui::home::preview_text::PreviewText;
 
 pub struct PreviewFeed {
     shown: Option<SessionCapture>,

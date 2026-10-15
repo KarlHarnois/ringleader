@@ -4,8 +4,8 @@ use ratatui::text::Line;
 use ratatui::widgets::Paragraph;
 
 use super::preview_panel::PreviewPanel;
-use super::session_table::SessionTable;
 use super::status_bar::StatusBar;
+use crate::ui::table::session_table::SessionTable;
 
 pub struct HomeView<'a> {
     table: SessionTable<'a>,
@@ -148,9 +148,9 @@ mod tests {
     use super::*;
     use crate::domain::{DiffStat, SessionState, SessionSummary};
     use crate::test_support::ServiceFixture;
-    use crate::ui::empty_state::EmptyState;
-    use crate::ui::list_selection::ListSelection;
-    use crate::ui::session_tree::SessionTree;
+    use crate::ui::home::empty_state::EmptyState;
+    use crate::ui::table::list_selection::ListSelection;
+    use crate::ui::table::session_tree::SessionTree;
     use crate::ui::theme::Theme;
 
     struct ViewFixture;

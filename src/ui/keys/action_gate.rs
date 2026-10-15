@@ -1,11 +1,11 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use super::app::AppRequest;
 use super::back_key::BackKey;
-use super::blocking_operation::BlockingOperation;
-use super::dialogs::DialogOpening;
 use crate::application::ports::ConfigError;
 use crate::domain::{Session, SessionState, SessionSummary};
+use crate::ui::app::AppRequest;
+use crate::ui::blocking_operation::BlockingOperation;
+use crate::ui::dialogs::DialogOpening;
 
 pub struct ActionGate<'a> {
     selected: Option<&'a SessionSummary>,

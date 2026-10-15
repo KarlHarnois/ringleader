@@ -3,9 +3,9 @@ use ratatui::style::Style;
 use ratatui::text::Line;
 
 use super::chosen_repo::ChosenRepo;
-use super::repo_finder::RepoFinder;
 use crate::application::SessionService;
 use crate::domain::Repo;
+use crate::ui::dialogs::repo_search::repo_finder::RepoFinder;
 use crate::ui::text_fit::TextFit;
 use crate::ui::theme::Theme;
 

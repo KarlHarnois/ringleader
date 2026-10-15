@@ -1,6 +1,6 @@
 use crossterm::event::KeyEvent;
 
-use super::text_field::{FieldKind, TextField};
+use crate::ui::dialogs::text_field::{FieldKind, TextField};
 
 pub struct SearchQuery {
     field: TextField,

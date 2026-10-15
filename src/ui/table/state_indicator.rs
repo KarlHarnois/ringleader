@@ -1,7 +1,7 @@
 use ratatui::style::Style;
 
-use super::theme::Theme;
 use crate::domain::SessionState;
+use crate::ui::theme::Theme;
 
 pub struct StateIndicator {
     state: SessionState,

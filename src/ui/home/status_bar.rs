@@ -4,9 +4,9 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-use super::text_fit::TextFit;
-use super::theme::Theme;
 use crate::domain::{SessionSummary, UnmanagedSession};
+use crate::ui::text_fit::TextFit;
+use crate::ui::theme::Theme;
 
 pub struct StatusBar<'a> {
     message: Option<&'a StatusMessage>,

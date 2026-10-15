@@ -4,9 +4,9 @@ use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Padding, Paragraph};
 
 use super::preview_text::PreviewText;
-use super::text_fit::TextFit;
-use super::theme::Theme;
 use crate::domain::SessionSummary;
+use crate::ui::text_fit::TextFit;
+use crate::ui::theme::Theme;
 
 pub struct PreviewPanel<'a> {
     row: Option<&'a SessionSummary>,

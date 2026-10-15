@@ -6,16 +6,16 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use super::colored_row::ColoredRow;
-use super::empty_state::EmptyState;
-use super::home_view::LayoutTier;
 use super::list_selection::ListSelection;
 use super::repo_heading::RepoHeading;
 use super::session_tree::{SessionTree, TreeBranch, TreeLine};
 use super::state_indicator::StateIndicator;
 use super::table_columns::{RowCells, TableColumns};
-use super::theme::Theme;
 use super::viewport::Viewport;
 use crate::domain::{DiffStat, SessionMetadata, SessionSummary};
+use crate::ui::home::empty_state::EmptyState;
+use crate::ui::home::home_view::LayoutTier;
+use crate::ui::theme::Theme;
 
 pub struct SessionTable<'a> {
     tree: SessionTree<'a>,
@@ -246,7 +246,7 @@ mod tests {
     use super::*;
     use crate::domain::{DiffStat, PullRequestState, SessionState, UnmanagedSession};
     use crate::test_support::ServiceFixture;
-    use crate::ui::repo_group::RepoGroup;
+    use crate::ui::table::repo_group::RepoGroup;
 
     struct TableFixture;
 
