@@ -433,7 +433,7 @@ mod tests {
     }
 
     #[test]
-    fn an_exited_session_is_respawned_without_the_agent_resume_args() {
+    fn an_exited_session_skips_resume_args_because_a_resume_with_no_conversation_exits() {
         let fixture = RestartFixture::exited().with_config(RestartFixture::resuming_config());
 
         RestartFixture::restart(&fixture).unwrap();
