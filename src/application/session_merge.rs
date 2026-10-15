@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use super::base_branch_resolver::BaseBranchResolver;
 use super::merge_report::{ConflictHandoff, MergeReport, UpstreamMerge};
 use super::ports::{HostProbe, MergeOutcome, Multiplexer, Workspace, WorkspaceError};
 use super::reconciliation::{ManagedRow, Reconciliation};
@@ -56,26 +55,30 @@ impl SessionMerge {
         reconciliation: &Reconciliation,
         config: &Config,
     ) -> Result<BaseBranch, ServiceError> {
-        let upstream = self.upstream_of(session, reconciliation, config)?;
+        let repo_base =
+            RepoMerge::new(self.host.as_ref()).configured_base_branch(session, config.repos());
+        let Some(requested) = session.requested_base_branch() else {
+            return self.fetch_upstream_of(session, reconciliation, repo_base);
+        };
+        let upstream = self.upstream_of(session, reconciliation, Some(requested))?;
         match self
             .workspace
             .fetch_upstream(session.worktree_path(), &upstream)
         {
-            Ok(()) => Ok(upstream),
             Err(WorkspaceError::NotOnOrigin { .. }) => {
-                self.fetch_upstream_chosen_again(session, reconciliation, config)
+                self.fetch_upstream_of(session, reconciliation, repo_base)
             }
-            Err(failure) => Err(failure.into()),
+            fetched => Ok(fetched.map(|()| upstream)?),
         }
     }
 
-    fn fetch_upstream_chosen_again(
+    fn fetch_upstream_of(
         &self,
         session: &Session,
         reconciliation: &Reconciliation,
-        config: &Config,
+        base_branch: Option<&BaseBranch>,
     ) -> Result<BaseBranch, ServiceError> {
-        let upstream = self.upstream_of(session, reconciliation, config)?;
+        let upstream = self.upstream_of(session, reconciliation, base_branch)?;
         self.workspace
             .fetch_upstream(session.worktree_path(), &upstream)?;
         Ok(upstream)
@@ -85,20 +88,13 @@ impl SessionMerge {
         &self,
         session: &Session,
         reconciliation: &Reconciliation,
-        config: &Config,
+        base_branch: Option<&BaseBranch>,
     ) -> Result<BaseBranch, ServiceError> {
-        let repos = RepoMerge::new(self.host.as_ref());
-        let worktree = session.worktree_path();
-        let base_branch = BaseBranchResolver::new(self.workspace.as_ref()).resolve(
-            worktree,
-            session.requested_base_branch(),
-            repos.configured_base_branch(session, config.repos()),
-        )?;
-        let session_branches =
-            repos.session_branches_in(session.repo_path(), reconciliation.entries());
+        let session_branches = RepoMerge::new(self.host.as_ref())
+            .session_branches_in(session.repo_path(), reconciliation.entries());
         UpstreamResolver::new(self.workspace.as_ref())
             .skipping(session_branches)
-            .resolve(worktree, base_branch)
+            .resolve(session.worktree_path(), base_branch)
     }
 
     fn merge_fetched(
@@ -294,13 +290,25 @@ mod tests {
             ServiceFixture::workspace_for(&[&Self::session()])
         }
 
-        fn workspace_holding(branches: &[Branch]) -> FakeWorkspace {
-            let worktree = Self::session().worktree_path().to_path_buf();
-            let tips: Vec<(Branch, &str)> = branches
+        fn based_on_part1(workspace: FakeWorkspace) -> ServiceFixture {
+            let requested = ServiceFixture::session_based_on(Self::NAME, "part1");
+            Self::waiting_as(requested).with_workspace(workspace.without_branch_on_origin("part1"))
+        }
+
+        fn fetch_failure() -> WorkspaceError {
+            WorkspaceError::Failed {
+                subcommand: "fetch".to_string(),
+                status: "exit status: 128".to_string(),
+                stderr: "fatal: could not read from remote repository".to_string(),
+            }
+        }
+
+        fn fetches(fixture: &ServiceFixture) -> usize {
+            let calls = fixture.workspace().calls();
+            calls
                 .iter()
-                .map(|branch| (branch.clone(), FakeWorkspace::DEFAULT_START))
-                .collect();
-            Self::workspace().with_branch_tips(&worktree, &tips)
+                .filter(|call| call.starts_with("fetch_upstream"))
+                .count()
         }
 
         fn conflicted() -> ServiceFixture {
@@ -604,10 +612,8 @@ mod tests {
     #[test]
     fn a_requested_base_branch_is_merged_over_the_configured_one() {
         let requested = ServiceFixture::session_based_on(MergeFixture::NAME, "release");
-        let release = MergeFixture::workspace_holding(&[Branch::Local("release".to_string())]);
-        let fixture = MergeFixture::waiting_as(requested)
-            .with_workspace(release)
-            .with_config(MergeFixture::config_with_develop());
+        let fixture =
+            MergeFixture::waiting_as(requested).with_config(MergeFixture::config_with_develop());
 
         MergeFixture::merge(&fixture).unwrap();
 
@@ -615,27 +621,8 @@ mod tests {
     }
 
     #[test]
-    fn a_requested_base_branch_that_no_longer_exists_gives_way_to_origins_default() {
-        let fixture = MergeFixture::waiting_as(ServiceFixture::session_based_on(
-            MergeFixture::NAME,
-            "part1",
-        ));
-
-        MergeFixture::merge(&fixture).unwrap();
-
-        assert!(MergeFixture::fetched_branch(&fixture, "main"));
-        assert!(!MergeFixture::fetched_branch(&fixture, "part1"));
-    }
-
-    #[test]
-    fn a_requested_base_branch_origin_dropped_gives_way_in_the_same_pull() {
-        let requested = ServiceFixture::session_based_on(MergeFixture::NAME, "part1");
-        let dropped = MergeFixture::workspace_holding(&[
-            Branch::origin_copy_of("part1"),
-            Branch::origin_copy_of("main"),
-        ])
-        .without_branch_on_origin("part1");
-        let fixture = MergeFixture::waiting_as(requested).with_workspace(dropped);
+    fn a_requested_base_branch_origin_no_longer_has_gives_way_to_origins_default() {
+        let fixture = MergeFixture::based_on_part1(MergeFixture::workspace());
 
         let report = MergeFixture::merge(&fixture).unwrap();
 
@@ -643,31 +630,49 @@ mod tests {
     }
 
     #[test]
-    fn a_requested_base_branch_still_held_locally_is_refused_when_origin_lacks_it() {
-        let requested = ServiceFixture::session_based_on(MergeFixture::NAME, "part1");
-        let unpushed = MergeFixture::workspace_holding(&[Branch::Local("part1".to_string())])
-            .without_branch_on_origin("part1");
-        let fixture = MergeFixture::waiting_as(requested).with_workspace(unpushed);
+    fn a_requested_base_branch_origin_no_longer_has_gives_way_to_the_configured_one() {
+        let fixture = MergeFixture::based_on_part1(MergeFixture::workspace())
+            .with_config(MergeFixture::config_with_develop());
+
+        MergeFixture::merge(&fixture).unwrap();
+
+        assert!(MergeFixture::fetched_branch(&fixture, "develop"));
+    }
+
+    #[test]
+    fn a_pull_whose_requested_and_configured_bases_left_origin_is_refused() {
+        let both_gone = MergeFixture::workspace().without_branch_on_origin("develop");
+        let fixture = MergeFixture::based_on_part1(both_gone)
+            .with_config(MergeFixture::config_with_develop());
 
         let error = MergeFixture::merge(&fixture).unwrap_err();
 
         assert_eq!(
             error,
             ServiceError::Invalid(
-                "origin has no branch part1, push it or merge by hand".to_string()
+                "origin has no branch develop, push it or merge by hand".to_string()
             )
         );
     }
 
     #[test]
+    fn a_requested_base_branch_that_fails_to_fetch_for_another_reason_is_not_replaced() {
+        let requested = ServiceFixture::session_based_on(MergeFixture::NAME, "part1");
+        let unreachable =
+            MergeFixture::workspace().failing("fetch_upstream", MergeFixture::fetch_failure());
+        let fixture = MergeFixture::waiting_as(requested).with_workspace(unreachable);
+
+        let error = MergeFixture::merge(&fixture).unwrap_err();
+
+        assert!(matches!(error, ServiceError::Failed(_)), "{error:?}");
+        assert_eq!(MergeFixture::fetches(&fixture), 1);
+    }
+
+    #[test]
     fn a_failed_fetch_types_nothing() {
-        let failure = WorkspaceError::Failed {
-            subcommand: "fetch".to_string(),
-            status: "exit status: 128".to_string(),
-            stderr: "fatal: could not read from remote repository".to_string(),
-        };
-        let fixture = MergeFixture::waiting()
-            .with_workspace(MergeFixture::workspace().failing("fetch_upstream", failure));
+        let fixture = MergeFixture::waiting().with_workspace(
+            MergeFixture::workspace().failing("fetch_upstream", MergeFixture::fetch_failure()),
+        );
 
         let error = MergeFixture::merge(&fixture).unwrap_err();
 

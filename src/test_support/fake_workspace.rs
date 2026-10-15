@@ -289,17 +289,10 @@ impl FakeWorkspace {
 }
 
 impl WorkspaceState {
-    fn fetch_from_origin(
-        &mut self,
-        worktree: &Path,
-        branch: &BaseBranch,
-    ) -> Result<(), WorkspaceError> {
+    fn fetch_from_origin(&self, branch: &BaseBranch) -> Result<(), WorkspaceError> {
         if !self.missing_on_origin.contains(&branch.to_string()) {
             return Ok(());
         }
-        let origin_copy = branch.origin_copy();
-        self.tips
-            .retain(|(owner, tipped, _)| !(owner == worktree && *tipped == origin_copy));
         Err(WorkspaceError::NotOnOrigin {
             branch: branch.to_string(),
         })
@@ -701,7 +694,7 @@ impl Workspace for FakeWorkspace {
             "fetch_upstream",
             format!("{} {branch_on_origin}", worktree.display()),
         )?;
-        self.edit(|state| state.fetch_from_origin(worktree, branch_on_origin))
+        self.edit(|state| state.fetch_from_origin(branch_on_origin))
     }
 
     fn merge_upstream(

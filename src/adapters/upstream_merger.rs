@@ -31,10 +31,10 @@ impl<'a> UpstreamMerger<'a> {
         self.git
             .run_checked(&fetch)
             .map(drop)
-            .map_err(|failure| self.settle_failed_fetch(worktree, branch, failure))
+            .map_err(|failure| self.explain_failed_fetch(worktree, branch, failure))
     }
 
-    fn settle_failed_fetch(
+    fn explain_failed_fetch(
         &self,
         worktree: &Path,
         branch: &BaseBranch,
@@ -43,7 +43,6 @@ impl<'a> UpstreamMerger<'a> {
         if !self.origin_lacks(worktree, branch) {
             return failure;
         }
-        self.drop_origin_copy(worktree, branch);
         WorkspaceError::NotOnOrigin {
             branch: branch.to_string(),
         }
@@ -57,15 +56,6 @@ impl<'a> UpstreamMerger<'a> {
             self.git.run(&listing),
             Ok(output) if output.exit_code() == Some(Self::NO_MATCHING_REFS)
         )
-    }
-
-    fn drop_origin_copy(&self, worktree: &Path, branch: &BaseBranch) {
-        let deletion = GitInvocation::in_worktree(worktree, "update-ref")
-            .writing()
-            .args(["-d", &Self::origin_ref(branch)]);
-        if let Err(error) = self.git.run_checked(&deletion) {
-            log::warn!("could not drop origin's stale copy of {branch}: {error}");
-        }
     }
 
     pub fn merge(
@@ -438,6 +428,28 @@ mod tests {
                 .is_empty()
         }
 
+        fn with_unreachable_origin(self) -> Self {
+            let missing = self.origin.sibling("missing-origin");
+            self.origin.git(
+                &self.clone,
+                &["remote", "set-url", "origin", &Self::text(&missing)],
+            );
+            self
+        }
+
+        fn keep_origin_copy_of(&self, branch: &str) {
+            let copy = format!("refs/remotes/origin/{branch}");
+            self.origin
+                .git(&self.clone, &["update-ref", &copy, &self.start]);
+        }
+
+        fn has_ref(&self, reference: &str) -> bool {
+            let verify = self
+                .origin
+                .try_git(&self.clone, &["rev-parse", "-q", "--verify", reference]);
+            verify.status.success()
+        }
+
         fn without_remote(self) -> Self {
             self.origin
                 .git(&self.clone, &["remote", "remove", "origin"]);
@@ -719,21 +731,23 @@ mod tests {
     }
 
     #[test]
-    fn a_branch_origin_dropped_loses_its_stale_origin_copy() {
+    fn a_branch_origin_dropped_keeps_its_origin_copy() {
         let fixture = MergeFixture::new();
-        let start = fixture.start.clone();
-        fixture.origin.git(
-            &fixture.clone,
-            &["update-ref", "refs/remotes/origin/part1", &start],
-        );
+        fixture.keep_origin_copy_of("part1");
 
         fixture.merge_from("part1").unwrap_err();
 
-        let copy = fixture.origin.try_git(
-            &fixture.clone,
-            &["rev-parse", "-q", "--verify", "refs/remotes/origin/part1"],
-        );
-        assert!(!copy.status.success());
+        assert!(fixture.has_ref("refs/remotes/origin/part1"));
+    }
+
+    #[test]
+    fn a_fetch_from_an_unreachable_origin_keeps_origins_refs() {
+        let fixture = MergeFixture::new().with_unreachable_origin();
+
+        let error = fixture.merge().unwrap_err();
+
+        assert!(matches!(error, WorkspaceError::Failed { .. }), "{error:?}");
+        assert!(fixture.has_ref("refs/remotes/origin/main"));
     }
 
     #[test]
