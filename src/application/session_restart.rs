@@ -6,7 +6,9 @@ use super::ports::{AgentLaunch, HostProbe, Multiplexer, SessionRegistry, Session
 use super::reconciliation::{ManagedRow, Reconciliation};
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
+use super::session_envrc::SessionEnvrc;
 use super::session_scratch::SessionScratch;
+use super::start_outcome::StartOutcome;
 use super::use_checks::UseChecks;
 use super::worktree_inspection::WorktreeInspection;
 use crate::domain::{Agent, Config, Session};
@@ -17,6 +19,7 @@ pub struct SessionRestart {
     host: Arc<dyn HostProbe>,
     registry: Arc<dyn SessionRegistry>,
     scratch: SessionScratch,
+    envrc: SessionEnvrc,
     hooks: Arc<AgentHooks>,
 }
 
@@ -28,6 +31,7 @@ impl SessionRestart {
             host: ports.repos().host(),
             registry: ports.state().registry(),
             scratch: SessionScratch::new(ports),
+            envrc: SessionEnvrc::new(ports),
             hooks,
         }
     }
@@ -38,21 +42,29 @@ impl SessionRestart {
         reconciliation: &Reconciliation,
         config: &Config,
         config_path: &Path,
-    ) -> Result<Session, ServiceError> {
+    ) -> Result<StartOutcome, ServiceError> {
+        Self::refuse_running(row)?;
         let session = row.session();
-        if row.state().runs_agent() {
-            return Err(ServiceError::Conflict(format!(
-                "session {} is running, restart only revives an exited or stopped agent",
-                session.name()
-            )));
-        }
         let checks = UseChecks::new(self.host.as_ref(), config, config_path);
         let agent = checks.agent_for_restart(session.agent())?;
         self.check_worktree(session)?;
-        let launch = self.scratch.prepare(Self::launch(agent, session));
+        let envrc = self
+            .envrc
+            .choose(session.worktree_path(), session.repo_path());
+        let launch = envrc.applied_to(self.scratch.prepare(Self::launch(agent, session)));
         let restarted = self.revive(row, launch, reconciliation, config)?;
         self.hooks.after_start(&restarted, agent);
-        Ok(restarted)
+        Ok(StartOutcome::new(restarted, envrc.warning()))
+    }
+
+    fn refuse_running(row: &ManagedRow) -> Result<(), ServiceError> {
+        if row.state().runs_agent() {
+            return Err(ServiceError::Conflict(format!(
+                "session {} is running, restart only revives an exited or stopped agent",
+                row.session().name()
+            )));
+        }
+        Ok(())
     }
 
     fn launch(agent: &Agent, session: &Session) -> AgentLaunch {
@@ -159,6 +171,15 @@ mod tests {
             }
         }
 
+        fn loads_envrc(fixture: &ServiceFixture) -> bool {
+            fixture
+                .multiplexer()
+                .launches()
+                .pop()
+                .unwrap()
+                .loads_envrc()
+        }
+
         fn restart(fixture: &ServiceFixture) -> Result<(), ServiceError> {
             fixture.service().restart_session("fix-auth").map(drop)
         }
@@ -196,9 +217,9 @@ mod tests {
     fn a_restart_that_recreates_the_socket_says_so() {
         let fixture = RestartFixture::exited_behind_a_lost_socket();
 
-        let recovery = fixture.service().restart_session("fix-auth").unwrap();
+        let outcome = fixture.service().restart_session("fix-auth").unwrap();
 
-        assert!(recovery.unwrap().contains("recreated the socket"));
+        assert!(outcome.recovery().unwrap().contains("recreated the socket"));
     }
 
     #[test]
@@ -661,5 +682,71 @@ mod tests {
             .with_multiplexer(FakeMultiplexer::new().with_live(ServiceFixture::exited(&session)));
 
         assert!(RestartFixture::restart(&fixture).is_ok());
+    }
+
+    #[test]
+    fn an_exited_session_is_respawned_through_its_allowed_envrc() {
+        let fixture = RestartFixture::exited()
+            .with_directory_environment(ServiceFixture::allowed_envrc("fix-auth"));
+
+        RestartFixture::restart(&fixture).unwrap();
+
+        assert!(RestartFixture::loads_envrc(&fixture));
+    }
+
+    #[test]
+    fn a_stopped_session_is_recreated_through_its_allowed_envrc() {
+        let fixture = RestartFixture::stopped()
+            .with_directory_environment(ServiceFixture::allowed_envrc("fix-auth"));
+
+        RestartFixture::restart(&fixture).unwrap();
+
+        assert!(
+            fixture
+                .multiplexer()
+                .specs()
+                .pop()
+                .unwrap()
+                .launch()
+                .loads_envrc()
+        );
+    }
+
+    #[test]
+    fn a_restart_through_the_envrc_passes_the_agent_its_args_and_the_session_name() {
+        let fixture = RestartFixture::exited()
+            .with_config(ServiceFixture::config_with_input())
+            .with_directory_environment(ServiceFixture::allowed_envrc("fix-auth"));
+
+        RestartFixture::restart(&fixture).unwrap();
+
+        let launch = fixture.multiplexer().launches().pop().unwrap();
+        assert_eq!(launch.argv(), ["claude", "--name", "fix-auth"]);
+        assert!(launch.loads_envrc());
+    }
+
+    #[test]
+    fn a_restart_allows_an_envrc_matching_the_main_checkout() {
+        let environment = ServiceFixture::not_allowed_envrc("fix-auth")
+            .with_allowed_envrc(Path::new(ServiceFixture::REPO), ServiceFixture::ENVRC);
+        let fixture = RestartFixture::stopped().with_directory_environment(environment);
+
+        RestartFixture::restart(&fixture).unwrap();
+
+        assert_eq!(
+            fixture.directory_environment().allowed(),
+            [RestartFixture::session().worktree_path()]
+        );
+    }
+
+    #[test]
+    fn a_not_allowed_envrc_still_restarts_the_agent_and_returns_the_warning() {
+        let fixture = RestartFixture::exited()
+            .with_directory_environment(ServiceFixture::not_allowed_envrc("fix-auth"));
+
+        let outcome = fixture.service().restart_session("fix-auth").unwrap();
+
+        assert!(outcome.warning().unwrap().contains("is not allowed"));
+        assert!(!RestartFixture::loads_envrc(&fixture));
     }
 }

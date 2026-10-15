@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-use super::agent_launcher::{LauncherCommand, PreparedLaunch};
+use super::launcher_command::{LauncherCommand, PreparedLaunch};
 use super::private_server::PrivateServer;
 use super::tmux_agent_input::TmuxAgentInput;
 use super::tmux_command::TmuxCommand;
@@ -393,7 +393,7 @@ impl From<TmuxError> for MultiplexerError {
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::OsString;
+    use std::ffi::{OsStr, OsString};
     use std::fs;
     use std::os::unix::net::UnixListener;
     use std::time::{Duration, Instant};
@@ -401,9 +401,14 @@ mod tests {
     use super::*;
     use crate::adapters::Deadlines;
     use crate::adapters::process_environment::ProcessEnvironment;
+    use crate::adapters::system_host_probe::SystemHostProbe;
     use crate::adapters::tmux_sequence::TmuxSequence;
-    use crate::domain::{HotKey, KeyBindings, RepoName, SessionRepo, SessionWorktree};
-    use crate::test_support::TmuxTestServer;
+    use crate::application::ports::HostProbe;
+    use crate::domain::{
+        HotKey, KeyBindings, RepoName, SessionClassifier, SessionRepo, SessionState,
+        SessionWorktree,
+    };
+    use crate::test_support::{DirenvTestHome, TmuxTestServer};
 
     const HOOKED: &str = "run-shell \"echo hooked; exit 1\"";
 
@@ -542,6 +547,57 @@ mod tests {
                 self.server.command_with(&environment),
                 self.server.stand_in(),
             )
+        }
+    }
+
+    struct DirenvPane {
+        fixture: MultiplexerFixture,
+        home: DirenvTestHome,
+    }
+
+    impl DirenvPane {
+        const ENVRC: &'static str = "export EXAMPLE_FROM_ENVRC=loaded\n";
+        const IDLE_SECONDS: u64 = 3;
+        const NOW: u64 = 0;
+
+        fn started(agent: &str) -> Self {
+            let pane = Self {
+                fixture: MultiplexerFixture::new(),
+                home: DirenvTestHome::new(),
+            };
+            let worktree = pane.fixture.worktree("fix-auth");
+            fs::write(worktree.join(".envrc"), Self::ENVRC).unwrap();
+            pane.home.allow_as_the_user(&worktree);
+            pane.multiplexer(&worktree, agent)
+                .create_session(&pane.fixture.spec("fix-auth"))
+                .unwrap();
+            pane
+        }
+
+        fn multiplexer(&self, worktree: &Path, agent: &str) -> TmuxMultiplexer {
+            let worktree = worktree.to_string_lossy().into_owned();
+            let prefix = ["direnv", "exec", &worktree, "sh", "-c", agent, "sh"];
+            TmuxMultiplexer::new(
+                self.fixture.server.command_with(&self.home.environment()),
+                self.fixture
+                    .server
+                    .launcher(prefix.iter().map(OsString::from).collect()),
+            )
+        }
+
+        fn runs_in_pane(&self, command: &str) -> bool {
+            let multiplexer = self.fixture.server.multiplexer();
+            let pane = multiplexer.pane_pids("ringleader-fix-auth").unwrap();
+            let probe = SystemHostProbe::new(&self.home.environment(), OsStr::new("tmux"));
+            probe
+                .session_processes(&pane)
+                .iter()
+                .any(|process| process.command() == command)
+        }
+
+        fn state(&self) -> SessionState {
+            let observation = self.fixture.observation("ringleader-fix-auth");
+            SessionClassifier::new(Self::IDLE_SECONDS).classify(Some(&observation), Self::NOW)
         }
     }
 
@@ -1588,5 +1644,31 @@ mod tests {
 
         assert!(error.is_timeout());
         assert_eq!(fixture.sessions(), ["holder"]);
+    }
+
+    #[test]
+    fn an_agent_started_through_direnv_runs_among_the_processes_of_its_pane() {
+        let pane = DirenvPane::started("exec sleep 31");
+
+        assert!(
+            pane.fixture
+                .server
+                .wait_for(|| pane.runs_in_pane("sleep 31"))
+        );
+    }
+
+    #[test]
+    fn an_agent_started_through_direnv_that_exits_leaves_an_exited_session() {
+        let pane = DirenvPane::started("echo \"$EXAMPLE_FROM_ENVRC\" > agent-ran");
+        let fixture = &pane.fixture;
+
+        assert!(
+            fixture
+                .server
+                .wait_for(|| { fixture.observation("ringleader-fix-auth").pane_dead() })
+        );
+        assert_eq!(pane.state(), SessionState::Exited);
+        let ran = fs::read_to_string(fixture.worktree("fix-auth").join("agent-ran")).unwrap();
+        assert_eq!(ran, "loaded\n");
     }
 }

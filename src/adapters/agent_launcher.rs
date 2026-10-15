@@ -6,9 +6,10 @@ use std::process::Command;
 
 use thiserror::Error;
 
-use super::agent_handoff::{AgentHandoff, HandoffContents};
+use super::agent_handoff::AgentHandoff;
+use super::handoff_contents::{EnvrcStep, HandoffContents};
+use super::launcher_command::{LauncherCommand, PreparedLaunch};
 use super::process_environment::ProcessEnvironment;
-use crate::application::ports::AgentLaunch;
 
 pub trait ExecSeam {
     fn exec(&mut self, command: Command) -> io::Error;
@@ -25,58 +26,125 @@ impl ExecSeam for ProcessExec {
 pub struct AgentLauncher {
     environment: ProcessEnvironment,
     seam: Box<dyn ExecSeam>,
+    reentry: LauncherCommand,
 }
 
 impl AgentLauncher {
     const PANE_VARIABLES: [&'static str; 4] = ["TERM", "COLORTERM", "TMUX", "TMUX_PANE"];
+    const ENVRC_LOADER: &'static str = "direnv";
+    const ENVRC_LOADER_EXEC: &'static str = "exec";
 
-    pub fn new(environment: &ProcessEnvironment, seam: Box<dyn ExecSeam>) -> Self {
+    pub fn new(
+        environment: &ProcessEnvironment,
+        seam: Box<dyn ExecSeam>,
+        reentry: LauncherCommand,
+    ) -> Self {
         Self {
             environment: environment.clone(),
             seam,
+            reentry,
         }
     }
 
     pub fn launch(&mut self, handoff: &Path) -> LaunchError {
-        let contents = match AgentHandoff::take(handoff) {
-            Ok(contents) => contents,
-            Err(error) => {
-                return LaunchError::Handoff {
-                    path: handoff.display().to_string(),
-                    detail: error.to_string(),
-                };
-            }
-        };
-        match self.prepared(&contents) {
-            Ok(command) => LaunchError::Exec {
-                detail: self.seam.exec(command).to_string(),
-            },
+        match Self::checked_contents(handoff) {
+            Ok(contents) => self.exec_step(&contents),
             Err(error) => error,
         }
     }
 
-    fn prepared(&self, contents: &HandoffContents) -> Result<Command, LaunchError> {
+    fn checked_contents(handoff: &Path) -> Result<HandoffContents, LaunchError> {
+        let contents = AgentHandoff::take(handoff).map_err(|error| LaunchError::Handoff {
+            path: handoff.display().to_string(),
+            detail: error.to_string(),
+        })?;
+        Self::check(&contents)?;
+        Ok(contents)
+    }
+
+    fn exec_step(&mut self, contents: &HandoffContents) -> LaunchError {
+        match contents.envrc() {
+            EnvrcStep::Skip => self.exec(self.agent_command(contents, contents.inherited())),
+            EnvrcStep::Load => self.exec_through_envrc(contents),
+            EnvrcStep::Loaded => self.exec_inside_envrc(contents),
+        }
+    }
+
+    fn check(contents: &HandoffContents) -> Result<(), LaunchError> {
         let worktree = contents.worktree();
         if !worktree.is_dir() {
             return Err(LaunchError::MissingWorktree {
                 path: worktree.display().to_string(),
             });
         }
-        let argv = contents.argv();
-        let Some((program, arguments)) = argv.split_first() else {
+        if contents.argv().is_empty() {
             return Err(LaunchError::EmptyCommand);
+        }
+        Ok(())
+    }
+
+    fn exec_through_envrc(&mut self, contents: &HandoffContents) -> LaunchError {
+        let prepared = match self.reentry.prepare_relay(&contents.inside_envrc()) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                return LaunchError::EnvrcHandoff {
+                    detail: error.to_string(),
+                };
+            }
         };
-        let mut command = Command::new(program);
+        let loader = Self::envrc_loader(contents, &prepared);
+        let error = self.exec(self.in_pane(loader, contents, contents.inherited()));
+        prepared.discard();
+        error
+    }
+
+    fn envrc_loader(contents: &HandoffContents, reentry: &PreparedLaunch) -> Command {
+        let mut loader = Command::new(Self::ENVRC_LOADER);
+        loader
+            .arg(Self::ENVRC_LOADER_EXEC)
+            .arg(contents.worktree())
+            .args(reentry.words());
+        loader
+    }
+
+    fn exec_inside_envrc(&mut self, contents: &HandoffContents) -> LaunchError {
+        let loaded = self.environment.variables().to_vec();
+        self.exec(self.agent_command(contents, loaded))
+    }
+
+    fn agent_command(
+        &self,
+        contents: &HandoffContents,
+        mut environment: Vec<(OsString, OsString)>,
+    ) -> Command {
+        let argv = contents.argv();
+        let mut command = Command::new(&argv[0]);
+        command.args(&argv[1..]);
+        environment.extend(contents.explicit());
+        self.in_pane(command, contents, environment)
+    }
+
+    fn in_pane(
+        &self,
+        mut command: Command,
+        contents: &HandoffContents,
+        environment: Vec<(OsString, OsString)>,
+    ) -> Command {
         command
-            .args(arguments)
             .env_clear()
-            .envs(contents.environment())
+            .envs(environment)
             .envs(self.pane_variables())
-            .current_dir(&worktree);
+            .current_dir(contents.worktree());
         if let Some(terminal) = self.environment.terminal() {
             command.env("GPG_TTY", terminal);
         }
-        Ok(command)
+        command
+    }
+
+    fn exec(&mut self, command: Command) -> LaunchError {
+        LaunchError::Exec {
+            detail: self.seam.exec(command).to_string(),
+        }
     }
 
     fn pane_variables(&self) -> Vec<(OsString, OsString)> {
@@ -90,42 +158,6 @@ impl AgentLauncher {
     }
 }
 
-pub struct LauncherCommand {
-    prefix: Vec<OsString>,
-    handoff: AgentHandoff,
-}
-
-impl LauncherCommand {
-    const HANDOFF_FLAG: &'static str = "--handoff";
-
-    pub fn new(prefix: Vec<OsString>, handoff: AgentHandoff) -> Self {
-        Self { prefix, handoff }
-    }
-
-    pub fn prepare(&self, launch: &AgentLaunch) -> io::Result<PreparedLaunch> {
-        let handoff = self.handoff.write(launch)?;
-        let mut words = self.prefix.clone();
-        words.push(OsString::from(Self::HANDOFF_FLAG));
-        words.push(handoff.clone().into_os_string());
-        Ok(PreparedLaunch { words, handoff })
-    }
-}
-
-pub struct PreparedLaunch {
-    words: Vec<OsString>,
-    handoff: std::path::PathBuf,
-}
-
-impl PreparedLaunch {
-    pub fn words(&self) -> &[OsString] {
-        &self.words
-    }
-
-    pub fn discard(&self) {
-        AgentHandoff::delete(&self.handoff);
-    }
-}
-
 #[derive(Debug, Error)]
 pub enum LaunchError {
     #[error("cannot read the handoff file {path}: {detail}")]
@@ -134,6 +166,8 @@ pub enum LaunchError {
     MissingWorktree { path: String },
     #[error("the handoff file names no agent command")]
     EmptyCommand,
+    #[error("cannot write the handoff file the agent takes inside its .envrc: {detail}")]
+    EnvrcHandoff { detail: String },
     #[error("cannot start the agent: {detail}")]
     Exec { detail: String },
 }
@@ -141,12 +175,14 @@ pub enum LaunchError {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::ffi::OsStr;
     use std::path::PathBuf;
     use std::process::Stdio;
     use std::sync::{Arc, Mutex};
 
     use super::*;
     use crate::application::ports::AgentLaunch;
+    use crate::test_support::DirenvTestHome;
 
     #[derive(Clone, Default)]
     struct CapturingExec {
@@ -200,11 +236,53 @@ mod tests {
         }
     }
 
+    #[derive(Clone, Default)]
+    struct RecordingExec {
+        recorded: Arc<Mutex<Vec<Recorded>>>,
+    }
+
+    struct Recorded {
+        words: Vec<OsString>,
+        environment: BTreeMap<OsString, OsString>,
+    }
+
+    impl RecordingExec {
+        fn words(&self) -> Vec<OsString> {
+            self.recorded.lock().unwrap()[0].words.clone()
+        }
+
+        fn variable(&self, name: &str) -> Option<OsString> {
+            self.recorded.lock().unwrap()[0]
+                .environment
+                .get(OsStr::new(name))
+                .cloned()
+        }
+    }
+
+    impl ExecSeam for RecordingExec {
+        fn exec(&mut self, command: Command) -> io::Error {
+            let mut words = vec![command.get_program().to_os_string()];
+            words.extend(command.get_args().map(OsStr::to_os_string));
+            let environment = command
+                .get_envs()
+                .filter_map(|(name, value)| Some((name.to_os_string(), value?.to_os_string())))
+                .collect();
+            self.recorded
+                .lock()
+                .unwrap()
+                .push(Recorded { words, environment });
+            io::Error::other("recorded instead of exec")
+        }
+    }
+
     struct LauncherFixture {
         directory: tempfile::TempDir,
     }
 
     impl LauncherFixture {
+        const REENTRY: [&'static str; 2] = ["ringleader", "__exec-agent"];
+        const SCRATCH: &'static str = "/scratch/fix-auth";
+
         fn new() -> Self {
             let fixture = Self {
                 directory: tempfile::tempdir().unwrap(),
@@ -217,14 +295,26 @@ mod tests {
             self.directory.path().join("fix-auth")
         }
 
+        fn handoff_directory(&self) -> PathBuf {
+            self.directory.path().join("handoff")
+        }
+
         fn env_program() -> String {
+            Self::program_on_path("env")
+        }
+
+        fn program_on_path(name: &str) -> String {
             let path = std::env::var_os("PATH").unwrap_or_default();
             std::env::split_paths(&path)
-                .map(|directory| directory.join("env"))
+                .map(|directory| directory.join(name))
                 .find(|candidate| candidate.is_file())
                 .unwrap()
                 .to_string_lossy()
                 .into_owned()
+        }
+
+        fn words(words: &[&str]) -> Vec<OsString> {
+            words.iter().map(OsString::from).collect()
         }
 
         fn creating_snapshot() -> ProcessEnvironment {
@@ -253,6 +343,20 @@ mod tests {
             )
         }
 
+        fn envrc_snapshot() -> ProcessEnvironment {
+            ProcessEnvironment::new(
+                vec![
+                    ("PATH".into(), "/devshell/bin:/creator/bin".into()),
+                    ("TMPDIR".into(), "/envrc/tmp".into()),
+                    ("SHELL".into(), "/envrc/bin/bash".into()),
+                    ("EXAMPLE_ACCOUNT_DIR".into(), "/envrc/accounts".into()),
+                    ("EXAMPLE_API_KEY".into(), "from-envrc".into()),
+                    ("EXAMPLE_FROM_ENVRC".into(), "loaded".into()),
+                ],
+                None,
+            )
+        }
+
         fn agent_launch(worktree: &Path) -> AgentLaunch {
             AgentLaunch::new(
                 vec![Self::env_program()],
@@ -261,12 +365,35 @@ mod tests {
             )
         }
 
-        fn handoff(&self, launch: &AgentLaunch) -> PathBuf {
-            let handoff = AgentHandoff::new(
-                &self.directory.path().join("handoff"),
-                &Self::creating_snapshot(),
-            );
+        fn envrc_launch(worktree: &Path) -> AgentLaunch {
+            let assignments = [(
+                "EXAMPLE_ACCOUNT_DIR".to_string(),
+                "/accounts/example".to_string(),
+            )];
+            Self::agent_launch(worktree)
+                .with_env_assignments(&assignments)
+                .with_temp_directory(Path::new(Self::SCRATCH))
+                .loading_envrc()
+        }
+
+        fn handoff_from(&self, creating: &ProcessEnvironment, launch: &AgentLaunch) -> PathBuf {
+            let handoff = AgentHandoff::new(&self.handoff_directory(), creating);
             handoff.write(launch).unwrap()
+        }
+
+        fn handoff(&self, launch: &AgentLaunch) -> PathBuf {
+            self.handoff_from(&Self::creating_snapshot(), launch)
+        }
+
+        fn launcher(
+            pane: &ProcessEnvironment,
+            seam: Box<dyn ExecSeam>,
+            handoff: &Path,
+            reentry: &[&str],
+        ) -> AgentLauncher {
+            let reentry =
+                LauncherCommand::new(Self::words(reentry), AgentHandoff::beside(handoff, pane));
+            AgentLauncher::new(pane, seam, reentry)
         }
 
         fn launch(
@@ -284,10 +411,37 @@ mod tests {
         ) -> (CapturingExec, LaunchError, PathBuf) {
             let seam = CapturingExec::default();
             let handoff = self.handoff(launch);
+            let pane = Self::pane_snapshot(terminal);
             let mut launcher =
-                AgentLauncher::new(&Self::pane_snapshot(terminal), Box::new(seam.clone()));
+                Self::launcher(&pane, Box::new(seam.clone()), &handoff, &Self::REENTRY);
             let result = launcher.launch(&handoff);
             (seam, result, handoff)
+        }
+
+        fn record(&self, launch: &AgentLaunch) -> RecordingExec {
+            let seam = RecordingExec::default();
+            let handoff = self.handoff(launch);
+            let pane = Self::pane_snapshot(None);
+            Self::launcher(&pane, Box::new(seam.clone()), &handoff, &Self::REENTRY)
+                .launch(&handoff);
+            seam
+        }
+
+        fn inside_envrc(&self) -> CapturingExec {
+            self.inside_envrc_from(&Self::creating_snapshot())
+        }
+
+        fn inside_envrc_from(&self, creating: &ProcessEnvironment) -> CapturingExec {
+            let first = self.handoff_from(creating, &Self::envrc_launch(&self.worktree()));
+            let contents = AgentHandoff::take(&first).unwrap().inside_envrc();
+            let envrc = Self::envrc_snapshot();
+            let handoff = AgentHandoff::beside(&first, &envrc)
+                .write_relay(&contents)
+                .unwrap();
+            let seam = CapturingExec::default();
+            Self::launcher(&envrc, Box::new(seam.clone()), &handoff, &Self::REENTRY)
+                .launch(&handoff);
+            seam
         }
     }
 
@@ -310,6 +464,24 @@ mod tests {
         .map(|(name, value)| (name.to_string(), value.to_string()))
         .collect();
         assert_eq!(seam.environment(), expected);
+    }
+
+    #[test]
+    fn the_agent_gets_its_arguments() {
+        let fixture = LauncherFixture::new();
+        let argv = [
+            LauncherFixture::program_on_path("sh"),
+            "-c".to_string(),
+            "echo ARGUMENTS=$*".to_string(),
+            "sh".to_string(),
+            "--name".to_string(),
+            "fix-auth".to_string(),
+        ];
+        let launch = AgentLaunch::new(argv.to_vec(), &[], &fixture.worktree());
+
+        let (seam, _, _) = fixture.run(None, &launch);
+
+        assert_eq!(seam.environment()["ARGUMENTS"], "--name fix-auth");
     }
 
     #[test]
@@ -368,5 +540,180 @@ mod tests {
 
         assert!(matches!(result, LaunchError::MissingWorktree { .. }));
         assert!(!seam.ran());
+    }
+
+    #[test]
+    fn an_unreadable_handoff_fails_before_exec() {
+        let fixture = LauncherFixture::new();
+        let missing = fixture.handoff_directory().join("handoff-gone.json");
+        let seam = CapturingExec::default();
+        let pane = LauncherFixture::pane_snapshot(None);
+
+        let result = LauncherFixture::launcher(
+            &pane,
+            Box::new(seam.clone()),
+            &missing,
+            &LauncherFixture::REENTRY,
+        )
+        .launch(&missing);
+
+        assert!(matches!(result, LaunchError::Handoff { .. }));
+        assert!(!seam.ran());
+    }
+
+    #[test]
+    fn a_handoff_without_a_command_fails_before_exec() {
+        let fixture = LauncherFixture::new();
+        let launch = AgentLaunch::new(Vec::new(), &[], &fixture.worktree());
+
+        let (seam, result, _) = fixture.run(None, &launch);
+
+        assert!(matches!(result, LaunchError::EmptyCommand));
+        assert!(!seam.ran());
+    }
+
+    #[test]
+    fn a_second_handoff_that_cannot_be_written_fails_before_direnv() {
+        let fixture = LauncherFixture::new();
+        let handoff = fixture.handoff(&LauncherFixture::envrc_launch(&fixture.worktree()));
+        let blocked = fixture.directory.path().join("blocked");
+        std::fs::write(&blocked, "a file where the handoff directory goes").unwrap();
+        let pane = LauncherFixture::pane_snapshot(None);
+        let reentry = LauncherCommand::new(
+            LauncherFixture::words(&LauncherFixture::REENTRY),
+            AgentHandoff::new(&blocked.join("handoff"), &pane),
+        );
+        let seam = RecordingExec::default();
+
+        let result = AgentLauncher::new(&pane, Box::new(seam.clone()), reentry).launch(&handoff);
+
+        assert!(matches!(result, LaunchError::EnvrcHandoff { .. }));
+        assert!(seam.recorded.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_launch_through_the_envrc_hands_the_launcher_to_direnv_exec_in_the_worktree() {
+        let fixture = LauncherFixture::new();
+
+        let seam = fixture.record(&LauncherFixture::envrc_launch(&fixture.worktree()));
+
+        let words = seam.words();
+        let worktree = fixture.worktree().into_os_string();
+        assert_eq!(
+            words[..5],
+            [
+                OsString::from("direnv"),
+                OsString::from("exec"),
+                worktree,
+                OsString::from("ringleader"),
+                OsString::from("__exec-agent")
+            ]
+        );
+        assert_eq!(words[5], "--handoff");
+        assert_eq!(
+            Path::new(&words[6]).parent(),
+            Some(fixture.handoff_directory().as_path())
+        );
+    }
+
+    #[test]
+    fn direnv_loads_the_envrc_with_the_home_ringleader_started_with() {
+        let fixture = LauncherFixture::new();
+        let assignments = [("HOME".to_string(), "/home/example-account".to_string())];
+        let launch =
+            LauncherFixture::envrc_launch(&fixture.worktree()).with_env_assignments(&assignments);
+
+        let seam = fixture.record(&launch);
+
+        assert_eq!(seam.variable("HOME"), Some(OsString::from("/home/example")));
+    }
+
+    #[test]
+    fn a_direnv_exec_that_fails_leaves_no_handoff_file() {
+        let fixture = LauncherFixture::new();
+
+        fixture.record(&LauncherFixture::envrc_launch(&fixture.worktree()));
+
+        let left = std::fs::read_dir(fixture.handoff_directory())
+            .unwrap()
+            .count();
+        assert_eq!(left, 0);
+    }
+
+    #[test]
+    fn the_scratch_tmpdir_wins_over_the_envrc_one() {
+        let seam = LauncherFixture::new().inside_envrc();
+
+        assert_eq!(seam.environment()["TMPDIR"], LauncherFixture::SCRATCH);
+    }
+
+    #[test]
+    fn a_set_value_wins_over_the_envrc_one() {
+        let seam = LauncherFixture::new().inside_envrc();
+
+        assert_eq!(
+            seam.environment()["EXAMPLE_ACCOUNT_DIR"],
+            "/accounts/example"
+        );
+    }
+
+    #[test]
+    fn a_configured_value_from_ringleader_wins_over_the_envrc_one() {
+        let seam = LauncherFixture::new().inside_envrc();
+
+        assert_eq!(seam.environment()["EXAMPLE_API_KEY"], "fixture-secret");
+    }
+
+    #[test]
+    fn the_shell_ringleader_started_with_wins_over_the_envrc_one() {
+        let creating =
+            ProcessEnvironment::new(vec![("SHELL".into(), "/bin/example-shell".into())], None);
+
+        let seam = LauncherFixture::new().inside_envrc_from(&creating);
+
+        assert_eq!(seam.environment()["SHELL"], "/bin/example-shell");
+    }
+
+    #[test]
+    fn the_agent_inside_the_envrc_keeps_the_envrc_path_and_exports() {
+        let seam = LauncherFixture::new().inside_envrc();
+
+        let environment = seam.environment();
+        assert_eq!(environment["PATH"], "/devshell/bin:/creator/bin");
+        assert_eq!(environment["EXAMPLE_FROM_ENVRC"], "loaded");
+    }
+
+    #[test]
+    fn direnv_exec_runs_the_launcher_inside_an_envrc_allowed_under_the_same_home() {
+        let fixture = LauncherFixture::new();
+        let home = DirenvTestHome::new();
+        let worktree = home.project_with_envrc(
+            "fix-auth",
+            "export EXAMPLE_FROM_ENVRC=loaded\nPATH_add devshell-bin\n",
+        );
+        home.allow_as_the_user(&worktree);
+        let handoff = fixture.handoff_from(
+            &home.environment(),
+            &LauncherFixture::agent_launch(&worktree).loading_envrc(),
+        );
+        let seam = CapturingExec::default();
+        let pane = LauncherFixture::pane_snapshot(None);
+
+        LauncherFixture::launcher(
+            &pane,
+            Box::new(seam.clone()),
+            &handoff,
+            &["sh", "-c", "env", "sh"],
+        )
+        .launch(&handoff);
+
+        let environment = seam.environment();
+        assert_eq!(environment["EXAMPLE_FROM_ENVRC"], "loaded");
+        let devshell = worktree.join("devshell-bin").display().to_string();
+        assert!(
+            environment["PATH"].starts_with(&devshell),
+            "{}",
+            environment["PATH"]
+        );
     }
 }

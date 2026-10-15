@@ -1,5 +1,7 @@
 use std::path::Path;
 
+use super::shell_word::ShellWord;
+
 pub struct BranchMarker<'a> {
     branch: &'a str,
 }
@@ -8,7 +10,6 @@ impl<'a> BranchMarker<'a> {
     pub const VARIABLE: &'static str = "ringleaderManaged";
     pub const VALUE: &'static str = "true";
     const SECTION: &'static str = "branch";
-    const SHELL_SAFE_PUNCTUATION: &'static str = "/._-:@%+=,";
 
     pub fn new(branch: &'a str) -> Self {
         Self { branch }
@@ -41,25 +42,10 @@ impl<'a> BranchMarker<'a> {
     pub fn marking_command(&self, repo: &Path) -> String {
         format!(
             "git -C {} config {} {}",
-            Self::shell_word(&repo.display().to_string()),
-            Self::shell_word(&self.key()),
+            ShellWord::new(&repo.display().to_string()),
+            ShellWord::new(&self.key()),
             Self::VALUE
         )
-    }
-
-    fn shell_word(word: &str) -> String {
-        if Self::needs_no_quotes(word) {
-            return word.to_string();
-        }
-        format!("'{}'", word.replace('\'', r"'\''"))
-    }
-
-    fn needs_no_quotes(word: &str) -> bool {
-        !word.is_empty()
-            && word.chars().all(|character| {
-                character.is_ascii_alphanumeric()
-                    || Self::SHELL_SAFE_PUNCTUATION.contains(character)
-            })
     }
 }
 

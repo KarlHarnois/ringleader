@@ -16,6 +16,7 @@ use super::session_deletion::SessionDeletion;
 use super::session_merge::{MergeReport, SessionMerge};
 use super::session_renaming::SessionRenaming;
 use super::session_restart::SessionRestart;
+use super::start_outcome::StartOutcome;
 use super::worktree_containment::WorktreeContainment;
 use crate::domain::{Config, KeyBindings, Session, SessionState};
 
@@ -68,7 +69,7 @@ impl SessionLifecycle {
         reconciliation: &Reconciliation,
         config: &Config,
         config_path: &Path,
-    ) -> Result<Session, ServiceError> {
+    ) -> Result<StartOutcome, ServiceError> {
         self.sync_server_config(config.key_bindings())?;
         self.creation
             .create(request, reconciliation, config, config_path)
@@ -125,7 +126,7 @@ impl SessionLifecycle {
         name: &str,
         config: &Config,
         config_path: &Path,
-    ) -> Result<Session, ServiceError> {
+    ) -> Result<StartOutcome, ServiceError> {
         let row = self.quiet_target(reconciliation, name)?;
         self.sync_server_config(config.key_bindings())?;
         self.restart

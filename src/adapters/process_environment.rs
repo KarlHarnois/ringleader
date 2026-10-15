@@ -1,6 +1,8 @@
 use std::ffi::{OsStr, OsString};
 use std::os::unix::ffi::OsStringExt;
 
+use crate::domain::Agent;
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ProcessEnvironment {
     variables: Vec<(OsString, OsString)>,
@@ -58,11 +60,19 @@ impl ProcessEnvironment {
     }
 
     pub fn without(&self, names: &[String]) -> Self {
+        self.retaining(|name| !names.iter().any(|removed| name == removed.as_str()))
+    }
+
+    pub fn baseline(&self) -> Self {
+        self.retaining(|name| Agent::is_baseline_variable(&name.to_string_lossy()))
+    }
+
+    fn retaining(&self, keeps: impl Fn(&OsString) -> bool) -> Self {
         Self {
             variables: self
                 .variables
                 .iter()
-                .filter(|(name, _)| !names.iter().any(|removed| name == removed.as_str()))
+                .filter(|(name, _)| keeps(name))
                 .cloned()
                 .collect(),
             terminal: self.terminal.clone(),
@@ -81,6 +91,11 @@ impl ProcessEnvironment {
         self.get(Self::SHELL)
             .map(|shell| shell.to_string_lossy().into_owned())
             .unwrap_or_else(|| Self::FALLBACK_SHELL.to_string())
+    }
+
+    pub fn shell_variable(&self) -> Option<(OsString, OsString)> {
+        let shell = self.get(Self::SHELL)?;
+        Some((OsString::from(Self::SHELL), shell.to_os_string()))
     }
 
     fn standard_input_terminal() -> Option<OsString> {
@@ -158,6 +173,21 @@ mod tests {
     }
 
     #[test]
+    fn the_baseline_keeps_only_the_variables_every_agent_gets() {
+        let environment = EnvironmentFixture::with(&[
+            ("PATH", "/bin"),
+            ("XDG_CONFIG_HOME", "/home/example/.config"),
+            ("DIRENV_CONFIG", "/home/example/.config/direnv-work"),
+        ]);
+
+        let baseline = environment.baseline();
+
+        assert_eq!(baseline.get("PATH"), Some(OsStr::new("/bin")));
+        assert!(baseline.contains("XDG_CONFIG_HOME"));
+        assert!(!baseline.contains("DIRENV_CONFIG"));
+    }
+
+    #[test]
     fn the_shell_comes_from_the_shell_variable() {
         let environment = EnvironmentFixture::with(&[("SHELL", "/bin/example-shell")]);
 
@@ -169,6 +199,23 @@ mod tests {
         let environment = EnvironmentFixture::with(&[("PATH", "/bin")]);
 
         assert_eq!(environment.shell(), "sh");
+    }
+
+    #[test]
+    fn the_shell_variable_pairs_its_name_with_its_value() {
+        let environment = EnvironmentFixture::with(&[("SHELL", "/bin/example-shell")]);
+
+        assert_eq!(
+            environment.shell_variable(),
+            Some(("SHELL".into(), "/bin/example-shell".into()))
+        );
+    }
+
+    #[test]
+    fn without_a_shell_variable_there_is_no_shell_variable() {
+        let environment = EnvironmentFixture::with(&[("PATH", "/bin")]);
+
+        assert_eq!(environment.shell_variable(), None);
     }
 
     #[test]

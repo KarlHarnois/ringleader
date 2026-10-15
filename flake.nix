@@ -48,6 +48,7 @@
         pkgs.git
         pkgs.nixfmt
         pkgs.util-linux
+        pkgs.direnv
       ];
 
       metricsTools =
@@ -127,6 +128,25 @@
           }
           touch $out
         '';
+
+      devShellTools =
+        pkgs: defaultShell:
+        pkgs.runCommand "dev-shell-tools" { } ''
+          fail() {
+            echo "$1" >&2
+            exit 1
+          }
+          check_shell() {
+            local analyzer pattern="RUST_SRC_PATH-'([^']*)'"
+            analyzer=$(PATH=$1 && command -v rust-analyzer) || fail "a dev shell has no rust-analyzer"
+            [[ $analyzer == /nix/store/* ]] || fail "a dev shell takes rust-analyzer from $analyzer"
+            [[ $(< "$analyzer") =~ $pattern ]] || fail "rust-analyzer sets no RUST_SRC_PATH"
+            [[ -f ''${BASH_REMATCH[1]}/core/src/lib.rs ]] || fail "RUST_SRC_PATH holds no core sources"
+            ! (PATH=$1 && command -v rustup) || fail "a dev shell provides rustup"
+          }
+          check_shell ${pkgs.lib.makeBinPath defaultShell.nativeBuildInputs}
+          touch $out
+        '';
     in
     {
       packages = forEachSystem (pkgs: {
@@ -140,6 +160,7 @@
           nativeCheckInputs = [
             pkgs.gitMinimal
             pkgs.tmux
+            pkgs.direnv
           ];
           postInstall = ''
             wrapProgram $out/bin/ringleader \
@@ -178,7 +199,7 @@
       devShells = forEachSystemWithMetricsTools (
         pkgs: tools: rec {
           default = pkgs.mkShell {
-            packages = developmentPackages pkgs;
+            packages = developmentPackages pkgs ++ [ pkgs.rust-analyzer ];
           };
           metrics = pkgs.mkShell {
             inputsFrom = [ default ];
@@ -203,6 +224,7 @@
       checks = nixpkgs.lib.genAttrs supportedSystems (system: {
         default = self.packages.${system}.default;
         readme-version-badge = readmeVersionBadge nixpkgs.legacyPackages.${system};
+        dev-shell-tools = devShellTools nixpkgs.legacyPackages.${system} self.devShells.${system}.default;
       });
     };
 }

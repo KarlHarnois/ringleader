@@ -8,6 +8,7 @@ pub enum CallKind {
     GitRead,
     GitWrite,
     GhQuery,
+    Direnv,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -18,6 +19,7 @@ pub struct Deadlines {
     git_read: Duration,
     git_write: Duration,
     gh_query: Duration,
+    direnv: Duration,
 }
 
 impl Deadlines {
@@ -29,6 +31,7 @@ impl Deadlines {
             git_read: Duration::from_secs(60),
             git_write: Duration::from_secs(300),
             gh_query: Duration::from_secs(20),
+            direnv: Duration::from_secs(10),
         }
     }
 
@@ -41,6 +44,7 @@ impl Deadlines {
             git_read: deadline,
             git_write: deadline,
             gh_query: deadline,
+            direnv: deadline,
         }
     }
 
@@ -52,6 +56,7 @@ impl Deadlines {
             CallKind::GitRead => self.git_read,
             CallKind::GitWrite => self.git_write,
             CallKind::GhQuery => self.gh_query,
+            CallKind::Direnv => self.direnv,
         }
     }
 }

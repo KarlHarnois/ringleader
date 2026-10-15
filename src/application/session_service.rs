@@ -22,6 +22,7 @@ use super::session_access::{SessionAccess, ShellOutcome};
 use super::session_lifecycle::SessionLifecycle;
 use super::session_merge::MergeReport;
 use super::session_monitor::SessionMonitor;
+use super::start_outcome::StartOutcome;
 use crate::domain::{
     Config, DiffStat, KeyBindings, PullRequest, Repo, Session, SessionObservation, SessionSummary,
 };
@@ -214,14 +215,17 @@ impl SessionService {
         self.pull_request_catalog.find(&sessions)
     }
 
-    pub fn create_session(&mut self, request: &CreateRequest) -> Result<Session, ServiceError> {
+    pub fn create_session(
+        &mut self,
+        request: &CreateRequest,
+    ) -> Result<StartOutcome, ServiceError> {
         let reconciliation = self.reconcile()?;
         let config_path = self.config_path();
-        let session =
+        let outcome =
             self.lifecycle
                 .create(request, &reconciliation, self.config(), &config_path)?;
-        self.entries.push(session.clone());
-        Ok(session)
+        self.entries.push(outcome.session().clone());
+        Ok(outcome)
     }
 
     pub fn delete_impact(&mut self, name: &str) -> Result<DeleteImpact, ServiceError> {
@@ -255,15 +259,15 @@ impl SessionService {
             .examine(self.config(), self.read_only_reason(), &self.config_path())
     }
 
-    pub fn restart_session(&mut self, name: &str) -> Result<Option<String>, ServiceError> {
+    pub fn restart_session(&mut self, name: &str) -> Result<StartOutcome, ServiceError> {
         let recovery = self.lifecycle.restore_server_socket()?;
         let reconciliation = self.reconcile()?;
         let config_path = self.config_path();
-        let restarted =
-            self.lifecycle
-                .restart(&reconciliation, name, self.config(), &config_path)?;
-        self.entries = reconciliation.entries_with(name, restarted);
-        Ok(recovery)
+        let outcome = self
+            .lifecycle
+            .restart(&reconciliation, name, self.config(), &config_path)?;
+        self.entries = reconciliation.entries_with(name, outcome.session().clone());
+        Ok(outcome.with_recovery(recovery))
     }
 
     pub fn merge_upstream(&mut self, name: &str) -> Result<MergeReport, ServiceError> {
