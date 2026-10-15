@@ -25,7 +25,7 @@ impl ExecutableScript {
             .spawn()
             .unwrap();
         tee.stdin
-            .take()
+            .as_mut()
             .unwrap()
             .write_all(body.as_bytes())
             .unwrap();
