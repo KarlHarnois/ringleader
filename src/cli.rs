@@ -49,11 +49,11 @@ enum CliCommand {
     List(ListArgs),
     #[command(about = "Create a session in a new worktree or the main checkout")]
     New(NewArgs),
-    #[command(about = "Delete a session, its worktree, and its branch")]
+    #[command(about = "Delete a session and the worktree and branch made for it")]
     Delete(DeleteArgs),
     #[command(about = "Attach to a session")]
     Attach(NameArgs),
-    #[command(about = "Rename a session and its branch")]
+    #[command(about = "Rename a session and the branch made for it")]
     Rename(RenameArgs),
     #[command(about = "Restart an exited or stopped session, or with --all every one")]
     Restart(RestartArgs),
