@@ -1,6 +1,6 @@
 # Background jobs
 
-**Every rule in this file binds each change to the TUI's background jobs.** A background job is a `Pending` worker that runs the tmux, git, gh, or agent calls of one TUI task. An observation is one tmux listing of every session.
+**Every rule in this file binds each change to the TUI's background jobs.** A background job is a `Pending` worker that runs the outside calls of one TUI task. An observation is one tmux listing of every session.
 
 **No background job blocks input.**
 
