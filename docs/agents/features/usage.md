@@ -8,11 +8,11 @@
 
 **Read a provider's key only from Ringleader's own environment, such as `OLLAMA_API_KEY`.**
 
-**Never put a key in a child process's arguments or environment.** Any process on the host can read a child's arguments through `ps`. Any process of the same user can read its environment through `/proc`. Pass the key on the child's standard input instead.
+**Never put a key that Ringleader reads itself in a child process's arguments or environment.** Any process on the host can read a child's arguments through `ps`. Any process of the same user can read its environment through `/proc`. Pass such a key on the child's standard input instead.
 
 **Run every probe in Ringleader's usage directory, never in a worktree.** A worktree's `.envrc` or project settings could switch the probe to another account.
 
-- Give a probe the variables the agent gets at launch, without the worktree's `.envrc`. The agent's `set_env` picks the account, for example with `CLAUDE_CONFIG_DIR`.
+- Give a probe the variables the agent gets at launch, without the worktree's `.envrc`. The agent's command needs them to authenticate, and the agent holds them already. The agent's `set_env` picks the account, for example with `CLAUDE_CONFIG_DIR`.
 
 **Measure once when the TUI starts, then only while the usage view is open.** A Claude probe starts a whole Claude Code process.
 
