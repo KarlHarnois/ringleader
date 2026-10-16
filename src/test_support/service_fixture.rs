@@ -351,6 +351,27 @@ impl ServiceFixture {
         Self::rebuilt(&session, worktree, session.agent())
     }
 
+    pub fn main_checkout_session(name: &str) -> Session {
+        let session = Self::session(name);
+        let worktree = SessionWorktree::new(
+            Path::new(Self::REPO),
+            FakeWorkspace::DEFAULT_BRANCH,
+            Self::TIP,
+        );
+        Self::rebuilt(&session, worktree, session.agent())
+    }
+
+    pub fn main_checkout_workspace() -> FakeWorkspace {
+        let repo = Path::new(Self::REPO);
+        let main_checkout = WorktreeEntry::new(repo)
+            .on_branch(FakeWorkspace::DEFAULT_BRANCH)
+            .at_head(Self::TIP)
+            .main();
+        FakeWorkspace::default()
+            .with_worktree(repo, main_checkout)
+            .with_branch(repo, FakeWorkspace::DEFAULT_BRANCH, Self::TIP)
+    }
+
     fn recorded_worktree(session: &Session) -> SessionWorktree {
         SessionWorktree::new(
             session.worktree_path(),
@@ -456,9 +477,12 @@ impl ServiceFixture {
         for session in sessions {
             host.add_directory(session.worktree_path());
         }
-        sessions.iter().fold(host, |host, session| {
-            host.with_file(&session.worktree_path().join(".git"))
-        })
+        sessions
+            .iter()
+            .filter(|session| !session.runs_in_main_checkout())
+            .fold(host, |host, session| {
+                host.with_file(&session.worktree_path().join(".git"))
+            })
     }
 
     pub fn workspace_for(sessions: &[&Session]) -> FakeWorkspace {

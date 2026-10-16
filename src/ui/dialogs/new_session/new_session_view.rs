@@ -9,7 +9,7 @@ use super::new_session_field::NewSessionField;
 use super::new_session_layout::NewSessionLayout;
 use super::prompt_field::{PromptField, PromptStyle};
 use super::repo_picker::RepoPicker;
-use crate::domain::AgentMode;
+use crate::domain::{AgentMode, Checkout};
 use crate::ui::dialogs::dialog_labels::DialogLabels;
 use crate::ui::dialogs::text_field::TextField;
 use crate::ui::text_fit::TextFit;
@@ -21,6 +21,7 @@ pub struct NewSessionView<'a> {
     agents: &'a AgentPicker,
     prompt: &'a PromptField,
     focus: NewSessionField,
+    checkout: Checkout,
     mode: AgentMode,
     error: Option<&'a str>,
 }
@@ -28,6 +29,7 @@ pub struct NewSessionView<'a> {
 impl<'a> NewSessionView<'a> {
     const CURSOR: char = '█';
     const NAME_ROWS: usize = 1;
+    const CHECKOUT_LABEL: &'static str = "Checkout";
     const MODE_LABEL: &'static str = "Mode";
     const UNSUPPORTED_MODE_MARK: &'static str = " · this agent has no plan_args";
 
@@ -43,6 +45,7 @@ impl<'a> NewSessionView<'a> {
             agents,
             prompt,
             focus: NewSessionField::Name,
+            checkout: Checkout::default(),
             mode: AgentMode::default(),
             error: None,
         }
@@ -50,6 +53,10 @@ impl<'a> NewSessionView<'a> {
 
     pub fn focused_on(self, focus: NewSessionField) -> Self {
         Self { focus, ..self }
+    }
+
+    pub fn with_checkout(self, checkout: Checkout) -> Self {
+        Self { checkout, ..self }
     }
 
     pub fn in_mode(self, mode: AgentMode) -> Self {
@@ -64,10 +71,13 @@ impl<'a> NewSessionView<'a> {
         let errors = self.error_lines(usize::from(area.width), theme);
         let layout = self.layout(area, labels, errors.len(), theme);
         let upper = self.upper_lines(labels.field_width(area), layout.repo_room(), labels, theme);
-        let [upper_area, mode_area, prompt_area, error_area, hints_area] =
+        let [upper_area, pinned_area, prompt_area, error_area, hints_area] =
             layout.areas(upper.len());
         self.render_upper(frame, upper_area, upper);
-        frame.render_widget(Paragraph::new(self.mode_lines(labels, theme)), mode_area);
+        frame.render_widget(
+            Paragraph::new(self.pinned_lines(labels, theme)),
+            pinned_area,
+        );
         self.prompt
             .render(frame, prompt_area, labels, self.prompt_style(theme));
         frame.render_widget(Paragraph::new(errors), error_area);
@@ -104,6 +114,20 @@ impl<'a> NewSessionView<'a> {
         lines.extend(labels.labeled(NewSessionField::Repo.label(), repo_lines));
         lines.extend(labels.labeled(NewSessionField::Agent.label(), agent_lines));
         lines
+    }
+
+    fn pinned_lines(&self, labels: DialogLabels, theme: &Theme) -> Vec<Line<'static>> {
+        let mut lines = self.checkout_lines(labels, theme);
+        lines.extend(self.mode_lines(labels, theme));
+        lines
+    }
+
+    fn checkout_lines(&self, labels: DialogLabels, theme: &Theme) -> Vec<Line<'static>> {
+        let checkout_line = match self.checkout {
+            Checkout::NewWorktree => Line::from(self.checkout.name()),
+            Checkout::Main => Line::styled(self.checkout.name(), theme.warning()),
+        };
+        labels.labeled(Self::CHECKOUT_LABEL, vec![checkout_line])
     }
 
     fn mode_lines(&self, labels: DialogLabels, theme: &Theme) -> Vec<Line<'static>> {

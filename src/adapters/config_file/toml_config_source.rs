@@ -76,7 +76,9 @@ prompt_args = ["{prompt}"]
 plan_args = ["--permission-mode", "plan"]
 # Added after args when restart recreates a stopped session, such as after a
 # reboot, to resume its conversation. An exited agent restarts without them,
-# so a resume that finds no conversation and exits restarts fresh.
+# so a resume that finds no conversation and exits restarts fresh. A session
+# in a repo's main checkout always restarts without them, since your own
+# conversations share that directory.
 resume_args = ["--continue"]
 # Lines typed into the agent once its prompt is ready, each followed by Enter.
 # startup_input is typed at every start, rename_input after a rename.

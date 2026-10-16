@@ -87,6 +87,9 @@ impl DeleteSessionDialog {
         for warning in self.impact.warnings() {
             lines.extend(TextFit::new(&warning).styled_lines(width, theme.warning()));
         }
+        if let Some(kept) = self.impact.kept() {
+            lines.extend(TextFit::new(kept).styled_lines(width, theme.base()));
+        }
         lines.push(Line::from(""));
         if self.changed {
             lines.extend(TextFit::new(Self::CHANGED).styled_lines(width, theme.error()));
@@ -208,6 +211,27 @@ mod tests {
         assert!(screen.contains("process 4242 (vim notes.md) runs in the worktree"));
         assert!(screen.contains("agent is actively working"));
         assert!(screen.contains("ignored files such as .env are deleted with the worktree"));
+    }
+
+    #[test]
+    fn the_dialog_of_a_session_in_the_main_checkout_says_the_checkout_stays() {
+        let row = SessionSummary::managed(
+            ServiceFixture::main_checkout_session("fix-auth"),
+            SessionState::Waiting,
+            false,
+        );
+
+        let screen = DeleteDialogFixture::screen(Dialog::delete(
+            Some(&row),
+            "fix-auth",
+            DeleteImpact::session_only(),
+            false,
+        ));
+
+        assert!(
+            screen.contains("the main checkout and its branch stay, delete ends only the session")
+        );
+        assert!(!screen.contains(".env"));
     }
 
     #[test]

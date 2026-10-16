@@ -63,13 +63,24 @@ impl RegistryAudit {
         reconciliation: &Reconciliation,
         report: &mut DoctorReport,
     ) {
-        let name = session.name();
         if !self.inspection.exists(session) {
             report.problem(format!(
-                "session {name}: worktree {} is missing",
+                "session {}: worktree {} is missing",
+                session.name(),
                 session.worktree_path().display()
             ));
         }
+        if !session.runs_in_main_checkout() {
+            self.audit_branch(session, report);
+            self.audit_leftover(session, report);
+        }
+        if state == SessionState::Stopped {
+            self.audit_stopped(session, reconciliation, report);
+        }
+    }
+
+    fn audit_branch(&self, session: &Session, report: &mut DoctorReport) {
+        let name = session.name();
         match self
             .workspace
             .branch_exists(session.repo_path(), session.branch())
@@ -83,14 +94,15 @@ impl RegistryAudit {
                 report.problem(format!("session {name}: cannot read its branch: {error}"))
             }
         }
+    }
+
+    fn audit_leftover(&self, session: &Session, report: &mut DoctorReport) {
         if let Ok(Some(problem)) = self.inspection.leftover_problem(session) {
+            let name = session.name();
             report.problem(format!(
                 "session {name}: worktree {} {problem}, remove the directory by hand or run ringleader delete {name} --forget",
                 session.worktree_path().display()
             ));
-        }
-        if state == SessionState::Stopped {
-            self.audit_stopped(session, reconciliation, report);
         }
     }
 
@@ -154,11 +166,18 @@ impl RegistryAudit {
                 session.agent()
             ));
         }
+        if !session.runs_in_main_checkout() {
+            Self::audit_worktree_root(session, config, report);
+        }
+    }
+
+    fn audit_worktree_root(session: &Session, config: &Config, report: &mut DoctorReport) {
         let recorded = session.naming();
         let current = config.naming();
         if recorded.worktree_root() != current.worktree_root() {
             report.warning(format!(
-                "session {name} was created under worktree_root {}, which differs from the config",
+                "session {} was created under worktree_root {}, which differs from the config",
+                session.name(),
                 recorded.worktree_root().display()
             ));
         }

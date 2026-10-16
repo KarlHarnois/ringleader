@@ -77,10 +77,24 @@ impl<'a> BusyWorktree<'a> {
     }
 
     fn processes_under(&self, session: &Session, socket: &Path) -> Option<Vec<ProcessInfo>> {
-        let processes = self
+        let processes = self.processes_of(session, socket);
+        (!processes.is_empty()).then_some(processes)
+    }
+
+    fn processes_of(&self, session: &Session, socket: &Path) -> Vec<ProcessInfo> {
+        let in_worktree = self
             .host
             .processes_under_server(session.worktree_path(), socket);
-        (!processes.is_empty()).then_some(processes)
+        if !session.runs_in_main_checkout() {
+            return in_worktree;
+        }
+        let in_session_worktrees = self
+            .host
+            .processes_under_server(session.naming().worktree_root(), socket);
+        in_worktree
+            .into_iter()
+            .filter(|process| !in_session_worktrees.contains(process))
+            .collect()
     }
 
     fn still_running(session: &Session, server: &str) -> String {
@@ -97,7 +111,10 @@ impl<'a> BusyWorktree<'a> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
+    use crate::domain::{NamingScheme, Registration, TmuxAddress};
     use crate::test_support::{FakeHostProbe, FakeMultiplexer, ServiceFixture};
 
     struct BusyFixture;
@@ -105,6 +122,7 @@ mod tests {
     impl BusyFixture {
         const FALLBACK_SOCKET: &'static str =
             "/home/example/.local/state/ringleader/tmux/tmux.sock";
+        const AGENT: u32 = 4300;
 
         fn session() -> Session {
             ServiceFixture::session("fix-auth")
@@ -112,6 +130,28 @@ mod tests {
 
         fn finding(host: &FakeHostProbe, session: &Session) -> Option<String> {
             BusyWorktree::new(host, Path::new(FakeMultiplexer::SOCKET)).finding(session)
+        }
+
+        fn main_checkout_holding_the_worktree_root() -> Session {
+            let session = ServiceFixture::main_checkout_session("zeta");
+            let naming = NamingScheme::new(&Self::worktree_root_in_the_repo(), "ringleader-");
+            let tmux = TmuxAddress::new(session.tmux_name(), session.socket_path());
+            Session::new(
+                session.name().clone(),
+                session.metadata().clone(),
+                Registration::new(tmux, naming, session.created_at()),
+            )
+        }
+
+        fn worktree_root_in_the_repo() -> PathBuf {
+            Path::new(ServiceFixture::REPO).join(".worktrees")
+        }
+
+        fn agent_on_the_private_server_in(directory: &Path) -> FakeHostProbe {
+            FakeHostProbe::default()
+                .with_file(Path::new(FakeMultiplexer::SOCKET))
+                .with_process(Self::AGENT, "claude", directory, Self::AGENT)
+                .serving(Self::AGENT, Path::new(FakeMultiplexer::SOCKET))
         }
     }
 
@@ -166,6 +206,23 @@ mod tests {
 
         assert!(finding.contains("End them before a restart or rename"));
         assert!(!finding.contains("send SIGUSR1"));
+    }
+
+    #[test]
+    fn a_main_checkout_ignores_the_agent_of_a_worktree_inside_it() {
+        let session = BusyFixture::main_checkout_holding_the_worktree_root();
+        let other_worktree = BusyFixture::worktree_root_in_the_repo().join("example-project/alpha");
+        let host = BusyFixture::agent_on_the_private_server_in(&other_worktree);
+
+        assert_eq!(BusyFixture::finding(&host, &session), None);
+    }
+
+    #[test]
+    fn a_main_checkout_still_finds_an_agent_left_in_the_checkout() {
+        let session = BusyFixture::main_checkout_holding_the_worktree_root();
+        let host = BusyFixture::agent_on_the_private_server_in(Path::new(ServiceFixture::REPO));
+
+        assert!(BusyFixture::finding(&host, &session).is_some());
     }
 
     #[test]

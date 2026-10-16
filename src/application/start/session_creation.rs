@@ -1,27 +1,24 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use super::checkout_strategy::CheckoutStrategy;
 use super::creation_plan::{CreateRequest, CreationPlan};
+use super::main_checkout_strategy::MainCheckoutStrategy;
+use super::new_worktree_strategy::NewWorktreeStrategy;
 use super::session_envrc::SessionEnvrc;
 use super::start_outcome::StartOutcome;
-use super::start_point_resolver::StartPointResolver;
-use super::worktree_rollback::WorktreeRollback;
 use crate::application::ServiceError;
 use crate::application::ServicePorts;
 use crate::application::agent_hooks::AgentHooks;
-use crate::application::checks::branch_availability::BranchAvailability;
 use crate::application::checks::use_checks::UseChecks;
-use crate::application::ports::{
-    Clock, HostProbe, Multiplexer, SessionRegistry, SessionSpec, StartPoint, Workspace,
-};
+use crate::application::ports::{Clock, HostProbe, Multiplexer, SessionRegistry, SessionSpec};
 use crate::application::reconciliation::Reconciliation;
-use crate::application::repo_merge::RepoMerge;
 use crate::application::session_scratch::SessionScratch;
-use crate::domain::{Config, Session};
+use crate::domain::{Checkout, Config, Session, SessionWorktree};
 
 pub struct SessionCreation {
-    branches: BranchAvailability,
-    workspace: Arc<dyn Workspace>,
+    new_worktree: NewWorktreeStrategy,
+    main_checkout: MainCheckoutStrategy,
     multiplexer: Arc<dyn Multiplexer>,
     host: Arc<dyn HostProbe>,
     registry: Arc<dyn SessionRegistry>,
@@ -34,8 +31,8 @@ pub struct SessionCreation {
 impl SessionCreation {
     pub fn new(ports: &ServicePorts, hooks: Arc<AgentHooks>) -> Self {
         Self {
-            branches: BranchAvailability::new(ports),
-            workspace: ports.repos().workspace(),
+            new_worktree: NewWorktreeStrategy::new(ports),
+            main_checkout: MainCheckoutStrategy::new(ports),
             multiplexer: ports.tmux().multiplexer(),
             host: ports.repos().host(),
             registry: ports.state().registry(),
@@ -54,19 +51,13 @@ impl SessionCreation {
         config_path: &Path,
     ) -> Result<StartOutcome, ServiceError> {
         let plan = self.plan_creation(request, config, config_path)?;
-        self.check_availability(&plan, reconciliation)?;
-        let session_branches = RepoMerge::new(self.host.as_ref())
-            .session_branches_in(plan.repo_path(), reconciliation.entries());
-        let start = StartPointResolver::new(self.workspace.as_ref())
-            .skipping(session_branches)
-            .resolve(plan.repo_path(), plan.base_branch())?;
-        let rollback =
-            WorktreeRollback::new(self.workspace.as_ref(), self.host.as_ref(), &plan, &start);
-        self.create_marked_worktree(&plan, &start, &rollback)?;
-        let envrc = self.envrc.choose(&plan.worktree(), plan.repo_path());
-        let launch = envrc.applied_to(self.scratch.prepare(plan.launch()));
-        let socket = self.start_tmux_session(&plan, &plan.spec(&start, launch), &rollback)?;
-        let session = plan.session(&start, &socket, self.clock.now_epoch_seconds());
+        reconciliation.refuse_taken_name(plan.name(), &plan.tmux_name())?;
+        let checkout = self.prepare_checkout(request.checkout(), &plan, reconciliation)?;
+        let envrc = self.envrc.choose(checkout.path(), plan.repo_path());
+        let launch = envrc.applied_to(self.scratch.prepare(plan.launch_in(checkout.worktree())));
+        let spec = plan.spec(checkout.worktree(), launch);
+        let socket = self.start_tmux_session(&plan, &checkout, &spec)?;
+        let session = plan.session(checkout.worktree(), &socket, self.clock.now_epoch_seconds());
         self.record(&session, reconciliation)?;
         self.hooks.after_start(&session, plan.agent());
         Ok(StartOutcome::new(session, envrc.warning()))
@@ -86,76 +77,35 @@ impl SessionCreation {
         Ok(CreationPlan::new(request, agent, config)?.rooted_at(&root))
     }
 
-    fn check_availability(
+    fn prepare_checkout(
         &self,
+        checkout: Checkout,
         plan: &CreationPlan,
         reconciliation: &Reconciliation,
-    ) -> Result<(), ServiceError> {
-        let taken_by_entry = reconciliation
-            .entries()
-            .iter()
-            .any(|entry| entry.name() == plan.name());
-        if taken_by_entry || reconciliation.is_live_tmux_name(&plan.tmux_name()) {
-            return Err(ServiceError::Conflict(format!(
-                "a session named {} already exists",
-                plan.name()
-            )));
-        }
-        self.check_worktree_available(plan, reconciliation)?;
-        self.branches.refuse_taken(plan.repo_path(), &plan.branch())
+    ) -> Result<PreparedCheckout<'_>, ServiceError> {
+        let strategy = self.strategy_for(checkout);
+        let worktree = strategy.prepare(plan, reconciliation)?;
+        Ok(PreparedCheckout { strategy, worktree })
     }
 
-    fn check_worktree_available(
-        &self,
-        plan: &CreationPlan,
-        reconciliation: &Reconciliation,
-    ) -> Result<(), ServiceError> {
-        let claimed_by_entry = reconciliation
-            .entries()
-            .iter()
-            .any(|entry| entry.worktree_path() == plan.worktree());
-        let canonical = self.host.canonicalize_lenient(&plan.worktree())?;
-        let listed_by_git = self
-            .workspace
-            .list_worktrees(plan.repo_path())?
-            .iter()
-            .any(|entry| entry.path() == canonical);
-        if claimed_by_entry || listed_by_git || self.host.path_exists(&plan.worktree()) {
-            return Err(ServiceError::Conflict(format!(
-                "worktree {} already exists",
-                plan.worktree().display()
-            )));
+    fn strategy_for(&self, checkout: Checkout) -> &dyn CheckoutStrategy {
+        match checkout {
+            Checkout::NewWorktree => &self.new_worktree,
+            Checkout::Main => &self.main_checkout,
         }
-        Ok(())
-    }
-
-    fn create_marked_worktree(
-        &self,
-        plan: &CreationPlan,
-        start: &StartPoint,
-        rollback: &WorktreeRollback,
-    ) -> Result<(), ServiceError> {
-        let branch = plan.branch();
-        self.workspace
-            .create_worktree(plan.repo_path(), &plan.worktree(), &branch, start)
-            .and_then(|()| {
-                self.workspace
-                    .mark_branch_managed(plan.repo_path(), &branch)
-            })
-            .map_err(|error| rollback.run(error.into()))
     }
 
     fn start_tmux_session(
         &self,
         plan: &CreationPlan,
+        checkout: &PreparedCheckout,
         spec: &SessionSpec,
-        rollback: &WorktreeRollback,
     ) -> Result<PathBuf, ServiceError> {
         self.multiplexer.create_session(spec).map_err(|error| {
             if error.is_timeout() {
-                self.after_tmux_timeout(plan, rollback, error.into())
+                self.after_tmux_timeout(plan, checkout, error.into())
             } else {
-                self.roll_back_launch(plan, rollback, error.into())
+                self.roll_back_launch(plan, checkout, error.into())
             }
         })
     }
@@ -163,27 +113,23 @@ impl SessionCreation {
     fn after_tmux_timeout(
         &self,
         plan: &CreationPlan,
-        rollback: &WorktreeRollback,
+        checkout: &PreparedCheckout,
         error: ServiceError,
     ) -> ServiceError {
         match self.multiplexer.kill_session(&plan.tmux_name()) {
-            Ok(()) => self.roll_back_launch(plan, rollback, error),
-            Err(_) => error.adding_context(&format!(
-                "kept the worktree {} and the branch {}, run ringleader doctor",
-                plan.worktree().display(),
-                plan.branch()
-            )),
+            Ok(()) => self.roll_back_launch(plan, checkout, error),
+            Err(_) => checkout.report_kept(error),
         }
     }
 
     fn roll_back_launch(
         &self,
         plan: &CreationPlan,
-        rollback: &WorktreeRollback,
+        checkout: &PreparedCheckout,
         error: ServiceError,
     ) -> ServiceError {
-        self.scratch.discard(&plan.worktree());
-        rollback.run(error)
+        self.scratch.discard(checkout.path());
+        checkout.undo(plan, error)
     }
 
     fn record(
@@ -197,6 +143,29 @@ impl SessionCreation {
             ServiceError::from(error)
                 .adding_context("the session runs, and the next observe adopts it from tmux")
         })
+    }
+}
+
+struct PreparedCheckout<'s> {
+    strategy: &'s dyn CheckoutStrategy,
+    worktree: SessionWorktree,
+}
+
+impl PreparedCheckout<'_> {
+    fn worktree(&self) -> &SessionWorktree {
+        &self.worktree
+    }
+
+    fn path(&self) -> &Path {
+        self.worktree.path()
+    }
+
+    fn undo(&self, plan: &CreationPlan, error: ServiceError) -> ServiceError {
+        self.strategy.undo(plan, &self.worktree, error)
+    }
+
+    fn report_kept(&self, error: ServiceError) -> ServiceError {
+        self.strategy.report_kept(&self.worktree, error)
     }
 }
 
@@ -430,6 +399,26 @@ mod tests {
         let session = CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap();
 
         assert_eq!(session.base_commit(), master_tip);
+    }
+
+    #[test]
+    fn a_new_session_starts_from_the_branch_a_session_in_the_main_checkout_runs_on() {
+        let master_tip = "7777777777777777777777777777777777777777";
+        let repo = Path::new(ServiceFixture::REPO);
+        let workspace = FakeWorkspace::default()
+            .with_branch_tip(
+                repo,
+                Branch::Local("main".to_string()),
+                FakeWorkspace::DEFAULT_START,
+            )
+            .with_branch_tip(repo, Branch::Local("master".to_string()), master_tip);
+        let fixture = ServiceFixture::new()
+            .with_sessions(&[ServiceFixture::main_checkout_session("in-main")])
+            .with_workspace(workspace);
+
+        let session = CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap();
+
+        assert_eq!(session.base_commit(), FakeWorkspace::DEFAULT_START);
     }
 
     #[test]

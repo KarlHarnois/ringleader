@@ -249,11 +249,15 @@ impl<'a> SessionReconciler<'a> {
         naming: &NamingScheme,
     ) -> Option<&'o SessionMetadata> {
         observation.metadata().filter(|metadata| {
-            metadata.has_absolute_paths()
-                && self
-                    .containment
-                    .contains(naming.worktree_root(), metadata.worktree_path())
+            metadata.has_absolute_paths() && self.places_its_worktree(metadata, naming)
         })
+    }
+
+    fn places_its_worktree(&self, metadata: &SessionMetadata, naming: &NamingScheme) -> bool {
+        metadata.runs_in_main_checkout()
+            || self
+                .containment
+                .contains(naming.worktree_root(), metadata.worktree_path())
     }
 }
 
@@ -388,6 +392,33 @@ mod tests {
         assert_eq!(
             ObserveFixture::only_row(&fixture).state(),
             SessionState::Unmanaged
+        );
+    }
+
+    #[test]
+    fn a_live_session_in_the_main_checkout_without_an_entry_is_adopted() {
+        let in_main_checkout = ServiceFixture::main_checkout_session("fix-auth");
+        let fixture = ServiceFixture::new().with_multiplexer(
+            FakeMultiplexer::new().with_live(ServiceFixture::waiting(&in_main_checkout)),
+        );
+
+        ObserveFixture::observe(&fixture);
+
+        assert_eq!(fixture.registry().sessions(), [in_main_checkout]);
+    }
+
+    #[test]
+    fn a_recorded_session_in_the_main_checkout_pairs_with_its_live_session() {
+        let in_main_checkout = ServiceFixture::main_checkout_session("fix-auth");
+        let fixture = ServiceFixture::new()
+            .with_sessions(std::slice::from_ref(&in_main_checkout))
+            .with_multiplexer(
+                FakeMultiplexer::new().with_live(ServiceFixture::waiting(&in_main_checkout)),
+            );
+
+        assert_eq!(
+            ObserveFixture::only_row(&fixture).state(),
+            SessionState::Waiting
         );
     }
 

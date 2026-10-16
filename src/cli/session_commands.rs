@@ -8,7 +8,7 @@ use crate::application::{
     CreateRequest, DeleteConfirmation, DeleteImpact, RestartReport, ServiceError, SessionService,
     StartOutcome,
 };
-use crate::domain::BaseBranch;
+use crate::domain::{BaseBranch, Checkout, Repo};
 
 pub struct SessionCommands<'a> {
     service: &'a mut SessionService,
@@ -49,14 +49,7 @@ impl<'a> SessionCommands<'a> {
     pub fn create(&mut self, args: &NewArgs) -> Result<u8, CommandStop> {
         self.service.observe(true)?;
         let repo = RepoArgument::new(&args.repo).resolve(self.service, self.session)?;
-        let mut request =
-            CreateRequest::new(&args.name, repo).with_prompt(args.prompt.as_deref().unwrap_or(""));
-        if let Some(agent) = &args.agent {
-            request = request.with_agent(agent);
-        }
-        if let Some(base) = args.base_branch.as_deref().and_then(BaseBranch::new) {
-            request = request.with_base_branch(base);
-        }
+        let request = Self::create_request(args, repo);
         self.session.stop_if_signaled()?;
         let outcome = self.service.create_session(&request)?;
         let created = outcome.session();
@@ -68,6 +61,27 @@ impl<'a> SessionCommands<'a> {
         ));
         self.note_if_present(outcome.warning());
         Ok(0)
+    }
+
+    fn create_request(args: &NewArgs, repo: Repo) -> CreateRequest {
+        let mut request = CreateRequest::new(&args.name, repo)
+            .with_checkout(Self::checkout(args))
+            .with_prompt(args.prompt.as_deref().unwrap_or(""));
+        if let Some(agent) = &args.agent {
+            request = request.with_agent(agent);
+        }
+        if let Some(base) = args.base_branch.as_deref().and_then(BaseBranch::new) {
+            request = request.with_base_branch(base);
+        }
+        request
+    }
+
+    fn checkout(args: &NewArgs) -> Checkout {
+        if args.main_checkout {
+            Checkout::Main
+        } else {
+            Checkout::NewWorktree
+        }
     }
 
     pub fn delete(&mut self, args: &DeleteArgs) -> Result<u8, CommandStop> {
@@ -345,6 +359,45 @@ mod tests {
 
         assert_eq!(exit, CliExit::Code(0));
         assert!(harness.stdout().starts_with("created fix-auth"));
+    }
+
+    #[test]
+    fn new_with_main_checkout_creates_the_session_in_the_repo_on_its_checked_out_branch() {
+        let fixture =
+            ServiceFixture::new().with_workspace(ServiceFixture::main_checkout_workspace());
+        let harness = CliHarness::new(fixture);
+
+        let exit = harness.run(&[
+            "new",
+            "--name",
+            "fix-auth",
+            "--repo",
+            "example-project",
+            "--main-checkout",
+        ]);
+
+        assert_eq!(exit, CliExit::Code(0));
+        assert!(harness.stdout().starts_with(&format!(
+            "created fix-auth in {} on branch main",
+            ServiceFixture::REPO
+        )));
+    }
+
+    #[test]
+    fn deleting_a_session_in_the_main_checkout_prints_what_it_kept_without_a_loss_warning() {
+        let session = ServiceFixture::main_checkout_session("fix-auth");
+        let fixture = ServiceFixture::new()
+            .with_sessions(std::slice::from_ref(&session))
+            .with_workspace(ServiceFixture::main_checkout_workspace())
+            .with_host(ServiceFixture::host_for(&[&session]))
+            .with_multiplexer(FakeMultiplexer::new().with_live(ServiceFixture::waiting(&session)));
+        let harness = CliHarness::new(fixture);
+
+        let exit = harness.run(&["delete", "fix-auth"]);
+
+        assert_eq!(exit, CliExit::Code(0));
+        assert!(harness.stdout().contains("kept the main checkout"));
+        assert!(harness.stderr().is_empty(), "{}", harness.stderr());
     }
 
     #[test]

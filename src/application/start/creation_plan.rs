@@ -2,9 +2,9 @@ use std::path::{Path, PathBuf};
 
 use crate::application::ports::{AgentLaunch, SessionSpec, StartPoint};
 use crate::domain::{
-    Agent, AgentMode, BaseBranch, Config, InvalidName, KeyBindings, NamingScheme, Registration,
-    Repo, Session, SessionMetadata, SessionName, SessionRepo, SessionSize, SessionWorktree,
-    TmuxAddress,
+    Agent, AgentMode, BaseBranch, Checkout, Config, InvalidName, KeyBindings, NamingScheme,
+    Registration, Repo, Session, SessionMetadata, SessionName, SessionRepo, SessionSize,
+    SessionWorktree, TmuxAddress,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -13,6 +13,7 @@ pub struct CreateRequest {
     repo: Repo,
     agent: Option<String>,
     base_branch: Option<BaseBranch>,
+    checkout: Checkout,
     mode: AgentMode,
     prompt: String,
 }
@@ -24,6 +25,7 @@ impl CreateRequest {
             repo,
             agent: None,
             base_branch: None,
+            checkout: Checkout::default(),
             mode: AgentMode::default(),
             prompt: String::new(),
         }
@@ -41,6 +43,10 @@ impl CreateRequest {
             base_branch: Some(base_branch),
             ..self
         }
+    }
+
+    pub fn with_checkout(self, checkout: Checkout) -> Self {
+        Self { checkout, ..self }
     }
 
     pub fn with_mode(self, mode: AgentMode) -> Self {
@@ -65,6 +71,10 @@ impl CreateRequest {
 
     pub fn agent(&self) -> Option<&str> {
         self.agent.as_deref()
+    }
+
+    pub fn checkout(&self) -> Checkout {
+        self.checkout
     }
 
     pub fn mode(&self) -> AgentMode {
@@ -131,6 +141,10 @@ impl CreationPlan {
             .or_else(|| self.repo.base_branch())
     }
 
+    pub fn requested_base_branch(&self) -> Option<&BaseBranch> {
+        self.requested_base_branch.as_ref()
+    }
+
     pub fn worktree(&self) -> PathBuf {
         self.naming.worktree_path(self.repo.name(), &self.name)
     }
@@ -143,28 +157,36 @@ impl CreationPlan {
         self.naming.tmux_session_name(&self.name)
     }
 
-    pub fn launch(&self) -> AgentLaunch {
-        AgentLaunch::for_agent(&self.agent, self.argv.clone(), &self.worktree())
+    pub fn new_worktree_from(&self, start: &StartPoint) -> SessionWorktree {
+        SessionWorktree::new(&self.worktree(), &self.branch(), start.base_commit())
+            .based_on(self.requested_base_branch.clone())
     }
 
-    pub fn spec(&self, start: &StartPoint, launch: AgentLaunch) -> SessionSpec {
-        SessionSpec::new(&self.tmux_name(), self.metadata(start), launch)
+    pub fn main_checkout_on(&self, branch: &str, start: &StartPoint) -> SessionWorktree {
+        SessionWorktree::new(self.repo.path(), branch, start.base_commit())
+    }
+
+    pub fn launch_in(&self, worktree: &SessionWorktree) -> AgentLaunch {
+        AgentLaunch::for_agent(&self.agent, self.argv.clone(), worktree.path())
+    }
+
+    pub fn spec(&self, worktree: &SessionWorktree, launch: AgentLaunch) -> SessionSpec {
+        SessionSpec::new(&self.tmux_name(), self.metadata(worktree), launch)
             .sized(self.size)
             .removing_env_names(&self.removed_env_names)
             .with_key_bindings(&self.key_bindings)
     }
 
-    pub fn session(&self, start: &StartPoint, socket: &Path, created_at: u64) -> Session {
+    pub fn session(&self, worktree: &SessionWorktree, socket: &Path, created_at: u64) -> Session {
         let tmux = TmuxAddress::new(&self.tmux_name(), socket);
         let registration = Registration::new(tmux, self.naming.clone(), created_at);
-        Session::new(self.name.clone(), self.metadata(start), registration)
+        Session::new(self.name.clone(), self.metadata(worktree), registration)
     }
 
-    fn metadata(&self, start: &StartPoint) -> SessionMetadata {
+    fn metadata(&self, worktree: &SessionWorktree) -> SessionMetadata {
         SessionMetadata::new(
             SessionRepo::new(self.repo.name().clone(), self.repo.path()),
-            SessionWorktree::new(&self.worktree(), &self.branch(), start.base_commit())
-                .based_on(self.requested_base_branch.clone()),
+            worktree.clone(),
             self.agent.name(),
         )
     }

@@ -31,7 +31,7 @@ impl NewSessionField {
             Self::Name => "Enter next field · Ctrl-S create · Shift-Tab mode · Esc cancel",
             Self::Repo => "Type to find a repo · Enter next field · Ctrl-S create · Esc cancel",
             Self::Agent => "↑ ↓ j k choose · Enter next field · Ctrl-S create · Esc cancel",
-            Self::Prompt => "Enter create · Shift-Tab mode · Esc cancel",
+            Self::Prompt => "Enter create · Shift-Tab mode · Ctrl-T checkout · Esc cancel",
         }
     }
 

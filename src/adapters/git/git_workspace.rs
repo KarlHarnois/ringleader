@@ -1788,6 +1788,30 @@ mod tests {
     }
 
     #[test]
+    fn an_unborn_main_checkout_lists_its_branch_without_a_head() {
+        let fixture = GitTestRepo::unborn();
+
+        let entries = fixture.workspace().list_worktrees(fixture.path()).unwrap();
+
+        assert_eq!(
+            entries,
+            [WorktreeEntry::new(fixture.path())
+                .on_branch(GitTestRepo::BRANCH)
+                .main()]
+        );
+    }
+
+    #[test]
+    fn a_detached_main_checkout_lists_no_branch() {
+        let fixture = GitTestRepo::new();
+        fixture.git(fixture.path(), &["checkout", "--detach"]);
+
+        let entries = fixture.workspace().list_worktrees(fixture.path()).unwrap();
+
+        assert_eq!(entries[0].branch(), None);
+    }
+
+    #[test]
     fn version_reads_the_git_release() {
         let fixture = GitTestRepo::new();
 

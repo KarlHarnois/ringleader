@@ -1,6 +1,7 @@
 use super::service_error::ServiceError;
 use crate::domain::{
-    Session, SessionMetadata, SessionObservation, SessionState, SessionSummary, UnmanagedSession,
+    Session, SessionMetadata, SessionName, SessionObservation, SessionState, SessionSummary,
+    UnmanagedSession,
 };
 
 pub struct Reconciliation {
@@ -101,6 +102,20 @@ impl Reconciliation {
         self.observation(tmux_name).is_some()
     }
 
+    pub fn refuse_taken_name(
+        &self,
+        name: &SessionName,
+        tmux_name: &str,
+    ) -> Result<(), ServiceError> {
+        let taken_by_entry = self.entries.iter().any(|entry| entry.name() == name);
+        if taken_by_entry || self.is_live_tmux_name(tmux_name) {
+            return Err(ServiceError::Conflict(format!(
+                "a session named {name} already exists"
+            )));
+        }
+        Ok(())
+    }
+
     pub fn claimant_of(&self, session: &Session) -> Option<&SessionObservation> {
         self.observations.iter().find(|observation| {
             observation.tmux_name() != session.tmux_name()
@@ -171,5 +186,26 @@ impl ManagedRow<'_> {
 impl Reconciliation {
     fn claims_worktree(metadata: &SessionMetadata, entry: &Session) -> bool {
         metadata.has_absolute_paths() && metadata.worktree_path() == entry.worktree_path()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::ServiceFixture;
+
+    #[test]
+    fn a_name_a_registry_entry_uses_is_taken_even_without_a_live_tmux_session() {
+        let entry = ServiceFixture::session("fix-auth");
+        let reconciliation = Reconciliation::new(std::slice::from_ref(&entry));
+
+        let refusal = reconciliation.refuse_taken_name(entry.name(), "ringleader-not-running");
+
+        assert_eq!(
+            refusal,
+            Err(ServiceError::Conflict(
+                "a session named fix-auth already exists".to_string()
+            ))
+        );
     }
 }

@@ -23,7 +23,9 @@ impl<'a> UseChecks<'a> {
     pub fn agent_for_creation(&self, request: &CreateRequest) -> Result<&'a Agent, ServiceError> {
         let agent = self.requested_agent(request.agent())?;
         self.check_command(agent)?;
-        self.check_worktree_root()?;
+        if request.checkout().creates_a_worktree() {
+            self.check_worktree_root()?;
+        }
         match agent.launch_refusal(request.mode(), request.prompt()) {
             Some(refusal) => Err(ServiceError::Invalid(refusal)),
             None => Ok(agent),

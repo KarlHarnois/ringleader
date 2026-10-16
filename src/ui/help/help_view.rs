@@ -27,7 +27,10 @@ impl HelpView {
     const KEYS: [(&'static str, &'static str); 18] = [
         ("n", "create a session"),
         ("d", "delete the selected session"),
-        ("R", "rename the selected session and its branch"),
+        (
+            "R",
+            "rename the selected session and the branch made for it",
+        ),
         (
             "Enter",
             "attach to the selected session, or fold the selected repo",

@@ -47,13 +47,13 @@ pub struct Cli {
 enum CliCommand {
     #[command(about = "List every session with its state and diff")]
     List(ListArgs),
-    #[command(about = "Create a session in a new worktree")]
+    #[command(about = "Create a session in a new worktree or the main checkout")]
     New(NewArgs),
-    #[command(about = "Delete a session, its worktree, and its branch")]
+    #[command(about = "Delete a session and the worktree and branch made for it")]
     Delete(DeleteArgs),
     #[command(about = "Attach to a session")]
     Attach(NameArgs),
-    #[command(about = "Rename a session and its branch")]
+    #[command(about = "Rename a session and the branch made for it")]
     Rename(RenameArgs),
     #[command(about = "Restart an exited or stopped session, or with --all every one")]
     Restart(RestartArgs),
@@ -108,6 +108,8 @@ struct NewArgs {
     agent: Option<String>,
     #[arg(long)]
     base_branch: Option<String>,
+    #[arg(long, conflicts_with = "base_branch")]
+    main_checkout: bool,
     #[arg(long)]
     prompt: Option<String>,
 }
@@ -547,6 +549,24 @@ mod tests {
     fn restart_with_both_a_name_and_all_exits_one() {
         assert_eq!(
             ParseFixture::exit_code(&["ringleader", "restart", "fix-auth", "--all"]),
+            1
+        );
+    }
+
+    #[test]
+    fn new_in_the_main_checkout_with_a_base_branch_exits_one() {
+        assert_eq!(
+            ParseFixture::exit_code(&[
+                "ringleader",
+                "new",
+                "--name",
+                "fix-auth",
+                "--repo",
+                "example-project",
+                "--main-checkout",
+                "--base-branch",
+                "develop",
+            ]),
             1
         );
     }
