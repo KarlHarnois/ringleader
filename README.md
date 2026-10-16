@@ -13,7 +13,7 @@
 /_/ |_/___/_/ |_/\____/_____/_____/_/  |_/_____/_____/_/ |_|
 ```
 
-Ringleader is a tmux session manager for Claude Code and opencode. Each session runs an agent in its own git worktree and branch. The TUI is Ringleader's terminal UI. The TUI lists the sessions by repo, with each session's state, such as working or waiting for input.
+Ringleader is a tmux session manager for Claude Code and opencode. Each session runs an agent in its own git worktree and branch. Ringleader's TUI lists the sessions by repo, with each session's state, such as working or waiting for input.
 
 Ringleader runs only on Linux.
 
