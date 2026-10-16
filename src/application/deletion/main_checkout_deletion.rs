@@ -58,7 +58,7 @@ impl MainCheckoutDeletion {
             return Ok(());
         }
         Err(ServiceError::Conflict(format!(
-            "processes the agent started still run: {}; kept the registry entry of the session, which is now stopped",
+            "processes the agent started still run: {}; end them by hand, since the session is now stopped and a second delete cannot find them",
             ProcessInfo::listed(&survivors)
         )))
     }
@@ -197,6 +197,21 @@ mod tests {
 
         assert!(error.to_string().contains("npm run dev"));
         assert_eq!(fixture.registry().sessions().len(), 1);
+    }
+
+    #[test]
+    fn a_process_its_agent_started_that_survives_is_left_for_the_user_to_end_by_hand() {
+        let host = CheckoutDeleteFixture::agent_host().with_stubborn_process(
+            CheckoutDeleteFixture::DEV_SERVER,
+            "npm run dev",
+            CheckoutDeleteFixture::checkout(),
+            CheckoutDeleteFixture::PANE_SESSION,
+        );
+        let fixture = CheckoutDeleteFixture::with_agent_process(host);
+
+        let error = CheckoutDeleteFixture::force(&fixture).unwrap_err();
+
+        assert!(error.to_string().contains("end them by hand"));
     }
 
     #[test]
