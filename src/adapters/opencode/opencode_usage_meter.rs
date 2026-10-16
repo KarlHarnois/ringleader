@@ -31,7 +31,14 @@ impl OpencodeUsageMeter {
     }
 
     fn activity_output(&self, agent: &Agent) -> Result<String, UsageError> {
-        match self.database.read(agent, OpencodeActivity::QUERY) {
+        let direct = self
+            .database
+            .read(agent, OpencodeActivity::QUERY)
+            .unwrap_or_else(|error| {
+                log::info!("{error}, asking opencode instead");
+                None
+            });
+        match direct {
             Some(output) => Ok(output),
             None => self.probe.run(agent, &Self::DATABASE_ARGUMENTS),
         }
@@ -88,6 +95,7 @@ mod tests {
 
     use super::*;
     use crate::adapters::host::process_environment::ProcessEnvironment;
+    use crate::adapters::opencode::opencode_database::OpencodeDatabaseError;
     use crate::adapters::opencode::provider_quota::QuotaError;
     use crate::adapters::sqlite::null_opencode_database::NullOpencodeDatabase;
     use crate::adapters::{BoundedCommand, Deadlines};
@@ -117,12 +125,16 @@ mod tests {
     }
 
     struct FakeOpencodeDatabase {
-        output: String,
+        answer: Result<Option<String>, OpencodeDatabaseError>,
     }
 
     impl OpencodeDatabase for FakeOpencodeDatabase {
-        fn read(&self, _agent: &Agent, _query: &str) -> Option<String> {
-            Some(self.output.clone())
+        fn read(
+            &self,
+            _agent: &Agent,
+            _query: &str,
+        ) -> Result<Option<String>, OpencodeDatabaseError> {
+            self.answer.clone()
         }
     }
 
@@ -230,7 +242,7 @@ mod tests {
     fn a_direct_read_of_the_database_skips_the_opencode_command() {
         let fixture = MeterFixture::new();
         let database = Arc::new(FakeOpencodeDatabase {
-            output: MeterFixture::RECORDED.to_string(),
+            answer: Ok(Some(MeterFixture::RECORDED.to_string())),
         });
 
         let usage = fixture
@@ -241,6 +253,23 @@ mod tests {
 
         assert_eq!(usage.rows().len(), 2);
         assert_eq!(fixture.recorded_arguments("opencode"), None);
+    }
+
+    #[test]
+    fn a_failed_direct_read_asks_the_opencode_command_instead() {
+        let fixture = MeterFixture::new();
+        let database = Arc::new(FakeOpencodeDatabase {
+            answer: Err(OpencodeDatabaseError::new("database is locked")),
+        });
+
+        let usage = fixture
+            .meter_reading(database, Vec::new())
+            .measure(&fixture.recording("opencode"))
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(usage.rows().len(), 2);
+        assert!(fixture.recorded_arguments("opencode").is_some());
     }
 
     #[test]

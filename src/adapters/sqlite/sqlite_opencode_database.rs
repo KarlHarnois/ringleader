@@ -9,7 +9,7 @@ use crate::adapters::agent_launch::agent_variables::AgentVariables;
 use crate::adapters::child_process::bounded_command::Call;
 use crate::adapters::child_process::deadlines::CallKind;
 use crate::adapters::host::process_environment::ProcessEnvironment;
-use crate::adapters::opencode::opencode_database::OpencodeDatabase;
+use crate::adapters::opencode::opencode_database::{OpencodeDatabase, OpencodeDatabaseError};
 use crate::application::ports::HostProbe;
 use crate::domain::Agent;
 
@@ -48,24 +48,18 @@ impl SqliteOpencodeDatabase {
         variables: &[(OsString, OsString)],
         database: &Path,
         query: &str,
-    ) -> Option<String> {
+    ) -> Result<String, OpencodeDatabaseError> {
         let call = Call::new(Self::SUBCOMMAND, CallKind::SqliteQuery);
         let command = self.command(variables, database, query);
-        match self.bounded.run(command, &call) {
-            Ok(output) if output.succeeded() => Some(output.stdout_text()),
-            Ok(output) => {
-                log::info!(
-                    "could not read {} directly, asking opencode instead: {}",
-                    database.display(),
-                    output.stderr_text()
-                );
-                None
-            }
-            Err(error) => {
-                log::info!("{error}, asking opencode instead");
-                None
-            }
+        let output = self
+            .bounded
+            .run(command, &call)
+            .map_err(|error| OpencodeDatabaseError::new(&error.to_string()))?;
+        if !output.succeeded() {
+            let detail = format!("{}: {}", database.display(), output.stderr_text());
+            return Err(OpencodeDatabaseError::new(&detail));
         }
+        Ok(output.stdout_text())
     }
 
     fn command(&self, variables: &[(OsString, OsString)], database: &Path, query: &str) -> Command {
@@ -95,15 +89,17 @@ impl SqliteOpencodeDatabase {
 }
 
 impl OpencodeDatabase for SqliteOpencodeDatabase {
-    fn read(&self, agent: &Agent, query: &str) -> Option<String> {
+    fn read(&self, agent: &Agent, query: &str) -> Result<Option<String>, OpencodeDatabaseError> {
         let variables = AgentVariables::new(
             &self.environment,
             agent.env_names(),
             agent.env_assignments(),
         )
         .combined();
-        let database = Self::database(&variables)?;
-        self.query(&variables, &database, query)
+        let Some(database) = Self::database(&variables) else {
+            return Ok(None);
+        };
+        self.query(&variables, &database, query).map(Some)
     }
 }
 
@@ -193,7 +189,7 @@ mod tests {
 
         let output = database.read(&DatabaseFixture::agent(), DatabaseFixture::QUERY);
 
-        assert_eq!(output.as_deref(), Some("[{\"one\":1}]\n"));
+        assert_eq!(output, Ok(Some("[{\"one\":1}]\n".to_string())));
     }
 
     #[test]
@@ -204,7 +200,9 @@ mod tests {
             &[("HOME", "/home/example")],
         );
 
-        database.read(&DatabaseFixture::agent(), DatabaseFixture::QUERY);
+        database
+            .read(&DatabaseFixture::agent(), DatabaseFixture::QUERY)
+            .unwrap();
 
         assert_eq!(
             fixture.arguments()[..4],
@@ -222,7 +220,9 @@ mod tests {
         ];
         let database = fixture.database(DatabaseFixture::RECORDING_SQLITE, &variables);
 
-        database.read(&DatabaseFixture::agent(), DatabaseFixture::QUERY);
+        database
+            .read(&DatabaseFixture::agent(), DatabaseFixture::QUERY)
+            .unwrap();
 
         assert_eq!(fixture.arguments()[4], "/data/example/opencode/opencode.db");
     }
@@ -235,7 +235,9 @@ mod tests {
             &[("HOME", "/home/example")],
         );
 
-        database.read(&DatabaseFixture::agent(), DatabaseFixture::QUERY);
+        database
+            .read(&DatabaseFixture::agent(), DatabaseFixture::QUERY)
+            .unwrap();
 
         assert_eq!(
             fixture.arguments()[4],
@@ -252,7 +254,9 @@ mod tests {
         ];
         let database = fixture.database(DatabaseFixture::RECORDING_SQLITE, &variables);
 
-        database.read(&DatabaseFixture::agent(), DatabaseFixture::QUERY);
+        database
+            .read(&DatabaseFixture::agent(), DatabaseFixture::QUERY)
+            .unwrap();
 
         assert_eq!(
             fixture.arguments()[4],
@@ -270,7 +274,7 @@ mod tests {
         let agent = DatabaseFixture::agent()
             .with_env_assignments(&[("XDG_DATA_HOME".to_string(), "/accounts/work".to_string())]);
 
-        database.read(&agent, DatabaseFixture::QUERY);
+        database.read(&agent, DatabaseFixture::QUERY).unwrap();
 
         assert_eq!(
             fixture.arguments()[4],
@@ -285,27 +289,28 @@ mod tests {
 
         assert_eq!(
             database.read(&DatabaseFixture::agent(), DatabaseFixture::QUERY),
-            None
+            Ok(None)
         );
         assert!(fixture.arguments().is_empty());
     }
 
     #[test]
-    fn a_failing_sqlite_reads_nothing() {
+    fn a_failing_sqlite_is_a_failed_read() {
         let fixture = DatabaseFixture::new();
         let database = fixture.database(
             DatabaseFixture::FAILING_SQLITE,
             &[("HOME", "/home/example")],
         );
 
-        assert_eq!(
-            database.read(&DatabaseFixture::agent(), DatabaseFixture::QUERY),
-            None
+        assert!(
+            database
+                .read(&DatabaseFixture::agent(), DatabaseFixture::QUERY)
+                .is_err()
         );
     }
 
     #[test]
-    fn a_sqlite_past_its_deadline_reads_nothing() {
+    fn a_sqlite_past_its_deadline_is_a_failed_read() {
         let fixture = DatabaseFixture::new();
         let database = fixture.database_within(
             DatabaseFixture::SLOW_SQLITE,
@@ -313,9 +318,10 @@ mod tests {
             Deadlines::uniform(DatabaseFixture::SHORT_DEADLINE),
         );
 
-        assert_eq!(
-            database.read(&DatabaseFixture::agent(), DatabaseFixture::QUERY),
-            None
+        assert!(
+            database
+                .read(&DatabaseFixture::agent(), DatabaseFixture::QUERY)
+                .is_err()
         );
     }
 
@@ -329,7 +335,7 @@ mod tests {
 
         assert_eq!(
             database.read(&DatabaseFixture::agent(), DatabaseFixture::QUERY),
-            None
+            Ok(None)
         );
     }
 }
