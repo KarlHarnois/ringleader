@@ -13,7 +13,7 @@
 /_/ |_/___/_/ |_/\____/_____/_____/_/  |_/_____/_____/_/ |_|
 ```
 
-Ringleader is a tmux session manager for Claude Code and opencode. Each session runs an agent in its own git worktree and branch. Ringleader's TUI lists the sessions by repo, with each session's state, such as working or waiting for input.
+Ringleader is a tmux session manager for Claude Code and opencode. Each session runs an agent in its own git worktree and branch. Ringleader lists the sessions grouped by repo, with each session's state, such as working or waiting for input.
 
 Ringleader runs only on Linux.
 
@@ -29,15 +29,15 @@ nix profile add github:KarlHarnois/ringleader
 
 ## First run
 
-**Run `ringleader` in a directory that holds your repos.** Ringleader opens the TUI, whose picker for a new session lists the repos under that directory.
+**Run `ringleader` in a directory that holds your repos.** When you create a session, Ringleader offers the repos it finds under that directory.
 
-**If `ringleader` reports a problem, run `ringleader doctor`.** The doctor command checks tmux, git, the config, and every session.
+**If a session fails to start, run `ringleader doctor`.** `ringleader doctor` checks tmux, git, the config, and every session.
 
-The first run writes a commented config to `$XDG_CONFIG_HOME/ringleader/config.toml`, with Claude Code and opencode as agents. The config's comments show how to set an agent's environment variables. For example, setting `CLAUDE_CONFIG_DIR` runs Claude Code under a second account.
+The first run writes a commented config to `~/.config/ringleader/config.toml`, with Claude Code and opencode as agents. The config's comments show how to set an agent's environment variables. For example, an `[[agents]]` entry that sets `CLAUDE_CONFIG_DIR` can run Claude Code under a second account.
 
-Sessions run on Ringleader's own tmux server. That server ignores your tmux config. Your `tmux ls` does not list Ringleader's sessions.
+Sessions run on Ringleader's own tmux server. That server ignores your tmux config. `tmux ls` does not list Ringleader's sessions.
 
-**Press `Ctrl-Q` to detach from a session back to the TUI.** In the TUI, press `?` to list the keys.
+**Press `Ctrl-Q` to leave a session and return to Ringleader.** Press `?` in Ringleader to list its keys.
 
 ## CLI
 
@@ -69,6 +69,6 @@ Every command accepts `--config <path>` and `--log-level <level>`.
 Examples of a conflict with existing state:
 
 - a taken name or branch
-- a running session
+- a restart of a session that is still running
 - a delete that would lose work
-- a held lock
+- a lock that another Ringleader process holds
