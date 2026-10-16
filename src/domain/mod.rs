@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod agent_mode;
 pub mod branches;
+pub mod checkout;
 pub mod config;
 pub mod config_checks;
 pub mod config_draft;
@@ -21,6 +22,7 @@ pub use branches::base_branch_ladder::BaseBranchLadder;
 pub use branches::branch::Branch;
 pub use branches::branch_tips::BranchTips;
 pub use branches::merge_bases::MergeBases;
+pub use checkout::Checkout;
 pub use config::{Config, SessionSize};
 pub use config_draft::ConfigDraft;
 pub use diff_stat::{DiffStat, FileChange};

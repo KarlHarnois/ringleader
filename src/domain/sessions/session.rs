@@ -78,16 +78,30 @@ impl Session {
         self.branch() == self.naming().branch_name(&self.name)
     }
 
+    pub fn runs_in_main_checkout(&self) -> bool {
+        self.metadata.runs_in_main_checkout()
+    }
+
+    pub fn allows_pull(&self) -> bool {
+        !self.runs_in_main_checkout()
+    }
+
     pub fn renamed(&self, name: SessionName) -> Self {
         let tmux_name = self.naming().tmux_session_name(&name);
-        let branch = self.naming().branch_name(&name);
         Self {
-            metadata: self.metadata.with_branch(&branch),
+            metadata: self.renamed_metadata(&name),
             registration: self
                 .registration
                 .on_tmux(TmuxAddress::new(&tmux_name, self.socket_path())),
             name,
         }
+    }
+
+    fn renamed_metadata(&self, name: &SessionName) -> SessionMetadata {
+        if self.runs_in_main_checkout() {
+            return self.metadata.clone();
+        }
+        self.metadata.with_branch(&self.naming().branch_name(name))
     }
 
     pub fn rekeyed(&self, name: SessionName, metadata: SessionMetadata, tmux: TmuxAddress) -> Self {
@@ -187,6 +201,16 @@ mod tests {
         fn fix_login() -> SessionName {
             SessionName::new("fix-login").unwrap()
         }
+
+        fn in_main_checkout() -> Session {
+            let session = Self::fix_auth();
+            let metadata = SessionMetadata::new(
+                SessionRepo::new(session.repo_name().clone(), session.repo_path()),
+                SessionWorktree::new(session.repo_path(), "main", "abc123"),
+                "claude",
+            );
+            Session::new(session.name().clone(), metadata, session.registration)
+        }
     }
 
     #[test]
@@ -227,6 +251,25 @@ mod tests {
         let renamed = session.renamed(SessionFixture::fix_login());
 
         assert_eq!(renamed.worktree_path(), session.worktree_path());
+    }
+
+    #[test]
+    fn renaming_a_session_in_the_main_checkout_keeps_the_checked_out_branch() {
+        let session = SessionFixture::in_main_checkout();
+
+        let renamed = session.renamed(SessionFixture::fix_login());
+
+        assert_eq!(renamed.branch(), "main");
+    }
+
+    #[test]
+    fn a_session_in_the_main_checkout_allows_no_pull() {
+        assert!(!SessionFixture::in_main_checkout().allows_pull());
+    }
+
+    #[test]
+    fn a_session_in_its_own_worktree_allows_a_pull() {
+        assert!(SessionFixture::fix_auth().allows_pull());
     }
 
     #[test]

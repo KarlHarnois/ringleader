@@ -10,6 +10,7 @@ pub struct DeleteImpact {
     unmerged_commits: u64,
     processes: Vec<ProcessInfo>,
     working: bool,
+    scope: DeleteScope,
 }
 
 impl DeleteImpact {
@@ -24,6 +25,14 @@ impl DeleteImpact {
             unmerged_commits: commits.count(),
             processes,
             working: false,
+            scope: DeleteScope::Worktree,
+        }
+    }
+
+    pub fn session_only() -> Self {
+        Self {
+            scope: DeleteScope::SessionOnly,
+            ..Self::default()
         }
     }
 
@@ -71,8 +80,12 @@ impl DeleteImpact {
         if self.working {
             warnings.push("agent is actively working".to_string());
         }
-        warnings.push("ignored files such as .env are deleted with the worktree".to_string());
+        warnings.extend(self.scope.loss().map(str::to_string));
         warnings
+    }
+
+    pub fn kept(&self) -> Option<&'static str> {
+        self.scope.kept()
     }
 
     fn accepts(&self, current: &DeleteImpact) -> bool {
@@ -95,6 +108,31 @@ impl DeleteImpact {
         let appeared = seen == 0 && current > 0;
         let grew_unconfirmed = !self.working && current > seen;
         !appeared && !grew_unconfirmed
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum DeleteScope {
+    #[default]
+    Worktree,
+    SessionOnly,
+}
+
+impl DeleteScope {
+    fn loss(self) -> Option<&'static str> {
+        match self {
+            Self::Worktree => Some("ignored files such as .env are deleted with the worktree"),
+            Self::SessionOnly => None,
+        }
+    }
+
+    fn kept(self) -> Option<&'static str> {
+        match self {
+            Self::Worktree => None,
+            Self::SessionOnly => {
+                Some("the main checkout and its branch stay, delete ends only the session")
+            }
+        }
     }
 }
 
@@ -145,5 +183,51 @@ impl DeleteConfirmation {
             message: format!("delete would lose work: {}", current.warnings().join("; ")),
             impact: Box::new(current.clone()),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct ImpactFixture;
+
+    impl ImpactFixture {
+        fn measured(dirty_files: u64, unmerged_commits: u64) -> DeleteImpact {
+            DeleteImpact::measured(
+                &DirtyState::present(dirty_files, Vec::new()),
+                &UnmergedCommits::new(unmerged_commits, None, None),
+                Vec::new(),
+            )
+        }
+
+        fn warns(impact: &DeleteImpact, warning: &str) -> bool {
+            impact.warnings().iter().any(|shown| shown == warning)
+        }
+    }
+
+    #[test]
+    fn a_measured_impact_of_a_clean_worktree_needs_no_confirmation() {
+        assert!(!ImpactFixture::measured(0, 0).needs_confirmation());
+    }
+
+    #[test]
+    fn a_single_uncommitted_file_is_named_as_lost() {
+        let impact = ImpactFixture::measured(1, 0);
+
+        assert!(ImpactFixture::warns(
+            &impact,
+            "1 uncommitted files will be lost"
+        ));
+    }
+
+    #[test]
+    fn a_single_unmerged_commit_is_named_as_lost() {
+        let impact = ImpactFixture::measured(0, 1);
+
+        assert!(ImpactFixture::warns(
+            &impact,
+            "1 commits exist on no other ref and will be lost"
+        ));
     }
 }

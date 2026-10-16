@@ -65,6 +65,10 @@ impl SessionMetadata {
     pub fn has_absolute_paths(&self) -> bool {
         self.repo_path.is_absolute() && self.worktree_path.is_absolute()
     }
+
+    pub fn runs_in_main_checkout(&self) -> bool {
+        self.worktree_path == self.repo_path
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -105,6 +109,18 @@ impl SessionWorktree {
             requested_base_branch,
             ..self
         }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn branch(&self) -> &str {
+        &self.branch
+    }
+
+    pub fn base_commit(&self) -> &str {
+        &self.base_commit
     }
 }
 
@@ -149,5 +165,19 @@ mod tests {
 
         assert_eq!(renamed.branch(), "ringleader/fix-login");
         assert_eq!(renamed.worktree_path(), metadata.worktree_path());
+    }
+
+    #[test]
+    fn metadata_whose_worktree_is_the_repo_runs_in_the_main_checkout() {
+        let metadata = MetadataFixture::with_paths("/repos/example", "/repos/example");
+
+        assert!(metadata.runs_in_main_checkout());
+    }
+
+    #[test]
+    fn metadata_in_a_worktree_of_its_own_does_not_run_in_the_main_checkout() {
+        let metadata = MetadataFixture::with_paths("/repos/example", "/worktrees/fix-auth");
+
+        assert!(!metadata.runs_in_main_checkout());
     }
 }

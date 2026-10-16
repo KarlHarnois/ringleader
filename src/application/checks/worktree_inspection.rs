@@ -34,8 +34,11 @@ impl WorktreeInspection {
         if !self.exists(session) {
             return Ok(None);
         }
-        if self.listed_entry(session)?.is_none() {
+        let Some(entry) = self.listed_entry(session)? else {
             return Ok(Some("git does not list it as a worktree".to_string()));
+        };
+        if entry.is_main() {
+            return Ok(None);
         }
         if !self.host.is_file(&session.worktree_path().join(".git")) {
             return Ok(Some("its .git is missing or is not a file".to_string()));

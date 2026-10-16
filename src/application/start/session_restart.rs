@@ -76,11 +76,15 @@ impl SessionRestart {
 
     fn argv(agent: &Agent, row: &ManagedRow) -> Vec<String> {
         let name = row.session().name();
-        if row.is_live() {
-            agent.restart_argv(name)
-        } else {
+        if Self::resumes(row) {
             agent.resume_argv(name)
+        } else {
+            agent.restart_argv(name)
         }
+    }
+
+    fn resumes(row: &ManagedRow) -> bool {
+        !row.is_live() && !row.session().runs_in_main_checkout()
     }
 
     fn revive(
@@ -420,6 +424,34 @@ mod tests {
             ServiceFixture::CREATED_AT
         );
         assert!(fixture.workspace().state_changing_calls().is_empty());
+    }
+
+    #[test]
+    fn a_stopped_session_in_the_main_checkout_is_recreated_in_the_checkout() {
+        let session = ServiceFixture::main_checkout_session("fix-auth");
+        let fixture = ServiceFixture::new()
+            .with_sessions(std::slice::from_ref(&session))
+            .with_workspace(ServiceFixture::main_checkout_workspace())
+            .with_host(ServiceFixture::host_for(&[&session]));
+
+        RestartFixture::restart(&fixture).unwrap();
+
+        let spec = fixture.multiplexer().specs().pop().unwrap();
+        assert_eq!(spec.worktree(), Path::new(ServiceFixture::REPO));
+    }
+
+    #[test]
+    fn a_stopped_session_in_the_main_checkout_never_resumes_the_repos_newest_conversation() {
+        let session = ServiceFixture::main_checkout_session("fix-auth");
+        let fixture = ServiceFixture::new()
+            .with_sessions(std::slice::from_ref(&session))
+            .with_workspace(ServiceFixture::main_checkout_workspace())
+            .with_host(ServiceFixture::host_for(&[&session]))
+            .with_config(RestartFixture::resuming_config());
+
+        RestartFixture::restart(&fixture).unwrap();
+
+        assert_eq!(RestartFixture::recreated_argv(&fixture), ["claude"]);
     }
 
     #[test]
