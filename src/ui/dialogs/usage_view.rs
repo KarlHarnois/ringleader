@@ -31,6 +31,7 @@ impl UsageView {
     const MEASURING: &'static str = " · measuring";
     const INDENT: &'static str = "  ";
     const LABEL_WIDTH: usize = 16;
+    const LONGEST_LABEL: usize = Self::LABEL_WIDTH - 1;
     const MINIMUM_GAP: usize = 2;
     const BAR_CELLS: usize = 10;
     const FILLED_CELL: &'static str = "█";
@@ -182,7 +183,8 @@ impl UsageView {
 
     fn label(text: &str) -> String {
         let width = Self::LABEL_WIDTH;
-        format!("{}{text:<width$.width$}", Self::INDENT)
+        let longest = Self::LONGEST_LABEL;
+        format!("{}{text:<width$.longest$}", Self::INDENT)
     }
 
     fn bar(percent: u8) -> String {
@@ -395,12 +397,12 @@ mod tests {
     }
 
     #[test]
-    fn a_long_scope_name_is_cut_to_the_label_column() {
+    fn a_long_scope_name_is_cut_short_of_the_bar() {
         let window = LimitWindow::Scoped("Example Model With A Long Name".to_string());
         let rows =
             ViewFixture::reporting(vec![ViewFixture::limit(window, 100.0, None)]).settled_rows();
 
-        assert_eq!(rows[1], "  Example Model Wi██████████ 100%");
+        assert_eq!(rows[1], "  Example Model W ██████████ 100%");
     }
 
     #[test]
