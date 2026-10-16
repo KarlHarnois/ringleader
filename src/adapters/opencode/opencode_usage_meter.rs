@@ -1,12 +1,14 @@
 use std::sync::Arc;
 
 use super::opencode_activity::OpencodeActivity;
+use super::provider_quota::ProviderQuota;
 use crate::adapters::agent_launch::agent_probe::AgentProbe;
 use crate::application::ports::{UsageError, UsageMeter};
-use crate::domain::{Agent, AgentUsage};
+use crate::domain::{Agent, AgentUsage, UsageRow};
 
 pub struct OpencodeUsageMeter {
     probe: Arc<AgentProbe>,
+    quotas: Vec<Arc<dyn ProviderQuota>>,
 }
 
 impl OpencodeUsageMeter {
@@ -14,8 +16,34 @@ impl OpencodeUsageMeter {
     const DATABASE_ARGUMENTS: [&'static str; 5] =
         ["--pure", "db", "--format", "json", OpencodeActivity::QUERY];
 
-    pub fn new(probe: Arc<AgentProbe>) -> Self {
-        Self { probe }
+    pub fn new(probe: Arc<AgentProbe>, quotas: Vec<Arc<dyn ProviderQuota>>) -> Self {
+        Self { probe, quotas }
+    }
+
+    fn usage(&self, activity: &OpencodeActivity) -> AgentUsage {
+        match activity
+            .provider()
+            .and_then(|provider| self.quota(provider))
+        {
+            Some(rows) => activity.usage_with(rows),
+            None => activity.usage(),
+        }
+    }
+
+    fn quota(&self, provider: &str) -> Option<Vec<UsageRow>> {
+        for quota in &self.quotas {
+            match quota.measure(provider) {
+                Ok(Some(rows)) => return Some(rows),
+                Ok(None) => {}
+                Err(error) => {
+                    log::warn!(
+                        "could not read the {provider} quota, showing opencode's totals: {error}"
+                    );
+                    return None;
+                }
+            }
+        }
+        None
     }
 }
 
@@ -28,7 +56,7 @@ impl UsageMeter for OpencodeUsageMeter {
         let activity = OpencodeActivity::parse(&output)?;
         Ok(Some(
             activity
-                .map(|activity| activity.usage())
+                .map(|activity| self.usage(&activity))
                 .unwrap_or_default(),
         ))
     }
@@ -39,14 +67,42 @@ mod tests {
     use std::ffi::OsString;
     use std::fs;
     use std::path::PathBuf;
+    use std::sync::Mutex;
 
     use super::*;
     use crate::adapters::host::process_environment::ProcessEnvironment;
+    use crate::adapters::opencode::provider_quota::QuotaError;
     use crate::adapters::{BoundedCommand, Deadlines};
+    use crate::domain::{LimitWindow, UsageLimit};
     use crate::test_support::{ExecutableScript, InheritedPath};
 
     struct MeterFixture {
         directory: tempfile::TempDir,
+    }
+
+    struct FakeProviderQuota {
+        answer: Result<Option<Vec<UsageRow>>, QuotaError>,
+        asked: Mutex<Vec<String>>,
+    }
+
+    impl FakeProviderQuota {
+        fn answering(answer: Result<Option<Vec<UsageRow>>, QuotaError>) -> Arc<Self> {
+            Arc::new(Self {
+                answer,
+                asked: Mutex::default(),
+            })
+        }
+
+        fn asked(&self) -> Vec<String> {
+            self.asked.lock().unwrap().clone()
+        }
+    }
+
+    impl ProviderQuota for FakeProviderQuota {
+        fn measure(&self, provider: &str) -> Result<Option<Vec<UsageRow>>, QuotaError> {
+            self.asked.lock().unwrap().push(provider.to_string());
+            self.answer.clone()
+        }
     }
 
     impl MeterFixture {
@@ -76,12 +132,29 @@ mod tests {
         }
 
         fn meter(&self) -> OpencodeUsageMeter {
+            self.meter_with(Vec::new())
+        }
+
+        fn meter_with(&self, quotas: Vec<Arc<dyn ProviderQuota>>) -> OpencodeUsageMeter {
             let variables = vec![(OsString::from("PATH"), InheritedPath::value())];
-            OpencodeUsageMeter::new(Arc::new(AgentProbe::new(
+            let probe = Arc::new(AgentProbe::new(
                 &ProcessEnvironment::new(variables, None),
                 &self.directory.path().join("usage"),
                 BoundedCommand::new(Deadlines::standard()),
-            )))
+            ));
+            OpencodeUsageMeter::new(probe, quotas)
+        }
+
+        fn measured_with(&self, quotas: Vec<Arc<dyn ProviderQuota>>) -> AgentUsage {
+            self.meter_with(quotas)
+                .measure(&self.recording("opencode"))
+                .unwrap()
+                .unwrap()
+        }
+
+        fn credits() -> Vec<UsageRow> {
+            let limit = UsageLimit::used(LimitWindow::Credits, 31.0, None);
+            vec![UsageRow::Limit(limit)]
         }
 
         fn recorded_arguments(&self, program: &str) -> Option<Vec<String>> {
@@ -126,6 +199,46 @@ mod tests {
 
         assert_eq!(usage.model(), Some("example-provider/example-model"));
         assert_eq!(usage.rows().len(), 2);
+    }
+
+    #[test]
+    fn the_active_providers_quota_replaces_the_totals() {
+        let quota = FakeProviderQuota::answering(Ok(Some(MeterFixture::credits())));
+
+        let usage = MeterFixture::new().measured_with(vec![quota]);
+
+        assert_eq!(usage.rows(), MeterFixture::credits());
+        assert_eq!(usage.model(), Some("example-provider/example-model"));
+    }
+
+    #[test]
+    fn the_quota_is_asked_about_the_active_provider() {
+        let quota = FakeProviderQuota::answering(Ok(None));
+
+        MeterFixture::new().measured_with(vec![quota.clone()]);
+
+        assert_eq!(quota.asked(), ["example-provider"]);
+    }
+
+    #[test]
+    fn the_first_quota_that_knows_the_provider_answers() {
+        let unknowing = FakeProviderQuota::answering(Ok(None));
+        let knowing = FakeProviderQuota::answering(Ok(Some(MeterFixture::credits())));
+
+        let usage = MeterFixture::new().measured_with(vec![unknowing, knowing]);
+
+        assert_eq!(usage.rows(), MeterFixture::credits());
+    }
+
+    #[test]
+    fn a_failing_quota_falls_back_to_the_totals() {
+        let failing = FakeProviderQuota::answering(Err(QuotaError::Throttled));
+        let later = FakeProviderQuota::answering(Ok(Some(MeterFixture::credits())));
+
+        let usage = MeterFixture::new().measured_with(vec![failing, later.clone()]);
+
+        assert_eq!(usage.rows().len(), 2);
+        assert!(later.asked().is_empty());
     }
 
     #[test]

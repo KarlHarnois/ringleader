@@ -158,6 +158,7 @@ impl UsageView {
             LimitWindow::Session => "Current session".to_string(),
             LimitWindow::Week => "This week".to_string(),
             LimitWindow::Scoped(name) => name.clone(),
+            LimitWindow::Credits => "Credits".to_string(),
         }
     }
 
@@ -171,6 +172,7 @@ impl UsageView {
     fn spend_label(kind: SpendKind) -> &'static str {
         match kind {
             SpendKind::ExtraUsage => "Extra usage",
+            SpendKind::Credits => "Credits used",
         }
     }
 
@@ -444,6 +446,25 @@ mod tests {
         let rows = ViewFixture::session_resetting_in(3600);
 
         assert!(rows[1].ends_with("resets in 1h 0m"), "{}", rows[1]);
+    }
+
+    #[test]
+    fn a_credits_allowance_is_named_credits() {
+        let rows =
+            ViewFixture::reporting(vec![ViewFixture::limit(LimitWindow::Credits, 31.0, None)])
+                .settled_rows();
+
+        assert_eq!(rows[1], "  Credits         ███░░░░░░░  31%");
+    }
+
+    #[test]
+    fn spent_credits_are_credits_used() {
+        let spend = Spend::new(SpendKind::Credits, Money::minor_units(1860, "USD"))
+            .with_limit(Money::minor_units(6000, "USD"));
+
+        let rows = ViewFixture::reporting(vec![UsageRow::Spend(spend)]).settled_rows();
+
+        assert_eq!(rows[1], "  Credits used    $18.60 / $60.00");
     }
 
     #[test]

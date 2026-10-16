@@ -3,6 +3,7 @@ pub enum LimitWindow {
     Session,
     Week,
     Scoped(String),
+    Credits,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,6 +22,10 @@ impl UsageLimit {
             used_percent: percent.round().clamp(0.0, Self::FULL_PERCENT) as u8,
             resets_at,
         }
+    }
+
+    pub fn remaining(window: LimitWindow, remaining_percent: f64, resets_at: Option<u64>) -> Self {
+        Self::used(window, Self::FULL_PERCENT - remaining_percent, resets_at)
     }
 
     pub fn window(&self) -> &LimitWindow {
@@ -52,6 +57,20 @@ mod tests {
         let limit = UsageLimit::used(LimitWindow::Session, -4.0, None);
 
         assert_eq!(limit.used_percent(), 0);
+    }
+
+    #[test]
+    fn an_undefined_percent_is_zero() {
+        let limit = UsageLimit::used(LimitWindow::Session, f64::NAN, None);
+
+        assert_eq!(limit.used_percent(), 0);
+    }
+
+    #[test]
+    fn the_percent_remaining_turns_into_the_percent_used() {
+        let limit = UsageLimit::remaining(LimitWindow::Week, 40.0, None);
+
+        assert_eq!(limit.used_percent(), 60);
     }
 
     #[test]

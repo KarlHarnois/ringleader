@@ -39,6 +39,7 @@ use adapters::host::signal_hook_interrupts::SignalHookInterrupts;
 use adapters::host::system_clock::SystemClock;
 use adapters::host::system_host_probe::SystemHostProbe;
 use adapters::host::xdg_paths::XdgPaths;
+use adapters::ollama::ollama_cloud_quota::OllamaCloudQuota;
 use adapters::opencode::opencode_usage_meter::OpencodeUsageMeter;
 use adapters::terminal_emulator::system_terminal_emulator::SystemTerminalEmulator;
 use adapters::tmux::server_files::ServerFiles;
@@ -286,6 +287,7 @@ impl CompositionRoot {
             self.programs.tmux(),
         ));
         let pull_requests = Self::pull_requests(&host, bounded);
+        let usage_meters = self.usage_meters(host.as_ref(), bounded);
         let directory_environment =
             DirenvDirectoryEnvironment::when_installed(host.as_ref(), &self.environment, bounded);
         let desktop = DesktopPorts::new(SystemTerminalEmulator::detect(
@@ -319,7 +321,7 @@ impl CompositionRoot {
                 repos,
                 tmux_ports,
                 desktop,
-                AgentPorts::new(self.usage_meters(bounded)),
+                AgentPorts::new(usage_meters),
             ),
             context,
         )
@@ -342,15 +344,24 @@ impl CompositionRoot {
         )
     }
 
-    fn usage_meters(&self, bounded: BoundedCommand) -> Vec<Arc<dyn UsageMeter>> {
+    fn usage_meters(
+        &self,
+        host: &SystemHostProbe,
+        bounded: BoundedCommand,
+    ) -> Vec<Arc<dyn UsageMeter>> {
         let probe = Arc::new(AgentProbe::new(
             &self.environment,
             &self.paths.usage_directory(),
             bounded,
         ));
+        let quotas = vec![OllamaCloudQuota::when_available(
+            host,
+            &self.environment,
+            bounded,
+        )];
         vec![
             Arc::new(ClaudeUsageMeter::new(probe.clone())),
-            Arc::new(OpencodeUsageMeter::new(probe)),
+            Arc::new(OpencodeUsageMeter::new(probe, quotas)),
         ]
     }
 

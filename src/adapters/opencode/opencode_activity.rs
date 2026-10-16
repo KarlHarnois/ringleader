@@ -52,15 +52,22 @@ impl OpencodeActivity {
         Ok(rows.into_iter().next())
     }
 
+    pub fn provider(&self) -> Option<&str> {
+        self.provider.as_deref()
+    }
+
     pub fn usage(&self) -> AgentUsage {
-        let rows = vec![
+        self.usage_with(vec![
             Self::totals(TotalsWindow::Today, self.tokens_today, self.cost_today),
             Self::totals(
                 TotalsWindow::LastSevenDays,
                 self.tokens_last_seven_days,
                 self.cost_last_seven_days,
             ),
-        ];
+        ])
+    }
+
+    pub fn usage_with(&self, rows: Vec<UsageRow>) -> AgentUsage {
         match self.model_name() {
             Some(model) => AgentUsage::new(rows).with_model(&model),
             None => AgentUsage::new(rows),

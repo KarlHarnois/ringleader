@@ -3,6 +3,7 @@ use super::money::Money;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpendKind {
     ExtraUsage,
+    Credits,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
