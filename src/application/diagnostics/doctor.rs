@@ -484,6 +484,19 @@ mod tests {
     }
 
     #[test]
+    fn a_session_in_the_main_checkout_gets_no_warning_when_the_worktree_root_moves() {
+        let moved_root = crate::domain::Config::defaults(Path::new("/elsewhere/worktrees"))
+            .with_agents(vec![ServiceFixture::agent()]);
+        let fixture = DoctorFixture::in_main_checkout(ServiceFixture::main_checkout_workspace())
+            .with_config(moved_root);
+
+        assert!(!DoctorFixture::has_warning(
+            &fixture,
+            "which differs from the config"
+        ));
+    }
+
+    #[test]
     fn a_main_checkout_switched_to_another_branch_is_no_problem_for_its_session() {
         let repo = Path::new(ServiceFixture::REPO);
         let switched = WorktreeEntry::new(repo)

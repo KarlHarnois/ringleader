@@ -166,11 +166,18 @@ impl RegistryAudit {
                 session.agent()
             ));
         }
+        if !session.runs_in_main_checkout() {
+            Self::audit_worktree_root(session, config, report);
+        }
+    }
+
+    fn audit_worktree_root(session: &Session, config: &Config, report: &mut DoctorReport) {
         let recorded = session.naming();
         let current = config.naming();
         if recorded.worktree_root() != current.worktree_root() {
             report.warning(format!(
-                "session {name} was created under worktree_root {}, which differs from the config",
+                "session {} was created under worktree_root {}, which differs from the config",
+                session.name(),
                 recorded.worktree_root().display()
             ));
         }
