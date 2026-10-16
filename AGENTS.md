@@ -18,9 +18,9 @@ This file and the reference files it names are the living reference for working 
 | Main-checkout session | A session whose recorded worktree path is its repo path |
 | Worktree session | A session whose recorded worktree is a worktree that Ringleader created for the session |
 
-## Values
+## Principles
 
-**If no rule covers a case, choose what these values favor.** If two values conflict, the earlier value wins.
+**If no rule covers a case, choose what these principles favor.** If two principles conflict, the earlier principle wins.
 
 ### The user's own setup stays untouched
 
@@ -28,7 +28,7 @@ This file and the reference files it names are the living reference for working 
 - Ringleader deletes or renames only its marked branches.
 - Ringleader never changes a main checkout's files, index, `HEAD`, or checked-out branch.
 - Ringleader assumes no particular personal setup.
-- Four rules come from this value:
+- Four rules come from this principle:
   - Every tmux call passes the private tmux server's socket.
   - Every manual run uses throwaway state.
   - Ringleader marks each branch it creates with `ringleaderManaged`.
