@@ -1,4 +1,6 @@
 use serde::Deserialize;
+use serde::de::DeserializeOwned;
+use serde_json::Value;
 
 use crate::application::ports::UsageError;
 use crate::domain::{AgentUsage, LimitWindow, Money, Spend, SpendKind, UsageLimit, UsageRow};
@@ -14,10 +16,25 @@ impl ClaudeUsageReport {
             .filter_map(|line| serde_json::from_str::<StreamMessage>(line).ok())
             .find(|message| message.kind == Self::USAGE_MESSAGE)
             .ok_or(UsageError::Unreadable)?;
-        let rate_limits = message.usage_report.and_then(|report| report.rate_limits);
+        let report: Option<UsageReport> = match message.usage_report {
+            Some(report) => Some(serde_json::from_value(report).map_err(Self::unreadable)?),
+            None => None,
+        };
+        let rate_limits = report.and_then(|report| report.rate_limits);
         Ok(AgentUsage::new(
             rate_limits.map(RateLimits::rows).unwrap_or_default(),
         ))
+    }
+
+    fn unreadable(error: serde_json::Error) -> UsageError {
+        log::info!("could not read Claude's usage report: {error}");
+        UsageError::Unreadable
+    }
+
+    fn readable_part<T: DeserializeOwned>(part: Value) -> Option<T> {
+        serde_json::from_value(part)
+            .map_err(|error| log::info!("skipped a part of Claude's usage report: {error}"))
+            .ok()
     }
 }
 
@@ -25,7 +42,7 @@ impl ClaudeUsageReport {
 struct StreamMessage {
     #[serde(rename = "type")]
     kind: String,
-    usage_report: Option<UsageReport>,
+    usage_report: Option<Value>,
 }
 
 #[derive(Deserialize)]
@@ -35,14 +52,21 @@ struct UsageReport {
 
 #[derive(Deserialize)]
 struct RateLimits {
-    limits: Option<Vec<RateLimit>>,
-    extra_usage: Option<ExtraUsage>,
+    limits: Option<Vec<Value>>,
+    extra_usage: Option<Value>,
 }
 
 impl RateLimits {
     fn rows(self) -> Vec<UsageRow> {
-        let limits = self.limits.unwrap_or_default().into_iter();
-        let spend = self.extra_usage.and_then(ExtraUsage::spend);
+        let limits = self
+            .limits
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(ClaudeUsageReport::readable_part::<RateLimit>);
+        let spend = self
+            .extra_usage
+            .and_then(ClaudeUsageReport::readable_part::<ExtraUsage>)
+            .and_then(ExtraUsage::spend);
         limits
             .map(|limit| UsageRow::Limit(limit.usage_limit()))
             .chain(spend.map(UsageRow::Spend))
@@ -255,6 +279,39 @@ mod tests {
                 3.0,
                 None
             ))]
+        );
+    }
+
+    #[test]
+    fn a_limit_that_cannot_be_read_is_skipped_and_the_others_kept() {
+        let usage = ReportFixture::with_rate_limits(
+            r#"{"limits":[{"kind":"session","percent":null},{"kind":"weekly_all","percent":18}]}"#,
+        );
+
+        assert_eq!(
+            usage.rows(),
+            [UsageRow::Limit(UsageLimit::used(
+                LimitWindow::Week,
+                18.0,
+                None
+            ))]
+        );
+    }
+
+    #[test]
+    fn extra_usage_that_cannot_be_read_is_skipped() {
+        let usage = ReportFixture::with_extra_usage(r#"{"is_enabled":"maybe","used_credits":120}"#);
+
+        assert!(usage.rows().is_empty());
+    }
+
+    #[test]
+    fn a_usage_report_of_another_shape_is_unreadable() {
+        assert_eq!(
+            ClaudeUsageReport::parse(
+                r#"{"type":"assistant","usage_report":{"rate_limits":"soon"}}"#
+            ),
+            Err(UsageError::Unreadable)
         );
     }
 
