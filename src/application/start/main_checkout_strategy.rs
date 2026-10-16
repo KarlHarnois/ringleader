@@ -229,6 +229,15 @@ mod tests {
     }
 
     #[test]
+    fn a_session_in_the_main_checkout_needs_no_writable_worktree_root() {
+        let host =
+            ServiceFixture::host_for(&[]).with_unwritable(Path::new(ServiceFixture::DATA_DIR));
+        let fixture = MainCheckoutFixture::fixture().with_host(host);
+
+        assert!(MainCheckoutFixture::create(&fixture).is_ok());
+    }
+
+    #[test]
     fn a_main_checkout_on_a_detached_head_is_refused() {
         let fixture = MainCheckoutFixture::with_main_entry(
             WorktreeEntry::new(MainCheckoutFixture::repo()).at_head(ServiceFixture::TIP),

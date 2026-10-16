@@ -13,6 +13,10 @@ impl Checkout {
         }
     }
 
+    pub fn creates_a_worktree(self) -> bool {
+        self == Self::NewWorktree
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             Self::NewWorktree => "new worktree",
@@ -38,5 +42,11 @@ mod tests {
     #[test]
     fn toggling_the_main_checkout_gives_a_new_worktree() {
         assert_eq!(Checkout::Main.toggled(), Checkout::NewWorktree);
+    }
+
+    #[test]
+    fn only_a_new_worktree_creates_a_worktree() {
+        assert!(Checkout::NewWorktree.creates_a_worktree());
+        assert!(!Checkout::Main.creates_a_worktree());
     }
 }
