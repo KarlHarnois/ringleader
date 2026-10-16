@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::thread;
 
 use super::pending::Pending;
 use super::ports::{Clock, UsageError, UsageMeter};
@@ -35,13 +36,31 @@ impl UsageCatalog {
     }
 
     fn record(&self, agents: &[Agent]) -> UsageReading {
-        let readings = agents
-            .iter()
-            .filter_map(|agent| self.reading_of(agent))
-            .collect();
+        let readings = self.readings_at_once(agents);
         let reading = UsageReading::new(self.clock.now_epoch_seconds(), readings);
         *self.stored() = Some(reading.clone());
         reading
+    }
+
+    fn readings_at_once(&self, agents: &[Agent]) -> Vec<AgentReading> {
+        thread::scope(|scope| {
+            let measurements: Vec<_> = agents
+                .iter()
+                .map(|agent| (agent, scope.spawn(|| self.reading_of(agent))))
+                .collect();
+            measurements
+                .into_iter()
+                .filter_map(|(agent, measurement)| {
+                    measurement.join().unwrap_or_else(|_| {
+                        log::warn!(
+                            "the usage measurement of the agent {} panicked",
+                            agent.name()
+                        );
+                        None
+                    })
+                })
+                .collect()
+        })
     }
 
     fn reading_of(&self, agent: &Agent) -> Option<AgentReading> {
@@ -92,7 +111,7 @@ impl UsageCatalog {
 mod tests {
     use super::*;
     use crate::domain::{LimitWindow, UsageLimit, UsageRow};
-    use crate::test_support::{FakeClock, FakeUsageMeter, LogCapture, ServiceFixture};
+    use crate::test_support::{FakeClock, FakeUsageMeter, HeldCalls, LogCapture, ServiceFixture};
 
     struct CatalogFixture;
 
@@ -143,6 +162,22 @@ mod tests {
         let reading = CatalogFixture::measured(&catalog, &agents);
 
         assert_eq!(CatalogFixture::names(&reading), ["work", "home"]);
+    }
+
+    #[test]
+    fn every_agent_is_measured_at_the_same_time() {
+        let held = HeldCalls::all();
+        let meter = FakeUsageMeter::new();
+        meter.on_measure(held.hook());
+        let catalog = CatalogFixture::catalog(vec![Arc::new(meter)]);
+        let agents = [CatalogFixture::agent("work"), CatalogFixture::agent("home")];
+
+        let measurement = catalog.measure(&agents);
+        let both_started = held.wait_for(2);
+        held.release();
+        measurement.wait_unless(|| false);
+
+        assert!(both_started);
     }
 
     #[test]

@@ -3,10 +3,12 @@ use std::sync::Mutex;
 
 use crate::application::ports::{UsageError, UsageMeter};
 use crate::domain::{Agent, AgentUsage};
+use crate::test_support::CallHooks;
 
 #[derive(Default)]
 pub struct FakeUsageMeter {
     state: Mutex<FakeState>,
+    hooks: CallHooks,
 }
 
 #[derive(Default)]
@@ -17,6 +19,8 @@ struct FakeState {
 }
 
 impl FakeUsageMeter {
+    const MEASURE: &'static str = "measure";
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -42,6 +46,10 @@ impl FakeUsageMeter {
         self.state.lock().unwrap().failing_agents.remove(agent);
     }
 
+    pub fn on_measure(&self, hook: impl Fn() + Send + Sync + 'static) {
+        self.hooks.add(Self::MEASURE, hook);
+    }
+
     pub fn calls(&self) -> Vec<String> {
         self.state.lock().unwrap().calls.clone()
     }
@@ -49,8 +57,13 @@ impl FakeUsageMeter {
 
 impl UsageMeter for FakeUsageMeter {
     fn measure(&self, agent: &Agent) -> Result<Option<AgentUsage>, UsageError> {
-        let mut state = self.state.lock().unwrap();
-        state.calls.push(format!("measure {}", agent.name()));
+        self.state
+            .lock()
+            .unwrap()
+            .calls
+            .push(format!("{} {}", Self::MEASURE, agent.name()));
+        self.hooks.run(Self::MEASURE);
+        let state = self.state.lock().unwrap();
         if state.failing_agents.contains(agent.name()) {
             return Err(UsageError::Unanswered);
         }
