@@ -15,16 +15,16 @@ This file and the reference files it names are the living reference for working 
 | Manual run | A run of the `ringleader` binary that you start by hand, TUI or CLI |
 | Marked branch | A branch that carries the `ringleaderManaged` git config marker |
 
-## Values
+## Principles
 
-**If no rule covers a case, choose what these values favor.** If two values conflict, the earlier value wins.
+**If no rule covers a case, choose what these principles favor.** If two principles conflict, the earlier principle wins.
 
 ### The user's own setup stays untouched
 
 - Ringleader runs the private tmux server and never changes the user's tmux server, tmux config, or key bindings.
 - Ringleader deletes or renames only its marked branches.
 - Ringleader assumes no particular personal setup.
-- Four rules come from this value:
+- Four rules come from this principle:
   - Every tmux call passes the private tmux server's socket.
   - Every manual run uses throwaway state.
   - Ringleader marks each branch it creates with `ringleaderManaged`.
