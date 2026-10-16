@@ -65,9 +65,19 @@ where
     }
 
     pub fn run(&mut self, app: &mut App) -> io::Result<()> {
+        self.start(app)?;
+        self.serve(app)
+    }
+
+    fn start(&mut self, app: &mut App) -> io::Result<()> {
         let size = self.terminal.size().map_err(io::Error::other)?;
         app.resize(size.width, size.height);
         app.observe();
+        app.refresh_usage();
+        Ok(())
+    }
+
+    fn serve(&mut self, app: &mut App) -> io::Result<()> {
         let mut next_tick = Instant::now();
         loop {
             if self.signals.raised().is_some() {
@@ -530,6 +540,21 @@ mod tests {
                 .text()
                 .contains("Opened a terminal window in the worktree of fix-auth.")
         );
+    }
+
+    #[test]
+    fn the_tui_measures_the_agents_usage_once_it_starts() {
+        let fixture = ServiceFixture::new();
+        let harness = UiHarness::new();
+        let mut app = UiHarness::app(&fixture);
+        let mut event_loop =
+            harness.event_loop(ScriptedInput::events(vec![UiHarness::character('q')]));
+
+        event_loop.run(&mut app).unwrap();
+
+        let measured = Deadline::for_background_work()
+            .wait_until(|| fixture.usage_meter().calls() == ["measure claude"]);
+        assert!(measured, "{:?}", fixture.usage_meter().calls());
     }
 
     #[test]

@@ -20,7 +20,9 @@ use ratatui::backend::CrosstermBackend;
 
 use adapters::agent_launch::agent_handoff::AgentHandoff;
 use adapters::agent_launch::agent_launcher::{AgentLauncher, ProcessExec};
+use adapters::agent_launch::agent_probe::AgentProbe;
 use adapters::agent_launch::launcher_command::LauncherCommand;
+use adapters::claude::claude_usage_meter::ClaudeUsageMeter;
 use adapters::config_file::toml_config_source::TomlConfigSource;
 use adapters::direnv::direnv_directory_environment::DirenvDirectoryEnvironment;
 use adapters::filesystem::directory_repo_scanner::DirectoryRepoScanner;
@@ -37,15 +39,18 @@ use adapters::host::signal_hook_interrupts::SignalHookInterrupts;
 use adapters::host::system_clock::SystemClock;
 use adapters::host::system_host_probe::SystemHostProbe;
 use adapters::host::xdg_paths::XdgPaths;
+use adapters::ollama::ollama_cloud_quota::OllamaCloudQuota;
+use adapters::opencode::opencode_usage_meter::OpencodeUsageMeter;
+use adapters::sqlite::sqlite_opencode_database::SqliteOpencodeDatabase;
 use adapters::terminal_emulator::system_terminal_emulator::SystemTerminalEmulator;
 use adapters::tmux::server_files::ServerFiles;
 use adapters::tmux::tmux_command::TmuxCommand;
 use adapters::tmux::tmux_multiplexer::TmuxMultiplexer;
 use adapters::{BoundedCommand, Deadlines, GitWorkspace};
-use application::ports::{ConfigSource, HostProbe, Lock, LockError, PullRequests};
+use application::ports::{ConfigSource, HostProbe, Lock, LockError, PullRequests, UsageMeter};
 use application::{
-    CorruptRegistry, DesktopPorts, DiagnosticPaths, LoadedConfig, RepoPorts, ServiceContext,
-    ServiceError, ServicePorts, SessionService, StatePorts, TmuxPorts,
+    AgentPorts, CorruptRegistry, DesktopPorts, DiagnosticPaths, LoadedConfig, RepoPorts,
+    ServiceContext, ServiceError, ServicePorts, SessionService, StatePorts, TmuxPorts,
 };
 use cli::{Cli, CliExit, CliOutput, CliSession};
 use ui::{App, CrosstermInput, CrosstermScreenMode, EventLoop, TerminalGuard};
@@ -283,6 +288,7 @@ impl CompositionRoot {
             self.programs.tmux(),
         ));
         let pull_requests = Self::pull_requests(&host, bounded);
+        let usage_meters = self.usage_meters(host.as_ref(), bounded);
         let directory_environment =
             DirenvDirectoryEnvironment::when_installed(host.as_ref(), &self.environment, bounded);
         let desktop = DesktopPorts::new(SystemTerminalEmulator::detect(
@@ -311,7 +317,13 @@ impl CompositionRoot {
             .with_diagnostics(self.diagnostics())
             .with_shell(&self.environment.shell());
         SessionService::new(
-            ServicePorts::new(state, repos, tmux_ports, desktop),
+            ServicePorts::new(
+                state,
+                repos,
+                tmux_ports,
+                desktop,
+                AgentPorts::new(usage_meters),
+            ),
             context,
         )
     }
@@ -331,6 +343,28 @@ impl CompositionRoot {
                 Path::new(MountTable::PROCESS_TABLE),
             )),
         )
+    }
+
+    fn usage_meters(
+        &self,
+        host: &SystemHostProbe,
+        bounded: BoundedCommand,
+    ) -> Vec<Arc<dyn UsageMeter>> {
+        let probe = Arc::new(AgentProbe::new(
+            &self.environment,
+            &self.paths.usage_directory(),
+            bounded,
+        ));
+        let quotas = vec![OllamaCloudQuota::when_installed(
+            host,
+            &self.environment,
+            bounded,
+        )];
+        let database = SqliteOpencodeDatabase::when_installed(host, &self.environment, bounded);
+        vec![
+            Arc::new(ClaudeUsageMeter::new(probe.clone())),
+            Arc::new(OpencodeUsageMeter::new(probe, database, quotas)),
+        ]
     }
 
     fn pull_requests(host: &SystemHostProbe, bounded: BoundedCommand) -> Arc<dyn PullRequests> {

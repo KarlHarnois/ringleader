@@ -1,4 +1,3 @@
-use std::ffi::OsString;
 use std::fs::{self, DirBuilder, OpenOptions};
 use std::io::{self, Write};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
@@ -6,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime};
 
+use super::agent_variables::AgentVariables;
 use super::handoff_contents::HandoffContents;
 use crate::adapters::host::live_process::LiveProcess;
 use crate::adapters::host::process_environment::ProcessEnvironment;
@@ -40,13 +40,21 @@ impl AgentHandoff {
     }
 
     pub fn write(&self, launch: &AgentLaunch) -> io::Result<PathBuf> {
-        let named = self.named_variables(launch);
-        let inherited = [self.baseline_variables(), named.clone()].concat();
-        let shell = self.environment.shell_variable().into_iter().collect();
-        let kept = Self::overridden(shell, named);
-        let explicit = Self::overridden(kept, Self::assigned_variables(launch));
-        let contents = HandoffContents::for_launch(launch, &inherited, &explicit);
+        let variables = AgentVariables::new(
+            &self.environment,
+            launch.env_names(),
+            launch.env_assignments(),
+        );
+        Self::warn_about_missing(variables.missing());
+        let contents =
+            HandoffContents::for_launch(launch, variables.inherited(), variables.explicit());
         self.write_file(Self::LAUNCH_PREFIX, &contents)
+    }
+
+    fn warn_about_missing(names: &[String]) {
+        for name in names {
+            log::warn!("the agent variable {name} is not set, the agent starts without it");
+        }
     }
 
     pub fn write_relay(&self, contents: &HandoffContents) -> io::Result<PathBuf> {
@@ -121,45 +129,6 @@ impl AgentHandoff {
         serde_json::from_slice(&bytes?).map_err(io::Error::other)
     }
 
-    fn overridden(
-        variables: Vec<(OsString, OsString)>,
-        overrides: Vec<(OsString, OsString)>,
-    ) -> Vec<(OsString, OsString)> {
-        let is_overridden =
-            |name: &OsString| overrides.iter().any(|(overriding, _)| overriding == name);
-        let mut combined: Vec<(OsString, OsString)> = variables
-            .into_iter()
-            .filter(|(name, _)| !is_overridden(name))
-            .collect();
-        combined.extend(overrides);
-        combined
-    }
-
-    fn baseline_variables(&self) -> Vec<(OsString, OsString)> {
-        self.environment.baseline().variables().to_vec()
-    }
-
-    fn named_variables(&self, launch: &AgentLaunch) -> Vec<(OsString, OsString)> {
-        let mut named = Vec::new();
-        for name in launch.env_names() {
-            match self.environment.get(name) {
-                Some(value) => named.push((OsString::from(name), value.to_os_string())),
-                None => {
-                    log::warn!("the agent variable {name} is not set, the agent starts without it")
-                }
-            }
-        }
-        named
-    }
-
-    fn assigned_variables(launch: &AgentLaunch) -> Vec<(OsString, OsString)> {
-        launch
-            .env_assignments()
-            .iter()
-            .map(|(name, value)| (OsString::from(name), OsString::from(value)))
-            .collect()
-    }
-
     fn next_path(&self, prefix: &str) -> PathBuf {
         let sequence = HANDOFF_COUNTER.fetch_add(1, Ordering::Relaxed);
         let separator = Self::NAME_SEPARATOR;
@@ -172,6 +141,7 @@ impl AgentHandoff {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsString;
     use std::fs::File;
 
     use super::*;

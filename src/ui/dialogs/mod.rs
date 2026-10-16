@@ -1,3 +1,5 @@
+pub mod compact_count;
+pub mod compact_duration;
 pub mod delete_session_dialog;
 pub mod dialog;
 pub mod dialog_labels;
@@ -7,8 +9,10 @@ pub mod home_path;
 pub mod new_session;
 pub mod rename_session_dialog;
 pub mod repo_search;
+pub mod scroll_window;
 pub mod session_finder;
 pub mod text_field;
+pub mod usage_view;
 
 pub use dialog::{Dialog, DialogOpening, DialogStep};
 pub use dialog_slot::DialogSlot;

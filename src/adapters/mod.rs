@@ -1,11 +1,15 @@
 pub mod agent_launch;
 pub mod child_process;
+pub mod claude;
 pub mod config_file;
 pub mod direnv;
 pub mod filesystem;
 pub mod gh;
 pub mod git;
 pub mod host;
+pub mod ollama;
+pub mod opencode;
+pub mod sqlite;
 pub mod terminal_emulator;
 pub mod tmux;
 

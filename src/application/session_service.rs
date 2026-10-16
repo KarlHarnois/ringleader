@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::pending::Pending;
-use super::ports::{ConfigError, ConfigSource, RegistryError, SessionRegistry};
+use super::ports::{Clock, ConfigError, ConfigSource, RegistryError, SessionRegistry};
 use super::pull_request_catalog::PullRequestCatalog;
 use super::reconciliation::Reconciliation;
 use super::restart_report::RestartReport;
@@ -12,6 +12,8 @@ use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
 use super::session_access::{SessionAccess, ShellOutcome};
 use super::session_lifecycle::SessionLifecycle;
+use super::usage_catalog::UsageCatalog;
+use super::usage_reading::UsageReading;
 use crate::application::CreateRequest;
 use crate::application::DeleteOutcome;
 use crate::application::DiagnosticPaths;
@@ -39,6 +41,8 @@ pub struct SessionService {
     access: SessionAccess,
     catalog: RepoCatalog,
     pull_request_catalog: PullRequestCatalog,
+    usage_catalog: UsageCatalog,
+    clock: Arc<dyn Clock>,
     doctor: Doctor,
     paths: DiagnosticPaths,
 }
@@ -51,6 +55,8 @@ impl SessionService {
             access: SessionAccess::new(&ports, context.shell()),
             catalog: RepoCatalog::new(&ports, &context),
             pull_request_catalog: PullRequestCatalog::new(ports.repos().pull_requests()),
+            usage_catalog: UsageCatalog::new(ports.agents().usage_meters(), ports.state().clock()),
+            clock: ports.state().clock(),
             doctor: Doctor::new(&ports, context.diagnostics().clone()),
             paths: context.diagnostics().clone(),
             config: context.into_config(),
@@ -222,6 +228,22 @@ impl SessionService {
         self.pull_request_catalog.find(&sessions)
     }
 
+    pub fn measure_usage(&self) -> Pending<UsageReading> {
+        self.usage_catalog.measure(self.config().agents())
+    }
+
+    pub fn refresh_usage(&self) {
+        drop(self.measure_usage());
+    }
+
+    pub fn last_usage(&self) -> Option<UsageReading> {
+        self.usage_catalog.latest(self.config().agents())
+    }
+
+    pub fn now_epoch_seconds(&self) -> u64 {
+        self.clock.now_epoch_seconds()
+    }
+
     pub fn create_session(
         &mut self,
         request: &CreateRequest,
@@ -354,13 +376,71 @@ pub enum CorruptRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{FakeMultiplexer, FakeSessionRegistry, ServiceFixture};
+    use crate::domain::{Agent, AgentUsage};
+    use crate::test_support::{
+        Deadline, FakeMultiplexer, FakeSessionRegistry, FakeUsageMeter, ServiceFixture,
+    };
 
     #[test]
     fn config_returns_the_loaded_config() {
         let fixture = ServiceFixture::new();
 
         assert_eq!(fixture.service().config(), &ServiceFixture::config());
+    }
+
+    #[test]
+    fn measuring_usage_measures_the_configured_agents() {
+        let fixture = ServiceFixture::new()
+            .with_usage_meter(FakeUsageMeter::new().with_usage("claude", AgentUsage::default()));
+        let service = fixture.service();
+
+        let reading = service
+            .measure_usage()
+            .wait_unless(|| false)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(reading.agents()[0].agent(), "claude");
+        assert_eq!(service.last_usage(), Some(reading));
+    }
+
+    #[test]
+    fn refreshing_usage_measures_into_the_last_reading() {
+        let fixture = ServiceFixture::new()
+            .with_usage_meter(FakeUsageMeter::new().with_usage("claude", AgentUsage::default()));
+        let service = fixture.service();
+
+        service.refresh_usage();
+
+        assert!(Deadline::for_background_work().wait_until(|| service.last_usage().is_some()));
+    }
+
+    #[test]
+    fn a_reload_that_changes_the_agents_leaves_no_last_usage() {
+        let fixture = ServiceFixture::new();
+        let mut service = fixture.service();
+        service
+            .measure_usage()
+            .wait_unless(|| false)
+            .unwrap()
+            .unwrap();
+        let other_agents = ServiceFixture::config().with_agents(vec![Agent::new("home", "claude")]);
+        fixture.config_source().replace(other_agents);
+
+        service.reload().unwrap();
+
+        assert_eq!(service.last_usage(), None);
+    }
+
+    #[test]
+    fn now_is_the_time_on_the_clock() {
+        let fixture = ServiceFixture::new();
+        fixture.clock().advance(5);
+
+        assert_eq!(
+            fixture.service().now_epoch_seconds(),
+            ServiceFixture::NOW + 5
+        );
     }
 
     #[test]

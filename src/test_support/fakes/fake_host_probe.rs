@@ -42,6 +42,15 @@ impl FakeHostProbe {
         self
     }
 
+    pub fn with_command_at(self, command: &str, path: &Path) -> Self {
+        self.state
+            .lock()
+            .unwrap()
+            .commands
+            .insert(command.to_string(), path.to_path_buf());
+        self
+    }
+
     pub fn with_directory(self, path: &Path) -> Self {
         self.add_directory(path);
         self

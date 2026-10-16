@@ -4,14 +4,14 @@ use std::sync::Arc;
 use super::{
     FakeClock, FakeConfigSource, FakeDirectoryEnvironment, FakeHostProbe, FakeMultiplexer,
     FakePullRequests, FakeRepoScanner, FakeScratchSpace, FakeSessionRegistry, FakeTerminalEmulator,
-    FakeWorkspace,
+    FakeUsageMeter, FakeWorkspace,
 };
 use crate::application::ports::{
     ConfigError, MergeOutcome, MultiplexerError, ScratchSpace, WorktreeEntry,
 };
 use crate::application::{
-    CorruptRegistry, DesktopPorts, DiagnosticPaths, LoadedConfig, RepoPorts, ServiceContext,
-    ServicePorts, SessionService, StatePorts, TmuxPorts,
+    AgentPorts, CorruptRegistry, DesktopPorts, DiagnosticPaths, LoadedConfig, RepoPorts,
+    ServiceContext, ServicePorts, SessionService, StatePorts, TmuxPorts,
 };
 use crate::domain::{
     Agent, AgentPane, BaseBranch, Config, HotKey, KeyBindings, NamingScheme, PullRequest,
@@ -32,6 +32,7 @@ pub struct ServiceFixture {
     scratch_space: Arc<FakeScratchSpace>,
     directory_environment: Arc<FakeDirectoryEnvironment>,
     terminal_emulator: Arc<FakeTerminalEmulator>,
+    usage_meter: Arc<FakeUsageMeter>,
     config_error: Option<ConfigError>,
     launch_directory: PathBuf,
     diagnostics: DiagnosticPaths,
@@ -71,6 +72,7 @@ impl ServiceFixture {
             scratch_space: Arc::new(FakeScratchSpace::default()),
             directory_environment: Arc::new(FakeDirectoryEnvironment::default()),
             terminal_emulator: Arc::new(FakeTerminalEmulator::default()),
+            usage_meter: Arc::new(FakeUsageMeter::new()),
             config_error: None,
             launch_directory: PathBuf::from(Self::REPO),
             diagnostics: Self::diagnostics(),
@@ -171,6 +173,13 @@ impl ServiceFixture {
         }
     }
 
+    pub fn with_usage_meter(self, usage_meter: FakeUsageMeter) -> Self {
+        Self {
+            usage_meter: Arc::new(usage_meter),
+            ..self
+        }
+    }
+
     pub fn without_home(self) -> Self {
         Self { home: None, ..self }
     }
@@ -252,6 +261,14 @@ impl ServiceFixture {
 
     pub fn terminal_emulator(&self) -> &FakeTerminalEmulator {
         &self.terminal_emulator
+    }
+
+    pub fn usage_meter(&self) -> &FakeUsageMeter {
+        &self.usage_meter
+    }
+
+    pub fn clock(&self) -> &FakeClock {
+        &self.clock
     }
 
     pub fn tmpdir_assignment(&self, name: &str) -> (String, String) {
@@ -507,6 +524,7 @@ impl ServiceFixture {
             .with_diff_workspace(self.measuring_workspace()),
             TmuxPorts::new(self.multiplexer.clone()),
             DesktopPorts::new(self.terminal_emulator.clone()),
+            AgentPorts::new(vec![self.usage_meter.clone()]),
         )
     }
 
