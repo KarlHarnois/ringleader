@@ -87,6 +87,9 @@ impl DeleteSessionDialog {
         for warning in self.impact.warnings() {
             lines.extend(TextFit::new(&warning).styled_lines(width, theme.warning()));
         }
+        if let Some(kept) = self.impact.kept() {
+            lines.extend(TextFit::new(kept).styled_lines(width, theme.base()));
+        }
         lines.push(Line::from(""));
         if self.changed {
             lines.extend(TextFit::new(Self::CHANGED).styled_lines(width, theme.error()));

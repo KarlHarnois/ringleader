@@ -254,9 +254,19 @@ mod tests {
         let impact = fixture.service().delete_impact("fix-auth").unwrap();
 
         assert_eq!(
-            impact.warnings(),
-            ["the main checkout and its branch stay, delete ends only the session"]
+            impact.kept(),
+            Some("the main checkout and its branch stay, delete ends only the session")
         );
+    }
+
+    #[test]
+    fn a_working_session_in_the_main_checkout_lists_only_its_working_agent_as_lost() {
+        let fixture =
+            CheckoutDeleteFixture::live(ServiceFixture::working(&CheckoutDeleteFixture::session()));
+
+        let impact = fixture.service().delete_impact("fix-auth").unwrap();
+
+        assert_eq!(impact.warnings(), ["agent is actively working"]);
     }
 
     #[test]

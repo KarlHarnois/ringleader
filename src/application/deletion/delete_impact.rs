@@ -80,8 +80,12 @@ impl DeleteImpact {
         if self.working {
             warnings.push("agent is actively working".to_string());
         }
-        warnings.push(self.scope.note().to_string());
+        warnings.extend(self.scope.loss().map(str::to_string));
         warnings
+    }
+
+    pub fn kept(&self) -> Option<&'static str> {
+        self.scope.kept()
     }
 
     fn accepts(&self, current: &DeleteImpact) -> bool {
@@ -115,11 +119,18 @@ enum DeleteScope {
 }
 
 impl DeleteScope {
-    fn note(self) -> &'static str {
+    fn loss(self) -> Option<&'static str> {
         match self {
-            Self::Worktree => "ignored files such as .env are deleted with the worktree",
+            Self::Worktree => Some("ignored files such as .env are deleted with the worktree"),
+            Self::SessionOnly => None,
+        }
+    }
+
+    fn kept(self) -> Option<&'static str> {
+        match self {
+            Self::Worktree => None,
             Self::SessionOnly => {
-                "the main checkout and its branch stay, delete ends only the session"
+                Some("the main checkout and its branch stay, delete ends only the session")
             }
         }
     }
