@@ -9,6 +9,7 @@ pub mod home_path;
 pub mod new_session;
 pub mod rename_session_dialog;
 pub mod repo_search;
+pub mod scroll_window;
 pub mod session_finder;
 pub mod text_field;
 pub mod usage_view;

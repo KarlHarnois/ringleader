@@ -1,4 +1,3 @@
-use std::cell::Cell;
 use std::iter::once;
 use std::path::Path;
 use std::slice;
@@ -11,6 +10,7 @@ use super::legend::{Legend, LegendEntry};
 use crate::domain::{HotKey, KeyBindings, PullRequestState, SessionState};
 use crate::ui::dialogs::DialogStep;
 use crate::ui::dialogs::home_path::HomePath;
+use crate::ui::dialogs::scroll_window::ScrollWindow;
 use crate::ui::table::state_indicator::StateIndicator;
 use crate::ui::text_fit::TextFit;
 use crate::ui::theme::Theme;
@@ -18,8 +18,7 @@ use crate::ui::theme::Theme;
 pub struct HelpView {
     bound_keys: Vec<(String, &'static str)>,
     files: Vec<(String, String)>,
-    scroll: usize,
-    max_scroll: Cell<usize>,
+    scroll: ScrollWindow,
 }
 
 impl HelpView {
@@ -66,7 +65,6 @@ impl HelpView {
     const FIRST_SPINNER_TICK: u64 = 0;
     const PULL_REQUEST_SYMBOL: &'static str = "#n";
     const CLOSE_HINT: &'static str = "? Esc q close";
-    const SCROLL_HINT: &'static str = "↑ ↓ scroll · ";
 
     pub fn new(key_bindings: &KeyBindings, files: &[(&str, &Path)], home: &HomePath) -> Self {
         let files = files
@@ -76,8 +74,7 @@ impl HelpView {
         Self {
             bound_keys: Self::bound_keys(key_bindings),
             files,
-            scroll: 0,
-            max_scroll: Cell::new(0),
+            scroll: ScrollWindow::default(),
         }
     }
 
@@ -111,43 +108,21 @@ impl HelpView {
     }
 
     pub fn handle_key(&mut self, key: &KeyEvent) -> DialogStep {
-        match key.code {
-            KeyCode::Char('?' | 'q') | KeyCode::Esc => return DialogStep::Close,
-            KeyCode::Down | KeyCode::Char('j') => {
-                self.scroll = (self.visible_scroll() + 1).min(self.max_scroll.get());
-            }
-            KeyCode::Up | KeyCode::Char('k') => {
-                self.scroll = self.visible_scroll().saturating_sub(1)
-            }
-            _ => {}
+        if let KeyCode::Char('?' | 'q') | KeyCode::Esc = key.code {
+            return DialogStep::Close;
         }
+        self.scroll.scroll_for(key);
         DialogStep::Stay
     }
 
     pub fn lines(&self, width: usize, height: usize, theme: &Theme) -> Vec<Line<'static>> {
-        let content = self.content(width, theme);
         let room = height.saturating_sub(1);
-        self.max_scroll.set(content.len().saturating_sub(room));
-        let shown = content.into_iter().skip(self.visible_scroll()).take(room);
-        let mut lines: Vec<Line<'static>> = shown.collect();
-        lines.push(Line::styled(self.hint(), theme.dim()));
+        let mut lines = self.scroll.window(self.content(width, theme), room);
+        lines.push(Line::styled(
+            self.scroll.hint(Self::CLOSE_HINT),
+            theme.dim(),
+        ));
         lines
-    }
-
-    fn hint(&self) -> String {
-        if self.scrolls() {
-            format!("{}{}", Self::SCROLL_HINT, Self::CLOSE_HINT)
-        } else {
-            Self::CLOSE_HINT.to_string()
-        }
-    }
-
-    fn scrolls(&self) -> bool {
-        self.max_scroll.get() > 0
-    }
-
-    fn visible_scroll(&self) -> usize {
-        self.scroll.min(self.max_scroll.get())
     }
 
     fn content(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {

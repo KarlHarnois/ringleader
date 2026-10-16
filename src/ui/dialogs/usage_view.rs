@@ -8,6 +8,7 @@ use ratatui::text::{Line, Span};
 use super::compact_count::CompactCount;
 use super::compact_duration::CompactDuration;
 use super::dialog::DialogStep;
+use super::scroll_window::ScrollWindow;
 use crate::application::{AgentReading, SessionService};
 use crate::domain::{
     AgentUsage, LimitWindow, Spend, SpendKind, TokenTotals, TotalsWindow, UsageLimit, UsageRow,
@@ -18,6 +19,7 @@ use crate::ui::theme::Theme;
 pub struct UsageView {
     feed: UsageFeed,
     now: u64,
+    scroll: ScrollWindow,
 }
 
 impl UsageView {
@@ -39,6 +41,7 @@ impl UsageView {
         Self {
             feed: UsageFeed::open(service),
             now: service.now_epoch_seconds(),
+            scroll: ScrollWindow::default(),
         }
     }
 
@@ -47,16 +50,17 @@ impl UsageView {
         self.now = service.now_epoch_seconds();
     }
 
-    pub fn handle_key(&self, key: &KeyEvent) -> DialogStep {
-        match key.code {
-            KeyCode::Char('u' | 'q') | KeyCode::Esc => DialogStep::Close,
-            _ => DialogStep::Stay,
+    pub fn handle_key(&mut self, key: &KeyEvent) -> DialogStep {
+        if let KeyCode::Char('u' | 'q') | KeyCode::Esc = key.code {
+            return DialogStep::Close;
         }
+        self.scroll.scroll_for(key);
+        DialogStep::Stay
     }
 
     pub fn lines(&self, width: usize, height: usize, theme: &Theme) -> Vec<Line<'static>> {
         let room = height.saturating_sub(1);
-        let mut lines: Vec<Line<'static>> = self.body(theme).into_iter().take(room).collect();
+        let mut lines = self.scroll.window(self.body(theme), room);
         lines.push(self.footer(width, theme));
         lines
     }
@@ -202,9 +206,10 @@ impl UsageView {
 
     fn footer(&self, width: usize, theme: &Theme) -> Line<'static> {
         let status = self.status();
-        let used = status.chars().count() + Self::CLOSE_HINT.chars().count();
+        let hint = self.scroll.hint(Self::CLOSE_HINT);
+        let used = status.chars().count() + hint.chars().count();
         let gap = width.saturating_sub(used).max(Self::MINIMUM_GAP);
-        let footer = format!("{status}{}{}", " ".repeat(gap), Self::CLOSE_HINT);
+        let footer = format!("{status}{}{hint}", " ".repeat(gap));
         Line::styled(footer, theme.dim())
     }
 
@@ -572,8 +577,39 @@ mod tests {
     }
 
     #[test]
-    fn u_escape_and_q_close_the_view() {
+    fn rows_that_do_not_fit_scroll_into_view() {
+        let mut view = ViewFixture::reporting(Vec::new()).settled();
+        ViewFixture::rows_within(&view, ViewFixture::WIDTH, 2);
+
+        view.handle_key(&ViewFixture::key(KeyCode::Char('j')));
+
+        let rows = ViewFixture::rows_within(&view, ViewFixture::WIDTH, 2);
+        assert_eq!(rows[0], "  no plan usage reported");
+    }
+
+    #[test]
+    fn rows_that_do_not_fit_offer_the_scroll_keys() {
         let view = ViewFixture::reporting(Vec::new()).settled();
+
+        let rows = ViewFixture::rows_within(&view, ViewFixture::WIDTH, 2);
+
+        assert!(
+            rows[1].ends_with("↑ ↓ scroll · u Esc q close"),
+            "{}",
+            rows[1]
+        );
+    }
+
+    #[test]
+    fn rows_that_fit_offer_no_scroll_keys() {
+        let rows = ViewFixture::reporting(Vec::new()).settled_rows();
+
+        assert!(!rows.last().unwrap().contains("scroll"));
+    }
+
+    #[test]
+    fn u_escape_and_q_close_the_view() {
+        let mut view = ViewFixture::reporting(Vec::new()).settled();
 
         for code in [KeyCode::Char('u'), KeyCode::Esc, KeyCode::Char('q')] {
             assert_eq!(view.handle_key(&ViewFixture::key(code)), DialogStep::Close);
@@ -582,7 +618,7 @@ mod tests {
 
     #[test]
     fn another_key_keeps_the_view_open() {
-        let view = ViewFixture::reporting(Vec::new()).settled();
+        let mut view = ViewFixture::reporting(Vec::new()).settled();
 
         assert_eq!(
             view.handle_key(&ViewFixture::key(KeyCode::Char('j'))),
