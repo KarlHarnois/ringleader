@@ -12,7 +12,7 @@ use crate::domain::{Agent, AgentUsage};
 pub struct UsageCatalog {
     meters: Vec<Arc<dyn UsageMeter>>,
     clock: Arc<dyn Clock>,
-    latest: Arc<Mutex<Option<UsageReading>>>,
+    latest: Arc<Mutex<Option<MeasuredReading>>>,
     measuring: Arc<Mutex<()>>,
     completed_measurements: Arc<AtomicU64>,
     failures: Arc<FailureStreaks>,
@@ -37,8 +37,11 @@ impl UsageCatalog {
         Pending::start(move || Ok(catalog.record(completed_before, &agents)))
     }
 
-    pub fn latest(&self) -> Option<UsageReading> {
-        self.stored().clone()
+    pub fn latest(&self, agents: &[Agent]) -> Option<UsageReading> {
+        self.stored()
+            .as_ref()
+            .filter(|measured| measured.agents == agents)
+            .map(|measured| measured.reading.clone())
     }
 
     fn record(&self, completed_before: u64, agents: &[Agent]) -> UsageReading {
@@ -46,19 +49,26 @@ impl UsageCatalog {
             .measuring
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        if let Some(reading) = self.reading_completed_since(completed_before) {
+        if let Some(reading) = self.reading_completed_since(completed_before, agents) {
             return reading;
         }
         let readings = self.readings_at_once(agents);
         let reading = UsageReading::new(self.clock.now_epoch_seconds(), readings);
-        *self.stored() = Some(reading.clone());
+        *self.stored() = Some(MeasuredReading {
+            agents: agents.to_vec(),
+            reading: reading.clone(),
+        });
         self.completed_measurements.fetch_add(1, Ordering::SeqCst);
         reading
     }
 
-    fn reading_completed_since(&self, completed_before: u64) -> Option<UsageReading> {
+    fn reading_completed_since(
+        &self,
+        completed_before: u64,
+        agents: &[Agent],
+    ) -> Option<UsageReading> {
         let completed_since = self.completed_measurements.load(Ordering::SeqCst) > completed_before;
-        self.latest().filter(|_| completed_since)
+        self.latest(agents).filter(|_| completed_since)
     }
 
     fn readings_at_once(&self, agents: &[Agent]) -> Vec<AgentReading> {
@@ -110,9 +120,14 @@ impl UsageCatalog {
         }
     }
 
-    fn stored(&self) -> MutexGuard<'_, Option<UsageReading>> {
+    fn stored(&self) -> MutexGuard<'_, Option<MeasuredReading>> {
         self.latest.lock().unwrap_or_else(PoisonError::into_inner)
     }
+}
+
+struct MeasuredReading {
+    agents: Vec<Agent>,
+    reading: UsageReading,
 }
 
 #[cfg(test)]
@@ -274,14 +289,44 @@ mod tests {
         let meter = FakeUsageMeter::new().with_usage("work", CatalogFixture::usage(10.0));
         let catalog = CatalogFixture::catalog(vec![Arc::new(meter)]);
 
-        let reading = CatalogFixture::measured(&catalog, &[CatalogFixture::agent("work")]);
+        let agents = [CatalogFixture::agent("work")];
 
-        assert_eq!(catalog.latest(), Some(reading));
+        let reading = CatalogFixture::measured(&catalog, &agents);
+
+        assert_eq!(catalog.latest(&agents), Some(reading));
     }
 
     #[test]
     fn nothing_is_known_before_the_first_measurement() {
-        assert_eq!(CatalogFixture::catalog(Vec::new()).latest(), None);
+        let catalog = CatalogFixture::catalog(Vec::new());
+
+        assert_eq!(catalog.latest(&[CatalogFixture::agent("work")]), None);
+    }
+
+    #[test]
+    fn a_reading_of_other_agents_is_not_the_latest() {
+        let catalog = CatalogFixture::catalog(vec![Arc::new(FakeUsageMeter::new())]);
+
+        CatalogFixture::measured(&catalog, &[CatalogFixture::agent("work")]);
+
+        assert_eq!(catalog.latest(&[CatalogFixture::agent("home")]), None);
+    }
+
+    #[test]
+    fn a_measurement_of_other_agents_does_not_reuse_a_running_one() {
+        let held = HeldCalls::all();
+        let meter = Arc::new(FakeUsageMeter::new());
+        meter.on_measure(held.hook());
+        let catalog = CatalogFixture::catalog(vec![meter.clone()]);
+
+        let first = catalog.measure(&[CatalogFixture::agent("work")]);
+        held.wait_for(1);
+        let second = catalog.measure(&[CatalogFixture::agent("home")]);
+        held.release();
+        first.wait_unless(|| false);
+        second.wait_unless(|| false);
+
+        assert_eq!(meter.calls(), ["measure work", "measure home"]);
     }
 
     #[test]

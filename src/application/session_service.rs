@@ -237,7 +237,7 @@ impl SessionService {
     }
 
     pub fn last_usage(&self) -> Option<UsageReading> {
-        self.usage_catalog.latest()
+        self.usage_catalog.latest(self.config().agents())
     }
 
     pub fn now_epoch_seconds(&self) -> u64 {
@@ -376,7 +376,7 @@ pub enum CorruptRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::AgentUsage;
+    use crate::domain::{Agent, AgentUsage};
     use crate::test_support::{
         Deadline, FakeMultiplexer, FakeSessionRegistry, FakeUsageMeter, ServiceFixture,
     };
@@ -413,6 +413,23 @@ mod tests {
         service.refresh_usage();
 
         assert!(Deadline::for_background_work().wait_until(|| service.last_usage().is_some()));
+    }
+
+    #[test]
+    fn a_reload_that_changes_the_agents_leaves_no_last_usage() {
+        let fixture = ServiceFixture::new();
+        let mut service = fixture.service();
+        service
+            .measure_usage()
+            .wait_unless(|| false)
+            .unwrap()
+            .unwrap();
+        let other_agents = ServiceFixture::config().with_agents(vec![Agent::new("home", "claude")]);
+        fixture.config_source().replace(other_agents);
+
+        service.reload().unwrap();
+
+        assert_eq!(service.last_usage(), None);
     }
 
     #[test]
