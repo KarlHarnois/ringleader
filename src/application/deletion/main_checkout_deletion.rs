@@ -2,27 +2,30 @@ use std::sync::Arc;
 
 use super::delete_impact::{DeleteConfirmation, DeleteImpact};
 use super::delete_outcome::DeleteOutcome;
+use super::tmux_teardown::TmuxTeardown;
 use crate::application::ServiceError;
 use crate::application::ServicePorts;
 use crate::application::checks::unseen_session::UnseenSession;
-use crate::application::ports::{HostProbe, Multiplexer, ProcessInfo, SessionRegistry};
+use crate::application::ports::{HostProbe, ProcessInfo, SessionRegistry};
 use crate::application::reconciliation::ManagedRow;
 use crate::application::session_scratch::SessionScratch;
 use crate::domain::{Session, SessionState};
 
 pub struct MainCheckoutDeletion {
     unseen: UnseenSession,
-    multiplexer: Arc<dyn Multiplexer>,
+    teardown: TmuxTeardown,
     host: Arc<dyn HostProbe>,
     registry: Arc<dyn SessionRegistry>,
     scratch: SessionScratch,
 }
 
 impl MainCheckoutDeletion {
+    const KEPT_ON_TMUX_FAILURE: &'static str = "kept the registry entry, run ringleader doctor";
+
     pub fn new(ports: &ServicePorts) -> Self {
         Self {
             unseen: UnseenSession::new(ports),
-            multiplexer: ports.tmux().multiplexer(),
+            teardown: TmuxTeardown::new(ports),
             host: ports.repos().host(),
             registry: ports.state().registry(),
             scratch: SessionScratch::new(ports),
@@ -49,26 +52,7 @@ impl MainCheckoutDeletion {
     }
 
     fn end_tmux_session(&self, row: &ManagedRow) -> Result<(), ServiceError> {
-        if !row.is_live() {
-            return Ok(());
-        }
-        let keep = |error| {
-            ServiceError::from(error)
-                .adding_context("kept the registry entry, run ringleader doctor")
-        };
-        let tmux_name = row.session().tmux_name();
-        let pane_sessions = self.multiplexer.pane_pids(tmux_name).map_err(keep)?;
-        self.multiplexer.kill_session(tmux_name).map_err(keep)?;
-        self.stop_agent_processes(&pane_sessions)
-    }
-
-    fn stop_agent_processes(&self, pane_sessions: &[u32]) -> Result<(), ServiceError> {
-        let started_by_the_agent: Vec<u32> = self
-            .host
-            .session_processes(pane_sessions)
-            .iter()
-            .map(ProcessInfo::pid)
-            .collect();
+        let started_by_the_agent = self.teardown.kill(row, Self::KEPT_ON_TMUX_FAILURE)?;
         let survivors = self.host.terminate(&started_by_the_agent);
         if survivors.is_empty() {
             return Ok(());
