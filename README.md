@@ -65,10 +65,3 @@ Every command accepts `--config <path>` and `--log-level <level>`.
 | 1 | invalid input or any other failure |
 | 2 | no session or `[[repos]]` entry with that name |
 | 3 | conflict with existing state |
-
-Examples of a conflict with existing state:
-
-- a taken name or branch
-- a restart of a session that is still running
-- a delete that would lose work
-- a lock that another Ringleader process holds
