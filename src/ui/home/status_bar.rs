@@ -97,7 +97,7 @@ pub struct KeyHints {
 }
 
 impl KeyHints {
-    const HINTS: [(&'static str, &'static str); 10] = [
+    const HINTS: [(&'static str, &'static str); 11] = [
         ("n", "new"),
         ("d", "delete"),
         ("R", "rename"),
@@ -106,10 +106,11 @@ impl KeyHints {
         ("s", "restart"),
         ("p", "pull"),
         ("r", "refresh"),
+        ("u", "usage"),
         ("?", "help"),
         ("q", "quit"),
     ];
-    const DROP_ORDER: [&'static str; 6] = ["p", "r", "s", "t", "R", "d"];
+    const DROP_ORDER: [&'static str; 7] = ["u", "p", "r", "s", "t", "R", "d"];
     const WIDE_GAP: &'static str = "   ";
     const NARROW_GAP: &'static str = "  ";
 
@@ -224,6 +225,16 @@ mod tests {
         assert_eq!(
             text,
             " n new   d delete   R rename   Enter attach   t shell   s restart   p pull   r refresh   ? help   q quit"
+        );
+    }
+
+    #[test]
+    fn a_hundred_and_twenty_column_bar_also_lists_usage() {
+        let text = BarFixture::render(StatusBar::new(Theme), 120);
+
+        assert_eq!(
+            text,
+            " n new   d delete   R rename   Enter attach   t shell   s restart   p pull   r refresh   u usage   ? help   q quit"
         );
     }
 

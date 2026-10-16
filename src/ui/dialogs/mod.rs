@@ -9,6 +9,7 @@ pub mod rename_session_dialog;
 pub mod repo_search;
 pub mod session_finder;
 pub mod text_field;
+pub mod usage_view;
 
 pub use dialog::{Dialog, DialogOpening, DialogStep};
 pub use dialog_slot::DialogSlot;

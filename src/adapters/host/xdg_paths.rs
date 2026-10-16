@@ -64,6 +64,10 @@ impl XdgPaths {
         self.cache_home.join(Self::APPLICATION).join("tmp")
     }
 
+    pub fn usage_directory(&self) -> PathBuf {
+        self.cache_home.join(Self::APPLICATION).join("usage")
+    }
+
     pub fn handoff_directory(&self) -> PathBuf {
         self.runtime_application_directory().join("handoff")
     }
@@ -152,6 +156,16 @@ mod tests {
         assert_eq!(
             paths.scratch_root(),
             Path::new("/example-cache/ringleader/tmp")
+        );
+    }
+
+    #[test]
+    fn usage_probes_run_in_the_cache_directory() {
+        let paths = PathsFixture::with(&[("XDG_CACHE_HOME", "/example-cache")]);
+
+        assert_eq!(
+            paths.usage_directory(),
+            Path::new("/example-cache/ringleader/usage")
         );
     }
 

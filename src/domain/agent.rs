@@ -144,6 +144,10 @@ impl Agent {
         &self.command
     }
 
+    pub fn command_name(&self) -> &str {
+        self.command.rsplit('/').next().unwrap_or_default()
+    }
+
     pub fn env_names(&self) -> &[String] {
         &self.env_names
     }
@@ -283,6 +287,21 @@ mod tests {
         fn words(parts: &[&str]) -> Vec<String> {
             parts.iter().map(|part| part.to_string()).collect()
         }
+    }
+
+    #[test]
+    fn the_command_name_is_the_file_name_of_the_command() {
+        let agent = Agent::new("work", "/home/example/.local/bin/example-agent");
+
+        assert_eq!(agent.command_name(), "example-agent");
+    }
+
+    #[test]
+    fn a_bare_command_is_its_own_name() {
+        assert_eq!(
+            Agent::new("work", "example-agent").command_name(),
+            "example-agent"
+        );
     }
 
     #[test]

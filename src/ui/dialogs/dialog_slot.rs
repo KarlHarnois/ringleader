@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use crossterm::event::Event;
 use ratatui::Frame;
 
@@ -24,9 +26,9 @@ impl DialogSlot {
         self.dialog = None;
     }
 
-    pub fn poll(&mut self) {
+    pub fn poll(&mut self, now: Instant, service: &SessionService) {
         if let Some(dialog) = &mut self.dialog {
-            dialog.poll();
+            dialog.poll(now, service);
         }
     }
 

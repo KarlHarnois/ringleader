@@ -11,10 +11,11 @@ pub enum CallKind {
     GhQuery,
     Direnv,
     TerminalQuery,
+    UsageProbe,
 }
 
 impl CallKind {
-    pub const ALL: [CallKind; 9] = [
+    pub const ALL: [CallKind; 10] = [
         Self::TmuxQuery,
         Self::TmuxChange,
         Self::GitDiff,
@@ -24,6 +25,7 @@ impl CallKind {
         Self::GhQuery,
         Self::Direnv,
         Self::TerminalQuery,
+        Self::UsageProbe,
     ];
 
     fn index(self) -> usize {
@@ -48,6 +50,7 @@ impl Deadlines {
             .with(CallKind::GhQuery, Duration::from_secs(20))
             .with(CallKind::Direnv, Duration::from_secs(10))
             .with(CallKind::TerminalQuery, Duration::from_secs(2))
+            .with(CallKind::UsageProbe, Duration::from_secs(30))
     }
 
     pub fn diff_poll() -> Self {

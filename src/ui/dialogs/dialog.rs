@@ -1,4 +1,6 @@
-use crossterm::event::{Event, KeyEventKind};
+use std::time::Instant;
+
+use crossterm::event::{Event, KeyEvent, KeyEventKind};
 use ratatui::Frame;
 use ratatui::layout::{Margin, Rect};
 use ratatui::text::Line;
@@ -9,6 +11,7 @@ use super::dialog_labels::DialogLabels;
 use super::home_path::HomePath;
 use super::rename_session_dialog::RenameSessionDialog;
 use super::session_finder::SessionFinder;
+use super::usage_view::UsageView;
 use crate::application::{DeleteImpact, SessionService};
 use crate::domain::{Session, SessionSummary};
 use crate::ui::app::AppRequest;
@@ -23,12 +26,13 @@ pub enum Dialog {
     Rename(Box<RenameSessionDialog>),
     Help(Box<HelpView>),
     FindSession(Box<SessionFinder>),
+    Usage(Box<UsageView>),
 }
 
 impl Dialog {
     const WIDTH: u16 = 76;
     const HEIGHT: u16 = 22;
-    const HELP_HEIGHT: u16 = 33;
+    const HELP_HEIGHT: u16 = 34;
 
     pub fn open(opening: DialogOpening, service: &SessionService) -> Self {
         match opening {
@@ -39,6 +43,7 @@ impl Dialog {
                 Self::Rename(Box::new(RenameSessionDialog::open(*session)))
             }
             DialogOpening::Help => Self::help(service),
+            DialogOpening::Usage => Self::Usage(Box::new(UsageView::open(service))),
         }
     }
 
@@ -77,9 +82,11 @@ impl Dialog {
         )))
     }
 
-    pub fn poll(&mut self) {
-        if let Self::NewSession(dialog) = self {
-            dialog.poll();
+    pub fn poll(&mut self, now: Instant, service: &SessionService) {
+        match self {
+            Self::NewSession(dialog) => dialog.poll(),
+            Self::Usage(view) => view.poll(now, service),
+            Self::Delete(_) | Self::Rename(_) | Self::Help(_) | Self::FindSession(_) => {}
         }
     }
 
@@ -88,35 +95,33 @@ impl Dialog {
     }
 
     pub fn handle_event(&mut self, event: &Event, service: &SessionService) -> DialogStep {
-        match (self, event) {
-            (Self::NewSession(dialog), Event::Key(key)) if key.kind != KeyEventKind::Release => {
-                dialog.handle_key(key, service)
-            }
-            (Self::NewSession(dialog), Event::Paste(text)) => {
-                dialog.paste(text);
-                DialogStep::Stay
-            }
-            (Self::Delete(dialog), Event::Key(key)) if key.kind != KeyEventKind::Release => {
-                dialog.handle_key(key)
-            }
-            (Self::Rename(dialog), Event::Key(key)) if key.kind != KeyEventKind::Release => {
-                dialog.handle_key(key)
-            }
-            (Self::Help(help), Event::Key(key)) if key.kind != KeyEventKind::Release => {
-                help.handle_key(key)
-            }
-            (Self::Rename(dialog), Event::Paste(text)) => {
-                dialog.paste(text);
-                DialogStep::Stay
-            }
-            (Self::FindSession(finder), Event::Key(key)) if key.kind != KeyEventKind::Release => {
-                finder.handle_key(key)
-            }
-            (Self::FindSession(finder), Event::Paste(text)) => {
-                finder.paste(text);
+        match event {
+            Event::Key(key) if key.kind != KeyEventKind::Release => self.handle_key(key, service),
+            Event::Paste(text) => {
+                self.paste(text);
                 DialogStep::Stay
             }
             _ => DialogStep::Stay,
+        }
+    }
+
+    fn handle_key(&mut self, key: &KeyEvent, service: &SessionService) -> DialogStep {
+        match self {
+            Self::NewSession(dialog) => dialog.handle_key(key, service),
+            Self::Delete(dialog) => dialog.handle_key(key),
+            Self::Rename(dialog) => dialog.handle_key(key),
+            Self::Help(help) => help.handle_key(key),
+            Self::FindSession(finder) => finder.handle_key(key),
+            Self::Usage(view) => view.handle_key(key),
+        }
+    }
+
+    fn paste(&mut self, text: &str) {
+        match self {
+            Self::NewSession(dialog) => dialog.paste(text),
+            Self::Rename(dialog) => dialog.paste(text),
+            Self::FindSession(finder) => finder.paste(text),
+            Self::Delete(_) | Self::Help(_) | Self::Usage(_) => {}
         }
     }
 
@@ -124,7 +129,7 @@ impl Dialog {
         match self {
             Self::NewSession(dialog) => dialog.fail(error),
             Self::Rename(dialog) => dialog.fail(error),
-            Self::Delete(_) | Self::Help(_) | Self::FindSession(_) => {}
+            Self::Delete(_) | Self::Help(_) | Self::FindSession(_) | Self::Usage(_) => {}
         }
     }
 
@@ -147,6 +152,7 @@ impl Dialog {
             Self::FindSession(finder) => {
                 Self::render_lines(frame, inner, finder.lines(width, height, theme))
             }
+            Self::Usage(view) => Self::render_lines(frame, inner, view.lines(width, height, theme)),
         }
     }
 
@@ -161,15 +167,18 @@ impl Dialog {
             Self::Rename(_) => RenameSessionDialog::TITLE,
             Self::Help(_) => HelpView::TITLE,
             Self::FindSession(_) => SessionFinder::TITLE,
+            Self::Usage(_) => UsageView::TITLE,
         }
     }
 
     fn preferred_height(&self) -> u16 {
         match self {
             Self::Help(_) => Self::HELP_HEIGHT,
-            Self::NewSession(_) | Self::Delete(_) | Self::Rename(_) | Self::FindSession(_) => {
-                Self::HEIGHT
-            }
+            Self::NewSession(_)
+            | Self::Delete(_)
+            | Self::Rename(_)
+            | Self::FindSession(_)
+            | Self::Usage(_) => Self::HEIGHT,
         }
     }
 
@@ -191,6 +200,7 @@ pub enum DialogOpening {
     NewSession,
     Rename(Box<Session>),
     Help,
+    Usage,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

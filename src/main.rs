@@ -20,7 +20,9 @@ use ratatui::backend::CrosstermBackend;
 
 use adapters::agent_launch::agent_handoff::AgentHandoff;
 use adapters::agent_launch::agent_launcher::{AgentLauncher, ProcessExec};
+use adapters::agent_launch::agent_probe::AgentProbe;
 use adapters::agent_launch::launcher_command::LauncherCommand;
+use adapters::claude::claude_usage_meter::ClaudeUsageMeter;
 use adapters::config_file::toml_config_source::TomlConfigSource;
 use adapters::direnv::direnv_directory_environment::DirenvDirectoryEnvironment;
 use adapters::filesystem::directory_repo_scanner::DirectoryRepoScanner;
@@ -42,10 +44,10 @@ use adapters::tmux::server_files::ServerFiles;
 use adapters::tmux::tmux_command::TmuxCommand;
 use adapters::tmux::tmux_multiplexer::TmuxMultiplexer;
 use adapters::{BoundedCommand, Deadlines, GitWorkspace};
-use application::ports::{ConfigSource, HostProbe, Lock, LockError, PullRequests};
+use application::ports::{ConfigSource, HostProbe, Lock, LockError, PullRequests, UsageMeter};
 use application::{
-    CorruptRegistry, DesktopPorts, DiagnosticPaths, LoadedConfig, RepoPorts, ServiceContext,
-    ServiceError, ServicePorts, SessionService, StatePorts, TmuxPorts,
+    AgentPorts, CorruptRegistry, DesktopPorts, DiagnosticPaths, LoadedConfig, RepoPorts,
+    ServiceContext, ServiceError, ServicePorts, SessionService, StatePorts, TmuxPorts,
 };
 use cli::{Cli, CliExit, CliOutput, CliSession};
 use ui::{App, CrosstermInput, CrosstermScreenMode, EventLoop, TerminalGuard};
@@ -311,7 +313,13 @@ impl CompositionRoot {
             .with_diagnostics(self.diagnostics())
             .with_shell(&self.environment.shell());
         SessionService::new(
-            ServicePorts::new(state, repos, tmux_ports, desktop),
+            ServicePorts::new(
+                state,
+                repos,
+                tmux_ports,
+                desktop,
+                AgentPorts::new(self.usage_meters(bounded)),
+            ),
             context,
         )
     }
@@ -331,6 +339,15 @@ impl CompositionRoot {
                 Path::new(MountTable::PROCESS_TABLE),
             )),
         )
+    }
+
+    fn usage_meters(&self, bounded: BoundedCommand) -> Vec<Arc<dyn UsageMeter>> {
+        let probe = Arc::new(AgentProbe::new(
+            &self.environment,
+            &self.paths.usage_directory(),
+            bounded,
+        ));
+        vec![Arc::new(ClaudeUsageMeter::new(probe))]
     }
 
     fn pull_requests(host: &SystemHostProbe, bounded: BoundedCommand) -> Arc<dyn PullRequests> {

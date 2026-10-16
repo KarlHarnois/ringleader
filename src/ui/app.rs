@@ -80,7 +80,7 @@ impl App {
         let status = Self::status_bar(self.theme, &self.status, &self.home);
         let outcome = self.home.tick(now, &mut self.service, &status);
         self.status.failure(outcome);
-        self.dialogs.poll();
+        self.dialogs.poll(now, &self.service);
     }
 
     pub fn observe(&mut self) {
@@ -300,16 +300,20 @@ mod tests {
     use crate::application::ports::{
         ConfigError, MergeOutcome, MultiplexerError, TerminalEmulatorError, UnmergedCommits,
     };
-    use crate::domain::{Config, ConfigDraft, DiffStat, PullRequestState, Session};
+    use crate::domain::{
+        AgentUsage, Config, ConfigDraft, DiffStat, LimitWindow, PullRequestState, Session,
+        UsageLimit, UsageRow,
+    };
     use crate::test_support::{
         CapturedWriter, Deadline, FakeMultiplexer, FakePullRequests, FakeTerminalEmulator,
-        HeldCalls, ServiceFixture, UiHarness,
+        FakeUsageMeter, HeldCalls, ServiceFixture, UiHarness,
     };
 
     struct AppFixture;
 
     impl AppFixture {
         const HELP_PAST_THE_END: usize = 50;
+        const SPINNER_FRAMES: &'static str = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
         const LOG_FILE_OUTSIDE_THE_STATE_DIRECTORY: &'static str = "/logs/ringleader/app.log";
 
         fn two_waiting_sessions() -> ServiceFixture {
@@ -501,6 +505,19 @@ mod tests {
                 .into_iter()
                 .filter(|call| call.starts_with("capture_pane"))
                 .collect()
+        }
+
+        fn measuring_usage() -> ServiceFixture {
+            let limit = UsageLimit::used(LimitWindow::Session, 42.0, None);
+            let usage = AgentUsage::new(vec![UsageRow::Limit(limit)]);
+            Self::two_waiting_sessions()
+                .with_usage_meter(FakeUsageMeter::new().with_usage("claude", usage))
+        }
+
+        fn spinner(screen: &str) -> Option<char> {
+            screen
+                .chars()
+                .find(|glyph| Self::SPINNER_FRAMES.contains(*glyph))
         }
 
         fn press(app: &mut App, character: char) {
@@ -1744,6 +1761,57 @@ mod tests {
     }
 
     #[test]
+    fn each_tick_turns_the_spinner_of_a_working_session() {
+        let fixture = AppFixture::two_working_sessions_that_ring();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        let before = AppFixture::spinner(&AppFixture::screen(&app, 100, 28));
+
+        app.on_tick(Instant::now());
+
+        let after = AppFixture::spinner(&AppFixture::screen(&app, 100, 28));
+        assert!(before.is_some());
+        assert_ne!(after, before);
+    }
+
+    #[test]
+    fn u_opens_the_usage_view_and_closes_it_again() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press(&mut app, 'u');
+        let opened = AppFixture::screen(&app, 100, 28);
+        AppFixture::press(&mut app, 'u');
+
+        assert!(opened.contains("┌ Usage "));
+        assert!(!app.dialogs.is_open());
+    }
+
+    #[test]
+    fn the_open_usage_view_measures_the_agents() {
+        let fixture = AppFixture::measuring_usage();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press(&mut app, 'u');
+        let shown = Deadline::for_background_work().wait_until(|| {
+            app.on_tick(Instant::now());
+            AppFixture::screen(&app, 100, 28).contains("Current session")
+        });
+
+        assert!(shown);
+    }
+
+    #[test]
+    fn nothing_is_measured_while_the_usage_view_is_closed() {
+        let fixture = AppFixture::measuring_usage();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        app.on_tick(Instant::now());
+        UiHarness::settle(&mut app);
+
+        assert!(fixture.usage_meter().calls().is_empty());
+    }
+
+    #[test]
     fn a_startup_note_without_warnings_shows_as_information() {
         let fixture = AppFixture::two_waiting_sessions();
 
@@ -1814,7 +1882,7 @@ mod tests {
         let fixture = AppFixture::two_waiting_sessions();
         let mut app = AppFixture::started(&fixture, 100, 28);
 
-        for opener in ['/', 'n', 'R', '?'] {
+        for opener in ['/', 'n', 'R', '?', 'u'] {
             AppFixture::press(&mut app, opener);
             let opened = app.dialogs.is_open();
             app.handle_event(&UiHarness::control('q'));

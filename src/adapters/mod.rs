@@ -1,5 +1,6 @@
 pub mod agent_launch;
 pub mod child_process;
+pub mod claude;
 pub mod config_file;
 pub mod direnv;
 pub mod filesystem;

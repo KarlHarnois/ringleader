@@ -30,6 +30,7 @@ pub use fakes::fake_repo_scanner::FakeRepoScanner;
 pub use fakes::fake_scratch_space::FakeScratchSpace;
 pub use fakes::fake_session_registry::FakeSessionRegistry;
 pub use fakes::fake_terminal_emulator::FakeTerminalEmulator;
+pub use fakes::fake_usage_meter::FakeUsageMeter;
 pub use fakes::fake_workspace::FakeWorkspace;
 pub use fakes::recording_screen_mode::RecordingScreenMode;
 pub use gate::Gate;

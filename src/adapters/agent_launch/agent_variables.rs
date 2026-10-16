@@ -37,6 +37,10 @@ impl AgentVariables {
         &self.missing
     }
 
+    pub fn combined(&self) -> Vec<(OsString, OsString)> {
+        Self::overridden(self.inherited.clone(), self.explicit.clone())
+    }
+
     fn named(
         environment: &ProcessEnvironment,
         env_names: &[String],
