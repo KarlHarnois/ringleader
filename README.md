@@ -13,23 +13,31 @@
 /_/ |_/___/_/ |_/\____/_____/_____/_/  |_/_____/_____/_/ |_|
 ```
 
-A tmux session manager for Claude and opencode. Each session runs an agent in its own git worktree and branch. A terminal UI lists the sessions grouped by repo and shows how each one is doing.
+Ringleader is a tmux session manager for Claude Code and opencode. Each session runs an agent in its own git worktree and branch. The TUI is Ringleader's terminal UI. The TUI lists the sessions by repo, with each session's state, such as working or waiting for input.
 
-Linux only.
+Ringleader runs only on Linux.
 
 ## Install
+
+**Install Ringleader with [Nix](https://nixos.org/download):**
 
 ```sh
 nix profile add github:KarlHarnois/ringleader
 ```
 
-Nix older than 2.30 spells `nix profile add` as `nix profile install`.
+**If your Nix is older than 2.30, run `nix profile install` instead of `nix profile add`.**
 
 ## First run
 
-Run `ringleader` in a directory that holds your repos. It opens the TUI and writes a commented config, with Claude Code and opencode as agents. Its comments show how to pass variables to an agent, for example to run Claude Code under a second account.
+**Run `ringleader` in a directory that holds your repos.** Ringleader opens the TUI, whose picker for a new session lists the repos under that directory.
 
-Sessions run on Ringleader's own tmux server. It ignores your tmux config, and its sessions do not show in your `tmux ls`. Ctrl-Q detaches from a session back to the TUI, and `?` lists the keys.
+**If `ringleader` reports a problem, run `ringleader doctor`.** The doctor command checks tmux, git, the config, and every session.
+
+The first run writes a commented config to `$XDG_CONFIG_HOME/ringleader/config.toml`, with Claude Code and opencode as agents. The config's comments show how to set an agent's environment variables. For example, setting `CLAUDE_CONFIG_DIR` runs Claude Code under a second account.
+
+Sessions run on Ringleader's own tmux server. That server ignores your tmux config. Your `tmux ls` does not list Ringleader's sessions.
+
+**Press `Ctrl-Q` to detach from a session back to the TUI.** In the TUI, press `?` to list the keys.
 
 ## CLI
 
@@ -54,6 +62,13 @@ Every command accepts `--config <path>` and `--log-level <level>`.
 | Code | Meaning |
 |---|---|
 | 0 | success |
-| 1 | invalid input or a failure |
+| 1 | invalid input or any other failure |
 | 2 | no session or `[[repos]]` entry with that name |
-| 3 | conflict with existing state, such as a taken name or branch, a running session, a delete that would lose work, or a held lock |
+| 3 | conflict with existing state |
+
+Examples of a conflict with existing state:
+
+- a taken name or branch
+- a running session
+- a delete that would lose work
+- a held lock
