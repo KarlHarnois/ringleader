@@ -1805,7 +1805,7 @@ mod tests {
     }
 
     #[test]
-    fn nothing_is_measured_while_the_usage_view_is_closed() {
+    fn a_tick_with_the_usage_view_closed_measures_nothing() {
         let fixture = AppFixture::measuring_usage();
         let mut app = AppFixture::started(&fixture, 100, 28);
 
