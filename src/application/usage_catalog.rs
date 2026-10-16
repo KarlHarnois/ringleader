@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
 
@@ -13,6 +14,7 @@ pub struct UsageCatalog {
     clock: Arc<dyn Clock>,
     latest: Arc<Mutex<Option<UsageReading>>>,
     measuring: Arc<Mutex<()>>,
+    completed_measurements: Arc<AtomicU64>,
     failing_agents: Arc<Mutex<HashSet<String>>>,
 }
 
@@ -23,6 +25,7 @@ impl UsageCatalog {
             clock,
             latest: Arc::default(),
             measuring: Arc::default(),
+            completed_measurements: Arc::default(),
             failing_agents: Arc::default(),
         }
     }
@@ -30,31 +33,32 @@ impl UsageCatalog {
     pub fn measure(&self, agents: &[Agent]) -> Pending<UsageReading> {
         let catalog = self.clone();
         let agents = agents.to_vec();
-        let requested_at = self.clock.now_epoch_seconds();
-        Pending::start(move || Ok(catalog.record(requested_at, &agents)))
+        let completed_before = self.completed_measurements.load(Ordering::SeqCst);
+        Pending::start(move || Ok(catalog.record(completed_before, &agents)))
     }
 
     pub fn latest(&self) -> Option<UsageReading> {
         self.stored().clone()
     }
 
-    fn record(&self, requested_at: u64, agents: &[Agent]) -> UsageReading {
+    fn record(&self, completed_before: u64, agents: &[Agent]) -> UsageReading {
         let _measuring = self
             .measuring
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        if let Some(reading) = self.reading_since(requested_at) {
+        if let Some(reading) = self.reading_completed_since(completed_before) {
             return reading;
         }
         let readings = self.readings_at_once(agents);
         let reading = UsageReading::new(self.clock.now_epoch_seconds(), readings);
         *self.stored() = Some(reading.clone());
+        self.completed_measurements.fetch_add(1, Ordering::SeqCst);
         reading
     }
 
-    fn reading_since(&self, requested_at: u64) -> Option<UsageReading> {
-        self.latest()
-            .filter(|reading| reading.measured_at() > requested_at)
+    fn reading_completed_since(&self, completed_before: u64) -> Option<UsageReading> {
+        let completed_since = self.completed_measurements.load(Ordering::SeqCst) > completed_before;
+        self.latest().filter(|_| completed_since)
     }
 
     fn readings_at_once(&self, agents: &[Agent]) -> Vec<AgentReading> {
@@ -200,14 +204,12 @@ mod tests {
         let held = HeldCalls::all();
         let meter = Arc::new(FakeUsageMeter::new());
         meter.on_measure(held.hook());
-        let clock = Arc::new(FakeClock::at(ServiceFixture::NOW));
-        let catalog = UsageCatalog::new(vec![meter.clone()], clock.clone());
+        let catalog = CatalogFixture::catalog(vec![meter.clone()]);
         let agents = [CatalogFixture::agent("work")];
 
         let first = catalog.measure(&agents);
         held.wait_for(1);
         let second = catalog.measure(&agents);
-        clock.advance(1);
         held.release();
 
         assert_eq!(second.wait_unless(|| false), first.wait_unless(|| false));
@@ -217,12 +219,10 @@ mod tests {
     #[test]
     fn a_measurement_asked_for_after_the_last_reading_measures_again() {
         let meter = Arc::new(FakeUsageMeter::new());
-        let clock = Arc::new(FakeClock::at(ServiceFixture::NOW));
-        let catalog = UsageCatalog::new(vec![meter.clone()], clock.clone());
+        let catalog = CatalogFixture::catalog(vec![meter.clone()]);
         let agents = [CatalogFixture::agent("work")];
 
         CatalogFixture::measured(&catalog, &agents);
-        clock.advance(1);
         CatalogFixture::measured(&catalog, &agents);
 
         assert_eq!(meter.calls().len(), 2);
