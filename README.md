@@ -35,7 +35,7 @@ nix profile add github:KarlHarnois/ringleader
 
 The first run writes a commented config to `~/.config/ringleader/config.toml`, with Claude Code and opencode as agents. The config's comments show how to set an agent's environment variables. For example, an `[[agents]]` entry that sets `CLAUDE_CONFIG_DIR` can run Claude Code under a second account.
 
-Sessions run on Ringleader's own tmux server. That server ignores your tmux config. `tmux ls` does not list Ringleader's sessions.
+Sessions run on Ringleader's own tmux server. That server ignores your tmux config. Ringleader's sessions do not show in your `tmux ls`.
 
 **Press `Ctrl-Q` to leave a session and return to Ringleader.** Press `?` in Ringleader to list its keys.
 
