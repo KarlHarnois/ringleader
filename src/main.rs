@@ -41,6 +41,7 @@ use adapters::host::system_host_probe::SystemHostProbe;
 use adapters::host::xdg_paths::XdgPaths;
 use adapters::ollama::ollama_cloud_quota::OllamaCloudQuota;
 use adapters::opencode::opencode_usage_meter::OpencodeUsageMeter;
+use adapters::sqlite::sqlite_opencode_database::SqliteOpencodeDatabase;
 use adapters::terminal_emulator::system_terminal_emulator::SystemTerminalEmulator;
 use adapters::tmux::server_files::ServerFiles;
 use adapters::tmux::tmux_command::TmuxCommand;
@@ -359,9 +360,10 @@ impl CompositionRoot {
             &self.environment,
             bounded,
         )];
+        let database = SqliteOpencodeDatabase::when_installed(host, &self.environment, bounded);
         vec![
             Arc::new(ClaudeUsageMeter::new(probe.clone())),
-            Arc::new(OpencodeUsageMeter::new(probe, quotas)),
+            Arc::new(OpencodeUsageMeter::new(probe, database, quotas)),
         ]
     }
 

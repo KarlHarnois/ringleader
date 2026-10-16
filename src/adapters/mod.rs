@@ -9,6 +9,7 @@ pub mod git;
 pub mod host;
 pub mod ollama;
 pub mod opencode;
+pub mod sqlite;
 pub mod terminal_emulator;
 pub mod tmux;
 

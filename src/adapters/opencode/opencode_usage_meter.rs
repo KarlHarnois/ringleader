@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use super::opencode_activity::OpencodeActivity;
+use super::opencode_database::OpencodeDatabase;
 use super::provider_quota::ProviderQuota;
 use crate::adapters::agent_launch::agent_probe::AgentProbe;
 use crate::application::ports::{UsageError, UsageMeter};
@@ -8,6 +9,7 @@ use crate::domain::{Agent, AgentUsage, UsageRow};
 
 pub struct OpencodeUsageMeter {
     probe: Arc<AgentProbe>,
+    database: Arc<dyn OpencodeDatabase>,
     quotas: Vec<Arc<dyn ProviderQuota>>,
 }
 
@@ -16,8 +18,23 @@ impl OpencodeUsageMeter {
     const DATABASE_ARGUMENTS: [&'static str; 5] =
         ["--pure", "db", "--format", "json", OpencodeActivity::QUERY];
 
-    pub fn new(probe: Arc<AgentProbe>, quotas: Vec<Arc<dyn ProviderQuota>>) -> Self {
-        Self { probe, quotas }
+    pub fn new(
+        probe: Arc<AgentProbe>,
+        database: Arc<dyn OpencodeDatabase>,
+        quotas: Vec<Arc<dyn ProviderQuota>>,
+    ) -> Self {
+        Self {
+            probe,
+            database,
+            quotas,
+        }
+    }
+
+    fn activity_output(&self, agent: &Agent) -> Result<String, UsageError> {
+        match self.database.read(agent, OpencodeActivity::QUERY) {
+            Some(output) => Ok(output),
+            None => self.probe.run(agent, &Self::DATABASE_ARGUMENTS),
+        }
     }
 
     fn usage(&self, activity: &OpencodeActivity) -> AgentUsage {
@@ -52,7 +69,7 @@ impl UsageMeter for OpencodeUsageMeter {
         if agent.command_name() != Self::PROGRAM {
             return Ok(None);
         }
-        let output = self.probe.run(agent, &Self::DATABASE_ARGUMENTS)?;
+        let output = self.activity_output(agent)?;
         let activity = OpencodeActivity::parse(&output)?;
         Ok(Some(
             activity
@@ -72,6 +89,7 @@ mod tests {
     use super::*;
     use crate::adapters::host::process_environment::ProcessEnvironment;
     use crate::adapters::opencode::provider_quota::QuotaError;
+    use crate::adapters::sqlite::null_opencode_database::NullOpencodeDatabase;
     use crate::adapters::{BoundedCommand, Deadlines};
     use crate::domain::{LimitWindow, UsageLimit};
     use crate::test_support::{ExecutableScript, InheritedPath};
@@ -98,6 +116,16 @@ mod tests {
         }
     }
 
+    struct FakeOpencodeDatabase {
+        output: String,
+    }
+
+    impl OpencodeDatabase for FakeOpencodeDatabase {
+        fn read(&self, _agent: &Agent, _query: &str) -> Option<String> {
+            Some(self.output.clone())
+        }
+    }
+
     impl ProviderQuota for FakeProviderQuota {
         fn measure(&self, provider: &str) -> Result<Option<Vec<UsageRow>>, QuotaError> {
             self.asked.lock().unwrap().push(provider.to_string());
@@ -106,6 +134,9 @@ mod tests {
     }
 
     impl MeterFixture {
+        const RECORDED: &'static str =
+            include_str!("../../../tests/fixtures/opencode-db-activity.json");
+
         fn new() -> Self {
             Self {
                 directory: tempfile::tempdir().unwrap(),
@@ -136,13 +167,21 @@ mod tests {
         }
 
         fn meter_with(&self, quotas: Vec<Arc<dyn ProviderQuota>>) -> OpencodeUsageMeter {
+            self.meter_reading(Arc::new(NullOpencodeDatabase), quotas)
+        }
+
+        fn meter_reading(
+            &self,
+            database: Arc<dyn OpencodeDatabase>,
+            quotas: Vec<Arc<dyn ProviderQuota>>,
+        ) -> OpencodeUsageMeter {
             let variables = vec![(OsString::from("PATH"), InheritedPath::value())];
             let probe = Arc::new(AgentProbe::new(
                 &ProcessEnvironment::new(variables, None),
                 &self.directory.path().join("usage"),
                 BoundedCommand::new(Deadlines::standard()),
             ));
-            OpencodeUsageMeter::new(probe, quotas)
+            OpencodeUsageMeter::new(probe, database, quotas)
         }
 
         fn measured_with(&self, quotas: Vec<Arc<dyn ProviderQuota>>) -> AgentUsage {
@@ -185,6 +224,23 @@ mod tests {
         let arguments = fixture.recorded_arguments("opencode").unwrap();
         assert_eq!(arguments[..4], ["--pure", "db", "--format", "json"]);
         assert!(arguments[4].starts_with("with active as"));
+    }
+
+    #[test]
+    fn a_direct_read_of_the_database_skips_the_opencode_command() {
+        let fixture = MeterFixture::new();
+        let database = Arc::new(FakeOpencodeDatabase {
+            output: MeterFixture::RECORDED.to_string(),
+        });
+
+        let usage = fixture
+            .meter_reading(database, Vec::new())
+            .measure(&fixture.recording("opencode"))
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(usage.rows().len(), 2);
+        assert_eq!(fixture.recorded_arguments("opencode"), None);
     }
 
     #[test]

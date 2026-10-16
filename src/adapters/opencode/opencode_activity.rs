@@ -28,13 +28,15 @@ impl OpencodeActivity {
               + coalesce(json_extract(message.data, '$.tokens.reasoning'), 0) as tokens \
           from message, active \
           where message.time_created \
-              >= unixepoch('now', 'localtime', 'start of day', '-6 days', 'utc') * 1000 \
+              >= cast(strftime('%s', 'now', 'localtime', 'start of day', '-6 days', 'utc') as integer) \
+                * 1000 \
             and json_extract(message.data, '$.role') = 'assistant' \
             and json_extract(message.data, '$.providerID') = active.provider \
         ), \
         today as ( \
           select * from recent \
-          where created >= unixepoch('now', 'localtime', 'start of day', 'utc') * 1000 \
+          where created \
+            >= cast(strftime('%s', 'now', 'localtime', 'start of day', 'utc') as integer) * 1000 \
         ) \
         select active.provider, active.model, \
           (select coalesce(sum(tokens), 0) from today) as tokens_today, \
@@ -45,6 +47,9 @@ impl OpencodeActivity {
     const LIST_PRICE_CURRENCY: &'static str = "USD";
 
     pub fn parse(output: &str) -> Result<Option<Self>, UsageError> {
+        if output.trim().is_empty() {
+            return Ok(None);
+        }
         let rows: Vec<Self> = serde_json::from_str(output).map_err(|error| {
             log::info!("could not read opencode's activity: {error}");
             UsageError::Unreadable
@@ -149,6 +154,11 @@ mod tests {
     #[test]
     fn a_database_without_sessions_has_no_activity() {
         assert!(OpencodeActivity::parse("[]").unwrap().is_none());
+    }
+
+    #[test]
+    fn empty_output_has_no_activity() {
+        assert!(OpencodeActivity::parse("\n").unwrap().is_none());
     }
 
     #[test]

@@ -21,3 +21,7 @@
 **Classify a Claude limit by its `kind`, never by its label.** Show Claude's limits in the order the server sent. Claude Code marks `usage_report` as experimental, and the server owns the labels and the order.
 
 **Label opencode's cost as a list price, never as the amount billed.** opencode prices each token at the model's list price, and a subscription such as Ollama Cloud bills differently.
+
+**Open opencode's database read-only.** Without `-readonly`, `sqlite3` creates a missing database file.
+
+**If the direct read of opencode's database fails, ask `opencode db` instead.** opencode owns the database's path and schema, and a new opencode release can change either.
