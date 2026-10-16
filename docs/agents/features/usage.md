@@ -6,9 +6,9 @@
 
 - Never read Claude Code's OAuth token: Claude Code refreshes the token itself, and a second refresher logs Claude Code out.
 
-**Read a provider's key only from Ringleader's own environment, such as `OLLAMA_API_KEY`.**
+**Take a provider's key only from the variables the agent gets.** An example is an `OLLAMA_API_KEY` that the agent names in `env`. Each agent can use its own account, so one key for every agent can report another account's quota.
 
-**Never put a key that Ringleader reads itself in a child process's arguments or environment.** Any process on the host can read a child's arguments through `ps`. Any process of the same user can read its environment through `/proc`. Pass such a key on the child's standard input instead.
+**Never put a key that Ringleader reads in a child process's arguments or environment.** Any process on the host can read a child's arguments through `ps`. Any process of the same user can read its environment through `/proc`. Pass such a key on the child's standard input instead.
 
 **Run every probe in Ringleader's usage directory, never in a worktree.** A worktree's `.envrc` or project settings could switch the probe to another account.
 

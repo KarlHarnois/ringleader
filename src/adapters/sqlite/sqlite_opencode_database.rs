@@ -68,17 +68,14 @@ impl SqliteOpencodeDatabase {
         command
     }
 
-    fn database(variables: &[(OsString, OsString)]) -> Option<PathBuf> {
-        let variable = |name: &str| {
-            variables
-                .iter()
-                .rev()
-                .find(|(candidate, _)| candidate == name)
-                .map(|(_, value)| PathBuf::from(value))
-        };
-        let data_home = variable(Self::DATA_HOME)
+    fn database(variables: &AgentVariables) -> Option<PathBuf> {
+        let data_home = variables
+            .value(Self::DATA_HOME)
+            .map(PathBuf::from)
             .filter(|path| path.is_absolute())
-            .or_else(|| Some(variable(Self::HOME)?.join(Self::DEFAULT_DATA_HOME)))?;
+            .or_else(|| {
+                Some(PathBuf::from(variables.value(Self::HOME)?).join(Self::DEFAULT_DATA_HOME))
+            })?;
         Some(data_home.join(Self::DATABASE))
     }
 }
@@ -89,8 +86,7 @@ impl OpencodeDatabase for SqliteOpencodeDatabase {
             &self.environment,
             agent.env_names(),
             agent.env_assignments(),
-        )
-        .combined();
+        );
         let Some(database) = Self::database(&variables) else {
             return Ok(None);
         };

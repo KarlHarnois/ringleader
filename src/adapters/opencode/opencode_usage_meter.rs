@@ -47,19 +47,19 @@ impl OpencodeUsageMeter {
         }
     }
 
-    fn usage(&self, activity: &OpencodeActivity) -> AgentUsage {
+    fn usage(&self, agent: &Agent, activity: &OpencodeActivity) -> AgentUsage {
         match activity
             .provider()
-            .and_then(|provider| self.quota(provider))
+            .and_then(|provider| self.quota(agent, provider))
         {
             Some(rows) => activity.usage_with(rows),
             None => activity.usage(),
         }
     }
 
-    fn quota(&self, provider: &str) -> Option<Vec<UsageRow>> {
+    fn quota(&self, agent: &Agent, provider: &str) -> Option<Vec<UsageRow>> {
         for quota in &self.quotas {
-            match quota.measure(provider) {
+            match quota.measure(agent, provider) {
                 Ok(Some(rows)) => {
                     self.failures.end(provider);
                     return Some(rows);
@@ -87,7 +87,7 @@ impl UsageMeter for OpencodeUsageMeter {
         let activity = OpencodeActivity::parse(&output)?;
         Ok(Some(
             activity
-                .map(|activity| self.usage(&activity))
+                .map(|activity| self.usage(agent, &activity))
                 .unwrap_or_default(),
         ))
     }
@@ -151,7 +151,11 @@ mod tests {
     }
 
     impl ProviderQuota for FakeProviderQuota {
-        fn measure(&self, provider: &str) -> Result<Option<Vec<UsageRow>>, QuotaError> {
+        fn measure(
+            &self,
+            _agent: &Agent,
+            provider: &str,
+        ) -> Result<Option<Vec<UsageRow>>, QuotaError> {
             self.asked.lock().unwrap().push(provider.to_string());
             self.answer.lock().unwrap().clone()
         }

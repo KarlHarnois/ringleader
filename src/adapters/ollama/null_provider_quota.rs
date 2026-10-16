@@ -1,10 +1,14 @@
 use crate::adapters::opencode::provider_quota::{ProviderQuota, QuotaError};
-use crate::domain::UsageRow;
+use crate::domain::{Agent, UsageRow};
 
 pub struct NullProviderQuota;
 
 impl ProviderQuota for NullProviderQuota {
-    fn measure(&self, _provider: &str) -> Result<Option<Vec<UsageRow>>, QuotaError> {
+    fn measure(
+        &self,
+        _agent: &Agent,
+        _provider: &str,
+    ) -> Result<Option<Vec<UsageRow>>, QuotaError> {
         Ok(None)
     }
 }
@@ -15,6 +19,8 @@ mod tests {
 
     #[test]
     fn every_provider_has_no_quota() {
-        assert_eq!(NullProviderQuota.measure("ollama-cloud"), Ok(None));
+        let agent = Agent::new("opencode", "opencode");
+
+        assert_eq!(NullProviderQuota.measure(&agent, "ollama-cloud"), Ok(None));
     }
 }

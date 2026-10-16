@@ -1,22 +1,22 @@
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::process::Command;
 use std::sync::Arc;
 
 use super::null_provider_quota::NullProviderQuota;
 use super::ollama_balance::OllamaBalance;
 use crate::adapters::BoundedCommand;
+use crate::adapters::agent_launch::agent_variables::AgentVariables;
 use crate::adapters::child_process::bounded_command::{Call, CommandError};
 use crate::adapters::child_process::command_output::CommandOutput;
 use crate::adapters::child_process::deadlines::CallKind;
 use crate::adapters::host::process_environment::ProcessEnvironment;
 use crate::adapters::opencode::provider_quota::{ProviderQuota, QuotaError};
 use crate::application::ports::HostProbe;
-use crate::domain::UsageRow;
+use crate::domain::{Agent, UsageRow};
 
 pub struct OllamaCloudQuota {
     program: OsString,
-    key: String,
-    baseline: ProcessEnvironment,
+    environment: ProcessEnvironment,
     bounded: BoundedCommand,
 }
 
@@ -45,29 +45,34 @@ impl OllamaCloudQuota {
     const REFUSED: [&'static str; 2] = ["401", "403"];
     const THROTTLED: &'static str = "429";
 
-    pub fn when_available(
+    pub fn when_installed(
         host: &dyn HostProbe,
         environment: &ProcessEnvironment,
         bounded: BoundedCommand,
     ) -> Arc<dyn ProviderQuota> {
-        let key = environment
-            .get(Self::KEY_VARIABLE)
-            .and_then(OsStr::to_str)
-            .filter(|key| !key.is_empty());
-        match (host.resolve_command(Self::PROGRAM), key) {
-            (Some(program), Some(key)) => Arc::new(Self {
+        match host.resolve_command(Self::PROGRAM) {
+            Some(program) => Arc::new(Self {
                 program: program.into_os_string(),
-                key: key.to_string(),
-                baseline: environment.baseline(),
+                environment: environment.clone(),
                 bounded,
             }),
-            _ => Arc::new(NullProviderQuota),
+            None => Arc::new(NullProviderQuota),
         }
     }
 
-    fn query(&self) -> Result<Vec<UsageRow>, QuotaError> {
+    fn key_of(&self, agent: &Agent) -> Option<String> {
+        let variables = AgentVariables::new(
+            &self.environment,
+            agent.env_names(),
+            agent.env_assignments(),
+        );
+        let key = variables.value(Self::KEY_VARIABLE)?.to_str()?;
+        (!key.is_empty()).then(|| key.to_string())
+    }
+
+    fn query(&self, key: &str) -> Result<Vec<UsageRow>, QuotaError> {
         let call = Call::new(Self::SUBCOMMAND, CallKind::CurlQuery)
-            .with_input(self.authorization_header().as_bytes());
+            .with_input(Self::authorization_header(key).as_bytes());
         let output = self
             .bounded
             .run(self.command(), &call)
@@ -80,12 +85,12 @@ impl OllamaCloudQuota {
         command
             .args(Self::ARGUMENTS)
             .env_clear()
-            .envs(self.baseline.variables().iter().cloned());
+            .envs(self.environment.baseline().variables().iter().cloned());
         command
     }
 
-    fn authorization_header(&self) -> String {
-        format!("Authorization: Bearer {}\n", self.key)
+    fn authorization_header(key: &str) -> String {
+        format!("Authorization: Bearer {key}\n")
     }
 
     fn unfinished(error: CommandError) -> QuotaError {
@@ -115,11 +120,14 @@ impl OllamaCloudQuota {
 }
 
 impl ProviderQuota for OllamaCloudQuota {
-    fn measure(&self, provider: &str) -> Result<Option<Vec<UsageRow>>, QuotaError> {
+    fn measure(&self, agent: &Agent, provider: &str) -> Result<Option<Vec<UsageRow>>, QuotaError> {
         if provider != Self::PROVIDER {
             return Ok(None);
         }
-        self.query().map(Some)
+        let Some(key) = self.key_of(agent) else {
+            return Ok(None);
+        };
+        self.query(&key).map(Some)
     }
 }
 
@@ -146,6 +154,10 @@ mod tests {
             Self {
                 directory: tempfile::tempdir().unwrap(),
             }
+        }
+
+        fn agent() -> Agent {
+            Agent::new("opencode", "opencode").with_env_names(&["OLLAMA_API_KEY".to_string()])
         }
 
         fn credits() -> PathBuf {
@@ -192,7 +204,7 @@ mod tests {
             key: Option<&str>,
             deadlines: Deadlines,
         ) -> Arc<dyn ProviderQuota> {
-            OllamaCloudQuota::when_available(
+            OllamaCloudQuota::when_installed(
                 host,
                 &Self::environment(key),
                 BoundedCommand::new(deadlines),
@@ -209,7 +221,8 @@ mod tests {
         }
 
         fn measured(&self, status: &str) -> Result<Option<Vec<UsageRow>>, QuotaError> {
-            self.answering(status).measure("ollama-cloud")
+            self.answering(status)
+                .measure(&QuotaFixture::agent(), "ollama-cloud")
         }
 
         fn recorded(&self, suffix: &str) -> Option<String> {
@@ -221,8 +234,44 @@ mod tests {
     fn another_provider_has_no_quota() {
         let fixture = QuotaFixture::new();
 
-        assert_eq!(fixture.answering("200").measure("openrouter"), Ok(None));
+        assert_eq!(
+            fixture
+                .answering("200")
+                .measure(&QuotaFixture::agent(), "openrouter"),
+            Ok(None)
+        );
         assert_eq!(fixture.recorded("args"), None);
+    }
+
+    #[test]
+    fn an_agent_that_does_not_get_the_key_has_no_quota() {
+        let fixture = QuotaFixture::new();
+        let agent = Agent::new("opencode", "opencode");
+
+        assert_eq!(
+            fixture.answering("200").measure(&agent, "ollama-cloud"),
+            Ok(None)
+        );
+        assert_eq!(fixture.recorded("args"), None);
+    }
+
+    #[test]
+    fn the_key_the_agent_sets_is_the_one_sent() {
+        let fixture = QuotaFixture::new();
+        let agent = Agent::new("opencode", "opencode").with_env_assignments(&[(
+            "OLLAMA_API_KEY".to_string(),
+            "work-example-key".to_string(),
+        )]);
+
+        fixture
+            .answering("200")
+            .measure(&agent, "ollama-cloud")
+            .unwrap();
+
+        assert_eq!(
+            fixture.recorded("stdin").unwrap(),
+            "Authorization: Bearer work-example-key\n"
+        );
     }
 
     #[test]
@@ -313,7 +362,7 @@ mod tests {
         let curl = fixture.curl("#!/bin/sh\ncat > /dev/null\nprintf 'no status'\n");
 
         assert_eq!(
-            QuotaFixture::with_curl(&curl).measure("ollama-cloud"),
+            QuotaFixture::with_curl(&curl).measure(&QuotaFixture::agent(), "ollama-cloud"),
             Err(QuotaError::Unanswered)
         );
     }
@@ -324,7 +373,7 @@ mod tests {
         let curl = fixture.curl_answering("200", &fixture.body("<html>"));
 
         assert_eq!(
-            QuotaFixture::with_curl(&curl).measure("ollama-cloud"),
+            QuotaFixture::with_curl(&curl).measure(&QuotaFixture::agent(), "ollama-cloud"),
             Err(QuotaError::Unreadable)
         );
     }
@@ -334,7 +383,7 @@ mod tests {
         let curl = Path::new("/nonexistent/curl");
 
         assert_eq!(
-            QuotaFixture::with_curl(curl).measure("ollama-cloud"),
+            QuotaFixture::with_curl(curl).measure(&QuotaFixture::agent(), "ollama-cloud"),
             Err(QuotaError::Unanswered)
         );
     }
@@ -348,7 +397,10 @@ mod tests {
 
         let quota = QuotaFixture::quota(&host, Some(QuotaFixture::KEY), deadlines);
 
-        assert_eq!(quota.measure("ollama-cloud"), Err(QuotaError::TimedOut));
+        assert_eq!(
+            quota.measure(&QuotaFixture::agent(), "ollama-cloud"),
+            Err(QuotaError::TimedOut)
+        );
     }
 
     #[test]
@@ -359,7 +411,10 @@ mod tests {
             Deadlines::standard(),
         );
 
-        assert_eq!(quota.measure("ollama-cloud"), Ok(None));
+        assert_eq!(
+            quota.measure(&QuotaFixture::agent(), "ollama-cloud"),
+            Ok(None)
+        );
     }
 
     #[test]
@@ -371,7 +426,11 @@ mod tests {
 
             let quota = QuotaFixture::quota(&host, key, Deadlines::standard());
 
-            assert_eq!(quota.measure("ollama-cloud"), Ok(None), "{key:?}");
+            assert_eq!(
+                quota.measure(&QuotaFixture::agent(), "ollama-cloud"),
+                Ok(None),
+                "{key:?}"
+            );
         }
     }
 }

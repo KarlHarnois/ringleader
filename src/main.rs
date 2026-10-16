@@ -355,7 +355,7 @@ impl CompositionRoot {
             &self.paths.usage_directory(),
             bounded,
         ));
-        let quotas = vec![OllamaCloudQuota::when_available(
+        let quotas = vec![OllamaCloudQuota::when_installed(
             host,
             &self.environment,
             bounded,

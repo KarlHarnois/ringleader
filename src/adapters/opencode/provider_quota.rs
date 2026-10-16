@@ -1,9 +1,9 @@
 use thiserror::Error;
 
-use crate::domain::UsageRow;
+use crate::domain::{Agent, UsageRow};
 
 pub trait ProviderQuota: Send + Sync {
-    fn measure(&self, provider: &str) -> Result<Option<Vec<UsageRow>>, QuotaError>;
+    fn measure(&self, agent: &Agent, provider: &str) -> Result<Option<Vec<UsageRow>>, QuotaError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
