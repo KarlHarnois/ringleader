@@ -5,7 +5,7 @@ use super::delete_outcome::DeleteOutcome;
 use crate::application::ServiceError;
 use crate::application::ServicePorts;
 use crate::application::checks::unseen_session::UnseenSession;
-use crate::application::ports::{Multiplexer, SessionRegistry};
+use crate::application::ports::{HostProbe, Multiplexer, ProcessInfo, SessionRegistry};
 use crate::application::reconciliation::ManagedRow;
 use crate::application::session_scratch::SessionScratch;
 use crate::domain::{Session, SessionState};
@@ -13,6 +13,7 @@ use crate::domain::{Session, SessionState};
 pub struct MainCheckoutDeletion {
     unseen: UnseenSession,
     multiplexer: Arc<dyn Multiplexer>,
+    host: Arc<dyn HostProbe>,
     registry: Arc<dyn SessionRegistry>,
     scratch: SessionScratch,
 }
@@ -22,6 +23,7 @@ impl MainCheckoutDeletion {
         Self {
             unseen: UnseenSession::new(ports),
             multiplexer: ports.tmux().multiplexer(),
+            host: ports.repos().host(),
             registry: ports.state().registry(),
             scratch: SessionScratch::new(ports),
         }
@@ -39,23 +41,42 @@ impl MainCheckoutDeletion {
         confirmation: &DeleteConfirmation,
     ) -> Result<DeleteOutcome, ServiceError> {
         confirmation.check(&self.impact(row)?)?;
-        self.kill_tmux_session(row)?;
+        self.end_tmux_session(row)?;
         self.scratch.discard(row.session().worktree_path());
         self.registry.save(remaining)?;
         let stray_session = self.unseen.stray_session_warning(row);
         Ok(DeleteOutcome::checkout_kept(row.session()).with_stray_session(stray_session))
     }
 
-    fn kill_tmux_session(&self, row: &ManagedRow) -> Result<(), ServiceError> {
+    fn end_tmux_session(&self, row: &ManagedRow) -> Result<(), ServiceError> {
         if !row.is_live() {
             return Ok(());
         }
-        self.multiplexer
-            .kill_session(row.session().tmux_name())
-            .map_err(|error| {
-                ServiceError::from(error)
-                    .adding_context("kept the registry entry, run ringleader doctor")
-            })
+        let keep = |error| {
+            ServiceError::from(error)
+                .adding_context("kept the registry entry, run ringleader doctor")
+        };
+        let tmux_name = row.session().tmux_name();
+        let pane_sessions = self.multiplexer.pane_pids(tmux_name).map_err(keep)?;
+        self.multiplexer.kill_session(tmux_name).map_err(keep)?;
+        self.stop_agent_processes(&pane_sessions)
+    }
+
+    fn stop_agent_processes(&self, pane_sessions: &[u32]) -> Result<(), ServiceError> {
+        let started_by_the_agent: Vec<u32> = self
+            .host
+            .session_processes(pane_sessions)
+            .iter()
+            .map(ProcessInfo::pid)
+            .collect();
+        let survivors = self.host.terminate(&started_by_the_agent);
+        if survivors.is_empty() {
+            return Ok(());
+        }
+        Err(ServiceError::Conflict(format!(
+            "processes the agent started still run: {}; kept the registry entry of the session, which is now stopped",
+            ProcessInfo::listed(&survivors)
+        )))
     }
 }
 
@@ -66,11 +87,14 @@ mod tests {
     use super::*;
     use crate::application::SessionService;
     use crate::domain::SessionObservation;
-    use crate::test_support::{FakeMultiplexer, ServiceFixture};
+    use crate::test_support::{FakeHostProbe, FakeMultiplexer, ServiceFixture};
 
     struct CheckoutDeleteFixture;
 
     impl CheckoutDeleteFixture {
+        const PANE_SESSION: u32 = 4100;
+        const DEV_SERVER: u32 = 4200;
+
         fn session() -> Session {
             ServiceFixture::main_checkout_session("fix-auth")
         }
@@ -85,6 +109,20 @@ mod tests {
 
         fn waiting() -> ServiceFixture {
             Self::live(ServiceFixture::waiting(&Self::session()))
+        }
+
+        fn with_agent_process(host: FakeHostProbe) -> ServiceFixture {
+            let session = Self::session();
+            let multiplexer = FakeMultiplexer::new()
+                .with_live(ServiceFixture::waiting(&session))
+                .with_pane_pids(session.tmux_name(), &[Self::PANE_SESSION]);
+            Self::stopped()
+                .with_host(host)
+                .with_multiplexer(multiplexer)
+        }
+
+        fn agent_host() -> FakeHostProbe {
+            ServiceFixture::host_for(&[&Self::session()])
         }
 
         fn live(observation: SessionObservation) -> ServiceFixture {
@@ -141,6 +179,40 @@ mod tests {
         CheckoutDeleteFixture::force(&fixture).unwrap();
 
         assert!(fixture.host().terminated().is_empty());
+    }
+
+    #[test]
+    fn deleting_a_session_in_the_main_checkout_stops_the_processes_its_agent_started() {
+        let host = CheckoutDeleteFixture::agent_host().with_process(
+            CheckoutDeleteFixture::DEV_SERVER,
+            "npm run dev",
+            CheckoutDeleteFixture::checkout(),
+            CheckoutDeleteFixture::PANE_SESSION,
+        );
+        let fixture = CheckoutDeleteFixture::with_agent_process(host);
+
+        CheckoutDeleteFixture::force(&fixture).unwrap();
+
+        assert_eq!(
+            fixture.host().terminated(),
+            [CheckoutDeleteFixture::DEV_SERVER]
+        );
+    }
+
+    #[test]
+    fn a_process_its_agent_started_that_survives_keeps_the_session_recorded() {
+        let host = CheckoutDeleteFixture::agent_host().with_stubborn_process(
+            CheckoutDeleteFixture::DEV_SERVER,
+            "npm run dev",
+            CheckoutDeleteFixture::checkout(),
+            CheckoutDeleteFixture::PANE_SESSION,
+        );
+        let fixture = CheckoutDeleteFixture::with_agent_process(host);
+
+        let error = CheckoutDeleteFixture::force(&fixture).unwrap_err();
+
+        assert!(error.to_string().contains("npm run dev"));
+        assert_eq!(fixture.registry().sessions().len(), 1);
     }
 
     #[test]
