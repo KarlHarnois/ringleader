@@ -58,18 +58,20 @@ impl OpencodeUsageMeter {
     }
 
     fn quota(&self, agent: &Agent, provider: &str) -> Option<Vec<UsageRow>> {
+        let streak = format!("{}/{provider}", agent.name());
         for quota in &self.quotas {
             match quota.measure(agent, provider) {
                 Ok(Some(rows)) => {
-                    self.failures.end(provider);
+                    self.failures.end(&streak);
                     return Some(rows);
                 }
                 Ok(None) => {}
                 Err(error) => {
-                    self.failures.warn_once(
-                        provider,
-                        &format!("could not read the {provider} quota, showing opencode's totals: {error}"),
+                    let warning = format!(
+                        "could not read the {provider} quota of the agent {}, showing opencode's totals: {error}",
+                        agent.name()
                     );
+                    self.failures.warn_once(&streak, &warning);
                     return None;
                 }
             }
@@ -133,6 +135,23 @@ mod tests {
 
         fn asked(&self) -> Vec<String> {
             self.asked.lock().unwrap().clone()
+        }
+    }
+
+    struct OneFailingAgentQuota {
+        failing_agent: &'static str,
+    }
+
+    impl ProviderQuota for OneFailingAgentQuota {
+        fn measure(
+            &self,
+            agent: &Agent,
+            _provider: &str,
+        ) -> Result<Option<Vec<UsageRow>>, QuotaError> {
+            if agent.name() == self.failing_agent {
+                return Err(QuotaError::Refused);
+            }
+            Ok(Some(MeterFixture::credits()))
         }
     }
 
@@ -381,6 +400,40 @@ mod tests {
         meter.measure(&agent).unwrap();
 
         assert_eq!(log.count_containing("failing-again-provider"), 2);
+    }
+
+    #[test]
+    fn one_agents_quota_success_leaves_another_agents_failure_streak() {
+        let log = LogCapture::installed();
+        let fixture = MeterFixture::new();
+        let quota = Arc::new(OneFailingAgentQuota {
+            failing_agent: "home",
+        });
+        let meter = fixture.meter_with(vec![quota]);
+        let work = fixture.on_provider("shared-streak-provider");
+        let home = Agent::new("home", work.command());
+
+        for agent in [&home, &work, &home, &work, &home] {
+            meter.measure(agent).unwrap();
+        }
+
+        assert_eq!(log.count_containing("shared-streak-provider"), 1);
+    }
+
+    #[test]
+    fn a_quota_warning_names_the_agent() {
+        let log = LogCapture::installed();
+        let fixture = MeterFixture::new();
+        let quota = Arc::new(OneFailingAgentQuota {
+            failing_agent: "warned-example-agent",
+        });
+        let meter = fixture.meter_with(vec![quota]);
+        let work = fixture.on_provider("example-provider");
+        let warned = Agent::new("warned-example-agent", work.command());
+
+        meter.measure(&warned).unwrap();
+
+        assert_eq!(log.count_containing("agent warned-example-agent"), 1);
     }
 
     #[test]
