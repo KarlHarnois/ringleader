@@ -232,6 +232,10 @@ impl SessionService {
         self.usage_catalog.measure(self.config().agents())
     }
 
+    pub fn refresh_usage(&self) {
+        drop(self.measure_usage());
+    }
+
     pub fn last_usage(&self) -> Option<UsageReading> {
         self.usage_catalog.latest()
     }
@@ -374,7 +378,7 @@ mod tests {
     use super::*;
     use crate::domain::AgentUsage;
     use crate::test_support::{
-        FakeMultiplexer, FakeSessionRegistry, FakeUsageMeter, ServiceFixture,
+        Deadline, FakeMultiplexer, FakeSessionRegistry, FakeUsageMeter, ServiceFixture,
     };
 
     #[test]
@@ -398,6 +402,17 @@ mod tests {
 
         assert_eq!(reading.agents()[0].agent(), "claude");
         assert_eq!(service.last_usage(), Some(reading));
+    }
+
+    #[test]
+    fn refreshing_usage_measures_into_the_last_reading() {
+        let fixture = ServiceFixture::new()
+            .with_usage_meter(FakeUsageMeter::new().with_usage("claude", AgentUsage::default()));
+        let service = fixture.service();
+
+        service.refresh_usage();
+
+        assert!(Deadline::for_background_work().wait_until(|| service.last_usage().is_some()));
     }
 
     #[test]

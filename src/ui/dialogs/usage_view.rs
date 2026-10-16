@@ -539,6 +539,7 @@ mod tests {
     fn a_refresh_in_flight_is_shown_beside_the_age() {
         let fixture = ViewFixture::reporting(Vec::new());
         fixture.settled();
+        fixture.services.clock().advance(300);
         let mut view = UsageView::open(&fixture.service);
 
         view.poll(Instant::now(), &fixture.service);
@@ -547,7 +548,7 @@ mod tests {
             ViewFixture::rows(&view)
                 .last()
                 .unwrap()
-                .starts_with("updated <1m ago · measuring  ")
+                .starts_with("updated 5m ago · measuring  ")
         );
     }
 

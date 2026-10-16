@@ -14,7 +14,7 @@
 
 - Give a probe the variables the agent gets at launch, without the worktree's `.envrc`. The agent's `set_env` picks the account, for example with `CLAUDE_CONFIG_DIR`.
 
-**Measure only while the usage view is open.** A Claude probe starts a whole Claude Code process.
+**Measure once when the TUI starts, then only while the usage view is open.** A Claude probe starts a whole Claude Code process.
 
 **Measure every agent at the same time.** The view then waits for the slowest probe instead of the sum of all probes.
 

@@ -88,6 +88,10 @@ impl App {
         self.status.failure(outcome);
     }
 
+    pub fn refresh_usage(&self) {
+        self.service.refresh_usage();
+    }
+
     pub fn poll(&mut self, now: Instant) {
         let outcome = self.home.poll(now, &mut self.service);
         self.status.failure(outcome);

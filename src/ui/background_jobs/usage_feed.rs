@@ -29,9 +29,22 @@ impl UsageFeed {
 
     pub fn poll(&mut self, now: Instant, service: &SessionService) {
         self.collect(now);
-        if self.is_due(now) {
+        let due = *self
+            .next_measurement
+            .get_or_insert_with(|| now + Self::freshness_left(self.reading.as_ref(), service));
+        if self.pending.is_none() && now >= due {
             self.pending = Some(service.measure_usage());
         }
+    }
+
+    fn freshness_left(reading: Option<&UsageReading>, service: &SessionService) -> Duration {
+        let Some(reading) = reading else {
+            return Duration::ZERO;
+        };
+        let age = service
+            .now_epoch_seconds()
+            .saturating_sub(reading.measured_at());
+        Self::REFRESH.saturating_sub(Duration::from_secs(age))
     }
 
     fn collect(&mut self, now: Instant) {
@@ -45,10 +58,6 @@ impl UsageFeed {
             Err(error) => log::warn!("could not measure the agents' usage: {error}"),
         }
     }
-
-    fn is_due(&self, now: Instant) -> bool {
-        self.pending.is_none() && self.next_measurement.is_none_or(|due| now >= due)
-    }
 }
 
 #[cfg(test)]
@@ -60,6 +69,8 @@ mod tests {
     struct FeedFixture;
 
     impl FeedFixture {
+        const MINUTE: u64 = 60;
+
         fn measuring_claude() -> ServiceFixture {
             let limit = UsageLimit::used(LimitWindow::Session, 42.0, None);
             let usage = AgentUsage::new(vec![UsageRow::Limit(limit)]);
@@ -74,6 +85,14 @@ mod tests {
                 !feed.is_measuring()
             });
             assert!(settled, "the measurement never finished");
+        }
+
+        fn measure_earlier(service: &SessionService) {
+            service
+                .measure_usage()
+                .wait_unless(|| false)
+                .unwrap()
+                .unwrap();
         }
 
         fn measurements(fixture: &ServiceFixture) -> usize {
@@ -94,6 +113,55 @@ mod tests {
         let feed = UsageFeed::open(&service);
 
         assert_eq!(feed.reading(), Some(&earlier));
+    }
+
+    #[test]
+    fn a_fresh_reading_is_not_measured_again_before_its_refresh_is_up() {
+        let fixture = FeedFixture::measuring_claude();
+        let service = fixture.service();
+        FeedFixture::measure_earlier(&service);
+        fixture.clock().advance(FeedFixture::MINUTE);
+        let mut feed = UsageFeed::open(&service);
+        let start = Instant::now();
+
+        feed.poll(start, &service);
+        feed.poll(
+            start + UsageFeed::REFRESH - Duration::from_secs(FeedFixture::MINUTE + 1),
+            &service,
+        );
+
+        assert!(!feed.is_measuring());
+    }
+
+    #[test]
+    fn a_fresh_reading_is_measured_again_once_its_refresh_is_up() {
+        let fixture = FeedFixture::measuring_claude();
+        let service = fixture.service();
+        FeedFixture::measure_earlier(&service);
+        fixture.clock().advance(FeedFixture::MINUTE);
+        let mut feed = UsageFeed::open(&service);
+        let start = Instant::now();
+        feed.poll(start, &service);
+
+        feed.poll(
+            start + UsageFeed::REFRESH - Duration::from_secs(FeedFixture::MINUTE),
+            &service,
+        );
+
+        assert!(feed.is_measuring());
+    }
+
+    #[test]
+    fn a_stale_reading_is_measured_again_at_once() {
+        let fixture = FeedFixture::measuring_claude();
+        let service = fixture.service();
+        FeedFixture::measure_earlier(&service);
+        fixture.clock().advance(UsageFeed::REFRESH.as_secs());
+        let mut feed = UsageFeed::open(&service);
+
+        feed.poll(Instant::now(), &service);
+
+        assert!(feed.is_measuring());
     }
 
     #[test]

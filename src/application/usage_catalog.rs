@@ -12,6 +12,7 @@ pub struct UsageCatalog {
     meters: Vec<Arc<dyn UsageMeter>>,
     clock: Arc<dyn Clock>,
     latest: Arc<Mutex<Option<UsageReading>>>,
+    measuring: Arc<Mutex<()>>,
     failing_agents: Arc<Mutex<HashSet<String>>>,
 }
 
@@ -21,6 +22,7 @@ impl UsageCatalog {
             meters,
             clock,
             latest: Arc::default(),
+            measuring: Arc::default(),
             failing_agents: Arc::default(),
         }
     }
@@ -28,18 +30,31 @@ impl UsageCatalog {
     pub fn measure(&self, agents: &[Agent]) -> Pending<UsageReading> {
         let catalog = self.clone();
         let agents = agents.to_vec();
-        Pending::start(move || Ok(catalog.record(&agents)))
+        let requested_at = self.clock.now_epoch_seconds();
+        Pending::start(move || Ok(catalog.record(requested_at, &agents)))
     }
 
     pub fn latest(&self) -> Option<UsageReading> {
         self.stored().clone()
     }
 
-    fn record(&self, agents: &[Agent]) -> UsageReading {
+    fn record(&self, requested_at: u64, agents: &[Agent]) -> UsageReading {
+        let _measuring = self
+            .measuring
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if let Some(reading) = self.reading_since(requested_at) {
+            return reading;
+        }
         let readings = self.readings_at_once(agents);
         let reading = UsageReading::new(self.clock.now_epoch_seconds(), readings);
         *self.stored() = Some(reading.clone());
         reading
+    }
+
+    fn reading_since(&self, requested_at: u64) -> Option<UsageReading> {
+        self.latest()
+            .filter(|reading| reading.measured_at() > requested_at)
     }
 
     fn readings_at_once(&self, agents: &[Agent]) -> Vec<AgentReading> {
@@ -178,6 +193,39 @@ mod tests {
         measurement.wait_unless(|| false);
 
         assert!(both_started);
+    }
+
+    #[test]
+    fn a_measurement_asked_for_during_another_reuses_its_reading() {
+        let held = HeldCalls::all();
+        let meter = Arc::new(FakeUsageMeter::new());
+        meter.on_measure(held.hook());
+        let clock = Arc::new(FakeClock::at(ServiceFixture::NOW));
+        let catalog = UsageCatalog::new(vec![meter.clone()], clock.clone());
+        let agents = [CatalogFixture::agent("work")];
+
+        let first = catalog.measure(&agents);
+        held.wait_for(1);
+        let second = catalog.measure(&agents);
+        clock.advance(1);
+        held.release();
+
+        assert_eq!(second.wait_unless(|| false), first.wait_unless(|| false));
+        assert_eq!(meter.calls().len(), 1);
+    }
+
+    #[test]
+    fn a_measurement_asked_for_after_the_last_reading_measures_again() {
+        let meter = Arc::new(FakeUsageMeter::new());
+        let clock = Arc::new(FakeClock::at(ServiceFixture::NOW));
+        let catalog = UsageCatalog::new(vec![meter.clone()], clock.clone());
+        let agents = [CatalogFixture::agent("work")];
+
+        CatalogFixture::measured(&catalog, &agents);
+        clock.advance(1);
+        CatalogFixture::measured(&catalog, &agents);
+
+        assert_eq!(meter.calls().len(), 2);
     }
 
     #[test]
