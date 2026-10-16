@@ -1,8 +1,8 @@
-use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
 
+use super::failure_streaks::FailureStreaks;
 use super::pending::Pending;
 use super::ports::{Clock, UsageError, UsageMeter};
 use super::usage_reading::{AgentReading, UsageReading};
@@ -15,7 +15,7 @@ pub struct UsageCatalog {
     latest: Arc<Mutex<Option<UsageReading>>>,
     measuring: Arc<Mutex<()>>,
     completed_measurements: Arc<AtomicU64>,
-    failing_agents: Arc<Mutex<HashSet<String>>>,
+    failures: Arc<FailureStreaks>,
 }
 
 impl UsageCatalog {
@@ -26,7 +26,7 @@ impl UsageCatalog {
             latest: Arc::default(),
             measuring: Arc::default(),
             completed_measurements: Arc::default(),
-            failing_agents: Arc::default(),
+            failures: Arc::default(),
         }
     }
 
@@ -102,27 +102,16 @@ impl UsageCatalog {
 
     fn track_failure(&self, agent: &str, usage: &Result<AgentUsage, UsageError>) {
         match usage {
-            Ok(_) => {
-                self.failing_agents().remove(agent);
-            }
-            Err(error) => self.warn_once(agent, error),
-        }
-    }
-
-    fn warn_once(&self, agent: &str, error: &UsageError) {
-        if self.failing_agents().insert(agent.to_string()) {
-            log::warn!("could not measure the usage of the agent {agent}: {error}");
+            Ok(_) => self.failures.end(agent),
+            Err(error) => self.failures.warn_once(
+                agent,
+                &format!("could not measure the usage of the agent {agent}: {error}"),
+            ),
         }
     }
 
     fn stored(&self) -> MutexGuard<'_, Option<UsageReading>> {
         self.latest.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    fn failing_agents(&self) -> MutexGuard<'_, HashSet<String>> {
-        self.failing_agents
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
     }
 }
 

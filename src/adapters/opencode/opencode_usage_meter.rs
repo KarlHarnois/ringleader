@@ -4,6 +4,7 @@ use super::opencode_activity::OpencodeActivity;
 use super::opencode_database::OpencodeDatabase;
 use super::provider_quota::ProviderQuota;
 use crate::adapters::agent_launch::agent_probe::AgentProbe;
+use crate::application::failure_streaks::FailureStreaks;
 use crate::application::ports::{UsageError, UsageMeter};
 use crate::domain::{Agent, AgentUsage, UsageRow};
 
@@ -11,6 +12,7 @@ pub struct OpencodeUsageMeter {
     probe: Arc<AgentProbe>,
     database: Arc<dyn OpencodeDatabase>,
     quotas: Vec<Arc<dyn ProviderQuota>>,
+    failures: FailureStreaks,
 }
 
 impl OpencodeUsageMeter {
@@ -27,6 +29,7 @@ impl OpencodeUsageMeter {
             probe,
             database,
             quotas,
+            failures: FailureStreaks::default(),
         }
     }
 
@@ -57,11 +60,15 @@ impl OpencodeUsageMeter {
     fn quota(&self, provider: &str) -> Option<Vec<UsageRow>> {
         for quota in &self.quotas {
             match quota.measure(provider) {
-                Ok(Some(rows)) => return Some(rows),
+                Ok(Some(rows)) => {
+                    self.failures.end(provider);
+                    return Some(rows);
+                }
                 Ok(None) => {}
                 Err(error) => {
-                    log::warn!(
-                        "could not read the {provider} quota, showing opencode's totals: {error}"
+                    self.failures.warn_once(
+                        provider,
+                        &format!("could not read the {provider} quota, showing opencode's totals: {error}"),
                     );
                     return None;
                 }
@@ -100,6 +107,7 @@ mod tests {
     use crate::adapters::sqlite::null_opencode_database::NullOpencodeDatabase;
     use crate::adapters::{BoundedCommand, Deadlines};
     use crate::domain::{LimitWindow, UsageLimit};
+    use crate::test_support::LogCapture;
     use crate::test_support::{ExecutableScript, InheritedPath};
 
     struct MeterFixture {
@@ -107,16 +115,20 @@ mod tests {
     }
 
     struct FakeProviderQuota {
-        answer: Result<Option<Vec<UsageRow>>, QuotaError>,
+        answer: Mutex<Result<Option<Vec<UsageRow>>, QuotaError>>,
         asked: Mutex<Vec<String>>,
     }
 
     impl FakeProviderQuota {
         fn answering(answer: Result<Option<Vec<UsageRow>>, QuotaError>) -> Arc<Self> {
             Arc::new(Self {
-                answer,
+                answer: Mutex::new(answer),
                 asked: Mutex::default(),
             })
+        }
+
+        fn answer_with(&self, answer: Result<Option<Vec<UsageRow>>, QuotaError>) {
+            *self.answer.lock().unwrap() = answer;
         }
 
         fn asked(&self) -> Vec<String> {
@@ -141,7 +153,7 @@ mod tests {
     impl ProviderQuota for FakeProviderQuota {
         fn measure(&self, provider: &str) -> Result<Option<Vec<UsageRow>>, QuotaError> {
             self.asked.lock().unwrap().push(provider.to_string());
-            self.answer.clone()
+            self.answer.lock().unwrap().clone()
         }
     }
 
@@ -166,6 +178,15 @@ mod tests {
             let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                 .join("tests/fixtures/opencode-db-activity.json");
             self.agent_named(program, &fixture.to_string_lossy())
+        }
+
+        fn on_provider(&self, provider: &str) -> Agent {
+            let activity = self.directory.path().join("activity.json");
+            let row = format!(
+                r#"[{{"provider":"{provider}","model":"example-model","tokens_today":0,"cost_today":0,"tokens_last_seven_days":0,"cost_last_seven_days":0}}]"#
+            );
+            fs::write(&activity, row).unwrap();
+            self.agent_named("opencode", &activity.to_string_lossy())
         }
 
         fn without_sessions(&self) -> Agent {
@@ -324,6 +345,38 @@ mod tests {
 
         assert_eq!(usage.rows().len(), 2);
         assert!(later.asked().is_empty());
+    }
+
+    #[test]
+    fn a_quota_that_keeps_failing_is_warned_about_once() {
+        let log = LogCapture::installed();
+        let fixture = MeterFixture::new();
+        let quota = FakeProviderQuota::answering(Err(QuotaError::Refused));
+        let meter = fixture.meter_with(vec![quota]);
+        let agent = fixture.on_provider("always-failing-provider");
+
+        for _ in 0..3 {
+            meter.measure(&agent).unwrap();
+        }
+
+        assert_eq!(log.count_containing("always-failing-provider"), 1);
+    }
+
+    #[test]
+    fn a_quota_that_fails_again_after_recovering_is_warned_about_again() {
+        let log = LogCapture::installed();
+        let fixture = MeterFixture::new();
+        let quota = FakeProviderQuota::answering(Err(QuotaError::Refused));
+        let meter = fixture.meter_with(vec![quota.clone()]);
+        let agent = fixture.on_provider("failing-again-provider");
+
+        meter.measure(&agent).unwrap();
+        quota.answer_with(Ok(Some(MeterFixture::credits())));
+        meter.measure(&agent).unwrap();
+        quota.answer_with(Err(QuotaError::Refused));
+        meter.measure(&agent).unwrap();
+
+        assert_eq!(log.count_containing("failing-again-provider"), 2);
     }
 
     #[test]

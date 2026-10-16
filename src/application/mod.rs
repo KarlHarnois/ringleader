@@ -3,6 +3,7 @@ pub mod base_branch_ladders;
 pub mod checks;
 pub mod deletion;
 pub mod diagnostics;
+pub mod failure_streaks;
 pub mod merge;
 pub mod monitor;
 pub mod pending;
