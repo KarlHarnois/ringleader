@@ -16,6 +16,13 @@ impl Money {
             currency: currency.to_string(),
         }
     }
+
+    pub fn major_units(amount: f64, currency: &str) -> Self {
+        let minor_units = (amount * Self::MINOR_UNITS_PER_UNIT as f64)
+            .round()
+            .max(0.0);
+        Self::minor_units(minor_units as u64, currency)
+    }
 }
 
 impl fmt::Display for Money {
@@ -37,6 +44,16 @@ mod tests {
     #[test]
     fn dollars_show_with_a_dollar_sign_and_cents() {
         assert_eq!(Money::minor_units(320, "USD").to_string(), "$3.20");
+    }
+
+    #[test]
+    fn a_major_amount_rounds_to_the_nearest_minor_unit() {
+        assert_eq!(Money::major_units(1.713516, "USD").to_string(), "$1.71");
+    }
+
+    #[test]
+    fn a_negative_major_amount_is_zero() {
+        assert_eq!(Money::major_units(-2.5, "USD").to_string(), "$0.00");
     }
 
     #[test]

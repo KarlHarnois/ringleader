@@ -16,6 +16,7 @@ pub mod repos;
 pub mod sessions;
 pub mod spend;
 pub mod terminal_text;
+pub mod token_totals;
 pub mod usage_limit;
 
 pub use agent::Agent;
@@ -47,4 +48,5 @@ pub use sessions::session_summary::SessionSummary;
 pub use sessions::unmanaged_session::{PairMismatch, UnmanagedSession};
 pub use spend::{Spend, SpendKind};
 pub use terminal_text::TerminalText;
+pub use token_totals::{TokenTotals, TotalsWindow};
 pub use usage_limit::{LimitWindow, UsageLimit};

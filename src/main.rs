@@ -39,6 +39,7 @@ use adapters::host::signal_hook_interrupts::SignalHookInterrupts;
 use adapters::host::system_clock::SystemClock;
 use adapters::host::system_host_probe::SystemHostProbe;
 use adapters::host::xdg_paths::XdgPaths;
+use adapters::opencode::opencode_usage_meter::OpencodeUsageMeter;
 use adapters::terminal_emulator::system_terminal_emulator::SystemTerminalEmulator;
 use adapters::tmux::server_files::ServerFiles;
 use adapters::tmux::tmux_command::TmuxCommand;
@@ -347,7 +348,10 @@ impl CompositionRoot {
             &self.paths.usage_directory(),
             bounded,
         ));
-        vec![Arc::new(ClaudeUsageMeter::new(probe))]
+        vec![
+            Arc::new(ClaudeUsageMeter::new(probe.clone())),
+            Arc::new(OpencodeUsageMeter::new(probe)),
+        ]
     }
 
     fn pull_requests(host: &SystemHostProbe, bounded: BoundedCommand) -> Arc<dyn PullRequests> {

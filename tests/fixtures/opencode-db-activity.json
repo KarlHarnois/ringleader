@@ -1,0 +1,10 @@
+[
+  {
+    "provider": "example-provider",
+    "model": "example-model",
+    "tokens_today": 1234,
+    "cost_today": 0.4219,
+    "tokens_last_seven_days": 6588481,
+    "cost_last_seven_days": 1.713516348
+  }
+]

@@ -1,3 +1,5 @@
+pub mod compact_count;
+pub mod compact_duration;
 pub mod delete_session_dialog;
 pub mod dialog;
 pub mod dialog_labels;

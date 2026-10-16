@@ -7,6 +7,7 @@ pub mod filesystem;
 pub mod gh;
 pub mod git;
 pub mod host;
+pub mod opencode;
 pub mod terminal_emulator;
 pub mod tmux;
 

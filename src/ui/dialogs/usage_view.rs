@@ -5,9 +5,13 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
+use super::compact_count::CompactCount;
+use super::compact_duration::CompactDuration;
 use super::dialog::DialogStep;
 use crate::application::{AgentReading, SessionService};
-use crate::domain::{AgentUsage, LimitWindow, Spend, SpendKind, UsageLimit, UsageRow};
+use crate::domain::{
+    AgentUsage, LimitWindow, Spend, SpendKind, TokenTotals, TotalsWindow, UsageLimit, UsageRow,
+};
 use crate::ui::background_jobs::usage_feed::UsageFeed;
 use crate::ui::theme::Theme;
 
@@ -72,7 +76,7 @@ impl UsageView {
     }
 
     fn agent_block(&self, agent: &AgentReading, theme: &Theme) -> Vec<Line<'static>> {
-        let heading = Line::styled(agent.agent().to_string(), theme.emphasis());
+        let heading = Self::heading(agent, theme);
         let rows = match agent.usage() {
             Ok(usage) => self.usage_rows(usage, theme),
             Err(error) => vec![Self::note(&error.to_string(), theme.error())],
@@ -81,6 +85,14 @@ impl UsageView {
             .chain(rows)
             .chain(once(Line::default()))
             .collect()
+    }
+
+    fn heading(agent: &AgentReading, theme: &Theme) -> Line<'static> {
+        let name = Span::styled(agent.agent().to_string(), theme.emphasis());
+        match agent.usage().ok().and_then(AgentUsage::model) {
+            Some(model) => Line::from(vec![name, Span::styled(format!(" · {model}"), theme.dim())]),
+            None => Line::from(name),
+        }
     }
 
     fn usage_rows(&self, usage: &AgentUsage, theme: &Theme) -> Vec<Line<'static>> {
@@ -98,6 +110,7 @@ impl UsageView {
         match row {
             UsageRow::Limit(limit) => self.limit_row(limit, theme),
             UsageRow::Spend(spend) => Self::spend_row(spend, theme),
+            UsageRow::Tokens(totals) => Self::tokens_row(totals, theme),
         }
     }
 
@@ -125,11 +138,33 @@ impl UsageView {
         ])
     }
 
+    fn tokens_row(totals: &TokenTotals, theme: &Theme) -> Line<'static> {
+        let tokens = CompactCount::new(totals.tokens()).label();
+        Line::from(vec![
+            Span::styled(
+                Self::label(Self::totals_label(totals.window())),
+                theme.base(),
+            ),
+            Span::styled(format!("{tokens} tokens"), theme.base()),
+            Span::styled(
+                format!(" · {} at list price", totals.list_price()),
+                theme.dim(),
+            ),
+        ])
+    }
+
     fn window_label(window: &LimitWindow) -> String {
         match window {
             LimitWindow::Session => "Current session".to_string(),
             LimitWindow::Week => "This week".to_string(),
             LimitWindow::Scoped(name) => name.clone(),
+        }
+    }
+
+    fn totals_label(window: TotalsWindow) -> &'static str {
+        match window {
+            TotalsWindow::Today => "Today",
+            TotalsWindow::LastSevenDays => "Last 7 days",
         }
     }
 
@@ -185,42 +220,6 @@ impl UsageView {
     }
 }
 
-struct CompactDuration {
-    seconds: u64,
-}
-
-impl CompactDuration {
-    const MINUTE: u64 = 60;
-    const HOUR: u64 = 60 * Self::MINUTE;
-    const DAY: u64 = 24 * Self::HOUR;
-
-    fn new(seconds: u64) -> Self {
-        Self { seconds }
-    }
-
-    fn label(&self) -> String {
-        let seconds = self.seconds;
-        if seconds < Self::MINUTE {
-            return "<1m".to_string();
-        }
-        if seconds < Self::HOUR {
-            return format!("{}m", seconds / Self::MINUTE);
-        }
-        if seconds < Self::DAY {
-            return format!(
-                "{}h {}m",
-                seconds / Self::HOUR,
-                seconds % Self::HOUR / Self::MINUTE
-            );
-        }
-        format!(
-            "{}d {}h",
-            seconds / Self::DAY,
-            seconds % Self::DAY / Self::HOUR
-        )
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use crossterm::event::KeyModifiers;
@@ -258,6 +257,14 @@ mod tests {
         fn session_resetting_in(seconds: u64) -> Vec<String> {
             let row = Self::limit(LimitWindow::Session, 42.0, Some(seconds));
             Self::reporting(vec![row]).settled_rows()
+        }
+
+        fn totals(window: TotalsWindow) -> UsageRow {
+            UsageRow::Tokens(TokenTotals::new(
+                window,
+                1234,
+                Money::minor_units(42, "USD"),
+            ))
         }
 
         fn extra_usage(used: u64, limit: Option<u64>) -> UsageRow {
@@ -317,6 +324,40 @@ mod tests {
         let rows = ViewFixture::session_resetting_in(ViewFixture::TWO_HOURS_FOURTEEN_MINUTES);
 
         assert_eq!(rows[0], "claude");
+    }
+
+    #[test]
+    fn a_heading_names_the_model_the_agent_runs() {
+        let usage = AgentUsage::new(Vec::new()).with_model("example-provider/example-model");
+        let fixture = ViewFixture::with_meter(FakeUsageMeter::new().with_usage("claude", usage));
+
+        assert_eq!(
+            fixture.settled_rows()[0],
+            "claude · example-provider/example-model"
+        );
+    }
+
+    #[test]
+    fn todays_totals_show_tokens_and_their_list_price() {
+        let rows =
+            ViewFixture::reporting(vec![ViewFixture::totals(TotalsWindow::Today)]).settled_rows();
+
+        assert_eq!(
+            rows[1],
+            "  Today           1.2k tokens · $0.42 at list price"
+        );
+    }
+
+    #[test]
+    fn the_weeks_totals_cover_the_last_seven_days() {
+        let rows = ViewFixture::reporting(vec![ViewFixture::totals(TotalsWindow::LastSevenDays)])
+            .settled_rows();
+
+        assert!(
+            rows[1].starts_with("  Last 7 days     1.2k tokens"),
+            "{}",
+            rows[1]
+        );
     }
 
     #[test]
