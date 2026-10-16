@@ -190,7 +190,7 @@ mod tests {
     use std::path::Path;
 
     use super::*;
-    use crate::application::ports::{MultiplexerError, RegistryError, Workspace};
+    use crate::application::ports::{MultiplexerError, RegistryError, Workspace, WorktreeEntry};
     use crate::domain::{Repo, RepoName, Session};
     use crate::test_support::{
         FakeMultiplexer, FakeSessionRegistry, FakeWorkspace, ServiceFixture,
@@ -217,6 +217,13 @@ mod tests {
         fn healthy() -> ServiceFixture {
             let session = Self::session();
             Self::with_session(&session, ServiceFixture::workspace_for(&[&session]))
+        }
+
+        fn in_main_checkout(workspace: FakeWorkspace) -> ServiceFixture {
+            Self::with_session(
+                &ServiceFixture::main_checkout_session("fix-auth"),
+                workspace,
+            )
         }
 
         fn lines(fixture: &ServiceFixture) -> Vec<String> {
@@ -455,6 +462,38 @@ mod tests {
             &fixture,
             "differs from the session name"
         ));
+    }
+
+    #[test]
+    fn a_stopped_session_in_the_main_checkout_has_no_problem() {
+        let fixture = DoctorFixture::in_main_checkout(ServiceFixture::main_checkout_workspace());
+
+        let report = fixture.service().doctor();
+
+        assert!(!report.has_problems(), "{:?}", report.lines());
+    }
+
+    #[test]
+    fn a_session_in_the_main_checkout_gets_no_marker_warning() {
+        let fixture = DoctorFixture::in_main_checkout(ServiceFixture::main_checkout_workspace());
+
+        assert!(!DoctorFixture::has_warning(
+            &fixture,
+            "no Ringleader marker"
+        ));
+    }
+
+    #[test]
+    fn a_main_checkout_switched_to_another_branch_is_no_problem_for_its_session() {
+        let repo = Path::new(ServiceFixture::REPO);
+        let switched = WorktreeEntry::new(repo)
+            .on_branch("develop")
+            .at_head(ServiceFixture::TIP)
+            .main();
+        let fixture =
+            DoctorFixture::in_main_checkout(FakeWorkspace::default().with_worktree(repo, switched));
+
+        assert!(!DoctorFixture::has_problem(&fixture, "is missing"));
     }
 
     #[test]

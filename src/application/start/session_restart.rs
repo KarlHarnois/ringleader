@@ -423,6 +423,20 @@ mod tests {
     }
 
     #[test]
+    fn a_stopped_session_in_the_main_checkout_is_recreated_in_the_checkout() {
+        let session = ServiceFixture::main_checkout_session("fix-auth");
+        let fixture = ServiceFixture::new()
+            .with_sessions(std::slice::from_ref(&session))
+            .with_workspace(ServiceFixture::main_checkout_workspace())
+            .with_host(ServiceFixture::host_for(&[&session]));
+
+        RestartFixture::restart(&fixture).unwrap();
+
+        let spec = fixture.multiplexer().specs().pop().unwrap();
+        assert_eq!(spec.worktree(), Path::new(ServiceFixture::REPO));
+    }
+
+    #[test]
     fn a_stopped_session_is_recreated_with_the_agent_resume_args() {
         let fixture = RestartFixture::stopped().with_config(RestartFixture::resuming_config());
 

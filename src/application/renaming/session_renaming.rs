@@ -53,7 +53,7 @@ impl SessionRenaming {
             &renamed,
         );
         self.refuse_unmovable_branch(&renaming, row.session())?;
-        Self::refuse_taken_name(&renamed, reconciliation)?;
+        reconciliation.refuse_taken_name(renamed.name(), renamed.tmux_name())?;
         self.refuse_taken_branch(&renaming, row.session(), &renamed)?;
         renaming.apply()?;
         let recorded = self.record_rename(row, &renamed, reconciliation, &mut renaming);
@@ -74,23 +74,6 @@ impl SessionRenaming {
         self.refuse_published(session)?;
         self.ownership
             .refuse_unmarked(session, BranchMutation::Rename)
-    }
-
-    fn refuse_taken_name(
-        renamed: &Session,
-        reconciliation: &Reconciliation,
-    ) -> Result<(), ServiceError> {
-        let name_taken = reconciliation
-            .entries()
-            .iter()
-            .any(|entry| entry.name() == renamed.name());
-        if name_taken || reconciliation.is_live_tmux_name(renamed.tmux_name()) {
-            return Err(ServiceError::Conflict(format!(
-                "a session named {} already exists",
-                renamed.name()
-            )));
-        }
-        Ok(())
     }
 
     fn refuse_taken_branch(
@@ -286,12 +269,48 @@ mod tests {
             )
         }
 
+        fn in_main_checkout() -> ServiceFixture {
+            let session = ServiceFixture::main_checkout_session("fix-auth");
+            let repo = Path::new(ServiceFixture::REPO);
+            ServiceFixture::new()
+                .with_sessions(std::slice::from_ref(&session))
+                .with_workspace(
+                    ServiceFixture::main_checkout_workspace()
+                        .with_published_branch(repo, session.branch()),
+                )
+                .with_host(ServiceFixture::host_for(&[&session]))
+        }
+
         fn registered(session: Session) -> ServiceFixture {
             ServiceFixture::new()
                 .with_registry(FakeSessionRegistry::with_sessions(vec![session.clone()]))
                 .with_workspace(ServiceFixture::workspace_for(&[&session]))
                 .with_host(ServiceFixture::host_for(&[&session]))
         }
+    }
+
+    #[test]
+    fn a_session_in_the_main_checkout_renames_on_a_pushed_branch_without_a_marker() {
+        let fixture = RenameFixture::in_main_checkout();
+
+        let renamed = fixture
+            .service()
+            .rename_session("fix-auth", "fix-login")
+            .unwrap();
+
+        assert_eq!(renamed.name().as_str(), "fix-login");
+    }
+
+    #[test]
+    fn renaming_a_session_in_the_main_checkout_changes_nothing_in_git() {
+        let fixture = RenameFixture::in_main_checkout();
+
+        fixture
+            .service()
+            .rename_session("fix-auth", "fix-login")
+            .unwrap();
+
+        assert!(fixture.workspace().state_changing_calls().is_empty());
     }
 
     #[test]

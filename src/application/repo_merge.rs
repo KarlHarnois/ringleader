@@ -46,6 +46,7 @@ impl<'a> RepoMerge<'a> {
         let repo = self.host.canonical_or_given(repo);
         sessions
             .iter()
+            .filter(|session| !session.runs_in_main_checkout())
             .filter(|session| self.host.canonical_or_given(session.repo_path()) == repo)
             .map(|session| Branch::Local(session.branch().to_string()))
             .collect()
@@ -107,6 +108,21 @@ mod tests {
         assert_eq!(
             RepoMerge::new(&host).session_branches_in(here.repo_path(), &[here.clone(), elsewhere]),
             [Branch::Local("main".to_string())]
+        );
+    }
+
+    #[test]
+    fn a_session_in_the_main_checkout_leaves_its_branch_on_the_ladder() {
+        let in_main_checkout = ServiceFixture::main_checkout_session("fix-auth");
+        let host = FakeHostProbe::default();
+
+        assert!(
+            RepoMerge::new(&host)
+                .session_branches_in(
+                    in_main_checkout.repo_path(),
+                    std::slice::from_ref(&in_main_checkout)
+                )
+                .is_empty()
         );
     }
 

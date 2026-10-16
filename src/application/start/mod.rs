@@ -1,4 +1,7 @@
+pub mod checkout_strategy;
 pub mod creation_plan;
+pub mod main_checkout_strategy;
+pub mod new_worktree_strategy;
 pub mod session_creation;
 pub mod session_envrc;
 pub mod session_restart;

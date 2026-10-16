@@ -24,6 +24,7 @@ impl PullRequestCatalog {
         let catalog = self.clone();
         let queries: Vec<PullRequestQuery> = sessions
             .iter()
+            .filter(|session| !session.runs_in_main_checkout())
             .map(|session| PullRequestQuery::of(session))
             .collect();
         Pending::start(move || Ok(catalog.fetch(queries)))
@@ -157,6 +158,16 @@ mod tests {
         let found = CatalogFixture::found(Arc::new(FakePullRequests::new()), &[&session]);
 
         assert_eq!(found.get("fix-auth"), Some(&None));
+    }
+
+    #[test]
+    fn a_session_in_the_main_checkout_is_never_looked_up() {
+        let session = ServiceFixture::main_checkout_session("fix-auth");
+        let fake = Arc::new(FakePullRequests::new());
+
+        CatalogFixture::found(fake.clone(), &[&session]);
+
+        assert!(fake.calls().is_empty());
     }
 
     #[test]

@@ -3,6 +3,7 @@ use std::sync::Arc;
 use super::delete_impact::{DeleteConfirmation, DeleteImpact};
 use super::delete_outcome::DeleteOutcome;
 use super::deletion_guards::{DeletionGuards, Measurement};
+use super::main_checkout_deletion::MainCheckoutDeletion;
 use crate::application::ServiceError;
 use crate::application::ServicePorts;
 use crate::application::checks::unseen_session::UnseenSession;
@@ -13,6 +14,7 @@ use crate::application::session_scratch::SessionScratch;
 use crate::domain::{Session, SessionState};
 
 pub struct SessionDeletion {
+    main_checkout: MainCheckoutDeletion,
     guards: DeletionGuards,
     unseen: UnseenSession,
     inspection: WorktreeInspection,
@@ -26,6 +28,7 @@ pub struct SessionDeletion {
 impl SessionDeletion {
     pub fn new(ports: &ServicePorts) -> Self {
         Self {
+            main_checkout: MainCheckoutDeletion::new(ports),
             guards: DeletionGuards::new(ports),
             unseen: UnseenSession::new(ports),
             inspection: WorktreeInspection::new(ports),
@@ -38,6 +41,9 @@ impl SessionDeletion {
     }
 
     pub fn impact(&self, row: &ManagedRow) -> Result<DeleteImpact, ServiceError> {
+        if row.session().runs_in_main_checkout() {
+            return self.main_checkout.impact(row);
+        }
         Ok(self.guards.measure(row)?.into_impact())
     }
 
@@ -47,6 +53,9 @@ impl SessionDeletion {
         remaining: &[Session],
         confirmation: &DeleteConfirmation,
     ) -> Result<DeleteOutcome, ServiceError> {
+        if row.session().runs_in_main_checkout() {
+            return self.main_checkout.delete(row, remaining, confirmation);
+        }
         if confirmation.forgets() {
             return self.forget(row, remaining, confirmation);
         }

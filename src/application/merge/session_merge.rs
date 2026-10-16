@@ -41,6 +41,7 @@ impl SessionMerge {
         config: &Config,
     ) -> Result<MergeReport, ServiceError> {
         let session = row.session();
+        Self::refuse_main_checkout(session)?;
         self.refuse_unsafe_merge(row)?;
         let upstream = self.fetch_upstream(session, reconciliation, config)?;
         self.refuse_unsafe_merge_now(session, reconciliation, config)?;
@@ -139,6 +140,17 @@ impl SessionMerge {
             .monitor
             .reconcile(reconciliation.entries(), config, observations);
         self.refuse_unsafe_merge(&current.managed(session.name().as_str())?)
+    }
+
+    fn refuse_main_checkout(session: &Session) -> Result<(), ServiceError> {
+        if session.allows_pull() {
+            return Ok(());
+        }
+        Err(ServiceError::Conflict(format!(
+            "session {} runs in the main checkout {}, and pull merges only into a worktree Ringleader made, never into your own checkout",
+            session.name(),
+            session.worktree_path().display()
+        )))
     }
 
     fn refuse_unsafe_merge(&self, row: &ManagedRow) -> Result<(), ServiceError> {
@@ -356,6 +368,18 @@ mod tests {
                 .iter()
                 .any(|call| call.starts_with("merge_upstream"))
         }
+    }
+
+    #[test]
+    fn a_session_in_the_main_checkout_refuses_the_pull_before_fetching() {
+        let in_main_checkout = ServiceFixture::main_checkout_session(MergeFixture::NAME);
+        let fixture = MergeFixture::waiting_as(in_main_checkout)
+            .with_workspace(ServiceFixture::main_checkout_workspace());
+
+        let error = MergeFixture::merge(&fixture).unwrap_err();
+
+        assert!(error.to_string().contains("runs in the main checkout"));
+        assert!(!MergeFixture::fetched_upstream(&fixture));
     }
 
     #[test]

@@ -10,8 +10,15 @@ pub struct DeleteOutcome {
     head: Option<String>,
     impact: DeleteImpact,
     branch: BranchPresence,
-    kept: Option<(PathBuf, String)>,
+    kept: Kept,
     stray_session: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Kept {
+    Nothing,
+    Forgotten(PathBuf, String),
+    MainCheckout(PathBuf, String),
 }
 
 impl DeleteOutcome {
@@ -28,7 +35,7 @@ impl DeleteOutcome {
             head,
             branch,
             impact: measurement.into_impact(),
-            kept: None,
+            kept: Kept::Nothing,
             stray_session: None,
         }
     }
@@ -41,15 +48,26 @@ impl DeleteOutcome {
     }
 
     pub fn forgotten(session: &Session) -> Self {
+        Self::keeping(Kept::Forgotten(
+            session.worktree_path().to_path_buf(),
+            session.branch().to_string(),
+        ))
+    }
+
+    pub fn checkout_kept(session: &Session) -> Self {
+        Self::keeping(Kept::MainCheckout(
+            session.worktree_path().to_path_buf(),
+            session.branch().to_string(),
+        ))
+    }
+
+    fn keeping(kept: Kept) -> Self {
         Self {
             tip: None,
             head: None,
             impact: DeleteImpact::default(),
             branch: BranchPresence::Present,
-            kept: Some((
-                session.worktree_path().to_path_buf(),
-                session.branch().to_string(),
-            )),
+            kept,
             stray_session: None,
         }
     }
@@ -76,18 +94,29 @@ impl DeleteOutcome {
     }
 
     pub fn kept(&self) -> Option<(&Path, &str)> {
-        self.kept
-            .as_ref()
-            .map(|(path, branch)| (path.as_path(), branch.as_str()))
+        match &self.kept {
+            Kept::Nothing => None,
+            Kept::Forgotten(path, branch) | Kept::MainCheckout(path, branch) => {
+                Some((path.as_path(), branch.as_str()))
+            }
+        }
     }
 
     pub fn summary(&self, name: &str) -> String {
-        if let Some((worktree, branch)) = self.kept() {
-            return format!(
+        match &self.kept {
+            Kept::Nothing => self.deleted_summary(name),
+            Kept::Forgotten(worktree, branch) => format!(
                 "forgot {name}, left the worktree {} and the branch {branch} on disk, run ringleader doctor",
                 worktree.display()
-            );
+            ),
+            Kept::MainCheckout(checkout, branch) => format!(
+                "deleted {name}, kept the main checkout {} and its branch {branch}",
+                checkout.display()
+            ),
         }
+    }
+
+    fn deleted_summary(&self, name: &str) -> String {
         match (self.branch, self.tip()) {
             (_, Some(tip)) => {
                 let head = self

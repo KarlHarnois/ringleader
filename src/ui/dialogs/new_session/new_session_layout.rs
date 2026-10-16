@@ -10,7 +10,9 @@ pub struct NewSessionLayout {
 
 impl NewSessionLayout {
     const PROMPT_FLOOR: usize = 1;
+    const CHECKOUT_ROWS: usize = 1;
     const MODE_ROWS: usize = 1;
+    const PINNED_ROWS: usize = Self::CHECKOUT_ROWS + Self::MODE_ROWS;
     const SPACER_ROWS: usize = 1;
     const ERROR_PLACEHOLDER_ROWS: usize = 1;
     const HINT_ROWS: usize = 1;
@@ -46,21 +48,21 @@ impl NewSessionLayout {
 
     pub fn areas(&self, upper_rows: usize) -> [Rect; 5] {
         let heights = self.heights_that_fit(upper_rows).map(Self::length);
-        let [upper, mode, prompt, _, errors, hints] =
+        let [upper, pinned, prompt, _, errors, hints] =
             Layout::vertical(heights).flex(Flex::Start).areas(self.area);
-        [upper, mode, prompt, errors, hints]
+        [upper, pinned, prompt, errors, hints]
     }
 
     fn heights_that_fit(&self, upper_rows: usize) -> [usize; 6] {
         let prompt_rows = self.prompt_rows();
-        let pinned_rows = Self::MODE_ROWS + prompt_rows + Self::HINT_ROWS;
+        let pinned_rows = Self::PINNED_ROWS + prompt_rows + Self::HINT_ROWS;
         let room = self.height().saturating_sub(pinned_rows);
         let error_rows = self.error_rows.min(room);
         let gap_rows = self.gap_rows();
         let upper_rows = upper_rows.min(room.saturating_sub(error_rows + gap_rows));
         [
             upper_rows,
-            Self::MODE_ROWS,
+            Self::PINNED_ROWS,
             prompt_rows,
             gap_rows,
             error_rows,
@@ -99,7 +101,7 @@ impl NewSessionLayout {
     fn spare_rows(&self) -> usize {
         let settled = self.fixed_upper_rows
             + self.repo_floor
-            + Self::MODE_ROWS
+            + Self::PINNED_ROWS
             + self.error_rows
             + Self::HINT_ROWS;
         self.height().saturating_sub(settled)
@@ -130,7 +132,7 @@ mod tests {
         const REPO_FLOOR: usize = 1;
         const UPPER_ROWS: usize = Self::FIXED_UPPER_ROWS + Self::REPO_FLOOR;
         const FIELDS_AND_HINTS_HEIGHT: usize =
-            Self::UPPER_ROWS + NewSessionLayout::MODE_ROWS + NewSessionLayout::HINT_ROWS;
+            Self::UPPER_ROWS + NewSessionLayout::PINNED_ROWS + NewSessionLayout::HINT_ROWS;
         const ROOM_FOR_A_ONE_ROW_PROMPT: usize =
             Self::FIELDS_AND_HINTS_HEIGHT + NewSessionLayout::PROMPT_FLOOR;
         const TALL_HEIGHT: usize = 20;
@@ -276,17 +278,18 @@ mod tests {
     }
 
     #[test]
-    fn a_short_area_keeps_the_mode_row_above_the_prompt_while_the_upper_rows_shrink() {
+    fn a_short_area_keeps_the_checkout_and_mode_rows_above_the_prompt_while_the_upper_rows_shrink()
+    {
         let error_rows = 2;
 
-        let [upper, mode, prompt, _, _] =
+        let [upper, pinned, prompt, _, _] =
             LayoutFixture::of_height(LayoutFixture::ROOM_FOR_A_ONE_ROW_PROMPT)
                 .with_error_rows(error_rows)
                 .areas();
 
         assert!(LayoutFixture::rows(upper) < LayoutFixture::UPPER_ROWS);
-        assert_eq!(LayoutFixture::rows(mode), NewSessionLayout::MODE_ROWS);
-        assert_eq!(mode.bottom(), prompt.y);
+        assert_eq!(LayoutFixture::rows(pinned), NewSessionLayout::PINNED_ROWS);
+        assert_eq!(pinned.bottom(), prompt.y);
     }
 
     #[test]

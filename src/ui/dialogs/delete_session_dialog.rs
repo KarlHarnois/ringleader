@@ -211,6 +211,27 @@ mod tests {
     }
 
     #[test]
+    fn the_dialog_of_a_session_in_the_main_checkout_says_the_checkout_stays() {
+        let row = SessionSummary::managed(
+            ServiceFixture::main_checkout_session("fix-auth"),
+            SessionState::Waiting,
+            false,
+        );
+
+        let screen = DeleteDialogFixture::screen(Dialog::delete(
+            Some(&row),
+            "fix-auth",
+            DeleteImpact::session_only(),
+            false,
+        ));
+
+        assert!(
+            screen.contains("the main checkout and its branch stay, delete ends only the session")
+        );
+        assert!(!screen.contains(".env"));
+    }
+
+    #[test]
     fn a_clean_session_is_deleted_on_the_first_confirmation() {
         let mut dialog = DeleteSessionDialog::new(None, "fix-auth", DeleteImpact::default());
 

@@ -13,7 +13,7 @@
 /_/ |_/___/_/ |_/\____/_____/_____/_/  |_/_____/_____/_/ |_|
 ```
 
-A tmux session manager for Claude and opencode. Each session runs an agent in its own git worktree and branch. A terminal UI lists the sessions grouped by repo and shows how each one is doing.
+A tmux session manager for Claude and opencode. Each session runs an agent in its own git worktree and branch, or in the repo's main checkout. A terminal UI lists the sessions grouped by repo and shows how each one is doing.
 
 Linux only.
 
@@ -36,7 +36,7 @@ Sessions run on Ringleader's own tmux server. It ignores your tmux config, and i
 ```
 ringleader
 ringleader list [--json]
-ringleader new --name <n> --repo <r> [--agent <a>] [--base-branch <b>] [--prompt <text>]
+ringleader new --name <n> --repo <r> [--agent <a>] [--base-branch <b> | --main-checkout] [--prompt <text>]
 ringleader delete <name> [--force] [--forget]
 ringleader attach <name>
 ringleader rename <old> <new>

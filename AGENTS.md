@@ -14,6 +14,9 @@ This file and the reference files it names are the living reference for working 
 | Private tmux server | The tmux server that Ringleader starts on its own socket |
 | Manual run | A run of the `ringleader` binary that you start by hand, TUI or CLI |
 | Marked branch | A branch that carries the `ringleaderManaged` git config marker |
+| Main checkout | A repo's own directory, which git lists as the repo's main worktree |
+| Main-checkout session | A session whose recorded worktree path is its repo path |
+| Worktree session | A session whose recorded worktree is a worktree that Ringleader created for the session |
 
 ## Values
 
@@ -23,6 +26,7 @@ This file and the reference files it names are the living reference for working 
 
 - Ringleader runs the private tmux server and never changes the user's tmux server, tmux config, or key bindings.
 - Ringleader deletes or renames only its marked branches.
+- Ringleader never changes a main checkout's files, index, `HEAD`, or checked-out branch.
 - Ringleader assumes no particular personal setup.
 - Four rules come from this value:
   - Every tmux call passes the private tmux server's socket.
@@ -34,7 +38,7 @@ This file and the reference files it names are the living reference for working 
 
 If an action could destroy work, Ringleader stops and says why instead of guessing.
 
-- Delete measures uncommitted files and unmerged commits, and asks before it deletes.
+- Delete measures uncommitted files and unmerged commits, and asks before it removes a worktree.
 - A failed create or rename undoes what it did.
 
 ### Fast and light
@@ -391,12 +395,13 @@ The hidden `__exec-agent` path loads no config, opens no log, and takes no lock.
 
 ### Sessions and branches
 
-- **A session's branch is its name.** A session's tmux session is the tmux prefix followed by its name.
-- Create and rename never record a branch that differs from the session's name.
-- Rename always moves the branch with the name.
-- Rename refuses a branch that has been pushed: the remote branch and any pull request keep the old name.
+- **A worktree session's branch is its name.** A session's tmux session is the tmux prefix followed by its name.
+- Create and rename never record a branch that differs from a worktree session's name.
+- Rename always moves a worktree session's branch with the name.
+- A main-checkout session records the branch checked out in the main checkout at create. Rename never moves that branch.
+- Rename refuses to move a pushed branch: the remote branch and any pull request keep the old name.
 - Rename never moves the worktree: the running agent and its transcripts are keyed by the worktree path.
-- A session recorded on another branch keeps working. Such a session comes from one of these:
+- A worktree session recorded on another branch keeps working. Such a session comes from one of these:
   - an adopted tmux session
   - a tmux session renamed by hand
 - If such a session's branch is marked and not pushed:

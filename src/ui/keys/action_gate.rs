@@ -191,6 +191,11 @@ impl<'a> ActionGate<'a> {
         self.writable()?;
         let row = self.selected()?;
         let name = row.name();
+        if row.session().is_some_and(|session| !session.allows_pull()) {
+            return Err(format!(
+                "{name} runs in the main checkout, so p cannot pull into it."
+            ));
+        }
         match row.state() {
             SessionState::Waiting => Ok(AppRequest::Block(BlockingOperation::Merge(
                 name.to_string(),
@@ -416,6 +421,17 @@ mod tests {
                 ))
             );
         }
+    }
+
+    #[test]
+    fn a_session_in_the_main_checkout_cannot_pull() {
+        let in_main_checkout = ServiceFixture::main_checkout_session("fix-auth");
+        let row = SessionSummary::managed(in_main_checkout, SessionState::Waiting, false);
+
+        assert_eq!(
+            ActionGate::new(Some(&row), None).pull(),
+            Err("fix-auth runs in the main checkout, so p cannot pull into it.".to_string())
+        );
     }
 
     #[test]

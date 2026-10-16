@@ -170,7 +170,8 @@ impl SessionLifecycle {
 
     fn refuse_launch_inside(&self, session: &Session) -> Result<(), ServiceError> {
         let containment = WorktreeContainment::new(self.host.as_ref());
-        if !containment.holds(session.worktree_path(), &self.launch_directory) {
+        let launched_inside = containment.holds(session.worktree_path(), &self.launch_directory);
+        if session.runs_in_main_checkout() || !launched_inside {
             return Ok(());
         }
         Err(ServiceError::Conflict(format!(
