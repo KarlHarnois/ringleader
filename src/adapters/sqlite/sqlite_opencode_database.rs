@@ -43,14 +43,9 @@ impl SqliteOpencodeDatabase {
         }
     }
 
-    fn query(
-        &self,
-        variables: &[(OsString, OsString)],
-        database: &Path,
-        query: &str,
-    ) -> Result<String, OpencodeDatabaseError> {
+    fn query(&self, database: &Path, query: &str) -> Result<String, OpencodeDatabaseError> {
         let call = Call::new(Self::SUBCOMMAND, CallKind::SqliteQuery);
-        let command = self.command(variables, database, query);
+        let command = self.command(database, query);
         let output = self
             .bounded
             .run(command, &call)
@@ -62,14 +57,14 @@ impl SqliteOpencodeDatabase {
         Ok(output.stdout_text())
     }
 
-    fn command(&self, variables: &[(OsString, OsString)], database: &Path, query: &str) -> Command {
+    fn command(&self, database: &Path, query: &str) -> Command {
         let mut command = Command::new(&self.program);
         command
             .args(Self::READ_ONLY_JSON)
             .arg(database)
             .arg(query)
             .env_clear()
-            .envs(variables.iter().cloned());
+            .envs(self.environment.baseline().variables().iter().cloned());
         command
     }
 
@@ -99,7 +94,7 @@ impl OpencodeDatabase for SqliteOpencodeDatabase {
         let Some(database) = Self::database(&variables) else {
             return Ok(None);
         };
-        self.query(&variables, &database, query).map(Some)
+        self.query(&database, query).map(Some)
     }
 }
 
@@ -119,6 +114,7 @@ mod tests {
     impl DatabaseFixture {
         const RECORDING_SQLITE: &'static str = "#!/bin/sh\n\
             printf '%s\\n' \"$@\" > \"$0.args\"\n\
+            env > \"$0.env\"\n\
             echo '[{\"one\":1}]'\n";
         const FAILING_SQLITE: &'static str =
             "#!/bin/sh\necho 'Error: unable to open database' >&2\nexit 1\n";
@@ -280,6 +276,22 @@ mod tests {
             fixture.arguments()[4],
             "/accounts/work/opencode/opencode.db"
         );
+    }
+
+    #[test]
+    fn sqlite_gets_none_of_the_agents_named_variables() {
+        let fixture = DatabaseFixture::new();
+        let variables = [
+            ("HOME", "/home/example"),
+            ("EXAMPLE_TOKEN", "example-secret"),
+        ];
+        let database = fixture.database(DatabaseFixture::RECORDING_SQLITE, &variables);
+        let agent = DatabaseFixture::agent().with_env_names(&["EXAMPLE_TOKEN".to_string()]);
+
+        database.read(&agent, DatabaseFixture::QUERY).unwrap();
+
+        let environment = fs::read_to_string(fixture.directory.path().join("sqlite3.env")).unwrap();
+        assert!(!environment.contains("example-secret"));
     }
 
     #[test]
