@@ -269,6 +269,7 @@ nix flake check
 
 - `adapters` also holds the process-level types that `CompositionRoot` uses directly.
 - Name each port adapter after its technology and its port, such as `GitWorkspace` or `TmuxMultiplexer`.
+- An adapter holds no business rule. `domain` or `application` decides what a port's answer means, so the adapter only translates.
 
 ### `ui` and `cli`
 
@@ -295,6 +296,10 @@ nix flake check
 | #59 | Port errors carry tool details, and two TUI types branch on those details. |
 | #60 | `ActionGate` decides which actions each session state allows. |
 | #61 | `CompositionRoot::run_tui` calls the TUI's startup use cases. |
+| #70 | The core encodes tmux's config quoting and socket limits. |
+| #71 | `Doctor` repeats the config writability check that the adapter owns. |
+| #72 | The core reasons about whether a worktree's `.git` is a file or a directory. |
+| #73 | `UpstreamMerger` enforces the pull guards. |
 
 ### New ports
 
