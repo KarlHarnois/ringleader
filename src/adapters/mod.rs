@@ -16,3 +16,11 @@ pub mod tmux;
 pub use child_process::bounded_command::BoundedCommand;
 pub use child_process::deadlines::Deadlines;
 pub use git::git_workspace::GitWorkspace;
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+compile_error!("Ringleader builds only for Linux and macOS");
+
+#[cfg(target_os = "macos")]
+pub use child_process::kqueue_exit_watch::KqueueExitWatch as ExitWatch;
+#[cfg(target_os = "linux")]
+pub use child_process::pidfd_exit_watch::PidfdExitWatch as ExitWatch;

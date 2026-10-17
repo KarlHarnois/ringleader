@@ -1,4 +1,5 @@
 pub mod app_log;
+pub mod errno;
 pub mod live_process;
 pub mod process_environment;
 pub mod signal_hook_interrupts;

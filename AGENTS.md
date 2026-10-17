@@ -229,6 +229,7 @@ nix flake check
 | `docs/agents/manual-runs.md` | make a manual run |
 | `docs/agents/uml-viewer.md` | open uml-viewer |
 | `docs/agents/source-folders.md` | add a file under `src/`, move a file there, or make a folder there |
+| `docs/agents/darwin-cross-check.md` | run the darwin cross-check |
 | `docs/agents/features/pull.md` | change the pull that the `p` key starts |
 | `docs/agents/features/direnv.md` | change how create or restart launches an agent, or which variables the agent gets |
 | `docs/agents/features/agent-hooks.md` | change how `AgentHooks` types into an agent, or the check that an agent is at its prompt |
@@ -383,6 +384,15 @@ Confine each `unsafe` block to one adapter method.
 **Every `new-session`, `new-window`, and `respawn-window` passes `-c` with the worktree.** Without `-c`, tmux starts the pane in the caller's directory and still exits 0.
 
 - A binding in the generated config passes `-c '#{session_path}'`. Ringleader renders the config before any session exists, and `create_session` starts each session in its worktree.
+
+## Platform code
+
+**Ringleader builds for Linux and Apple Silicon macOS.** A platform file is a file whose `mod` line limits it to one target OS through a `target_os` cfg attribute. A seam is a capability whose implementation the target OS picks, through one re-export in `adapters/mod.rs`.
+
+- Write a `target_os` cfg attribute only on a `mod` line under `adapters/`, on a seam's re-export, or on the `compile_error!`.
+- Every caller names a seam by its re-export.
+- If only macOS production code calls a platform-free file, compile the file under `#[cfg(any(target_os = "macos", test))]`. Otherwise, Linux builds it as dead code.
+- A change that edits a platform file is done only after the darwin cross-check passes.
 
 ## Wiring
 
