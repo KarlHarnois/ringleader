@@ -19,6 +19,7 @@ struct HostState {
     access: HashMap<PathBuf, DirectoryAccess>,
     processes: Vec<FakeProcess>,
     servers: HashSet<PathBuf>,
+    own: HashSet<u32>,
     terminated: Vec<u32>,
 }
 
@@ -108,6 +109,11 @@ impl FakeHostProbe {
             process.server_socket = Some(socket.to_path_buf());
         }
         drop(state);
+        self
+    }
+
+    pub fn refusing_to_terminate(self, pid: u32) -> Self {
+        self.state.lock().unwrap().own.insert(pid);
         self
     }
 
@@ -225,17 +231,20 @@ impl HostProbe for FakeHostProbe {
             .collect()
     }
 
-    fn terminate(&self, pids: &[u32]) -> Vec<ProcessInfo> {
+    fn terminate(&self, pids: &[u32]) -> Result<Vec<ProcessInfo>, HostProbeError> {
         let mut state = self.state.lock().unwrap();
+        if let Some(pid) = pids.iter().copied().find(|pid| state.own.contains(pid)) {
+            return Err(HostProbeError::OwnProcess { pid });
+        }
         state.terminated.extend_from_slice(pids);
         state
             .processes
             .retain(|process| process.survives_sigterm || !pids.contains(&process.info.pid()));
-        state
+        Ok(state
             .processes
             .iter()
             .filter(|process| pids.contains(&process.info.pid()))
             .map(|process| process.info.clone())
-            .collect()
+            .collect())
     }
 }

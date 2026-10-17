@@ -53,7 +53,7 @@ impl MainCheckoutDeletion {
 
     fn end_tmux_session(&self, row: &ManagedRow) -> Result<(), ServiceError> {
         let started_by_the_agent = self.teardown.kill(row, Self::KEPT_ON_TMUX_FAILURE)?;
-        let survivors = self.host.terminate(&started_by_the_agent);
+        let survivors = self.host.terminate(&started_by_the_agent)?;
         if survivors.is_empty() {
             return Ok(());
         }
@@ -212,6 +212,26 @@ mod tests {
         let error = CheckoutDeleteFixture::force(&fixture).unwrap_err();
 
         assert!(error.to_string().contains("end them by hand"));
+    }
+
+    #[test]
+    fn a_batch_the_host_refuses_to_end_keeps_the_session_recorded_and_ends_nothing() {
+        let host = CheckoutDeleteFixture::agent_host()
+            .with_process(
+                CheckoutDeleteFixture::DEV_SERVER,
+                "npm run dev",
+                CheckoutDeleteFixture::checkout(),
+                CheckoutDeleteFixture::PANE_SESSION,
+            )
+            .refusing_to_terminate(CheckoutDeleteFixture::DEV_SERVER);
+        let fixture = CheckoutDeleteFixture::with_agent_process(host);
+
+        let error = CheckoutDeleteFixture::force(&fixture).unwrap_err();
+
+        assert!(matches!(error, ServiceError::Conflict(_)), "{error}");
+        assert!(error.to_string().contains("end the processes by hand"));
+        assert!(fixture.host().terminated().is_empty());
+        assert_eq!(fixture.registry().sessions().len(), 1);
     }
 
     #[test]

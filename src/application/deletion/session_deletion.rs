@@ -132,7 +132,7 @@ impl SessionDeletion {
                 .iter()
                 .map(ProcessInfo::pid),
         );
-        let mut remaining = self.host.terminate(&targets);
+        let mut remaining = self.host.terminate(&targets)?;
         remaining.extend(self.host.processes_in(session.worktree_path(), &[]));
         if !remaining.is_empty() {
             return Err(ServiceError::Conflict(format!(
@@ -684,6 +684,23 @@ mod tests {
 
         assert!(error.to_string().contains("5300 (bash)"));
         assert!(fixture.multiplexer().live_names().is_empty());
+        DeleteFixture::assert_everything_kept(&fixture);
+    }
+
+    #[test]
+    fn a_batch_the_host_refuses_to_end_keeps_everything_and_ends_nothing() {
+        let session = DeleteFixture::session();
+        let fixture = DeleteFixture::live_fixture().with_host(
+            ServiceFixture::host_for(&[&session])
+                .with_process(5200, "vim", session.worktree_path(), 5200)
+                .refusing_to_terminate(5200),
+        );
+
+        let error = DeleteFixture::force(&mut fixture.service()).unwrap_err();
+
+        assert!(matches!(error, ServiceError::Conflict(_)), "{error}");
+        assert!(error.to_string().contains("end the processes by hand"));
+        assert!(fixture.host().terminated().is_empty());
         DeleteFixture::assert_everything_kept(&fixture);
     }
 
