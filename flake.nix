@@ -99,13 +99,15 @@
               ];
             runtimeEnv = llvmCoverageEnv;
           };
-          wrapTool =
-            name: tool: runtime:
+          pidNamespace = pkgs.lib.optionalString pkgs.stdenv.isLinux "${pkgs.util-linux}/bin/unshare --map-current-user --pid --fork --mount-proc ";
+          wrapTool = wrapToolBehind "";
+          wrapToolBehind =
+            prefix: name: tool: runtime:
             pkgs.writeShellApplication (
               runtime
               // {
                 inherit name;
-                text = ''exec ${tool}/bin/${name} "$@"'';
+                text = ''exec ${prefix}${tool}/bin/${name} "$@"'';
               }
             );
         in
@@ -118,7 +120,7 @@
             ;
           dryerApp = wrapTool "dryer" dryerTool gitRuntime;
           crapperApp = wrapTool "crapper" crapperTool coverageRuntime;
-          mutatorApp = wrapTool "mutator" mutatorTool coverageRuntime;
+          mutatorApp = wrapToolBehind pidNamespace "mutator" mutatorTool coverageRuntime;
         };
 
       forEachSystemWithMetricsTools = build: forEachSystem (pkgs: build pkgs (metricsTools pkgs));
@@ -241,7 +243,7 @@
               pkgs.clojure
               tools.dryerTool
               tools.crapperTool
-              tools.mutatorTool
+              tools.mutatorApp
             ];
             env = tools.llvmCoverageEnv;
             UML_VIEWER_DEPS = ''
