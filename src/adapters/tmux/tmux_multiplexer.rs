@@ -431,6 +431,12 @@ mod tests {
             }
         }
 
+        fn with_recorded_holder() -> Self {
+            let fixture = Self::with_holder();
+            fixture.server.multiplexer().server_state().unwrap();
+            fixture
+        }
+
         fn worktree(&self, name: &str) -> PathBuf {
             let worktree = self.server.directory().join("worktrees").join(name);
             fs::create_dir_all(&worktree).unwrap();
@@ -1390,8 +1396,8 @@ mod tests {
     }
 
     #[test]
-    fn creating_after_the_socket_was_removed_reuses_the_running_server() {
-        let fixture = MultiplexerFixture::with_holder();
+    fn creating_after_the_socket_was_removed_reuses_the_recorded_server() {
+        let fixture = MultiplexerFixture::with_recorded_holder();
         let first_server = fixture.server.server_pid();
         fs::remove_file(fixture.server.socket()).unwrap();
 
@@ -1408,7 +1414,7 @@ mod tests {
 
     #[test]
     fn a_stopped_server_that_cannot_restore_its_socket_refuses_the_creation() {
-        let fixture = MultiplexerFixture::with_holder();
+        let fixture = MultiplexerFixture::with_recorded_holder();
         let first_server = fixture.server.server_pid();
         MultiplexerFixture::signal(&first_server, "-STOP");
         fs::remove_file(fixture.server.socket()).unwrap();

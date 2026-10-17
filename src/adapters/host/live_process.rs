@@ -53,7 +53,7 @@ impl LiveProcess {
         Path::new(self.executable.trim_end_matches(Self::DELETED_SUFFIX))
     }
 
-    pub fn runs_under_server(&self, by_pid: &HashMap<u32, &LiveProcess>, socket: &str) -> bool {
+    pub fn runs_under_server(&self, by_pid: &HashMap<u32, &LiveProcess>, socket: &Path) -> bool {
         std::iter::successors(by_pid.get(&self.parent), |ancestor| {
             by_pid.get(&ancestor.parent)
         })
@@ -62,10 +62,10 @@ impl LiveProcess {
     }
 
     pub fn tmux_servers_on(socket: &Path) -> Vec<Self> {
-        Self::servers_among(Self::all(), &socket.to_string_lossy())
+        Self::servers_among(Self::all(), socket)
     }
 
-    fn servers_among(processes: Vec<Self>, socket: &str) -> Vec<Self> {
+    fn servers_among(processes: Vec<Self>, socket: &Path) -> Vec<Self> {
         let serving: Vec<Self> = processes
             .into_iter()
             .filter(|process| process.serves(socket))
@@ -95,11 +95,13 @@ impl LiveProcess {
         }
     }
 
-    fn serves(&self, socket: &str) -> bool {
+    pub fn serves(&self, socket: &Path) -> bool {
         let command_line = TmuxCommandLine::new(&self.arguments);
         self.owner == Self::current_user()
             && self.name == command_line.server_name()
-            && command_line.socket() == Some(socket)
+            && command_line
+                .socket()
+                .is_some_and(|named| Path::new(named) == socket)
     }
 
     pub fn all() -> Vec<Self> {
@@ -259,7 +261,7 @@ mod tests {
         let pane = ProcessFixture::forked_but_not_yet_exec(&server);
 
         let servers: Vec<u32> =
-            LiveProcess::servers_among(vec![server, pane], ProcessFixture::SOCKET)
+            LiveProcess::servers_among(vec![server, pane], Path::new(ProcessFixture::SOCKET))
                 .iter()
                 .map(LiveProcess::pid)
                 .collect();
@@ -273,6 +275,6 @@ mod tests {
         let agent = ProcessFixture::agent_under(&server);
         let by_pid = HashMap::from([(server.pid, &server), (agent.pid, &agent)]);
 
-        assert!(!agent.runs_under_server(&by_pid, ProcessFixture::SOCKET));
+        assert!(!agent.runs_under_server(&by_pid, Path::new(ProcessFixture::SOCKET)));
     }
 }

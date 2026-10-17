@@ -42,9 +42,11 @@ impl TmuxTestServer {
             .tempdir_in("/tmp")
             .expect("a socket directory under /tmp");
         let files = ServerFiles::new(
-            &directory.path().join("tmux.sock"),
+            &directory.path().join("tmux").join("tmux.sock"),
             &directory.path().join("tmux.conf"),
         );
+        std::fs::create_dir(files.socket().parent().expect("a socket directory"))
+            .expect("the test server socket directory is made");
         std::fs::write(files.config(), config_text).expect("the test server config is written");
         Self {
             directory,
@@ -78,6 +80,10 @@ impl TmuxTestServer {
 
     pub fn socket(&self) -> &Path {
         self.files.socket()
+    }
+
+    pub fn socket_directory(&self) -> &Path {
+        self.socket().parent().expect("a socket directory")
     }
 
     pub fn config(&self) -> &Path {

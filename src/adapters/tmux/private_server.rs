@@ -10,7 +10,9 @@ use super::tmux_command::TmuxCommand;
 use super::tmux_error::TmuxError;
 use super::tmux_launch::{Launched, TmuxLaunch};
 use super::tmux_listing::TmuxListing;
+use super::tmux_output::TmuxOutput;
 use super::tmux_scripts::TmuxScripts;
+use super::tmux_sequence::TmuxSequence;
 use super::tmux_server_config::TmuxServerConfig;
 use crate::adapters::host::live_process::LiveProcess;
 use crate::application::ports::{MultiplexerError, ServerConfig, ServerState};
@@ -47,43 +49,51 @@ impl<'a> PrivateServer<'a> {
     }
 
     pub fn socket_lost(&self) -> bool {
-        !self.servers_without_socket().is_empty()
+        let files = self.tmux.server();
+        Self::is_missing(files.socket())
+            && !files.server_is_starting()
+            && !LiveProcess::tmux_servers_on(files.socket()).is_empty()
     }
 
     pub fn restore_socket(&self) -> Result<bool, MultiplexerError> {
-        let servers = self.servers_without_socket();
-        if servers.is_empty() {
+        if !self.socket_lost() {
             return Ok(false);
         }
+        let server = self.recorded_server()?;
         self.tmux.server().prepare_socket_directory()?;
-        let failures: Vec<String> = servers
-            .iter()
-            .filter_map(|server| {
-                let error = server.signal(libc::SIGUSR1).err()?;
-                Some(format!(
-                    "SIGUSR1 to tmux server {} failed: {error}",
-                    server.pid()
-                ))
-            })
-            .collect();
-        if failures.len() == servers.len() {
-            return Err(self.socket_not_restored(&failures.join("; ")));
+        server.signal(libc::SIGUSR1).map_err(|error| {
+            self.socket_not_restored(&format!(
+                "SIGUSR1 to tmux server {} failed: {error}",
+                server.pid()
+            ))
+        })?;
+        if self.socket_returns() {
+            return Ok(true);
         }
-        match self.socket_returns() {
-            true => Ok(true),
-            false => Err(self.socket_not_restored(&format!(
-                "the server did not recreate it within {} seconds",
-                Self::RESTORE_LIMIT.as_secs()
-            ))),
-        }
+        Err(self.socket_not_restored(&format!(
+            "the server did not recreate it within {} seconds",
+            Self::RESTORE_LIMIT.as_secs()
+        )))
     }
 
-    fn servers_without_socket(&self) -> Vec<LiveProcess> {
+    fn recorded_server(&self) -> Result<LiveProcess, MultiplexerError> {
         let files = self.tmux.server();
-        match Self::is_missing(files.socket()) && !files.server_is_starting() {
-            true => LiveProcess::tmux_servers_on(files.socket()),
-            false => Vec::new(),
+        let Some(pid) = files.recorded_server_pid() else {
+            return Err(
+                self.socket_not_restored("no server pid is recorded, so no process was signalled")
+            );
+        };
+        let Some(process) = LiveProcess::read(pid) else {
+            return Err(
+                self.socket_not_restored(&format!("the recorded server pid {pid} no longer runs"))
+            );
+        };
+        if !process.serves(files.socket()) {
+            return Err(self.socket_not_restored(&format!(
+                "the recorded pid {pid} now names another process"
+            )));
         }
+        Ok(process)
     }
 
     fn socket_returns(&self) -> bool {
@@ -109,7 +119,7 @@ impl<'a> PrivateServer<'a> {
     }
 
     pub fn state(&self) -> Result<Option<ServerState>, MultiplexerError> {
-        let output = self.tmux.query(&TmuxScripts::server_state())?;
+        let output = self.query_recording_pid(&TmuxScripts::server_state())?;
         if let Some(state) = TmuxListing::new(&output).server_state() {
             return Ok(Some(state));
         }
@@ -156,13 +166,13 @@ impl<'a> PrivateServer<'a> {
     }
 
     fn binds_return_key(&self) -> Result<bool, MultiplexerError> {
-        let output = self.tmux.query(&TmuxScripts::root_keys())?;
+        let output = self.query_recording_pid(&TmuxScripts::root_keys())?;
         Ok(TmuxListing::new(&output).binds_detach())
     }
 
     fn running_config(&self) -> Result<Option<RunningConfig>, MultiplexerError> {
         let query = TmuxScripts::server_values(&RunningConfig::formats());
-        let output = self.tmux.query(&query)?;
+        let output = self.query_recording_pid(&query)?;
         if let Some(running) = RunningConfig::read(&output) {
             return Ok(Some(running));
         }
@@ -170,6 +180,14 @@ impl<'a> PrivateServer<'a> {
             return Ok(None);
         }
         Err(TmuxError::failed("display-message", &output).into())
+    }
+
+    fn query_recording_pid(&self, query: &TmuxSequence) -> Result<TmuxOutput, MultiplexerError> {
+        let output = self.tmux.query(query)?;
+        if let Some(pid) = TmuxListing::new(&output).server_pid() {
+            self.tmux.server().record_server_pid(pid);
+        }
+        Ok(output)
     }
 }
 
@@ -197,6 +215,16 @@ mod tests {
 
         fn alt_n_and_alt_down() -> KeyBindings {
             KeyBindings::default().with_next_session_keys(HotKey::parse_valid(["M-n", "M-Down"]))
+        }
+
+        fn record_server_pid(tmux: &TmuxCommand) {
+            PrivateServer::new(tmux).state().unwrap();
+        }
+
+        fn exited_pid() -> u32 {
+            let mut child = std::process::Command::new("true").spawn().unwrap();
+            child.wait().unwrap();
+            child.id()
         }
 
         fn start_lock(server: &TmuxTestServer) -> fs::File {
@@ -306,9 +334,10 @@ mod tests {
     }
 
     #[test]
-    fn a_server_whose_socket_was_removed_gets_it_back_with_its_sessions() {
+    fn a_recorded_server_whose_socket_was_removed_gets_it_back_with_its_sessions() {
         let server = TmuxTestServer::with_session("holder");
         let tmux = server.command();
+        ServerFixture::record_server_pid(&tmux);
         fs::remove_file(server.socket()).unwrap();
 
         let restored = PrivateServer::new(&tmux).restore_socket().unwrap();
@@ -322,14 +351,59 @@ mod tests {
     }
 
     #[test]
+    fn a_server_whose_pid_was_never_recorded_is_refused_a_restore() {
+        let server = TmuxTestServer::with_session("holder");
+        let tmux = server.command();
+        fs::remove_file(server.socket()).unwrap();
+
+        let error = PrivateServer::new(&tmux).restore_socket().unwrap_err();
+
+        assert!(
+            error.to_string().contains("no server pid is recorded"),
+            "{error}"
+        );
+        assert!(!server.socket().exists());
+    }
+
+    #[test]
+    fn a_recorded_pid_that_no_longer_runs_is_refused_a_restore() {
+        let server = TmuxTestServer::with_session("holder");
+        let tmux = server.command();
+        tmux.server().record_server_pid(ServerFixture::exited_pid());
+        fs::remove_file(server.socket()).unwrap();
+
+        let error = PrivateServer::new(&tmux).restore_socket().unwrap_err();
+
+        assert!(error.to_string().contains("no longer runs"), "{error}");
+        assert!(!server.socket().exists());
+    }
+
+    #[test]
+    fn a_stale_pid_that_now_names_another_process_is_refused_a_restore() {
+        let server = TmuxTestServer::with_session("holder");
+        let tmux = server.command();
+        tmux.server().record_server_pid(std::process::id());
+        fs::remove_file(server.socket()).unwrap();
+
+        let error = PrivateServer::new(&tmux).restore_socket().unwrap_err();
+
+        assert!(
+            error.to_string().contains("now names another process"),
+            "{error}"
+        );
+        assert!(!server.socket().exists());
+    }
+
+    #[test]
     fn a_removed_socket_directory_comes_back_private() {
         let server = TmuxTestServer::with_session("holder");
         let tmux = server.command();
-        fs::remove_dir_all(server.directory()).unwrap();
+        ServerFixture::record_server_pid(&tmux);
+        fs::remove_dir_all(server.socket_directory()).unwrap();
 
         let restored = PrivateServer::new(&tmux).restore_socket().unwrap();
 
-        let mode = fs::metadata(server.directory())
+        let mode = fs::metadata(server.socket_directory())
             .unwrap()
             .permissions()
             .mode();
@@ -342,6 +416,7 @@ mod tests {
         let server = TmuxTestServer::with_session("holder");
         let tmux = server.command();
         let private = PrivateServer::new(&tmux);
+        ServerFixture::record_server_pid(&tmux);
         fs::remove_file(server.socket()).unwrap();
         let lock = ServerFixture::start_lock(&server);
         lock.lock().unwrap();
@@ -359,6 +434,7 @@ mod tests {
     fn a_start_lock_left_behind_does_not_stop_the_recovery() {
         let server = TmuxTestServer::with_session("holder");
         let tmux = server.command();
+        ServerFixture::record_server_pid(&tmux);
         fs::remove_file(server.socket()).unwrap();
         drop(ServerFixture::start_lock(&server));
 
@@ -379,6 +455,19 @@ mod tests {
         let tmux = server.command();
 
         assert!(!PrivateServer::new(&tmux).restore_socket().unwrap());
+    }
+
+    #[test]
+    fn reading_the_state_of_a_live_server_records_its_pid_beside_the_config() {
+        let server = TmuxTestServer::with_session("holder");
+        let tmux = server.command();
+
+        PrivateServer::new(&tmux).state().unwrap();
+
+        assert_eq!(
+            tmux.server().recorded_server_pid(),
+            Some(server.server_pid().parse::<u32>().unwrap())
+        );
     }
 
     #[test]

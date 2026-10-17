@@ -16,6 +16,7 @@ pub struct ServerFiles {
 
 impl ServerFiles {
     const START_LOCK_SUFFIX: &'static str = ".lock";
+    const SERVER_PID_EXTENSION: &'static str = "pid";
 
     pub fn new(socket: &Path, config: &Path) -> Self {
         Self {
@@ -34,12 +35,41 @@ impl ServerFiles {
 
     pub fn prepare(&self, config_text: &str) -> Result<(), MultiplexerError> {
         self.prepare_socket_directory()?;
-        if let Some(config_directory) = self.config.parent() {
-            fs::create_dir_all(config_directory).map_err(Self::failed_at(config_directory))?;
-        }
+        self.prepare_config_directory()?;
         DurableFile::new(&self.config)
             .write(config_text.as_bytes())
             .map_err(Self::failed_at(&self.config))
+    }
+
+    pub fn record_server_pid(&self, pid: u32) {
+        let record = self.server_pid_record();
+        let written = self.prepare_config_directory().and_then(|()| {
+            DurableFile::new(&record)
+                .write(pid.to_string().as_bytes())
+                .map_err(Self::failed_at(&record))
+        });
+        if let Err(error) = written {
+            log::warn!("could not record the tmux server pid: {error}");
+        }
+    }
+
+    pub fn recorded_server_pid(&self) -> Option<u32> {
+        fs::read_to_string(self.server_pid_record())
+            .ok()?
+            .trim()
+            .parse()
+            .ok()
+    }
+
+    fn server_pid_record(&self) -> PathBuf {
+        self.config.with_extension(Self::SERVER_PID_EXTENSION)
+    }
+
+    fn prepare_config_directory(&self) -> Result<(), MultiplexerError> {
+        let Some(config_directory) = self.config.parent() else {
+            return Ok(());
+        };
+        fs::create_dir_all(config_directory).map_err(Self::failed_at(config_directory))
     }
 
     pub fn prepare_socket_directory(&self) -> Result<(), MultiplexerError> {
@@ -114,6 +144,45 @@ mod tests {
             error
                 .to_string()
                 .contains(&socket.parent().unwrap().display().to_string())
+        );
+    }
+
+    #[test]
+    fn the_server_pid_record_lives_beside_the_config_and_not_the_socket() {
+        let directory = tempfile::tempdir().unwrap();
+        let socket = directory.path().join("run/ringleader/tmux/tmux.sock");
+        let config = directory.path().join("state/ringleader/tmux.conf");
+        let files = ServerFiles::new(&socket, &config);
+
+        files.record_server_pid(4100);
+
+        assert_eq!(files.recorded_server_pid(), Some(4100));
+        assert!(config.with_file_name("tmux.pid").is_file());
+        assert!(!socket.parent().unwrap().exists());
+    }
+
+    #[test]
+    fn without_a_record_there_is_no_server_pid() {
+        let directory = tempfile::tempdir().unwrap();
+        let socket = directory.path().join("run/ringleader/tmux/tmux.sock");
+        let config = directory.path().join("state/ringleader/tmux.conf");
+
+        assert_eq!(
+            ServerFiles::new(&socket, &config).recorded_server_pid(),
+            None
+        );
+    }
+
+    #[test]
+    fn a_record_that_holds_no_pid_is_no_server_pid() {
+        let directory = tempfile::tempdir().unwrap();
+        let socket = directory.path().join("tmux.sock");
+        let config = directory.path().join("tmux.conf");
+        fs::write(directory.path().join("tmux.pid"), "not a pid\n").unwrap();
+
+        assert_eq!(
+            ServerFiles::new(&socket, &config).recorded_server_pid(),
+            None
         );
     }
 

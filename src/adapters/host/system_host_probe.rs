@@ -145,14 +145,13 @@ impl HostProbe for SystemHostProbe {
     }
 
     fn processes_under_server(&self, path: &Path, socket: &Path) -> Vec<ProcessInfo> {
-        let socket = socket.to_string_lossy();
         let processes = LiveProcess::all();
         let by_pid: HashMap<u32, &LiveProcess> = processes
             .iter()
             .map(|process| (process.pid(), process))
             .collect();
         self.others_in(&processes, path)
-            .filter(|process| process.runs_under_server(&by_pid, &socket))
+            .filter(|process| process.runs_under_server(&by_pid, socket))
             .map(LiveProcess::info)
             .collect()
     }
