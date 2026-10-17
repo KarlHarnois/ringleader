@@ -4,7 +4,7 @@ pub struct GhQuery {
 
 impl GhQuery {
     const CANDIDATES: &'static str = "first: 10, orderBy: {field: CREATED_AT, direction: DESC}";
-    const FIELDS: &'static str = "number state isDraft createdAt headRepositoryOwner { login }";
+    const FIELDS: &'static str = "number url state isDraft createdAt headRepositoryOwner { login }";
 
     pub fn new(branches: &[String]) -> Self {
         Self {
@@ -64,5 +64,16 @@ mod tests {
         assert!(text.contains("branch1: pullRequests(headRefName: $branch1,"));
         assert!(text.contains("viewer { login }"));
         assert!(text.contains("headRepositoryOwner { login }"));
+    }
+
+    #[test]
+    fn the_query_asks_for_the_url_of_every_pull_request() {
+        let arguments = GhQuery::new(&["fix-auth".to_string()]).arguments();
+
+        assert!(
+            arguments
+                .iter()
+                .any(|argument| argument.contains("nodes { number url state"))
+        );
     }
 }

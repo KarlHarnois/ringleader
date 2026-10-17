@@ -56,6 +56,7 @@ Each way comes from an ecosystem users already know, and keeps the meaning it ha
 | A text field | readline |
 | A fuzzy picker | fzf |
 | The key that opens a finder | the `Ctrl-K` quick switcher, as in Slack, Discord, and GitHub |
+| The key that opens a pull request in the browser | the `o` open key, as in gh-dash, newsboat, and GitHub |
 
 - The arrow keys work wherever an ecosystem's movement keys work.
 - If no ecosystem in the table covers a new key, ask the project owner which ecosystem the key follows.

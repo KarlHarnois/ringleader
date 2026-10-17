@@ -2,7 +2,7 @@ use thiserror::Error;
 
 use super::ports::{
     ConfigError, HostProbeError, MultiplexerError, RegistryError, TerminalEmulatorError,
-    WorkspaceError,
+    WebBrowserError, WorkspaceError,
 };
 use crate::application::DeleteImpact;
 use crate::domain::InvalidName;
@@ -102,6 +102,12 @@ impl From<HostProbeError> for ServiceError {
 
 impl From<TerminalEmulatorError> for ServiceError {
     fn from(error: TerminalEmulatorError) -> Self {
+        ServiceError::Failed(error.to_string())
+    }
+}
+
+impl From<WebBrowserError> for ServiceError {
+    fn from(error: WebBrowserError) -> Self {
         ServiceError::Failed(error.to_string())
     }
 }

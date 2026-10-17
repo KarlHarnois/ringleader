@@ -335,6 +335,14 @@ impl SessionService {
         self.access.open_terminal(session)
     }
 
+    pub fn open_pull_request(&self, name: &str) -> Result<(), ServiceError> {
+        let pull_request = self
+            .entry(name)
+            .and_then(|session| self.pull_request_catalog.latest(session))
+            .ok_or_else(|| ServiceError::NotFound(format!("{name} has no pull request")))?;
+        self.access.open_pull_request(&pull_request)
+    }
+
     pub fn poll_startup_input(&self) {
         self.lifecycle.poll_startup_input();
     }

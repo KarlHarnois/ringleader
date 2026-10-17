@@ -90,7 +90,7 @@ impl PullRequests for FakePullRequests {
                 let found = state
                     .pull_requests
                     .get(&(repo.clone(), branch.clone()))
-                    .copied();
+                    .cloned();
                 (branch.clone(), found)
             })
             .collect())

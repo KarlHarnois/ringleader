@@ -11,6 +11,7 @@
         "nodes": [
           {
             "number": 300,
+            "url": "https://github.example.com/example-org/example-project/pull/300",
             "state": "OPEN",
             "isDraft": false,
             "createdAt": "2023-11-14T22:28:20Z",
@@ -20,6 +21,7 @@
           },
           {
             "number": 42,
+            "url": "https://github.example.com/example-org/example-project/pull/42",
             "state": "OPEN",
             "isDraft": false,
             "createdAt": "2023-11-14T22:13:20Z",
