@@ -13,23 +13,25 @@
 /_/ |_/___/_/ |_/\____/_____/_____/_/  |_/_____/_____/_/ |_|
 ```
 
-A tmux session manager for Claude and opencode. Each session runs an agent in its own git worktree and branch, or in the repo's main checkout. A terminal UI lists the sessions grouped by repo and shows how each one is doing.
+Ringleader is a tmux session manager for Claude Code and opencode. Each session runs an agent in its own git worktree and branch, or in the repo's main checkout. Ringleader's TUI lists the sessions grouped by repo and shows how each one is doing.
 
-Linux only.
+Ringleader runs only on Linux.
 
 ## Install
+
+**Install Ringleader with [Nix](https://nixos.org/download/):**
 
 ```sh
 nix profile add github:KarlHarnois/ringleader
 ```
 
-Nix older than 2.30 spells `nix profile add` as `nix profile install`.
+**If your Nix is older than 2.30, run `nix profile install` instead of `nix profile add`.**
 
 ## First run
 
-Run `ringleader` in a directory that holds your repos. It opens the TUI and writes a commented config, with Claude Code and opencode as agents. Its comments show how to pass variables to an agent, for example to run Claude Code under a second account.
+**Run `ringleader` in a directory that holds your repos.** The command opens the TUI. If no config exists, the command writes a commented config with Claude Code and opencode as agents.
 
-Sessions run on Ringleader's own tmux server. It ignores your tmux config, and its sessions do not show in your `tmux ls`. Ctrl-Q detaches from a session back to the TUI, and `?` lists the keys.
+Sessions run on Ringleader's own tmux server. The server ignores your tmux config, and its sessions do not show in your `tmux ls`. Ctrl-Q detaches you from a session and returns you to the TUI or the shell you attached from.
 
 ## CLI
 
@@ -54,6 +56,13 @@ Every command accepts `--config <path>` and `--log-level <level>`.
 | Code | Meaning |
 |---|---|
 | 0 | success |
-| 1 | invalid input or a failure |
-| 2 | no session or `[[repos]]` entry with that name |
-| 3 | conflict with existing state, such as a taken name or branch, a running session, a delete that would lose work, or a held lock |
+| 1 | invalid input or any other failure |
+| 2 | no session or `[[repos]]` entry with the given name |
+| 3 | conflict with existing state |
+
+Conflicts with existing state include these:
+
+- a taken name or branch
+- a running session
+- a delete that would lose work
+- a held lock
