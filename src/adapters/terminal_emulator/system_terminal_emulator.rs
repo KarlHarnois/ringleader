@@ -170,8 +170,52 @@ fi"#;
             }
         }
 
-        fn programs(&self) -> &RecordingPrograms {
-            &self.programs
+        fn install(&self, name: &str) -> PathBuf {
+            self.programs.install(name)
+        }
+
+        fn install_failing(&self, name: &str) -> PathBuf {
+            self.programs.install_failing(name)
+        }
+
+        fn install_unexecutable(&self, name: &str) -> PathBuf {
+            self.programs.install_unexecutable(name)
+        }
+
+        fn install_lingering(&self, name: &str) -> PathBuf {
+            self.programs.install_lingering(name)
+        }
+
+        fn program_directory(&self) -> PathBuf {
+            self.programs.program_directory()
+        }
+
+        fn pid(&self, name: &str) -> Option<u32> {
+            self.programs.pid(name)
+        }
+
+        fn never_ran(&self, name: &str) -> bool {
+            self.programs.never_ran(name)
+        }
+
+        fn ran_in(&self, name: &str) -> Option<PathBuf> {
+            self.programs.ran_in(name)
+        }
+
+        fn environment_of(&self, name: &str) -> Vec<String> {
+            self.programs.environment_of(name)
+        }
+
+        fn streams_of(&self, name: &str) -> String {
+            self.programs.streams_of(name)
+        }
+
+        fn arguments_of(&self, name: &str) -> String {
+            self.programs.arguments_of(name)
+        }
+
+        fn session_of(&self, name: &str) -> Option<u32> {
+            self.programs.session_of(name)
         }
 
         fn worktree(&self) -> &Path {
@@ -207,16 +251,12 @@ fi"#;
     #[test]
     fn xdg_terminal_exec_on_the_path_opens_in_the_directory() {
         let fixture = TerminalFixture::new();
-        fixture
-            .programs()
-            .install(TerminalFixture::XDG_TERMINAL_EXEC);
+        fixture.install(TerminalFixture::XDG_TERMINAL_EXEC);
 
         fixture.open_with(&[TerminalFixture::WAYLAND]).unwrap();
 
         assert_eq!(
-            fixture
-                .programs()
-                .ran_in(TerminalFixture::XDG_TERMINAL_EXEC),
+            fixture.ran_in(TerminalFixture::XDG_TERMINAL_EXEC),
             Some(fixture.canonical_worktree())
         );
     }
@@ -224,16 +264,12 @@ fi"#;
     #[test]
     fn xdg_terminal_exec_passes_the_directory_on_to_a_running_terminal() {
         let fixture = TerminalFixture::new();
-        fixture
-            .programs()
-            .install(TerminalFixture::XDG_TERMINAL_EXEC);
+        fixture.install(TerminalFixture::XDG_TERMINAL_EXEC);
 
         fixture.open_with(&[TerminalFixture::WAYLAND]).unwrap();
 
         assert_eq!(
-            fixture
-                .programs()
-                .arguments_of(TerminalFixture::XDG_TERMINAL_EXEC),
+            fixture.arguments_of(TerminalFixture::XDG_TERMINAL_EXEC),
             format!("--dir={}\n", fixture.worktree().display())
         );
     }
@@ -241,16 +277,11 @@ fi"#;
     #[test]
     fn the_window_opens_without_waiting_for_the_program_to_end() {
         let fixture = TerminalFixture::new();
-        fixture
-            .programs()
-            .install_lingering(TerminalFixture::XDG_TERMINAL_EXEC);
+        fixture.install_lingering(TerminalFixture::XDG_TERMINAL_EXEC);
 
         fixture.open_with(&[TerminalFixture::WAYLAND]).unwrap();
 
-        let pid = fixture
-            .programs()
-            .pid(TerminalFixture::XDG_TERMINAL_EXEC)
-            .unwrap();
+        let pid = fixture.pid(TerminalFixture::XDG_TERMINAL_EXEC).unwrap();
         let process = LiveProcess::read(pid).unwrap();
         let running = process.is_alive();
         process.signal(libc::SIGTERM).unwrap();
@@ -260,10 +291,8 @@ fi"#;
     #[test]
     fn xdg_terminal_exec_wins_over_the_terminal_variable() {
         let fixture = TerminalFixture::new();
-        fixture
-            .programs()
-            .install(TerminalFixture::XDG_TERMINAL_EXEC);
-        let named = fixture.programs().install(TerminalFixture::NAMED_TERMINAL);
+        fixture.install(TerminalFixture::XDG_TERMINAL_EXEC);
+        let named = fixture.install(TerminalFixture::NAMED_TERMINAL);
 
         fixture
             .open_with(&[
@@ -272,23 +301,14 @@ fi"#;
             ])
             .unwrap();
 
-        assert!(
-            fixture
-                .programs()
-                .pid(TerminalFixture::XDG_TERMINAL_EXEC)
-                .is_some()
-        );
-        assert!(
-            fixture
-                .programs()
-                .never_ran(TerminalFixture::NAMED_TERMINAL)
-        );
+        assert!(fixture.pid(TerminalFixture::XDG_TERMINAL_EXEC).is_some());
+        assert!(fixture.never_ran(TerminalFixture::NAMED_TERMINAL));
     }
 
     #[test]
     fn without_xdg_terminal_exec_the_terminal_variable_names_one_program() {
         let fixture = TerminalFixture::new();
-        let named = fixture.programs().install(TerminalFixture::NAMED_TERMINAL);
+        let named = fixture.install(TerminalFixture::NAMED_TERMINAL);
 
         fixture
             .open_with(&[
@@ -298,27 +318,22 @@ fi"#;
             .unwrap();
 
         assert_eq!(
-            fixture.programs().ran_in(TerminalFixture::NAMED_TERMINAL),
+            fixture.ran_in(TerminalFixture::NAMED_TERMINAL),
             Some(fixture.canonical_worktree())
         );
-        assert_eq!(
-            fixture
-                .programs()
-                .arguments_of(TerminalFixture::NAMED_TERMINAL),
-            ""
-        );
+        assert_eq!(fixture.arguments_of(TerminalFixture::NAMED_TERMINAL), "");
     }
 
     #[test]
     fn a_bare_terminal_name_is_found_on_the_path_ringleader_started_with() {
         let fixture = TerminalFixture::new();
-        fixture.programs().install("example-terminal");
+        fixture.install("example-terminal");
 
         fixture
             .open_with(&[TerminalFixture::WAYLAND, ("TERMINAL", "example-terminal")])
             .unwrap();
 
-        assert!(fixture.programs().pid("example-terminal").is_some());
+        assert!(fixture.pid("example-terminal").is_some());
     }
 
     #[test]
@@ -339,9 +354,7 @@ fi"#;
     #[test]
     fn without_a_graphical_display_nothing_starts() {
         let fixture = TerminalFixture::new();
-        fixture
-            .programs()
-            .install(TerminalFixture::XDG_TERMINAL_EXEC);
+        fixture.install(TerminalFixture::XDG_TERMINAL_EXEC);
 
         let error = fixture
             .open_with(&[("WAYLAND_DISPLAY", ""), ("DISPLAY", "")])
@@ -352,36 +365,23 @@ fi"#;
             error.to_string(),
             "no graphical display is available, WAYLAND_DISPLAY and DISPLAY are unset or empty"
         );
-        assert!(
-            fixture
-                .programs()
-                .never_ran(TerminalFixture::XDG_TERMINAL_EXEC)
-        );
+        assert!(fixture.never_ran(TerminalFixture::XDG_TERMINAL_EXEC));
     }
 
     #[test]
     fn an_x11_display_is_enough() {
         let fixture = TerminalFixture::new();
-        fixture
-            .programs()
-            .install(TerminalFixture::XDG_TERMINAL_EXEC);
+        fixture.install(TerminalFixture::XDG_TERMINAL_EXEC);
 
         fixture.open_with(&[("DISPLAY", ":0")]).unwrap();
 
-        assert!(
-            fixture
-                .programs()
-                .pid(TerminalFixture::XDG_TERMINAL_EXEC)
-                .is_some()
-        );
+        assert!(fixture.pid(TerminalFixture::XDG_TERMINAL_EXEC).is_some());
     }
 
     #[test]
     fn the_program_gets_the_environment_without_the_tmux_variables() {
         let fixture = TerminalFixture::new();
-        fixture
-            .programs()
-            .install(TerminalFixture::XDG_TERMINAL_EXEC);
+        fixture.install(TerminalFixture::XDG_TERMINAL_EXEC);
 
         fixture
             .open_with(&[
@@ -393,12 +393,10 @@ fi"#;
             .unwrap();
 
         assert_eq!(
-            fixture
-                .programs()
-                .environment_of(TerminalFixture::XDG_TERMINAL_EXEC),
+            fixture.environment_of(TerminalFixture::XDG_TERMINAL_EXEC),
             [
                 "EXAMPLE_SETTING=kept".to_string(),
-                format!("PATH={}", fixture.programs().program_directory().display()),
+                format!("PATH={}", fixture.program_directory().display()),
                 "WAYLAND_DISPLAY=wayland-1".to_string(),
             ]
         );
@@ -407,16 +405,12 @@ fi"#;
     #[test]
     fn the_program_reads_and_writes_none_of_the_terminal() {
         let fixture = TerminalFixture::new();
-        fixture
-            .programs()
-            .install(TerminalFixture::XDG_TERMINAL_EXEC);
+        fixture.install(TerminalFixture::XDG_TERMINAL_EXEC);
 
         fixture.open_with(&[TerminalFixture::WAYLAND]).unwrap();
 
         assert_eq!(
-            fixture
-                .programs()
-                .streams_of(TerminalFixture::XDG_TERMINAL_EXEC),
+            fixture.streams_of(TerminalFixture::XDG_TERMINAL_EXEC),
             "null\nnull\nnull\n"
         );
     }
@@ -424,35 +418,23 @@ fi"#;
     #[test]
     fn the_program_leads_a_session_of_its_own() {
         let fixture = TerminalFixture::new();
-        fixture
-            .programs()
-            .install(TerminalFixture::XDG_TERMINAL_EXEC);
+        fixture.install(TerminalFixture::XDG_TERMINAL_EXEC);
 
         fixture.open_with(&[TerminalFixture::WAYLAND]).unwrap();
 
-        let pid = fixture.programs().pid(TerminalFixture::XDG_TERMINAL_EXEC);
+        let pid = fixture.pid(TerminalFixture::XDG_TERMINAL_EXEC);
         assert!(pid.is_some());
-        assert_eq!(
-            fixture
-                .programs()
-                .session_of(TerminalFixture::XDG_TERMINAL_EXEC),
-            pid
-        );
+        assert_eq!(fixture.session_of(TerminalFixture::XDG_TERMINAL_EXEC), pid);
     }
 
     #[test]
     fn an_ended_program_is_reaped() {
         let fixture = TerminalFixture::new();
-        fixture
-            .programs()
-            .install(TerminalFixture::XDG_TERMINAL_EXEC);
+        fixture.install(TerminalFixture::XDG_TERMINAL_EXEC);
 
         fixture.open_with(&[TerminalFixture::WAYLAND]).unwrap();
 
-        let pid = fixture
-            .programs()
-            .pid(TerminalFixture::XDG_TERMINAL_EXEC)
-            .unwrap();
+        let pid = fixture.pid(TerminalFixture::XDG_TERMINAL_EXEC).unwrap();
         let process = PathBuf::from(format!("/proc/{pid}"));
         assert!(Deadline::for_background_work().wait_until(|| !process.exists()));
     }
@@ -461,9 +443,7 @@ fi"#;
     fn a_failed_exit_is_logged_with_the_program_and_its_status() {
         let capture = LogCapture::installed();
         let fixture = TerminalFixture::new();
-        let program = fixture
-            .programs()
-            .install_failing(TerminalFixture::XDG_TERMINAL_EXEC);
+        let program = fixture.install_failing(TerminalFixture::XDG_TERMINAL_EXEC);
         let warning = format!("{} ended with exit status: 3", program.display());
 
         fixture.open_with(&[TerminalFixture::WAYLAND]).unwrap();
@@ -476,9 +456,7 @@ fi"#;
     #[test]
     fn a_program_that_cannot_start_is_named_with_the_reason() {
         let fixture = TerminalFixture::new();
-        let named = fixture
-            .programs()
-            .install_unexecutable(TerminalFixture::NAMED_TERMINAL);
+        let named = fixture.install_unexecutable(TerminalFixture::NAMED_TERMINAL);
 
         let error = fixture
             .open_with(&[
@@ -496,69 +474,48 @@ fi"#;
     #[test]
     fn xdg_terminal_exec_that_opens_ghostty_gives_way_to_a_ghostty_window() {
         let fixture = TerminalFixture::new();
-        fixture
-            .programs()
-            .install(TerminalFixture::XDG_TERMINAL_EXEC);
-        let ghostty = fixture.programs().install(TerminalFixture::GHOSTTY);
+        fixture.install(TerminalFixture::XDG_TERMINAL_EXEC);
+        let ghostty = fixture.install(TerminalFixture::GHOSTTY);
         fixture.answer_lookup_with(TerminalFixture::XDG_TERMINAL_EXEC, &ghostty);
 
         fixture.open_with(&[TerminalFixture::WAYLAND]).unwrap();
 
         assert_eq!(
-            fixture.programs().arguments_of(TerminalFixture::GHOSTTY),
+            fixture.arguments_of(TerminalFixture::GHOSTTY),
             format!(
                 "+new-window\n--working-directory={}\n",
                 fixture.worktree().display()
             )
         );
-        assert!(
-            fixture
-                .programs()
-                .never_ran(TerminalFixture::XDG_TERMINAL_EXEC)
-        );
+        assert!(fixture.never_ran(TerminalFixture::XDG_TERMINAL_EXEC));
     }
 
     #[test]
     fn xdg_terminal_exec_that_opens_another_terminal_opens_it_itself() {
         let fixture = TerminalFixture::new();
-        fixture
-            .programs()
-            .install(TerminalFixture::XDG_TERMINAL_EXEC);
-        let named = fixture.programs().install(TerminalFixture::NAMED_TERMINAL);
+        fixture.install(TerminalFixture::XDG_TERMINAL_EXEC);
+        let named = fixture.install(TerminalFixture::NAMED_TERMINAL);
         fixture.answer_lookup_with(TerminalFixture::XDG_TERMINAL_EXEC, &named);
 
         fixture.open_with(&[TerminalFixture::WAYLAND]).unwrap();
 
         assert_eq!(
-            fixture
-                .programs()
-                .arguments_of(TerminalFixture::XDG_TERMINAL_EXEC),
+            fixture.arguments_of(TerminalFixture::XDG_TERMINAL_EXEC),
             format!("--dir={}\n", fixture.worktree().display())
         );
-        assert!(
-            fixture
-                .programs()
-                .never_ran(TerminalFixture::NAMED_TERMINAL)
-        );
+        assert!(fixture.never_ran(TerminalFixture::NAMED_TERMINAL));
     }
 
     #[test]
     fn a_failed_lookup_is_logged_and_xdg_terminal_exec_still_opens() {
         let capture = LogCapture::installed();
         let fixture = TerminalFixture::new();
-        fixture
-            .programs()
-            .install(TerminalFixture::XDG_TERMINAL_EXEC);
+        fixture.install(TerminalFixture::XDG_TERMINAL_EXEC);
         fixture.fail_lookup(TerminalFixture::XDG_TERMINAL_EXEC);
 
         fixture.open_with(&[TerminalFixture::WAYLAND]).unwrap();
 
-        assert!(
-            fixture
-                .programs()
-                .pid(TerminalFixture::XDG_TERMINAL_EXEC)
-                .is_some()
-        );
+        assert!(fixture.pid(TerminalFixture::XDG_TERMINAL_EXEC).is_some());
         assert_eq!(
             capture.count_containing(
                 "xdg-terminal-exec --print-cmd failed, so it opens the terminal itself: \
@@ -571,7 +528,7 @@ fi"#;
     #[test]
     fn a_terminal_variable_naming_ghostty_opens_a_ghostty_window() {
         let fixture = TerminalFixture::new();
-        let ghostty = fixture.programs().install(TerminalFixture::GHOSTTY);
+        let ghostty = fixture.install(TerminalFixture::GHOSTTY);
 
         fixture
             .open_with(&[
@@ -581,7 +538,7 @@ fi"#;
             .unwrap();
 
         assert_eq!(
-            fixture.programs().arguments_of(TerminalFixture::GHOSTTY),
+            fixture.arguments_of(TerminalFixture::GHOSTTY),
             format!(
                 "+new-window\n--working-directory={}\n",
                 fixture.worktree().display()

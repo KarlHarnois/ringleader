@@ -106,8 +106,36 @@ mod tests {
             fixture
         }
 
-        fn programs(&self) -> &RecordingPrograms {
-            &self.programs
+        fn program_directory(&self) -> PathBuf {
+            self.programs.program_directory()
+        }
+
+        fn pid(&self, name: &str) -> Option<u32> {
+            self.programs.pid(name)
+        }
+
+        fn never_ran(&self, name: &str) -> bool {
+            self.programs.never_ran(name)
+        }
+
+        fn ran_in(&self, name: &str) -> Option<PathBuf> {
+            self.programs.ran_in(name)
+        }
+
+        fn environment_of(&self, name: &str) -> Vec<String> {
+            self.programs.environment_of(name)
+        }
+
+        fn streams_of(&self, name: &str) -> String {
+            self.programs.streams_of(name)
+        }
+
+        fn arguments_of(&self, name: &str) -> String {
+            self.programs.arguments_of(name)
+        }
+
+        fn session_of(&self, name: &str) -> Option<u32> {
+            self.programs.session_of(name)
         }
 
         fn install_xdg_open_without_its_interpreter(&self) -> PathBuf {
@@ -130,7 +158,7 @@ mod tests {
         fixture.open_with(&[BrowserFixture::WAYLAND]).unwrap();
 
         assert_eq!(
-            fixture.programs().arguments_of(BrowserFixture::XDG_OPEN),
+            fixture.arguments_of(BrowserFixture::XDG_OPEN),
             format!("{}\n", BrowserFixture::URL)
         );
     }
@@ -142,7 +170,7 @@ mod tests {
         fixture.open_with(&[BrowserFixture::WAYLAND]).unwrap();
 
         assert_eq!(
-            fixture.programs().streams_of(BrowserFixture::XDG_OPEN),
+            fixture.streams_of(BrowserFixture::XDG_OPEN),
             "null\nnull\nnull\n"
         );
     }
@@ -153,9 +181,9 @@ mod tests {
 
         fixture.open_with(&[BrowserFixture::WAYLAND]).unwrap();
 
-        let pid = fixture.programs().pid(BrowserFixture::XDG_OPEN);
+        let pid = fixture.pid(BrowserFixture::XDG_OPEN);
         assert!(pid.is_some());
-        assert_eq!(fixture.programs().session_of(BrowserFixture::XDG_OPEN), pid);
+        assert_eq!(fixture.session_of(BrowserFixture::XDG_OPEN), pid);
     }
 
     #[test]
@@ -172,10 +200,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            fixture.programs().environment_of(BrowserFixture::XDG_OPEN),
+            fixture.environment_of(BrowserFixture::XDG_OPEN),
             [
                 "EXAMPLE_SETTING=kept".to_string(),
-                format!("PATH={}", fixture.programs().program_directory().display()),
+                format!("PATH={}", fixture.program_directory().display()),
                 "WAYLAND_DISPLAY=wayland-1".to_string(),
             ]
         );
@@ -188,7 +216,7 @@ mod tests {
         fixture.open_with(&[BrowserFixture::WAYLAND]).unwrap();
 
         assert_eq!(
-            fixture.programs().ran_in(BrowserFixture::XDG_OPEN),
+            fixture.ran_in(BrowserFixture::XDG_OPEN),
             Some(Path::new("/").to_path_buf())
         );
     }
@@ -199,7 +227,7 @@ mod tests {
 
         fixture.open_with(&[("DISPLAY", ":0")]).unwrap();
 
-        assert!(fixture.programs().pid(BrowserFixture::XDG_OPEN).is_some());
+        assert!(fixture.pid(BrowserFixture::XDG_OPEN).is_some());
     }
 
     #[test]
@@ -214,7 +242,7 @@ mod tests {
             error.to_string(),
             "no graphical display is available, WAYLAND_DISPLAY and DISPLAY are unset or empty"
         );
-        assert!(fixture.programs().never_ran(BrowserFixture::XDG_OPEN));
+        assert!(fixture.never_ran(BrowserFixture::XDG_OPEN));
     }
 
     #[test]
