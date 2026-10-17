@@ -149,7 +149,7 @@ mod tests {
         const SINGLE_INSTANCE: &'static str = "--gtk-single-instance=true";
         const WAYLAND: (&'static str, &'static str) = ("WAYLAND_DISPLAY", "wayland-1");
         const LOOKUP_ANSWER: &'static str = r#"if [ "$1" = --print-cmd ]; then
-  answer='{answers}/{name}'
+  answer='{answer_file}'
   if [ -f "$answer" ]; then
     . "$answer"
   fi
@@ -160,7 +160,9 @@ fi"#;
             let programs = RecordingPrograms::new();
             let answers = programs.make_directory("answers");
             let worktree = programs.make_directory("worktree");
-            let prelude = Self::LOOKUP_ANSWER.replace("{answers}", &answers.to_string_lossy());
+            let answer_file = answers.join(RecordingPrograms::NAME_PLACEHOLDER);
+            let prelude =
+                Self::LOOKUP_ANSWER.replace("{answer_file}", &answer_file.to_string_lossy());
             Self {
                 programs: programs.with_prelude(&prelude),
                 answers,
