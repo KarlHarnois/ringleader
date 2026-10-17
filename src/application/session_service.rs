@@ -339,7 +339,9 @@ impl SessionService {
         let pull_request = self
             .entry(name)
             .and_then(|session| self.pull_request_catalog.latest(session))
-            .ok_or_else(|| ServiceError::NotFound(format!("{name} has no pull request")))?;
+            .ok_or_else(|| {
+                ServiceError::NotFound(format!("no pull request is known for {name}"))
+            })?;
         self.access.open_pull_request(&pull_request)
     }
 

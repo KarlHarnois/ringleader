@@ -1762,7 +1762,7 @@ mod tests {
     }
 
     #[test]
-    fn o_on_a_session_without_a_pull_request_says_so_and_opens_nothing() {
+    fn o_on_a_session_without_a_known_pull_request_says_so_and_opens_nothing() {
         let fixture = AppFixture::deletable();
         let mut app = AppFixture::started(&fixture, 100, 28);
 
@@ -1771,7 +1771,7 @@ mod tests {
         assert_eq!(
             app.status.message(),
             Some(&StatusMessage::Error(
-                "fix-auth has no pull request".to_string()
+                "no pull request is known for fix-auth".to_string()
             ))
         );
         assert!(fixture.web_browser().opened().is_empty());

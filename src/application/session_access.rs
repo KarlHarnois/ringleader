@@ -447,7 +447,7 @@ mod tests {
     }
 
     #[test]
-    fn a_session_not_yet_looked_up_has_no_pull_request_to_open() {
+    fn a_session_not_yet_looked_up_has_no_known_pull_request_to_open() {
         let fixture = PullRequestFixture::with_pull_request();
 
         let error = fixture
@@ -456,18 +456,18 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(error, ServiceError::NotFound(_)));
-        assert_eq!(error.to_string(), "fix-auth has no pull request");
+        assert_eq!(error.to_string(), "no pull request is known for fix-auth");
         assert!(fixture.web_browser().opened().is_empty());
     }
 
     #[test]
-    fn a_session_with_no_entry_has_no_pull_request_to_open() {
+    fn a_session_with_no_entry_has_no_known_pull_request_to_open() {
         let fixture = PullRequestFixture::with_pull_request();
         let service = PullRequestFixture::looked_up(&fixture);
 
         let error = service.open_pull_request("mystery").unwrap_err();
 
-        assert_eq!(error.to_string(), "mystery has no pull request");
+        assert_eq!(error.to_string(), "no pull request is known for mystery");
         assert!(fixture.web_browser().opened().is_empty());
     }
 
