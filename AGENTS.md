@@ -81,6 +81,13 @@ Ringleader stays minimal in what it shows, what it asks for, and what it documen
 - Convention wins over configuration: every setting except the agent list has a working default.
 - Add a setting only for a case that convention cannot serve.
 
+### Break freely before 1.0
+
+Before 1.0, every downstream setup pins Ringleader in its `flake.lock`.
+
+- If the design changes, change the code and tests outright.
+- Never add a deprecation path, a compatibility shim, or a flag that keeps old behavior.
+
 ### Let the code speak
 
 The code, its names, and its tests describe what Ringleader does. This file and its reference files hold only what the code cannot say.
