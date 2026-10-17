@@ -269,8 +269,8 @@ impl App {
 
     fn open_pull_request(&mut self, name: &str) {
         let outcome = self.service.open_pull_request(name);
-        let opened = format!("Opened the pull request of {name} in the browser.");
-        self.status.outcome(outcome, opened);
+        let asked = format!("Asked the browser to open the pull request of {name}.");
+        self.status.outcome(outcome, asked);
     }
 
     fn settle(&mut self, select: Option<String>) {
@@ -1742,7 +1742,7 @@ mod tests {
         assert_eq!(
             app.status.message(),
             Some(&StatusMessage::Info(
-                "Opened the pull request of fix-auth in the browser.".to_string()
+                "Asked the browser to open the pull request of fix-auth.".to_string()
             ))
         );
     }
