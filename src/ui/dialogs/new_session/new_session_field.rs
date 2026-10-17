@@ -2,12 +2,11 @@
 pub enum NewSessionField {
     Name,
     Repo,
-    Agent,
     Prompt,
 }
 
 impl NewSessionField {
-    const ORDER: [NewSessionField; 4] = [Self::Name, Self::Repo, Self::Agent, Self::Prompt];
+    const ORDER: [NewSessionField; 3] = [Self::Name, Self::Repo, Self::Prompt];
 
     pub fn next(self) -> Self {
         Self::ORDER[(self.position() + 1) % Self::ORDER.len()]
@@ -21,7 +20,6 @@ impl NewSessionField {
         match self {
             Self::Name => "Name",
             Self::Repo => "Repo",
-            Self::Agent => "Agent",
             Self::Prompt => "Prompt",
         }
     }
@@ -30,8 +28,9 @@ impl NewSessionField {
         match self {
             Self::Name => "Enter next field · Ctrl-S create · Shift-Tab mode · Esc cancel",
             Self::Repo => "Type to find a repo · Enter next field · Ctrl-S create · Esc cancel",
-            Self::Agent => "↑ ↓ j k choose · Enter next field · Ctrl-S create · Esc cancel",
-            Self::Prompt => "Enter create · Shift-Tab mode · Ctrl-T checkout · Esc cancel",
+            Self::Prompt => {
+                "Enter create · Alt-P agent · Shift-Tab mode · Ctrl-T checkout · Esc cancel"
+            }
         }
     }
 
@@ -50,5 +49,10 @@ mod tests {
     #[test]
     fn next_wraps_from_the_last_field_to_the_first() {
         assert_eq!(NewSessionField::Prompt.next(), NewSessionField::Name);
+    }
+
+    #[test]
+    fn the_repo_is_followed_by_the_prompt() {
+        assert_eq!(NewSessionField::Repo.next(), NewSessionField::Prompt);
     }
 }

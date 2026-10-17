@@ -56,6 +56,7 @@ Each way comes from an ecosystem users already know, and keeps the meaning it ha
 | A text field | readline |
 | A fuzzy picker | fzf |
 | The key that opens a finder | the `Ctrl-K` quick switcher, as in Slack, Discord, and GitHub |
+| The keys that cycle the mode and the agent | Claude Code, where `Shift-Tab` cycles the mode and `Alt-P` opens the model picker |
 
 - The arrow keys work wherever an ecosystem's movement keys work.
 - If no ecosystem in the table covers a new key, ask the project owner which ecosystem the key follows.
@@ -429,7 +430,7 @@ Ringleader checks a registry entry recorded on another socket only through `/pro
 **A dialog's hint line lists only two kinds of keys:**
 
 - keys whose meaning is Ringleader's own, such as `Enter create`, `Ctrl-S create`, and `Esc cancel`
-- keys that choose from a list, such as `↑ ↓ j k choose`
+- keys that choose from a list, such as `↑ ↓ Ctrl-J Ctrl-K choose`
 
 A hint line never lists a text-editing key: every terminal user already expects those keys. Text-editing keys include cursor movement, `Ctrl-U`, and `Ctrl-W`.
 
