@@ -1,6 +1,6 @@
 ---
 name: checking-hexagonal-boundaries
-description: This skill checks whether an architectural decision respects a project's hexagonal architecture, also called ports and adapters. A decision is a proposed design or the code a branch changes. The skill applies the project's own documented architecture rules first, then generic hexagonal checks. It reports each broken rule with its evidence and the placement that fixes it, and edits no file. Use this skill before you add a port, an adapter, or a type that another layer imports. Also use it when the user asks to check, validate, review, or audit a design, a plan, or a branch for layering, dependency direction, ports, adapters, or core purity, or asks where code belongs. Trigger phrases include "hex arch", "wrong layer", "missing port", and "business logic in an adapter".
+description: This skill checks whether an architectural decision respects a project's hexagonal architecture, also called ports and adapters. A decision is a proposed design or the code a branch changes. The skill applies the project's own documented architecture rules first, then generic hexagonal checks. It reports each broken rule with its evidence and the placement that fixes the break, and edits no file. Use this skill before you add a port, an adapter, or a type that another layer imports. Also use this skill when the user asks to check, validate, review, or audit a design, a plan, or a branch for layering, dependency direction, ports, adapters, or core purity, or asks where code belongs. Trigger phrases include "hex arch", "wrong layer", "missing port", and "business logic in an adapter".
 ---
 
 # Checking hexagonal boundaries
@@ -38,22 +38,40 @@ description: This skill checks whether an architectural decision respects a proj
 1. Read each of these files that exists at the repository root: `AGENTS.md`, `CLAUDE.md`, `ARCHITECTURE.md`, and `README.md`.
 2. Read each file that those files import or name for architecture work.
 3. Build the layer map from what those files state.
-4. If those files give no folder a role, infer the layer map from folder names, per the folder name table. Mark the map as assumed in the report.
+4. If those files leave a folder or file without a role, the folder name table gives the role.
 5. If no folder maps to the core, ask the user for the layer map and stop.
 
 **A project rule wins over a hexagonal check it contradicts.**
 
-**The folder name table maps common folder names to roles:**
+**The folder name table maps a common folder or file name to its role:**
 
-| Role | Common folder names |
+| Folder or file name | Role |
 | --- | --- |
-| Core | `domain`, `core`, `model`, `entities`, `application`, `usecases` |
-| Ports | `ports`, `interfaces`, `boundaries` |
-| Driven adapters | `adapters`, `infrastructure`, `infra`, `persistence`, `driven` |
-| Driving adapters | `cli`, `ui`, `web`, `api`, `http`, `controllers`, `driving` |
-| Composition root | the program's entry point, such as `main` |
+| `domain` | Core |
+| `core` | Core |
+| `model` | Core |
+| `entities` | Core |
+| `application` | Core |
+| `usecases` | Core |
+| `ports` | Ports |
+| `interfaces` | Ports |
+| `boundaries` | Ports |
+| `adapters` | Driven adapters |
+| `infrastructure` | Driven adapters |
+| `infra` | Driven adapters |
+| `persistence` | Driven adapters |
+| `driven` | Driven adapters |
+| `cli` | Driving adapters |
+| `ui` | Driving adapters |
+| `web` | Driving adapters |
+| `api` | Driving adapters |
+| `http` | Driving adapters |
+| `controllers` | Driving adapters |
+| `driving` | Driving adapters |
+| `main` | Composition root |
+| `cmd` | Composition root |
 
-If a folder matches no row, read its files to decide its role.
+If a folder or file matches no row, read its contents. If the contents are not the program's code, the folder or file has no role. Otherwise, decide the role from what the contents do.
 
 ## Check a proposal
 
@@ -62,11 +80,11 @@ If a folder matches no row, read its files to decide its role.
 1. List each responsibility the proposal places, with the layer, port, and adapter the proposal gives it.
 2. List each dependency between layers that the proposal adds.
 3. Check each listed item against every project rule and every hexagonal check.
-4. If the proposal leaves a check undecidable, report an unsure finding with the question that decides it.
+4. If the proposal leaves a check undecidable, report an unsure finding with the question that decides the check.
 
 ## Check a code change
 
-1. Find the base. If the user named a base, use it. Otherwise, the base is the output of `git rev-parse --abbrev-ref origin/HEAD`. If that command fails, ask the user for the base and stop.
+1. If the user named a base, use that base. Otherwise, the base is the output of `git rev-parse --abbrev-ref origin/HEAD`. If that command fails, ask the user for the base and stop.
 2. If the user named a branch, the head is that branch. Otherwise, the head is `HEAD`.
 3. Run `git merge-base <base> <head>`. Its output is the fork point. If the command fails, report its error to the user and stop.
 4. If the head is not `HEAD`, the changed files are the files `git diff --name-only <fork point> <head>` lists.
@@ -94,9 +112,9 @@ If a folder matches no row, read its files to decide its role.
 
 ## Known violations
 
-**A known violation is a break that the project's documents already list as known.** Never report a known violation as a finding. If the decision copies or extends a known violation, report a finding.
+**A known violation is a break that the project's documents already list.** Never report a known violation as a finding. If the decision copies or extends a known violation, report a finding.
 
-If a known violation links an issue, read the issue to see the code it names. If you cannot read the issue, match on the listed description, and say so in the report.
+If a known violation links an issue, read the issue to see the code the issue names. If you cannot read the issue, match on the listed description, and say so in the report.
 
 ## Report
 
@@ -105,7 +123,7 @@ If a known violation links an issue, read the issue to see the code it names. If
 **If a project rule and a hexagonal check both cover a break, cite the project rule.**
 
 1. A verdict line. If there is no finding, write `Respects the architecture`. If every finding is unsure, write `Undecided: <m> questions`. Otherwise, write `Breaks the architecture: <n> findings, <m> of them unsure`.
-2. The layer map, one line per role. If the map is assumed, say so.
+2. The layer map, one line per role. Mark each inferred role `inferred`.
 3. A findings table with one row per finding and these columns:
 
    | Column | Content |

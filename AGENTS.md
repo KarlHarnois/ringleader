@@ -246,7 +246,7 @@ nix flake check
 
 **Dependencies point inward only.** The tests in `main.rs` check the imports of every layer.
 
-**A boundary change adds a port, an adapter, or a type that another layer imports.** Before you make a boundary change, invoke the `checking-hexagonal-boundaries` skill on your design. Resolve every finding it reports before you write the code.
+**A boundary change adds a port, an adapter, or a type that another layer imports.** Before you make a boundary change, invoke the `checking-hexagonal-boundaries` skill on your design. Resolve every finding the skill reports before you write the code.
 
 ### `domain`
 
@@ -484,7 +484,7 @@ Add a new editing key to `TextField` with its usual terminal meaning, never to a
 - Put a rule that every task needs in this file. Put a rule that only one kind of task needs in a reference file under `docs/agents/`.
 - Name each reference file in the Reference files table.
 - Put a procedure that an agent invokes on demand in a skill at `.agents/skills/<name>/SKILL.md`.
-- Link each skill from `.claude/skills/<name>` with a relative symlink: Claude Code reads skills only from `.claude/skills/`.
+- Link each skill from `.claude/skills/<name>` with a relative symlink: Claude Code reads a repository's skills only from `.claude/skills/`.
 - Never name a Ringleader type, path, or rule in a skill: each skill ports unchanged to other repos.
 - This repository holds no `CLAUDE.md` or `CLAUDE.local.md`: either file would hide this file from Claude Code.
 - If one of those files is ever needed, make its first line `@AGENTS.md`.
