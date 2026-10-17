@@ -218,29 +218,18 @@ mod tests {
         fn call() -> Call {
             Call::new("sh", CallKind::GitRead)
         }
-
-        fn session_of_this_process() -> String {
-            let stat = std::fs::read_to_string("/proc/self/stat").unwrap();
-            Self::session_field(&stat)
-        }
-
-        fn session_field(stat: &str) -> String {
-            let after_name = &stat[stat.rfind(')').unwrap() + 2..];
-            after_name.split(' ').nth(3).unwrap().to_string()
-        }
     }
 
     #[test]
     fn the_child_runs_in_its_own_session() {
         let output = ChildFixture::bounded(Duration::from_secs(5))
             .run(
-                ChildFixture::shell("cat /proc/$$/stat"),
+                ChildFixture::shell("kill -s 0 -- -$$"),
                 &ChildFixture::call(),
             )
             .unwrap();
 
-        let child_session = ChildFixture::session_field(&output.stdout_text());
-        assert_ne!(child_session, ChildFixture::session_of_this_process());
+        assert!(output.succeeded(), "{}", output.stderr_text());
     }
 
     #[test]

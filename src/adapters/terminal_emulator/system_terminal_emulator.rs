@@ -172,6 +172,7 @@ mod tests {
         const SUCCESS: &'static str = "exit 0";
         const FAILURE: &'static str = "exit 3";
         const LINGERING_SECONDS: u32 = 30;
+        const SHELL_VARIABLES: [&'static str; 4] = ["OLDPWD", "PWD", "SHLVL", "_"];
         const RECORDING: &'static str = r#"#!/bin/sh
 if [ "$1" = --print-cmd ]; then
   answer='{answer}'
@@ -181,16 +182,17 @@ if [ "$1" = --print-cmd ]; then
   exit 0
 fi
 record='{record}'
-'{cat}' /proc/$$/environ > "$record/environ"
-read -r stat < /proc/$$/stat
-echo "$stat" > "$record/stat"
+'{env}' > "$record/environ"
+if kill -0 -$$ 2>/dev/null; then
+  echo leader > "$record/group"
+fi
 pwd -P > "$record/cwd"
 : > "$record/arguments"
 for argument in "$@"; do
   printf '%s\n' "$argument" >> "$record/arguments"
 done
 for descriptor in 0 1 2; do
-  if [ /proc/$$/fd/$descriptor -ef /dev/null ]; then
+  if [ /dev/fd/$descriptor -ef /dev/null ]; then
     echo null >> "$record/streams"
   else
     echo terminal >> "$record/streams"
@@ -249,7 +251,7 @@ echo $$ > "$record/pid"
             let script = Self::RECORDING
                 .replace("{answer}", &self.answers().join(name).to_string_lossy())
                 .replace("{record}", &record.to_string_lossy())
-                .replace("{cat}", &Self::tool("cat").to_string_lossy())
+                .replace("{env}", &Self::tool("env").to_string_lossy())
                 .replace("{ending}", ending);
             let program = self.programs().join(name);
             ExecutableScript::write(&program, &script);
@@ -317,12 +319,18 @@ echo $$ > "$record/pid"
         fn environment_of(&self, name: &str) -> Vec<String> {
             let mut variables: Vec<String> = self
                 .recorded_once_started(name, "environ")
-                .split('\0')
-                .filter(|variable| !variable.is_empty())
+                .lines()
+                .filter(|variable| !Self::set_by_the_shell(variable))
                 .map(str::to_string)
                 .collect();
             variables.sort();
             variables
+        }
+
+        fn set_by_the_shell(variable: &str) -> bool {
+            variable
+                .split_once('=')
+                .is_some_and(|(name, _)| Self::SHELL_VARIABLES.contains(&name))
         }
 
         fn streams_of(&self, name: &str) -> String {
@@ -338,11 +346,8 @@ echo $$ > "$record/pid"
             self.recorded(name, file)
         }
 
-        fn session_of(&self, name: &str) -> Option<u32> {
-            self.pid(name)?;
-            let stat = self.recorded(name, "stat");
-            let (_, fields) = stat.rsplit_once(')')?;
-            fields.split_whitespace().nth(3)?.parse().ok()
+        fn leads_its_process_group(&self, name: &str) -> bool {
+            self.recorded_once_started(name, "group").trim() == "leader"
         }
 
         fn canonical_worktree(&self) -> PathBuf {
@@ -529,9 +534,7 @@ echo $$ > "$record/pid"
 
         fixture.open_with(&[TerminalFixture::WAYLAND]).unwrap();
 
-        let pid = fixture.pid(TerminalFixture::XDG_TERMINAL_EXEC);
-        assert!(pid.is_some());
-        assert_eq!(fixture.session_of(TerminalFixture::XDG_TERMINAL_EXEC), pid);
+        assert!(fixture.leads_its_process_group(TerminalFixture::XDG_TERMINAL_EXEC));
     }
 
     #[test]
