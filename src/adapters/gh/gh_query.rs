@@ -69,11 +69,11 @@ mod tests {
     #[test]
     fn the_query_asks_for_the_url_of_every_pull_request() {
         let arguments = GhQuery::new(&["fix-auth".to_string()]).arguments();
+        let query = arguments
+            .iter()
+            .find(|argument| argument.starts_with("query="))
+            .unwrap();
 
-        assert!(
-            arguments
-                .iter()
-                .any(|argument| argument.contains("nodes { number url state"))
-        );
+        assert!(query.contains(" url "));
     }
 }
