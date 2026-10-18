@@ -10,6 +10,7 @@ use super::agent_handoff::AgentHandoff;
 use super::handoff_contents::{EnvrcStep, HandoffContents};
 use super::launcher_command::{LauncherCommand, PreparedLaunch};
 use crate::adapters::host::process_environment::ProcessEnvironment;
+use crate::domain::Agent;
 
 pub trait ExecSeam {
     fn exec(&mut self, command: Command) -> io::Error;
@@ -30,7 +31,7 @@ pub struct AgentLauncher {
 }
 
 impl AgentLauncher {
-    const PANE_VARIABLES: [&'static str; 4] = ["TERM", "COLORTERM", "TMUX", "TMUX_PANE"];
+    const PANE_VARIABLES: [&'static str; 3] = ["TERM", "TMUX", "TMUX_PANE"];
     const ENVRC_LOADER: &'static str = "direnv";
     const ENVRC_LOADER_EXEC: &'static str = "exec";
 
@@ -134,6 +135,7 @@ impl AgentLauncher {
             .env_clear()
             .envs(environment)
             .envs(self.pane_variables())
+            .envs(Agent::TRUE_COLOR_VARIABLES)
             .current_dir(contents.worktree());
         if let Some(terminal) = self.environment.terminal() {
             command.env("GPG_TTY", terminal);
@@ -349,6 +351,7 @@ mod tests {
                     ("EXAMPLE_ACCOUNT_DIR".into(), "/envrc/accounts".into()),
                     ("EXAMPLE_API_KEY".into(), "from-envrc".into()),
                     ("EXAMPLE_FROM_ENVRC".into(), "loaded".into()),
+                    ("COLORTERM".into(), "from-envrc".into()),
                 ],
                 None,
             )
@@ -443,7 +446,7 @@ mod tests {
     }
 
     #[test]
-    fn the_agent_gets_exactly_the_baseline_the_configured_names_and_the_pane_variables() {
+    fn the_agent_gets_exactly_the_handed_values_the_pane_variables_and_true_color() {
         let fixture = LauncherFixture::new();
 
         let (seam, _, _) = fixture.launch(Some("/dev/pts/9"), &fixture.worktree());
@@ -455,12 +458,32 @@ mod tests {
             ("TERM", "tmux-256color"),
             ("TMUX", "/tmp/tmux-1000/default,1,0"),
             ("TMUX_PANE", "%3"),
+            ("COLORTERM", "truecolor"),
+            ("CLAUDE_CODE_TMUX_TRUECOLOR", "1"),
             ("GPG_TTY", "/dev/pts/9"),
         ]
         .iter()
         .map(|(name, value)| (name.to_string(), value.to_string()))
         .collect();
         assert_eq!(seam.environment(), expected);
+    }
+
+    #[test]
+    fn opencode_is_told_the_terminal_renders_true_color() {
+        let fixture = LauncherFixture::new();
+
+        let (seam, _, _) = fixture.launch(None, &fixture.worktree());
+
+        assert_eq!(seam.environment()["COLORTERM"], "truecolor");
+    }
+
+    #[test]
+    fn claude_code_is_told_it_may_use_true_color_inside_tmux() {
+        let fixture = LauncherFixture::new();
+
+        let (seam, _, _) = fixture.launch(None, &fixture.worktree());
+
+        assert_eq!(seam.environment()["CLAUDE_CODE_TMUX_TRUECOLOR"], "1");
     }
 
     #[test]
@@ -642,6 +665,13 @@ mod tests {
         let seam = LauncherFixture::new().inside_envrc();
 
         assert_eq!(seam.environment()["TMPDIR"], LauncherFixture::SCRATCH);
+    }
+
+    #[test]
+    fn the_vouched_colorterm_wins_over_the_envrc_one() {
+        let seam = LauncherFixture::new().inside_envrc();
+
+        assert_eq!(seam.environment()["COLORTERM"], "truecolor");
     }
 
     #[test]
