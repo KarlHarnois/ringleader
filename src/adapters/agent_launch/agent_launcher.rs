@@ -469,7 +469,7 @@ mod tests {
     }
 
     #[test]
-    fn colorterm_is_truecolor_even_when_the_pane_lacks_it() {
+    fn opencode_is_told_the_terminal_renders_true_color() {
         let fixture = LauncherFixture::new();
 
         let (seam, _, _) = fixture.launch(None, &fixture.worktree());
