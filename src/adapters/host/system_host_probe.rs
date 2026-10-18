@@ -63,10 +63,6 @@ impl SystemHostProbe {
         })
     }
 
-    fn is_own(&self, process: &LiveProcess) -> bool {
-        self.own_lineage.contains(&process.pid()) || process.parent() == std::process::id()
-    }
-
     fn refuse_wrong_batch(&self, pids: &[u32]) -> Result<(), HostProbeError> {
         if pids.len() > Self::TERMINATE_CEILING {
             return Err(HostProbeError::BatchAboveCeiling {
@@ -88,6 +84,10 @@ impl SystemHostProbe {
 
     fn shares_own_session(&self, process: &LiveProcess) -> bool {
         Some(process.session()) == self.own_session
+    }
+
+    fn is_own(&self, process: &LiveProcess) -> bool {
+        self.own_lineage.contains(&process.pid()) || process.parent() == std::process::id()
     }
 
     fn others_in<'p>(
