@@ -99,7 +99,7 @@
               ];
             runtimeEnv = llvmCoverageEnv;
           };
-          pidNamespace = pkgs.lib.optionalString pkgs.stdenv.isLinux "${pkgs.util-linux}/bin/unshare --map-current-user --pid --fork --mount-proc ";
+          pidNamespace = pkgs.lib.optionalString pkgs.stdenv.isLinux "${pkgs.util-linux}/bin/unshare --map-current-user --pid --fork --kill-child --mount-proc ";
           wrapTool = wrapToolBehind "";
           wrapToolBehind =
             prefix: name: tool: runtime:

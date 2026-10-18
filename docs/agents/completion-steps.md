@@ -23,6 +23,7 @@ nix run .#mutator -- --help
 **Never run `mutator` on the whole repository:** it runs every covered mutant, and many tests start real tmux servers.
 
 - `mutator` runs inside a PID namespace: a mutant of the process-signalling code can otherwise signal every process the user owns.
+- A `mutator` run ends only with Ctrl-C or with SIGKILL of its `unshare` process. SIGTERM never reaches a run inside the PID namespace.
 - Name each module or file to mutate as an argument. One run MAY name several. A run's files share one baseline test run.
 - If you move the `mutator` pin or the `crapper` pin in `flake.nix`, move both pins together. `mutator` imports `crapper`, and the `mutator` patch was tested against both pinned revisions.
 - After you move the pins, run `nix develop .#metrics -c mutator --scan src/main.rs`. The run builds the patched `mutator` and imports every `crapper` module that `mutator` uses.
