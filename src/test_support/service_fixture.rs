@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use super::{
     FakeClock, FakeConfigSource, FakeDirectoryEnvironment, FakeHostProbe, FakeMultiplexer,
@@ -242,6 +242,22 @@ impl ServiceFixture {
 
     pub fn shared_multiplexer(&self) -> Arc<FakeMultiplexer> {
         Arc::clone(&self.multiplexer)
+    }
+
+    pub fn refuse_to_terminate_at(&self, operation: &'static str, pid: u32) {
+        let host = Arc::clone(&self.host);
+        self.multiplexer
+            .add_call_hook(operation, move || host.refuse_to_terminate(pid));
+    }
+
+    pub fn terminated_at(&self, operation: &'static str) -> Arc<Mutex<Option<Vec<u32>>>> {
+        let snapshot = Arc::new(Mutex::new(None));
+        let host = Arc::clone(&self.host);
+        let recorder = Arc::clone(&snapshot);
+        self.multiplexer.add_call_hook(operation, move || {
+            *recorder.lock().unwrap() = Some(host.terminated());
+        });
+        snapshot
     }
 
     pub fn config_source(&self) -> &FakeConfigSource {

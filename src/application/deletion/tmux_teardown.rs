@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::application::ServiceError;
 use crate::application::ServicePorts;
-use crate::application::ports::{HostProbe, Multiplexer, ProcessInfo};
+use crate::application::ports::{HostProbe, Multiplexer, MultiplexerError, ProcessInfo};
 use crate::application::reconciliation::ManagedRow;
 
 pub struct TmuxTeardown {
@@ -18,22 +18,33 @@ impl TmuxTeardown {
         }
     }
 
-    pub fn kill(&self, row: &ManagedRow, kept: &str) -> Result<Vec<u32>, ServiceError> {
+    pub fn pane_sessions(&self, row: &ManagedRow, kept: &str) -> Result<Vec<u32>, ServiceError> {
         if !row.is_live() {
             return Ok(Vec::new());
         }
-        let keep = |error| ServiceError::from(error).adding_context(kept);
-        let tmux_name = row.session().tmux_name();
-        let pane_sessions = self.multiplexer.pane_pids(tmux_name).map_err(keep)?;
-        self.multiplexer.kill_session(tmux_name).map_err(keep)?;
-        Ok(self.left_in(&pane_sessions))
+        self.multiplexer
+            .pane_pids(row.session().tmux_name())
+            .map_err(Self::adding(kept))
     }
 
-    fn left_in(&self, pane_sessions: &[u32]) -> Vec<u32> {
+    pub fn pane_processes(&self, pane_sessions: &[u32]) -> Vec<u32> {
         self.host
             .session_processes(pane_sessions)
             .iter()
             .map(ProcessInfo::pid)
             .collect()
+    }
+
+    pub fn kill(&self, row: &ManagedRow, kept: &str) -> Result<(), ServiceError> {
+        if !row.is_live() {
+            return Ok(());
+        }
+        self.multiplexer
+            .kill_session(row.session().tmux_name())
+            .map_err(Self::adding(kept))
+    }
+
+    fn adding(kept: &str) -> impl Fn(MultiplexerError) -> ServiceError {
+        move |error| ServiceError::from(error).adding_context(kept)
     }
 }

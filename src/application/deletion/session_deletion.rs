@@ -32,6 +32,8 @@ impl SessionDeletion {
         "kept the worktree, the branch, and the registry entry, run ringleader doctor";
     const KEPT_AFTER_STOP: &'static str =
         "kept the worktree, the branch, and the session, which is now stopped";
+    const KEPT_WHILE_RUNNING: &'static str =
+        "kept the worktree, the branch, and the session, which still runs";
 
     pub fn new(ports: &ServicePorts) -> Self {
         Self {
@@ -126,28 +128,67 @@ impl SessionDeletion {
         measurement: &Measurement,
     ) -> Result<(), ServiceError> {
         let session = row.session();
-        let mut targets = self.teardown.kill(row, Self::KEPT_ON_TMUX_FAILURE)?;
-        targets.extend(
-            measurement
-                .impact()
-                .processes()
-                .iter()
-                .map(ProcessInfo::pid),
-        );
-        let mut remaining = self
-            .host
-            .terminate(&targets)
-            .map_err(|error| ServiceError::from(error).adding_context(Self::KEPT_AFTER_STOP))?;
-        remaining.extend(self.host.processes_in(session.worktree_path(), &[]));
-        if !remaining.is_empty() {
-            return Err(ServiceError::Conflict(format!(
-                "processes still run in {}: {}; {}",
-                session.worktree_path().display(),
-                ProcessInfo::listed(&remaining),
-                Self::KEPT_AFTER_STOP
-            )));
-        }
+        let pane_sessions = self
+            .teardown
+            .pane_sessions(row, Self::KEPT_ON_TMUX_FAILURE)?;
+        let confirmed = Self::confirmed_pids(measurement);
+        self.refuse_wrong_batch(&pane_sessions, &confirmed)?;
+        self.teardown.kill(row, Self::KEPT_ON_TMUX_FAILURE)?;
+        let survivors = self.end_processes(&pane_sessions, &confirmed)?;
+        self.refuse_remaining(session, survivors)?;
         self.refuse_new_commits(session, measurement)
+    }
+
+    fn confirmed_pids(measurement: &Measurement) -> Vec<u32> {
+        measurement
+            .impact()
+            .processes()
+            .iter()
+            .map(ProcessInfo::pid)
+            .collect()
+    }
+
+    fn refuse_wrong_batch(
+        &self,
+        pane_sessions: &[u32],
+        confirmed: &[u32],
+    ) -> Result<(), ServiceError> {
+        self.host
+            .check_batch(&self.processes_to_end(pane_sessions, confirmed))
+            .map_err(|error| ServiceError::from(error).adding_context(Self::KEPT_WHILE_RUNNING))
+    }
+
+    fn end_processes(
+        &self,
+        pane_sessions: &[u32],
+        confirmed: &[u32],
+    ) -> Result<Vec<ProcessInfo>, ServiceError> {
+        self.host
+            .terminate(&self.processes_to_end(pane_sessions, confirmed))
+            .map_err(|error| ServiceError::from(error).adding_context(Self::KEPT_AFTER_STOP))
+    }
+
+    fn processes_to_end(&self, pane_sessions: &[u32], confirmed: &[u32]) -> Vec<u32> {
+        let mut batch = self.teardown.pane_processes(pane_sessions);
+        batch.extend_from_slice(confirmed);
+        batch
+    }
+
+    fn refuse_remaining(
+        &self,
+        session: &Session,
+        mut remaining: Vec<ProcessInfo>,
+    ) -> Result<(), ServiceError> {
+        remaining.extend(self.host.processes_in(session.worktree_path(), &[]));
+        if remaining.is_empty() {
+            return Ok(());
+        }
+        Err(ServiceError::Conflict(format!(
+            "processes still run in {}: {}; {}",
+            session.worktree_path().display(),
+            ProcessInfo::listed(&remaining),
+            Self::KEPT_AFTER_STOP
+        )))
     }
 
     fn refuse_new_commits(
@@ -231,7 +272,8 @@ mod tests {
     use crate::application::session_service::SessionService;
     use crate::domain::{AgentPane, NamingScheme, Registration, TmuxAddress};
     use crate::test_support::{
-        FakeMultiplexer, FakeScratchSpace, FakeSessionRegistry, FakeWorkspace, ServiceFixture,
+        FakeHostProbe, FakeMultiplexer, FakeScratchSpace, FakeSessionRegistry, FakeWorkspace,
+        ServiceFixture,
     };
 
     const OTHER_TIP: &str = "0badc0de0badc0de0badc0de0badc0de0badc0de";
@@ -239,6 +281,10 @@ mod tests {
     struct DeleteFixture;
 
     impl DeleteFixture {
+        const PANE_SESSION: u32 = 4100;
+        const PANE_CHILD: u32 = 4101;
+        const OUTSIDE_PROCESS: u32 = 5200;
+
         fn session() -> Session {
             ServiceFixture::session("fix-auth")
         }
@@ -258,7 +304,25 @@ mod tests {
         fn live_multiplexer() -> FakeMultiplexer {
             FakeMultiplexer::new()
                 .with_live(ServiceFixture::waiting(&Self::session()))
-                .with_pane_pids("ringleader-fix-auth", &[4100])
+                .with_pane_pids("ringleader-fix-auth", &[Self::PANE_SESSION])
+        }
+
+        fn host_with_pane_child() -> FakeHostProbe {
+            ServiceFixture::host_for(&[&Self::session()]).with_process(
+                Self::PANE_CHILD,
+                "nohup sleep",
+                Path::new("/tmp"),
+                Self::PANE_SESSION,
+            )
+        }
+
+        fn with_outside_process(host: FakeHostProbe) -> FakeHostProbe {
+            host.with_process(
+                Self::OUTSIDE_PROCESS,
+                "vim",
+                &Self::worktree(),
+                Self::OUTSIDE_PROCESS,
+            )
         }
 
         fn stopped_fixture() -> ServiceFixture {
@@ -305,6 +369,16 @@ mod tests {
             assert!(fixture.workspace().has_branch(Self::repo(), "fix-auth"));
             assert_eq!(fixture.registry().sessions().len(), 1);
             assert!(fixture.scratch_space().removed().is_empty());
+        }
+
+        fn assert_session_untouched(fixture: &ServiceFixture) {
+            assert_eq!(fixture.multiplexer().live_names(), ["ringleader-fix-auth"]);
+            assert!(
+                fixture
+                    .workspace()
+                    .lists_worktree(Self::repo(), &Self::worktree())
+            );
+            Self::assert_everything_kept(fixture);
         }
 
         fn git_failure() -> WorkspaceError {
@@ -694,35 +768,89 @@ mod tests {
     }
 
     #[test]
-    fn a_batch_the_host_refuses_to_end_keeps_the_worktree_and_entry_and_signals_nothing() {
-        let session = DeleteFixture::session();
+    fn a_pane_process_the_host_refuses_to_end_leaves_the_session_live_and_everything_kept() {
         let fixture = DeleteFixture::live_fixture().with_host(
-            ServiceFixture::host_for(&[&session])
-                .with_process(5200, "vim", session.worktree_path(), 5200)
-                .refusing_to_terminate(5200),
+            DeleteFixture::host_with_pane_child().refusing_to_terminate(DeleteFixture::PANE_CHILD),
         );
 
         let error = DeleteFixture::force(&mut fixture.service()).unwrap_err();
 
         assert!(matches!(error, ServiceError::Conflict(_)), "{error}");
         assert!(error.to_string().contains("end the processes by hand"));
-        assert!(error.to_string().contains("which is now stopped"));
+        assert!(error.to_string().contains("which still runs"));
+        DeleteFixture::assert_session_untouched(&fixture);
+    }
+
+    #[test]
+    fn a_confirmed_process_the_host_refuses_to_end_leaves_the_session_live_and_everything_kept() {
+        let host = ServiceFixture::host_for(&[&DeleteFixture::session()]);
+        let fixture = DeleteFixture::live_fixture().with_host(
+            DeleteFixture::with_outside_process(host)
+                .refusing_to_terminate(DeleteFixture::OUTSIDE_PROCESS),
+        );
+
+        let error = DeleteFixture::force(&mut fixture.service()).unwrap_err();
+
+        assert!(error.to_string().contains("which still runs"), "{error}");
+        DeleteFixture::assert_session_untouched(&fixture);
+    }
+
+    #[test]
+    fn a_batch_the_host_refuses_to_end_signals_nothing() {
+        let fixture = DeleteFixture::live_fixture().with_host(
+            DeleteFixture::host_with_pane_child().refusing_to_terminate(DeleteFixture::PANE_CHILD),
+        );
+
+        DeleteFixture::force(&mut fixture.service()).unwrap_err();
+
         assert!(fixture.host().terminated().is_empty());
-        DeleteFixture::assert_everything_kept(&fixture);
     }
 
     #[test]
     fn delete_stops_the_session_processes_and_the_confirmed_outside_processes() {
-        let session = DeleteFixture::session();
-        let fixture = DeleteFixture::live_fixture().with_host(
-            ServiceFixture::host_for(&[&session])
-                .with_process(4101, "nohup sleep", Path::new("/tmp"), 4100)
-                .with_process(5200, "vim", session.worktree_path(), 5200),
-        );
+        let fixture = DeleteFixture::live_fixture().with_host(DeleteFixture::with_outside_process(
+            DeleteFixture::host_with_pane_child(),
+        ));
 
         DeleteFixture::force(&mut fixture.service()).unwrap();
 
-        assert_eq!(fixture.host().terminated(), [4101, 5200]);
+        assert_eq!(
+            fixture.host().terminated(),
+            [DeleteFixture::PANE_CHILD, DeleteFixture::OUTSIDE_PROCESS]
+        );
+    }
+
+    #[test]
+    fn a_batch_the_host_accepts_is_ended_only_after_the_tmux_session_is_killed() {
+        let fixture = DeleteFixture::live_fixture().with_host(DeleteFixture::with_outside_process(
+            DeleteFixture::host_with_pane_child(),
+        ));
+        let ended_at_kill = fixture.terminated_at("kill_session");
+
+        DeleteFixture::force(&mut fixture.service()).unwrap();
+
+        assert_eq!(*ended_at_kill.lock().unwrap(), Some(Vec::new()));
+        assert_eq!(
+            fixture.host().terminated(),
+            [DeleteFixture::PANE_CHILD, DeleteFixture::OUTSIDE_PROCESS]
+        );
+    }
+
+    #[test]
+    fn a_refusal_the_kill_reveals_says_the_session_is_now_stopped() {
+        let fixture =
+            DeleteFixture::live_fixture().with_host(DeleteFixture::host_with_pane_child());
+        fixture.refuse_to_terminate_at("kill_session", DeleteFixture::PANE_CHILD);
+
+        let error = DeleteFixture::force(&mut fixture.service()).unwrap_err();
+
+        assert!(
+            error.to_string().contains("which is now stopped"),
+            "{error}"
+        );
+        assert!(fixture.multiplexer().live_names().is_empty());
+        assert!(fixture.host().terminated().is_empty());
+        DeleteFixture::assert_everything_kept(&fixture);
     }
 
     #[test]
