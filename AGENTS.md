@@ -81,6 +81,13 @@ Ringleader stays minimal in what it shows, what it asks for, and what it documen
 - Convention wins over configuration: every setting except the agent list has a working default.
 - Add a setting only for a case that convention cannot serve.
 
+### Break freely before 1.0
+
+Before 1.0, every downstream setup pins Ringleader in its `flake.lock`.
+
+- If the design changes, change the code and tests outright.
+- Never add a deprecation path, a compatibility shim, or a flag that keeps old behavior.
+
 ### Let the code speak
 
 The code, its names, and its tests describe what Ringleader does. This file and its reference files hold only what the code cannot say.
@@ -246,6 +253,8 @@ nix flake check
 
 **Dependencies point inward only.** The tests in `main.rs` check the imports of every layer.
 
+**A boundary change adds a port, an adapter, or a type that another layer imports.** Before you make a boundary change, invoke the `checking-hexagonal-boundaries` skill on your design. Resolve every finding the skill reports before you write the code.
+
 ### `domain`
 
 `domain` holds the entities, value types, and pure rules.
@@ -267,6 +276,7 @@ nix flake check
 
 - `adapters` also holds the process-level types that `CompositionRoot` uses directly.
 - Name each port adapter after its technology and its port, such as `GitWorkspace` or `TmuxMultiplexer`.
+- An adapter holds no business rule. `domain` or `application` decides what a port's answer means, so the adapter only translates.
 
 ### `ui` and `cli`
 
@@ -293,6 +303,10 @@ nix flake check
 | #59 | Port errors carry tool details, and two TUI types branch on those details. |
 | #60 | `ActionGate` decides which actions each session state allows. |
 | #61 | `CompositionRoot::run_tui` calls the TUI's startup use cases. |
+| #70 | The core encodes tmux's config quoting and socket limits. |
+| #71 | `Doctor` repeats the config writability check that the adapter owns. |
+| #72 | The core reasons about whether a worktree's `.git` is a file or a directory. |
+| #73 | `UpstreamMerger` enforces the pull guards. |
 
 ### New ports
 
@@ -481,5 +495,8 @@ Add a new editing key to `TextField` with its usual terminal meaning, never to a
 - Never put architecture or the rules of this file in `README.md`.
 - Put a rule that every task needs in this file. Put a rule that only one kind of task needs in a reference file under `docs/agents/`.
 - Name each reference file in the Reference files table.
+- Put a procedure that an agent invokes on demand in a skill at `.agents/skills/<name>/SKILL.md`.
+- Link each skill from `.claude/skills/<name>` with a relative symlink: Claude Code reads a repository's skills only from `.claude/skills/`.
+- Never name a Ringleader type, path, or rule in a skill: each skill ports unchanged to other repos.
 - This repository holds no `CLAUDE.md` or `CLAUDE.local.md`: either file would hide this file from Claude Code.
 - If one of those files is ever needed, make its first line `@AGENTS.md`.
