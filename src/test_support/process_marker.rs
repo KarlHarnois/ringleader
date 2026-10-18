@@ -1,5 +1,6 @@
 use std::ffi::OsString;
 use std::fs;
+use std::process::{Child, Command};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -14,6 +15,7 @@ pub struct ProcessMarker {
 
 impl ProcessMarker {
     pub const NAME: &'static str = "RINGLEADER_TEST_PROCESS";
+    const SLEEP_SECONDS: &'static str = "30";
 
     pub fn new() -> Self {
         let sequence = MARKER_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -28,6 +30,14 @@ impl ProcessMarker {
 
     pub fn table(&self) -> ProcessTable {
         ProcessTable::within(Arc::new(self.clone()))
+    }
+
+    pub fn sleeping_child(&self) -> Child {
+        Command::new("sleep")
+            .arg(Self::SLEEP_SECONDS)
+            .envs([self.variable()])
+            .spawn()
+            .expect("a marked sleep starts")
     }
 
     fn entry(&self) -> Vec<u8> {

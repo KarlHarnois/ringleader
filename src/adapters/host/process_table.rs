@@ -137,15 +137,6 @@ mod tests {
     struct TableFixture;
 
     impl TableFixture {
-        fn sleeping_child(marker: &ProcessMarker) -> std::process::Child {
-            let (name, value) = marker.variable();
-            std::process::Command::new("sleep")
-                .arg("30")
-                .env(name, value)
-                .spawn()
-                .unwrap()
-        }
-
         fn end(mut child: std::process::Child) {
             child.kill().unwrap();
             child.wait().unwrap();
@@ -155,7 +146,7 @@ mod tests {
     #[test]
     fn a_marked_table_lists_the_marked_process_and_not_the_test_itself() {
         let marker = ProcessMarker::new();
-        let child = TableFixture::sleeping_child(&marker);
+        let child = marker.sleeping_child();
         let table = marker.table();
 
         let listed: Vec<u32> = table.all().iter().map(LiveProcess::pid).collect();
@@ -207,7 +198,7 @@ mod tests {
     #[test]
     fn a_process_that_exited_but_was_not_waited_for_is_a_zombie_and_not_alive() {
         let marker = ProcessMarker::new();
-        let mut child = TableFixture::sleeping_child(&marker);
+        let mut child = marker.sleeping_child();
         child.kill().unwrap();
         let table = marker.table();
         let zombie = Deadline::for_background_work().wait_until(|| !table.is_alive(child.id()));

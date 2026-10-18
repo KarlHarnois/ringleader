@@ -309,14 +309,6 @@ mod tests {
             server
         }
 
-        fn marked_sleep(marker: &ProcessMarker) -> std::process::Child {
-            std::process::Command::new("sleep")
-                .arg("30")
-                .envs([marker.variable()])
-                .spawn()
-                .unwrap()
-        }
-
         fn orphan_in(directory: &Path, marker: &ProcessMarker) -> ProcessInfo {
             std::process::Command::new("sh")
                 .args(["-c", "nohup sleep 34 >/dev/null 2>&1 &"])
@@ -526,7 +518,7 @@ mod tests {
     #[test]
     fn a_direct_child_of_the_probes_process_is_refused_and_not_signalled() {
         let marker = ProcessMarker::new();
-        let mut child = ProbeFixture::marked_sleep(&marker);
+        let mut child = marker.sleeping_child();
         let probe = ProbeFixture::probe_on(marker.table());
 
         let refused = probe.terminate(&[child.id()]);
