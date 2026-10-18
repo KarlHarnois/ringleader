@@ -288,6 +288,10 @@ mod tests {
         }
 
         fn started_probe_session() -> TmuxTestServer {
+            Self::started_session_running("nohup sleep 31 >/dev/null 2>&1 & sleep 30", "sleep 31")
+        }
+
+        fn started_session_running(script: &str, running: &str) -> TmuxTestServer {
             let server = TmuxTestServer::new();
             let directory = server.directory().to_string_lossy().into_owned();
             server.text(&[
@@ -299,10 +303,32 @@ mod tests {
                 &directory,
                 "sh",
                 "-c",
-                "nohup sleep 31 >/dev/null 2>&1 & sleep 30",
+                script,
             ]);
-            assert!(server.wait_for(|| ProbeFixture::pid_of(&server, "sleep 31").is_some()));
+            assert!(server.wait_for(|| ProbeFixture::pid_of(&server, running).is_some()));
             server
+        }
+
+        fn marked_sleep(marker: &ProcessMarker) -> std::process::Child {
+            std::process::Command::new("sleep")
+                .arg("30")
+                .envs([marker.variable()])
+                .spawn()
+                .unwrap()
+        }
+
+        fn orphan_in(directory: &Path, marker: &ProcessMarker) -> ProcessInfo {
+            std::process::Command::new("sh")
+                .args(["-c", "nohup sleep 34 >/dev/null 2>&1 &"])
+                .current_dir(directory)
+                .envs([marker.variable()])
+                .status()
+                .unwrap();
+            ProbeFixture::probe_on(marker.table())
+                .processes_in(directory, &[])
+                .into_iter()
+                .next()
+                .expect("the nohup child runs in the directory")
         }
     }
 
@@ -488,6 +514,60 @@ mod tests {
             })
         );
         assert!(child_untouched);
+    }
+
+    #[test]
+    fn a_batch_of_exactly_the_ceiling_is_not_refused() {
+        let batch = ProbeFixture::absent_pids(SystemHostProbe::TERMINATE_CEILING);
+
+        assert_eq!(ProbeFixture::probe().terminate(&batch), Ok(Vec::new()));
+    }
+
+    #[test]
+    fn a_direct_child_of_the_probes_process_is_refused_and_not_signalled() {
+        let marker = ProcessMarker::new();
+        let mut child = ProbeFixture::marked_sleep(&marker);
+        let probe = ProbeFixture::probe_on(marker.table());
+
+        let refused = probe.terminate(&[child.id()]);
+
+        let child_untouched = ProbeFixture::is_alive(child.id());
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert_eq!(refused, Err(HostProbeError::OwnProcess { pid: child.id() }));
+        assert!(child_untouched);
+    }
+
+    #[test]
+    fn a_process_in_the_probes_own_session_is_refused_and_not_signalled() {
+        let directory = tempfile::tempdir().unwrap();
+        let marker = ProcessMarker::new();
+        let orphan = ProbeFixture::orphan_in(directory.path(), &marker);
+        let probe = ProbeFixture::probe_on(marker.table());
+
+        let refused = probe.terminate(&[orphan.pid()]);
+
+        let orphan_untouched = ProbeFixture::is_alive(orphan.pid());
+        ProbeFixture::end_by_hand(std::slice::from_ref(&orphan));
+        assert_eq!(
+            refused,
+            Err(HostProbeError::OwnProcess { pid: orphan.pid() })
+        );
+        assert!(orphan_untouched);
+    }
+
+    #[test]
+    fn a_process_that_ignores_sigterm_is_reported_as_a_survivor() {
+        let server =
+            ProbeFixture::started_session_running("trap '' TERM; exec sleep 35", "sleep 35");
+        let stubborn = ProbeFixture::pid_of(&server, "sleep 35").unwrap();
+
+        let survivors = ProbeFixture::probe_on(server.process_table())
+            .terminate(&[stubborn])
+            .unwrap();
+
+        let pids: Vec<u32> = survivors.iter().map(ProcessInfo::pid).collect();
+        assert_eq!(pids, [stubborn]);
     }
 
     #[test]
