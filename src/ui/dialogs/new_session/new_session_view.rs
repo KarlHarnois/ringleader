@@ -29,6 +29,7 @@ pub struct NewSessionView<'a> {
 impl<'a> NewSessionView<'a> {
     const CURSOR: char = '█';
     const NAME_ROWS: usize = 1;
+    const AGENT_LABEL: &'static str = "Agent";
     const CHECKOUT_LABEL: &'static str = "Checkout";
     const MODE_LABEL: &'static str = "Mode";
     const UNSUPPORTED_MODE_MARK: &'static str = " · this agent has no plan_args";
@@ -92,9 +93,8 @@ impl<'a> NewSessionView<'a> {
         theme: &Theme,
     ) -> NewSessionLayout {
         let field_width = labels.field_width(area);
-        let fixed_rows = Self::NAME_ROWS + self.agents.height(self.agents_expanded());
         NewSessionLayout::new(area, error_rows)
-            .with_upper_rows(fixed_rows, self.repos.fewest_rows(field_width, theme))
+            .with_upper_rows(Self::NAME_ROWS, self.repos.fewest_rows(field_width, theme))
             .with_prompt_rows(self.prompt.rows(field_width))
     }
 
@@ -109,17 +109,20 @@ impl<'a> NewSessionView<'a> {
         let name_line = Line::from(self.name.visible(field_width, cursor));
         let repo_style = self.focus_style(NewSessionField::Repo, theme);
         let repo_lines = self.repos.lines(field_width, repo_room, repo_style, theme);
-        let agent_lines = self.agents.lines(self.agents_expanded(), theme);
         let mut lines = labels.labeled(NewSessionField::Name.label(), vec![name_line]);
         lines.extend(labels.labeled(NewSessionField::Repo.label(), repo_lines));
-        lines.extend(labels.labeled(NewSessionField::Agent.label(), agent_lines));
         lines
     }
 
     fn pinned_lines(&self, labels: DialogLabels, theme: &Theme) -> Vec<Line<'static>> {
-        let mut lines = self.checkout_lines(labels, theme);
+        let mut lines = self.agent_lines(labels, theme);
+        lines.extend(self.checkout_lines(labels, theme));
         lines.extend(self.mode_lines(labels, theme));
         lines
+    }
+
+    fn agent_lines(&self, labels: DialogLabels, theme: &Theme) -> Vec<Line<'static>> {
+        labels.labeled(Self::AGENT_LABEL, vec![self.agents.line(theme)])
     }
 
     fn checkout_lines(&self, labels: DialogLabels, theme: &Theme) -> Vec<Line<'static>> {
@@ -145,30 +148,21 @@ impl<'a> NewSessionView<'a> {
     }
 
     fn render_upper(&self, frame: &mut Frame, area: Rect, lines: Vec<Line<'static>>) {
-        let rows_through_focus = self.rows_through_focus(lines.len());
-        let hidden_rows = rows_through_focus.saturating_sub(usize::from(area.height));
+        let hidden_rows = self.hidden_upper_rows(lines.len(), usize::from(area.height));
         let scroll = u16::try_from(hidden_rows).unwrap_or(u16::MAX);
         frame.render_widget(Paragraph::new(lines).scroll((scroll, 0)), area);
     }
 
-    fn rows_through_focus(&self, upper_rows: usize) -> usize {
-        let agent_rows = self.agents.height(self.agents_expanded());
-        let rows_above_agents = upper_rows.saturating_sub(agent_rows);
+    fn hidden_upper_rows(&self, upper_rows: usize, visible_rows: usize) -> usize {
         match self.focus {
-            NewSessionField::Name => Self::NAME_ROWS,
-            NewSessionField::Repo => rows_above_agents,
-            NewSessionField::Agent => rows_above_agents + self.agents.rows_through_selected(),
-            NewSessionField::Prompt => 0,
+            NewSessionField::Repo => upper_rows.saturating_sub(visible_rows),
+            NewSessionField::Name | NewSessionField::Prompt => 0,
         }
     }
 
     fn error_lines(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
         let wrapped = |error| TextFit::new(error).styled_lines(width, theme.error());
         self.error.map(wrapped).unwrap_or_default()
-    }
-
-    fn agents_expanded(&self) -> bool {
-        self.focus == NewSessionField::Agent
     }
 
     fn focus_style(&self, field: NewSessionField, theme: &Theme) -> Style {
