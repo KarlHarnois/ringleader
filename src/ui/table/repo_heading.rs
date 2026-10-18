@@ -84,12 +84,7 @@ impl<'a> RepoHeading<'a> {
         if !self.folded {
             return Vec::new();
         }
-        let mut spans = vec![
-            Span::styled(" ", theme.base()),
-            Span::styled(format!("({})", self.rows.len()), theme.dim()),
-        ];
-        spans.extend(self.count_spans(tick, theme));
-        spans
+        self.count_spans(tick, theme)
     }
 
     fn count_spans(&self, tick: u64, theme: &Theme) -> Vec<Span<'static>> {
@@ -166,7 +161,7 @@ mod tests {
 
         let heading = HeadingFixture::folded(&rows);
 
-        assert_eq!(HeadingFixture::text(&heading), "1 ▸ alpha (4) ⠋1 ●2 ○1");
+        assert_eq!(HeadingFixture::text(&heading), "1 ▸ alpha ⠋1 ●2 ○1");
     }
 
     #[test]
@@ -175,7 +170,7 @@ mod tests {
 
         let heading = HeadingFixture::folded(&rows);
 
-        assert_eq!(HeadingFixture::text(&heading), "1 ▸ alpha (1) ●1");
+        assert_eq!(HeadingFixture::text(&heading), "1 ▸ alpha ●1");
         assert!(heading.shown_rows().is_empty());
     }
 
@@ -199,8 +194,8 @@ mod tests {
         let heading = HeadingFixture::folded(&rows);
 
         assert_eq!(
-            HeadingFixture::text_within(&heading, 30),
-            "1 ▸ example-project… (2) ⠋1 ●1"
+            HeadingFixture::text_within(&heading, 26),
+            "1 ▸ example-project… ⠋1 ●1"
         );
     }
 

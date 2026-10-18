@@ -519,11 +519,11 @@ mod tests {
     }
 
     #[test]
-    fn a_folded_heading_shows_its_number_arrow_count_and_state_counts() {
+    fn a_folded_heading_shows_its_number_arrow_and_state_counts() {
         let terminal = TableFixture::render_folded(&TableFixture::two_repos(), 8);
 
-        assert!(TableFixture::line(&terminal, 2).starts_with("│1 ▸ alpha (2) ⠋1 ●1 "));
-        assert!(TableFixture::line(&terminal, 3).starts_with("│2 ▸ beta (1) ✗1 "));
+        assert!(TableFixture::line(&terminal, 2).starts_with("│1 ▸ alpha ⠋1 ●1 "));
+        assert!(TableFixture::line(&terminal, 3).starts_with("│2 ▸ beta ✗1 "));
     }
 
     #[test]
@@ -535,14 +535,13 @@ mod tests {
     }
 
     #[test]
-    fn a_heading_dims_its_number_and_count_and_bolds_its_repo() {
+    fn a_heading_dims_its_number_bolds_its_repo_and_colors_its_state_counts() {
         let terminal = TableFixture::render_folded(&TableFixture::two_repos(), 8);
         let buffer = terminal.backend().buffer();
 
         assert!(buffer[(1, 2)].modifier.contains(Modifier::DIM));
         assert!(buffer[(5, 2)].modifier.contains(Modifier::BOLD));
-        assert!(buffer[(11, 2)].modifier.contains(Modifier::DIM));
-        assert_eq!(buffer[(18, 2)].fg, Color::Green);
+        assert_eq!(buffer[(14, 2)].fg, Color::Green);
     }
 
     #[test]

@@ -878,7 +878,7 @@ mod tests {
         AppFixture::press(&mut app, ' ');
 
         let screen = AppFixture::screen(&app, 100, 28);
-        assert!(screen.contains("1 ▸ alpha (1)"));
+        assert!(screen.contains("1 ▸ alpha ●1"));
         assert!(!screen.contains("docs"));
         assert!(screen.contains("fix-auth"));
     }
