@@ -1,6 +1,5 @@
 use std::path::{Path, PathBuf};
 
-use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::text::Line;
 
 use crate::domain::Agent;
@@ -29,48 +28,15 @@ impl AgentPicker {
             .ok_or_else(|| format!("no agents configured in {}", self.config_path.display()))
     }
 
-    pub fn height(&self, expanded: bool) -> usize {
-        if expanded {
-            self.agents.len().max(1)
-        } else {
-            1
-        }
+    pub fn cycle(&mut self) {
+        self.selected = (self.selected + 1) % self.agents.len().max(1);
     }
 
-    pub fn rows_through_selected(&self) -> usize {
-        self.selected + 1
-    }
-
-    pub fn handle_key(&mut self, key: &KeyEvent) -> bool {
-        let last = self.agents.len().saturating_sub(1);
-        match key.code {
-            KeyCode::Up | KeyCode::Char('k') => self.selected = self.selected.saturating_sub(1),
-            KeyCode::Down | KeyCode::Char('j') => self.selected = (self.selected + 1).min(last),
-            _ => return false,
+    pub fn line(&self, theme: &Theme) -> Line<'static> {
+        match self.selected() {
+            Ok(agent) => Line::from(Self::text(agent)),
+            Err(problem) => Line::styled(problem, theme.error()),
         }
-        true
-    }
-
-    pub fn lines(&self, expanded: bool, theme: &Theme) -> Vec<Line<'static>> {
-        let selected = match self.selected() {
-            Ok(agent) => agent,
-            Err(problem) => return vec![Line::styled(problem, theme.error())],
-        };
-        if !expanded {
-            return vec![Line::from(Self::text(selected))];
-        }
-        self.agents
-            .iter()
-            .enumerate()
-            .map(|(index, agent)| {
-                let style = if index == self.selected {
-                    theme.selected()
-                } else {
-                    theme.base()
-                };
-                Line::styled(Self::text(agent), style)
-            })
-            .collect()
     }
 
     fn text(agent: &Agent) -> String {
@@ -80,5 +46,61 @@ impl AgentPicker {
             Self::NO_PROMPT_MARK
         };
         format!("{}{mark}", agent.name())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::*;
+
+    struct PickerFixture;
+
+    impl PickerFixture {
+        const CONFIG_PATH: &'static str = "/config/ringleader/config.toml";
+
+        fn with_agents(names: &[&str]) -> AgentPicker {
+            let agents: Vec<Agent> = names.iter().map(|name| Agent::new(name, "sh")).collect();
+            AgentPicker::new(&agents, Path::new(Self::CONFIG_PATH))
+        }
+
+        fn selected_name(picker: &AgentPicker) -> String {
+            picker.selected().unwrap().name().to_string()
+        }
+    }
+
+    #[test]
+    fn cycling_picks_the_next_agent() {
+        let mut picker = PickerFixture::with_agents(&["claude", "opencode"]);
+
+        picker.cycle();
+
+        assert_eq!(PickerFixture::selected_name(&picker), "opencode");
+    }
+
+    #[test]
+    fn cycling_past_the_last_agent_wraps_to_the_first() {
+        let mut picker = PickerFixture::with_agents(&["claude", "opencode"]);
+
+        picker.cycle();
+        picker.cycle();
+
+        assert_eq!(PickerFixture::selected_name(&picker), "claude");
+    }
+
+    #[test]
+    fn cycling_with_no_agents_keeps_the_config_path_error() {
+        let mut picker = PickerFixture::with_agents(&[]);
+
+        picker.cycle();
+
+        assert_eq!(
+            picker.selected().err(),
+            Some(format!(
+                "no agents configured in {}",
+                PickerFixture::CONFIG_PATH
+            ))
+        );
     }
 }
