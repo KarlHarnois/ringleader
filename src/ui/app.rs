@@ -1779,9 +1779,7 @@ mod tests {
 
     #[test]
     fn a_browser_that_cannot_open_shows_why_as_an_error() {
-        let missing = WebBrowserError::NoDisplay {
-            reason: "the session runs on a text console".to_string(),
-        };
+        let missing = WebBrowserError::NoDisplay;
         let fixture = AppFixture::with_pull_request()
             .with_web_browser(FakeWebBrowser::failing(missing.clone()));
         let mut app = AppFixture::showing(&fixture, "#142");

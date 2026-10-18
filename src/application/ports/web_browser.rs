@@ -6,10 +6,10 @@ pub trait WebBrowser: Send + Sync {
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum WebBrowserError {
-    #[error("no graphical display is available, {reason}")]
-    NoDisplay { reason: String },
-    #[error("no web browser to open, {reason}")]
-    NoBrowser { reason: String },
-    #[error("cannot start the web browser, {reason}")]
-    StartFailed { reason: String },
+    #[error("no graphical display is available")]
+    NoDisplay,
+    #[error("no web browser is available")]
+    NoBrowser,
+    #[error("cannot start the web browser")]
+    StartFailed,
 }

@@ -499,9 +499,7 @@ mod tests {
 
     #[test]
     fn a_browser_that_cannot_open_says_why() {
-        let missing = WebBrowserError::NoBrowser {
-            reason: "xdg-open is not on PATH".to_string(),
-        };
+        let missing = WebBrowserError::NoBrowser;
         let fixture = PullRequestFixture::with_pull_request()
             .with_web_browser(FakeWebBrowser::failing(missing.clone()));
         let service = PullRequestFixture::looked_up(&fixture);

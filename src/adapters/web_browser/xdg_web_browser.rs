@@ -1,4 +1,3 @@
-use std::io;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
@@ -18,36 +17,26 @@ impl XdgWebBrowser {
     const OUTSIDE_EVERY_WORKTREE: &'static str = "/";
 
     pub fn detect(host: &dyn HostProbe, environment: &ProcessEnvironment) -> Arc<dyn WebBrowser> {
-        match Self::program(host, environment) {
-            Ok(program) => Arc::new(Self {
+        if !environment.has_graphical_display() {
+            return Arc::new(Self::without_display());
+        }
+        match host.resolve_command(Self::XDG_OPEN) {
+            Some(program) => Arc::new(Self {
                 program,
                 environment: environment.outside_tmux(),
             }),
-            Err(missing) => Arc::new(NullWebBrowser::new(missing)),
+            None => Arc::new(Self::without_xdg_open()),
         }
     }
 
-    fn program(
-        host: &dyn HostProbe,
-        environment: &ProcessEnvironment,
-    ) -> Result<PathBuf, WebBrowserError> {
-        if !environment.has_graphical_display() {
-            return Err(Self::no_display());
-        }
-        host.resolve_command(Self::XDG_OPEN)
-            .ok_or_else(Self::no_browser)
+    fn without_display() -> NullWebBrowser {
+        let reason = ProcessEnvironment::no_display_reason();
+        NullWebBrowser::new(WebBrowserError::NoDisplay, &reason)
     }
 
-    fn no_display() -> WebBrowserError {
-        WebBrowserError::NoDisplay {
-            reason: ProcessEnvironment::no_display_reason(),
-        }
-    }
-
-    fn no_browser() -> WebBrowserError {
-        WebBrowserError::NoBrowser {
-            reason: format!("{} is not on PATH", Self::XDG_OPEN),
-        }
+    fn without_xdg_open() -> NullWebBrowser {
+        let reason = format!("{} is not on PATH", Self::XDG_OPEN);
+        NullWebBrowser::new(WebBrowserError::NoBrowser, &reason)
     }
 
     fn command(&self, url: &str) -> DetachedCommand {
@@ -59,19 +48,14 @@ impl XdgWebBrowser {
             .envs(self.environment.variables().iter().cloned());
         DetachedCommand::new(command)
     }
-
-    fn start_failure(&self, error: &io::Error) -> WebBrowserError {
-        WebBrowserError::StartFailed {
-            reason: format!("{}: {error}", self.program.display()),
-        }
-    }
 }
 
 impl WebBrowser for XdgWebBrowser {
     fn open(&self, url: &str) -> Result<(), WebBrowserError> {
-        self.command(url)
-            .start()
-            .map_err(|error| self.start_failure(&error))
+        self.command(url).start().map_err(|error| {
+            log::warn!("cannot start {}: {error}", self.program.display());
+            WebBrowserError::StartFailed
+        })
     }
 }
 
@@ -82,7 +66,7 @@ mod tests {
 
     use super::*;
     use crate::adapters::host::system_host_probe::SystemHostProbe;
-    use crate::test_support::{ExecutableScript, RecordingPrograms};
+    use crate::test_support::{ExecutableScript, LogCapture, RecordingPrograms};
 
     struct BrowserFixture {
         programs: RecordingPrograms,
@@ -231,42 +215,60 @@ mod tests {
     }
 
     #[test]
-    fn without_a_graphical_display_nothing_starts() {
+    fn without_a_graphical_display_nothing_starts_and_only_the_log_names_the_variables() {
+        let log = LogCapture::installed();
         let fixture = BrowserFixture::with_xdg_open();
 
         let error = fixture
             .open_with(&[("WAYLAND_DISPLAY", ""), ("DISPLAY", "")])
             .unwrap_err();
 
-        assert_eq!(
-            error.to_string(),
-            "no graphical display is available, WAYLAND_DISPLAY and DISPLAY are unset or empty"
-        );
+        assert_eq!(error, WebBrowserError::NoDisplay);
         assert!(fixture.never_ran(BrowserFixture::XDG_OPEN));
+        assert_eq!(
+            log.count_containing(
+                "cannot open a web browser: WAYLAND_DISPLAY and DISPLAY are unset or empty"
+            ),
+            1
+        );
     }
 
     #[test]
-    fn without_xdg_open_nothing_opens() {
+    fn without_xdg_open_nothing_opens_and_only_the_log_names_xdg_open() {
+        let log = LogCapture::installed();
         let fixture = BrowserFixture::new();
 
         let error = fixture.open_with(&[BrowserFixture::WAYLAND]).unwrap_err();
 
+        assert_eq!(error, WebBrowserError::NoBrowser);
         assert_eq!(
-            error.to_string(),
-            "no web browser to open, xdg-open is not on PATH"
+            log.count_containing("cannot open a web browser: xdg-open is not on PATH"),
+            1
         );
     }
 
     #[test]
-    fn a_browser_that_cannot_start_is_named_with_the_reason() {
+    fn a_browser_that_cannot_start_fails_in_the_ports_terms() {
+        let fixture = BrowserFixture::new();
+        fixture.install_xdg_open_without_its_interpreter();
+
+        let error = fixture.open_with(&[BrowserFixture::WAYLAND]).unwrap_err();
+
+        assert_eq!(error, WebBrowserError::StartFailed);
+    }
+
+    #[test]
+    fn a_browser_that_cannot_start_logs_the_program_and_the_reason() {
+        let log = LogCapture::installed();
         let fixture = BrowserFixture::new();
         let program = fixture.install_xdg_open_without_its_interpreter();
-
-        let error = fixture.open_with(&[BrowserFixture::WAYLAND]).unwrap_err();
-
-        assert!(error.to_string().starts_with(&format!(
-            "cannot start the web browser, {}: No such file or directory",
+        let warning = format!(
+            "cannot start {}: No such file or directory",
             program.display()
-        )));
+        );
+
+        fixture.open_with(&[BrowserFixture::WAYLAND]).unwrap_err();
+
+        assert_eq!(log.count_containing(&warning), 1);
     }
 }
