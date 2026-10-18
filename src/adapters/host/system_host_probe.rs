@@ -8,11 +8,13 @@ use std::time::{Duration, Instant};
 
 use super::live_process::LiveProcess;
 use super::process_environment::ProcessEnvironment;
+use super::process_table::ProcessTable;
 use crate::adapters::filesystem::host_path::HostPath;
 use crate::application::ports::{DirectoryAccess, HostProbe, HostProbeError, ProcessInfo};
 
 pub struct SystemHostProbe {
     search_path: OsString,
+    processes: ProcessTable,
     own_lineage: Vec<u32>,
     own_session: Option<u32>,
     tmux_executable: Option<PathBuf>,
@@ -25,7 +27,11 @@ impl SystemHostProbe {
     const EXECUTABLE_BITS: u32 = 0o111;
     const ACCESS_BITS: u32 = 0o777;
 
-    pub fn new(environment: &ProcessEnvironment, tmux_program: &OsStr) -> Self {
+    pub fn new(
+        environment: &ProcessEnvironment,
+        tmux_program: &OsStr,
+        processes: ProcessTable,
+    ) -> Self {
         let search_path = environment
             .get("PATH")
             .map(OsString::from)
@@ -34,8 +40,9 @@ impl SystemHostProbe {
             .and_then(|program| fs::canonicalize(program).ok());
         Self {
             search_path,
-            own_lineage: LiveProcess::lineage_of(std::process::id()),
-            own_session: LiveProcess::read(std::process::id()).map(|own| own.session()),
+            own_lineage: processes.lineage_of(std::process::id()),
+            own_session: processes.read(std::process::id()).map(|own| own.session()),
+            processes,
             tmux_executable,
         }
     }
@@ -75,7 +82,7 @@ impl SystemHostProbe {
 
     fn owns_pid(&self, pid: u32) -> bool {
         self.own_lineage.contains(&pid)
-            || LiveProcess::read(pid).is_some_and(|process| {
+            || self.processes.read(pid).is_some_and(|process| {
                 self.is_own(&process) || Some(process.session()) == self.own_session
             })
     }
@@ -160,7 +167,7 @@ impl HostProbe for SystemHostProbe {
     }
 
     fn processes_in(&self, path: &Path, excluded_sessions: &[u32]) -> Vec<ProcessInfo> {
-        let processes = LiveProcess::all();
+        let processes = self.processes.all();
         self.others_in(&processes, path)
             .filter(|process| !excluded_sessions.contains(&process.session()))
             .map(LiveProcess::info)
@@ -168,7 +175,7 @@ impl HostProbe for SystemHostProbe {
     }
 
     fn processes_under_server(&self, path: &Path, socket: &Path) -> Vec<ProcessInfo> {
-        let processes = LiveProcess::all();
+        let processes = self.processes.all();
         let by_pid: HashMap<u32, &LiveProcess> = processes
             .iter()
             .map(|process| (process.pid(), process))
@@ -180,11 +187,12 @@ impl HostProbe for SystemHostProbe {
     }
 
     fn tmux_server_serves(&self, socket: &Path) -> bool {
-        !LiveProcess::tmux_servers_on(socket).is_empty()
+        !self.processes.tmux_servers_on(socket).is_empty()
     }
 
     fn session_processes(&self, sessions: &[u32]) -> Vec<ProcessInfo> {
-        LiveProcess::all()
+        self.processes
+            .all()
             .into_iter()
             .filter(|process| sessions.contains(&process.session()))
             .map(|process| process.info())
@@ -195,7 +203,7 @@ impl HostProbe for SystemHostProbe {
         self.refuse_wrong_batch(pids)?;
         let targets: Vec<LiveProcess> = pids
             .iter()
-            .filter_map(|pid| LiveProcess::read(*pid))
+            .filter_map(|pid| self.processes.read(*pid))
             .collect();
         for process in &targets {
             let _ = process.signal(libc::SIGTERM);
@@ -205,7 +213,7 @@ impl HostProbe for SystemHostProbe {
         loop {
             let remaining: Vec<&LiveProcess> = targets
                 .iter()
-                .filter(|process| process.is_alive())
+                .filter(|process| self.processes.is_alive(process.pid()))
                 .collect();
             if remaining.is_empty() || Instant::now() >= deadline {
                 return Ok(remaining.into_iter().map(LiveProcess::info).collect());
@@ -218,7 +226,7 @@ impl HostProbe for SystemHostProbe {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{InheritedPath, TmuxTestServer};
+    use crate::test_support::{InheritedPath, ProcessMarker, TmuxTestServer};
 
     struct ProbeFixture;
 
@@ -226,17 +234,21 @@ mod tests {
         const ABSENT_PIDS_START: u32 = 4_000_000;
 
         fn probe() -> SystemHostProbe {
-            Self::probe_for(OsStr::new("tmux"))
+            Self::probe_on(ProcessMarker::new().table())
         }
 
-        fn probe_for(tmux_program: &OsStr) -> SystemHostProbe {
+        fn probe_on(processes: ProcessTable) -> SystemHostProbe {
+            Self::probe_for_on(OsStr::new("tmux"), processes)
+        }
+
+        fn probe_for_on(tmux_program: &OsStr, processes: ProcessTable) -> SystemHostProbe {
             let path = InheritedPath::value();
             let environment = ProcessEnvironment::new(vec![("PATH".into(), path)], None);
-            SystemHostProbe::new(&environment, tmux_program)
+            SystemHostProbe::new(&environment, tmux_program, processes)
         }
 
         fn pid_of(server: &TmuxTestServer, pattern: &str) -> Option<u32> {
-            ProbeFixture::probe()
+            ProbeFixture::probe_on(server.process_table())
                 .processes_in(server.directory(), &[])
                 .iter()
                 .find(|process| process.command() == pattern)
@@ -248,7 +260,7 @@ mod tests {
                 .text(&["display-message", "-p", "-t", "=probe:", "#{pane_pid}"])
                 .parse()
                 .unwrap();
-            ProbeFixture::probe()
+            ProbeFixture::probe_on(server.process_table())
                 .session_processes(&[pane_pid])
                 .iter()
                 .find(|process| process.command() == "sleep 31")
@@ -266,7 +278,7 @@ mod tests {
         }
 
         fn is_alive(pid: u32) -> bool {
-            LiveProcess::read(pid).is_some_and(|process| process.is_alive())
+            ProcessMarker::new().table().is_alive(pid)
         }
 
         fn absent_pids(count: usize) -> Vec<u32> {
@@ -330,9 +342,10 @@ mod tests {
     fn processes_under_a_server_are_found_by_its_socket_and_not_by_another() {
         let server = ProbeFixture::started_probe_session();
         let other_socket = server.directory().join("other.sock");
+        let probe = ProbeFixture::probe_on(server.process_table());
 
-        let own = ProbeFixture::probe().processes_under_server(server.directory(), server.socket());
-        let other = ProbeFixture::probe().processes_under_server(server.directory(), &other_socket);
+        let own = probe.processes_under_server(server.directory(), server.socket());
+        let other = probe.processes_under_server(server.directory(), &other_socket);
 
         assert!(own.iter().any(|process| process.command() == "sleep 31"));
         assert!(other.is_empty());
@@ -342,12 +355,14 @@ mod tests {
     fn a_process_outside_any_tmux_server_is_not_under_one() {
         let server = TmuxTestServer::with_session("probe");
         let directory = tempfile::tempdir().unwrap();
+        let marker = ProcessMarker::new();
         std::process::Command::new("sh")
             .args(["-c", "nohup sleep 33 >/dev/null 2>&1 &"])
             .current_dir(directory.path())
+            .envs([marker.variable()])
             .status()
             .unwrap();
-        let probe = ProbeFixture::probe();
+        let probe = ProbeFixture::probe_on(marker.table());
         let orphan = probe.processes_in(directory.path(), &[]);
 
         let under = probe.processes_under_server(directory.path(), server.socket());
@@ -361,7 +376,7 @@ mod tests {
     fn a_running_server_serves_its_own_socket_and_no_other() {
         let server = TmuxTestServer::with_session("probe");
         let other_socket = server.directory().join("other.sock");
-        let probe = ProbeFixture::probe();
+        let probe = ProbeFixture::probe_on(server.process_table());
 
         assert!(probe.tmux_server_serves(server.socket()));
         assert!(!probe.tmux_server_serves(&other_socket));
@@ -407,7 +422,7 @@ mod tests {
     fn processes_in_lists_the_nohup_child_and_skips_the_tmux_server() {
         let server = ProbeFixture::started_probe_session();
 
-        let commands: Vec<String> = ProbeFixture::probe()
+        let commands: Vec<String> = ProbeFixture::probe_on(server.process_table())
             .processes_in(server.directory(), &[])
             .iter()
             .map(|process| process.command().to_string())
@@ -423,8 +438,8 @@ mod tests {
         server.start_session("probe");
         let server_pid: u32 = server.server_pid().parse().unwrap();
 
-        let listed =
-            ProbeFixture::probe_for(server.program()).processes_in(server.directory(), &[]);
+        let listed = ProbeFixture::probe_for_on(server.program(), server.process_table())
+            .processes_in(server.directory(), &[]);
 
         assert!(
             listed.iter().all(|process| process.pid() != server_pid),
@@ -448,7 +463,9 @@ mod tests {
         std::thread::sleep(Duration::from_millis(200));
 
         let survived_kill = ProbeFixture::is_alive(child);
-        let survivors = ProbeFixture::probe().terminate(&[child]).unwrap();
+        let survivors = ProbeFixture::probe_on(server.process_table())
+            .terminate(&[child])
+            .unwrap();
 
         assert!(survived_kill);
         assert!(survivors.is_empty());
@@ -458,7 +475,7 @@ mod tests {
     fn a_batch_that_holds_the_probes_own_pid_is_refused_whole_and_signals_nothing() {
         let server = ProbeFixture::started_probe_session();
         let child = ProbeFixture::nohup_child(&server);
-        let probe = ProbeFixture::probe();
+        let probe = ProbeFixture::probe_on(server.process_table());
 
         let refused = probe.terminate(&[std::process::id(), child]);
 
@@ -477,7 +494,7 @@ mod tests {
     fn a_batch_above_the_ceiling_is_refused_whole_and_signals_nothing() {
         let server = ProbeFixture::started_probe_session();
         let child = ProbeFixture::nohup_child(&server);
-        let probe = ProbeFixture::probe();
+        let probe = ProbeFixture::probe_on(server.process_table());
         let mut batch = ProbeFixture::absent_pids(SystemHostProbe::TERMINATE_CEILING);
         batch.push(child);
 

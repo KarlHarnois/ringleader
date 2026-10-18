@@ -178,7 +178,11 @@ mod tests {
         fn multiplexer_with_shell(server: &TmuxTestServer, shell: &Path) -> TmuxMultiplexer {
             let shell = shell.display().to_string();
             let environment = server.environment_with(&[("SHELL", &shell)]);
-            TmuxMultiplexer::new(server.command_with(&environment), server.stand_in())
+            TmuxMultiplexer::new(
+                server.command_with(&environment),
+                server.stand_in(),
+                server.process_table(),
+            )
         }
 
         fn toggles_from_copy_mode(

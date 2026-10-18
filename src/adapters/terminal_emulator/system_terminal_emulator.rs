@@ -154,12 +154,15 @@ mod tests {
 
     use super::*;
     use crate::adapters::Deadlines;
-    use crate::adapters::host::live_process::LiveProcess;
+    use crate::adapters::host::process_table::ProcessTable;
     use crate::adapters::host::system_host_probe::SystemHostProbe;
-    use crate::test_support::{Deadline, ExecutableScript, InheritedPath, LogCapture};
+    use crate::test_support::{
+        Deadline, ExecutableScript, InheritedPath, LogCapture, ProcessMarker,
+    };
 
     struct TerminalFixture {
         directory: tempfile::TempDir,
+        marker: ProcessMarker,
     }
 
     impl TerminalFixture {
@@ -203,6 +206,7 @@ echo $$ > "$record/pid"
         fn new() -> Self {
             let fixture = Self {
                 directory: tempfile::tempdir().unwrap(),
+                marker: ProcessMarker::new(),
             };
             fs::create_dir(fixture.programs()).unwrap();
             fs::create_dir(fixture.worktree()).unwrap();
@@ -283,14 +287,21 @@ echo $$ > "$record/pid"
                 .iter()
                 .map(|(name, value)| (OsString::from(name), OsString::from(value)));
             ProcessEnvironment::new(
-                std::iter::once(search_path).chain(variables).collect(),
+                std::iter::once(search_path)
+                    .chain(variables)
+                    .chain([self.marker.variable()])
+                    .collect(),
                 None,
             )
         }
 
+        fn processes(&self) -> ProcessTable {
+            self.marker.table()
+        }
+
         fn open_with(&self, variables: &[(&str, &str)]) -> Result<(), TerminalEmulatorError> {
             let environment = self.environment(variables);
-            let host = SystemHostProbe::new(&environment, OsStr::new("tmux"));
+            let host = SystemHostProbe::new(&environment, OsStr::new("tmux"), self.processes());
             let bounded = BoundedCommand::new(Deadlines::standard());
             SystemTerminalEmulator::detect(&host, &environment, bounded)
                 .open_window(&self.worktree())
@@ -315,10 +326,11 @@ echo $$ > "$record/pid"
         }
 
         fn environment_of(&self, name: &str) -> Vec<String> {
+            let marker = format!("{}=", ProcessMarker::NAME);
             let mut variables: Vec<String> = self
                 .recorded_once_started(name, "environ")
                 .split('\0')
-                .filter(|variable| !variable.is_empty())
+                .filter(|variable| !variable.is_empty() && !variable.starts_with(&marker))
                 .map(str::to_string)
                 .collect();
             variables.sort();
@@ -384,8 +396,9 @@ echo $$ > "$record/pid"
         fixture.open_with(&[TerminalFixture::WAYLAND]).unwrap();
 
         let pid = fixture.pid(TerminalFixture::XDG_TERMINAL_EXEC).unwrap();
-        let process = LiveProcess::read(pid).unwrap();
-        let running = process.is_alive();
+        let processes = fixture.processes();
+        let process = processes.read(pid).unwrap();
+        let running = processes.is_alive(pid);
         process.signal(libc::SIGTERM).unwrap();
         assert!(running);
     }

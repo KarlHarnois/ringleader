@@ -35,6 +35,7 @@ use adapters::gh::null_pull_requests::NullPullRequests;
 use adapters::git::git_runner::GitRunner;
 use adapters::host::app_log::AppLog;
 use adapters::host::process_environment::{ProcessEnvironment, ProgramPaths};
+use adapters::host::process_table::ProcessTable;
 use adapters::host::signal_hook_interrupts::SignalHookInterrupts;
 use adapters::host::system_clock::SystemClock;
 use adapters::host::system_host_probe::SystemHostProbe;
@@ -65,6 +66,7 @@ struct CompositionRoot {
     paths: XdgPaths,
     server: ServerFiles,
     launch_directory: PathBuf,
+    processes: ProcessTable,
 }
 
 #[expect(
@@ -82,6 +84,7 @@ impl CompositionRoot {
             launch_directory: std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")),
             environment,
             programs,
+            processes: ProcessTable::new(),
         }
     }
 
@@ -169,7 +172,7 @@ impl CompositionRoot {
     fn exec_agent(&self, handoff: &Path) -> ExitCode {
         let reentry = LauncherCommand::new(
             Self::launcher_prefix(),
-            AgentHandoff::beside(handoff, &self.environment),
+            AgentHandoff::beside(handoff, &self.environment, self.processes.clone()),
         );
         let mut launcher = AgentLauncher::new(&self.environment, Box::new(ProcessExec), reentry);
         Self::fail(&launcher.launch(handoff).to_string())
@@ -286,6 +289,7 @@ impl CompositionRoot {
         let host = Arc::new(SystemHostProbe::new(
             &self.environment,
             self.programs.tmux(),
+            self.processes.clone(),
         ));
         let pull_requests = Self::pull_requests(&host, bounded);
         let usage_meters = self.usage_meters(host.as_ref(), bounded);
@@ -311,7 +315,11 @@ impl CompositionRoot {
             self.programs.git(),
             BoundedCommand::new(Deadlines::diff_poll()),
         )));
-        let tmux_ports = TmuxPorts::new(Arc::new(TmuxMultiplexer::new(tmux, self.launcher())));
+        let tmux_ports = TmuxPorts::new(Arc::new(TmuxMultiplexer::new(
+            tmux,
+            self.launcher(),
+            self.processes.clone(),
+        )));
         let context = ServiceContext::new(loaded, &self.launch_directory)
             .with_home(self.paths.home())
             .with_diagnostics(self.diagnostics())
@@ -403,7 +411,11 @@ impl CompositionRoot {
     }
 
     fn handoff(&self) -> AgentHandoff {
-        AgentHandoff::new(&self.paths.handoff_directory(), &self.environment)
+        AgentHandoff::new(
+            &self.paths.handoff_directory(),
+            &self.environment,
+            self.processes.clone(),
+        )
     }
 
     fn lock_failure(error: &LockError) -> ExitCode {
@@ -611,6 +623,22 @@ mod tests {
     fn the_core_never_uses_crossterm_ratatui_std_process_or_std_fs() {
         let uses =
             LayerImports::of(&["domain", "application"]).uses_of(&LayerImports::OUTSIDE_THE_CORE);
+
+        assert_eq!(uses, BTreeSet::new());
+    }
+
+    #[test]
+    fn only_main_builds_the_production_process_table_so_no_test_scans_the_whole_host() {
+        let layers = [
+            "domain",
+            "application",
+            "adapters",
+            "ui",
+            "cli",
+            "test_support",
+        ];
+
+        let uses = LayerImports::of(&layers).uses_of(&["ProcessTable::new"]);
 
         assert_eq!(uses, BTreeSet::new());
     }
