@@ -35,7 +35,7 @@ impl TmuxTestServer {
     const OUTER_SESSION: &'static str = "outer";
 
     pub fn new() -> Self {
-        Self::with_config(&TmuxServerConfig::new(&KeyBindings::default()).render())
+        Self::with_config(&Self::default_config())
     }
 
     pub fn with_config(config_text: &str) -> Self {
@@ -43,8 +43,11 @@ impl TmuxTestServer {
     }
 
     pub fn sharing_table_with(other: &Self) -> Self {
-        let config_text = TmuxServerConfig::new(&KeyBindings::default()).render();
-        Self::with_config_marked(&config_text, other.marker.clone())
+        Self::with_config_marked(&Self::default_config(), other.marker.clone())
+    }
+
+    fn default_config() -> String {
+        TmuxServerConfig::new(&KeyBindings::default()).render()
     }
 
     fn with_config_marked(config_text: &str, marker: ProcessMarker) -> Self {
