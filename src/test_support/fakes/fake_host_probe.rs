@@ -113,7 +113,7 @@ impl FakeHostProbe {
     }
 
     pub fn refusing_to_terminate(self, pid: u32) -> Self {
-        self.state.lock().unwrap().own.insert(pid);
+        self.refuse_to_terminate(pid);
         self
     }
 
@@ -131,6 +131,10 @@ impl FakeHostProbe {
         for ancestor in path.ancestors() {
             state.directories.insert(ancestor.to_path_buf());
         }
+    }
+
+    pub fn refuse_to_terminate(&self, pid: u32) {
+        self.state.lock().unwrap().own.insert(pid);
     }
 
     pub fn terminated(&self) -> Vec<u32> {
@@ -232,10 +236,8 @@ impl HostProbe for FakeHostProbe {
     }
 
     fn terminate(&self, pids: &[u32]) -> Result<Vec<ProcessInfo>, HostProbeError> {
+        self.check_batch(pids)?;
         let mut state = self.state.lock().unwrap();
-        if let Some(pid) = pids.iter().copied().find(|pid| state.own.contains(pid)) {
-            return Err(HostProbeError::OwnProcess { pid });
-        }
         state.terminated.extend_from_slice(pids);
         state
             .processes
@@ -246,5 +248,13 @@ impl HostProbe for FakeHostProbe {
             .filter(|process| pids.contains(&process.info.pid()))
             .map(|process| process.info.clone())
             .collect())
+    }
+
+    fn check_batch(&self, pids: &[u32]) -> Result<(), HostProbeError> {
+        let state = self.state.lock().unwrap();
+        match pids.iter().copied().find(|pid| state.own.contains(pid)) {
+            Some(pid) => Err(HostProbeError::OwnProcess { pid }),
+            None => Ok(()),
+        }
     }
 }
