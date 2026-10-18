@@ -245,6 +245,14 @@ mod tests {
                 .unwrap();
         }
 
+        fn restore_by_hand(server: &TmuxTestServer, pid: &str) {
+            std::process::Command::new("kill")
+                .args(["-USR1", pid])
+                .status()
+                .unwrap();
+            assert!(server.wait_for(|| server.socket().exists()));
+        }
+
         fn exited_pid() -> u32 {
             let mut child = std::process::Command::new("true").spawn().unwrap();
             child.wait().unwrap();
@@ -400,12 +408,14 @@ mod tests {
         assert!(error.to_string().contains("SIGUSR1"), "{error}");
         assert!(error.to_string().contains(&format!("pid {pid}")), "{error}");
         assert!(!server.socket().exists());
+        ServerFixture::restore_by_hand(&server, &pid);
     }
 
     #[test]
     fn a_recorded_pid_that_no_longer_runs_is_refused_a_restore() {
         let server = TmuxTestServer::with_session("holder");
         let tmux = server.command();
+        let pid = server.server_pid();
         tmux.server().record_server_pid(ServerFixture::exited_pid());
         fs::remove_file(server.socket()).unwrap();
 
@@ -415,12 +425,14 @@ mod tests {
 
         assert!(error.to_string().contains("no longer runs"), "{error}");
         assert!(!server.socket().exists());
+        ServerFixture::restore_by_hand(&server, &pid);
     }
 
     #[test]
     fn a_stale_pid_that_now_names_another_process_is_refused_a_restore() {
         let server = TmuxTestServer::with_session("holder");
         let tmux = server.command();
+        let pid = server.server_pid();
         tmux.server().record_server_pid(std::process::id());
         fs::remove_file(server.socket()).unwrap();
 
@@ -433,6 +445,7 @@ mod tests {
             "{error}"
         );
         assert!(!server.socket().exists());
+        ServerFixture::restore_by_hand(&server, &pid);
     }
 
     #[test]
