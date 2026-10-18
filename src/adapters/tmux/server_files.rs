@@ -42,6 +42,9 @@ impl ServerFiles {
     }
 
     pub fn record_server_pid(&self, pid: u32) {
+        if self.recorded_server_pid() == Some(pid) {
+            return;
+        }
         let record = self.server_pid_record();
         let written = self.prepare_config_directory().and_then(|()| {
             DurableFile::new(&record)
@@ -107,8 +110,38 @@ impl ServerFiles {
 #[cfg(test)]
 mod tests {
     use std::os::unix::fs::PermissionsExt;
+    use std::time::{Duration, SystemTime};
 
     use super::*;
+
+    struct RecordFixture;
+
+    impl RecordFixture {
+        const AGE: Duration = Duration::from_secs(60);
+        const TIMESTAMP_SLACK: Duration = Duration::from_secs(1);
+
+        fn files(directory: &Path) -> ServerFiles {
+            ServerFiles::new(&directory.join("tmux.sock"), &directory.join("tmux.conf"))
+        }
+
+        fn age_record(directory: &Path) -> SystemTime {
+            let aged = SystemTime::now() - Self::AGE;
+            File::options()
+                .write(true)
+                .open(directory.join("tmux.pid"))
+                .unwrap()
+                .set_modified(aged)
+                .unwrap();
+            aged
+        }
+
+        fn record_modified_at(directory: &Path) -> SystemTime {
+            fs::metadata(directory.join("tmux.pid"))
+                .unwrap()
+                .modified()
+                .unwrap()
+        }
+    }
 
     #[test]
     fn preparing_the_server_files_makes_a_private_socket_directory_and_the_config() {
@@ -159,6 +192,30 @@ mod tests {
         assert_eq!(files.recorded_server_pid(), Some(4100));
         assert!(config.with_file_name("tmux.pid").is_file());
         assert!(!socket.parent().unwrap().exists());
+    }
+
+    #[test]
+    fn recording_the_same_pid_again_leaves_the_record_untouched() {
+        let directory = tempfile::tempdir().unwrap();
+        let files = RecordFixture::files(directory.path());
+        files.record_server_pid(4100);
+        let aged = RecordFixture::age_record(directory.path());
+
+        files.record_server_pid(4100);
+
+        let modified = RecordFixture::record_modified_at(directory.path());
+        assert!(modified.duration_since(aged).unwrap() < RecordFixture::TIMESTAMP_SLACK);
+    }
+
+    #[test]
+    fn recording_another_pid_replaces_the_record() {
+        let directory = tempfile::tempdir().unwrap();
+        let files = RecordFixture::files(directory.path());
+        files.record_server_pid(4100);
+
+        files.record_server_pid(4200);
+
+        assert_eq!(files.recorded_server_pid(), Some(4200));
     }
 
     #[test]
