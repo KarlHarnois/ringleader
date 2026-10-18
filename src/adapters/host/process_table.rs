@@ -33,6 +33,10 @@ impl ProcessTable {
         Self { scope }
     }
 
+    pub fn tmux_servers_on(&self, socket: &Path) -> Vec<LiveProcess> {
+        LiveProcess::servers_among(self.all(), socket)
+    }
+
     pub fn all(&self) -> Vec<LiveProcess> {
         let Ok(entries) = fs::read_dir(Self::ROOT) else {
             return Vec::new();
@@ -43,6 +47,20 @@ impl ProcessTable {
             .filter(|pid| self.scope.lists(*pid))
             .filter_map(|pid| self.read(pid))
             .collect()
+    }
+
+    pub fn lineage_of(&self, pid: u32) -> Vec<u32> {
+        let mut lineage = Vec::new();
+        let mut current = Some(pid);
+        while let Some(pid) = current.filter(|&pid| pid > 0) {
+            lineage.push(pid);
+            current = self.read(pid).map(|process| process.parent());
+        }
+        lineage
+    }
+
+    pub fn is_alive(&self, pid: u32) -> bool {
+        ProcessStat::read(pid).is_some_and(|stat| !stat.is_zombie())
     }
 
     pub fn read(&self, pid: u32) -> Option<LiveProcess> {
@@ -68,24 +86,6 @@ impl ProcessTable {
                 .with_arguments(arguments)
                 .with_name(&name),
         )
-    }
-
-    pub fn lineage_of(&self, pid: u32) -> Vec<u32> {
-        let mut lineage = Vec::new();
-        let mut current = Some(pid);
-        while let Some(pid) = current.filter(|&pid| pid > 0) {
-            lineage.push(pid);
-            current = self.read(pid).map(|process| process.parent());
-        }
-        lineage
-    }
-
-    pub fn is_alive(&self, pid: u32) -> bool {
-        ProcessStat::read(pid).is_some_and(|stat| !stat.is_zombie())
-    }
-
-    pub fn tmux_servers_on(&self, socket: &Path) -> Vec<LiveProcess> {
-        LiveProcess::servers_among(self.all(), socket)
     }
 
     fn directory_of(pid: u32) -> PathBuf {
