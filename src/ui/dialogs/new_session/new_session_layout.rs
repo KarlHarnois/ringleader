@@ -10,9 +10,10 @@ pub struct NewSessionLayout {
 
 impl NewSessionLayout {
     const PROMPT_FLOOR: usize = 1;
+    const AGENT_ROWS: usize = 1;
     const CHECKOUT_ROWS: usize = 1;
     const MODE_ROWS: usize = 1;
-    const PINNED_ROWS: usize = Self::CHECKOUT_ROWS + Self::MODE_ROWS;
+    const PINNED_ROWS: usize = Self::AGENT_ROWS + Self::CHECKOUT_ROWS + Self::MODE_ROWS;
     const SPACER_ROWS: usize = 1;
     const ERROR_PLACEHOLDER_ROWS: usize = 1;
     const HINT_ROWS: usize = 1;
@@ -128,7 +129,7 @@ mod tests {
 
     impl LayoutFixture {
         const WIDTH: u16 = 60;
-        const FIXED_UPPER_ROWS: usize = 2;
+        const FIXED_UPPER_ROWS: usize = 1;
         const REPO_FLOOR: usize = 1;
         const UPPER_ROWS: usize = Self::FIXED_UPPER_ROWS + Self::REPO_FLOOR;
         const FIELDS_AND_HINTS_HEIGHT: usize =
@@ -262,7 +263,7 @@ mod tests {
 
     #[test]
     fn a_short_area_shrinks_the_upper_rows_before_the_error() {
-        let error_rows = 2;
+        let error_rows = 1;
 
         let [upper, _, prompt, errors, _] =
             LayoutFixture::of_height(LayoutFixture::ROOM_FOR_A_ONE_ROW_PROMPT)
@@ -278,9 +279,8 @@ mod tests {
     }
 
     #[test]
-    fn a_short_area_keeps_the_checkout_and_mode_rows_above_the_prompt_while_the_upper_rows_shrink()
-    {
-        let error_rows = 2;
+    fn a_short_area_keeps_the_pinned_rows_above_the_prompt_while_the_upper_rows_shrink() {
+        let error_rows = 1;
 
         let [upper, pinned, prompt, _, _] =
             LayoutFixture::of_height(LayoutFixture::ROOM_FOR_A_ONE_ROW_PROMPT)
