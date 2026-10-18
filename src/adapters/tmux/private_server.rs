@@ -27,6 +27,7 @@ pub struct PrivateServer<'a> {
 impl<'a> PrivateServer<'a> {
     const RESTORE_LIMIT: Duration = Duration::from_secs(2);
     const RESTORE_POLL: Duration = Duration::from_millis(20);
+    const RESTORE_BY_HAND: &'static str = "send SIGUSR1 to Ringleader's tmux server by hand";
 
     pub fn new(tmux: &'a TmuxCommand, processes: ProcessTable) -> Self {
         Self { tmux, processes }
@@ -81,21 +82,19 @@ impl<'a> PrivateServer<'a> {
     fn recorded_server(&self) -> Result<LiveProcess, MultiplexerError> {
         let files = self.tmux.server();
         let Some(pid) = files.recorded_server_pid() else {
-            return Err(
-                self.socket_not_restored("no server pid is recorded, so no process was signalled")
-            );
+            return Err(self.refused("no server pid is recorded, so no process was signalled"));
         };
         let Some(process) = self.processes.read(pid) else {
-            return Err(
-                self.socket_not_restored(&format!("the recorded server pid {pid} no longer runs"))
-            );
+            return Err(self.refused(&format!("the recorded server pid {pid} no longer runs")));
         };
         if !process.serves(files.socket()) {
-            return Err(self.socket_not_restored(&format!(
-                "the recorded pid {pid} now names another process"
-            )));
+            return Err(self.refused(&format!("the recorded pid {pid} now names another process")));
         }
         Ok(process)
+    }
+
+    fn refused(&self, reason: &str) -> MultiplexerError {
+        self.socket_not_restored(&format!("{reason}; {}", Self::RESTORE_BY_HAND))
     }
 
     fn socket_returns(&self) -> bool {
@@ -376,6 +375,7 @@ mod tests {
             error.to_string().contains("no server pid is recorded"),
             "{error}"
         );
+        assert!(error.to_string().contains("SIGUSR1"), "{error}");
         assert!(!server.socket().exists());
     }
 
