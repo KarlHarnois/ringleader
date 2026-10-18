@@ -16,8 +16,7 @@ impl<'a> ConfigChecks<'a> {
     const WIDTHS: (u16, u16) = (20, 500);
     const HEIGHTS: (u16, u16) = (10, 200);
     const IDLE_SECONDS: (i64, i64) = (2, 3600);
-    const LAUNCHER_VARIABLES: [&'static str; 5] =
-        ["TERM", "COLORTERM", "TMUX", "TMUX_PANE", "GPG_TTY"];
+    const LAUNCHER_VARIABLES: [&'static str; 4] = ["TERM", "TMUX", "TMUX_PANE", "GPG_TTY"];
     const TMUX_UPDATED_VARIABLES: [&'static str; 5] = [
         "MSYSTEM",
         "SSH_ASKPASS",
@@ -236,6 +235,8 @@ impl<'a> ConfigChecks<'a> {
             Some("is not a plain variable name")
         } else if Self::LAUNCHER_VARIABLES.contains(&name) {
             Some("is set by the launcher from its own pane")
+        } else if Agent::is_true_color_variable(name) {
+            Some("is set by the launcher, since Ringleader's tmux server renders true color")
         } else {
             None
         }
@@ -538,6 +539,8 @@ mod tests {
             "",
             "TERM",
             "GPG_TTY",
+            "COLORTERM",
+            "CLAUDE_CODE_TMUX_TRUECOLOR",
             "PATH",
             "SSH_ASKPASS",
         ] {
@@ -547,12 +550,32 @@ mod tests {
 
     #[test]
     fn set_env_entries_that_are_not_plain_or_belong_to_the_launcher_fail() {
-        for name in ["AWS_*", "FOO=bar", "", "TERM", "GPG_TTY"] {
+        for name in [
+            "AWS_*",
+            "FOO=bar",
+            "",
+            "TERM",
+            "GPG_TTY",
+            "COLORTERM",
+            "CLAUDE_CODE_TMUX_TRUECOLOR",
+        ] {
             ChecksFixture::fails_on(
                 ChecksFixture::agent_setting(name, "/accounts/example"),
                 "agents.set_env",
             );
         }
+    }
+
+    #[test]
+    fn a_true_color_variable_in_set_env_is_refused_with_the_launcher_named() {
+        let draft = ChecksFixture::agent_setting("COLORTERM", "truecolor");
+
+        assert_eq!(
+            ChecksFixture::failures(&draft),
+            [
+                "agents.set_env: agent `example-agent` entry `COLORTERM` is set by the launcher, since Ringleader's tmux server renders true color"
+            ]
+        );
     }
 
     #[test]

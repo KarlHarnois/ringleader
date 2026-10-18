@@ -54,12 +54,22 @@ impl Agent {
         "GNUPGHOME",
     ];
     const BASELINE_PREFIXES: [&'static str; 2] = ["LC_", "XDG_"];
+    pub const TRUE_COLOR_VARIABLES: [(&'static str, &'static str); 2] = [
+        ("COLORTERM", "truecolor"),
+        ("CLAUDE_CODE_TMUX_TRUECOLOR", "1"),
+    ];
 
     pub fn is_baseline_variable(name: &str) -> bool {
         Self::BASELINE_VARIABLES.contains(&name)
             || Self::BASELINE_PREFIXES
                 .iter()
                 .any(|prefix| name.starts_with(prefix))
+    }
+
+    pub fn is_true_color_variable(name: &str) -> bool {
+        Self::TRUE_COLOR_VARIABLES
+            .iter()
+            .any(|(listed, _)| *listed == name)
     }
 
     pub fn new(name: &str, command: &str) -> Self {
@@ -558,6 +568,13 @@ mod tests {
         let agent = AgentFixture::with_template(&[]);
 
         assert_eq!(agent.launch_refusal(AgentMode::Build, ""), None);
+    }
+
+    #[test]
+    fn colorterm_and_the_claude_code_override_are_the_true_color_variables() {
+        assert!(Agent::is_true_color_variable("COLORTERM"));
+        assert!(Agent::is_true_color_variable("CLAUDE_CODE_TMUX_TRUECOLOR"));
+        assert!(!Agent::is_true_color_variable("TERM"));
     }
 
     #[test]
