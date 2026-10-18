@@ -1,5 +1,6 @@
 use std::ffi::OsString;
 use std::fs;
+use std::path::Path;
 use std::process::{Child, Command};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -33,11 +34,20 @@ impl ProcessMarker {
     }
 
     pub fn sleeping_child(&self) -> Child {
-        Command::new("sleep")
-            .arg(Self::SLEEP_SECONDS)
-            .envs([self.variable()])
+        self.sleep_command().spawn().expect("a marked sleep starts")
+    }
+
+    pub fn sleeping_child_in(&self, directory: &Path) -> Child {
+        self.sleep_command()
+            .current_dir(directory)
             .spawn()
-            .expect("a marked sleep starts")
+            .expect("a marked sleep starts in the directory")
+    }
+
+    fn sleep_command(&self) -> Command {
+        let mut command = Command::new("sleep");
+        command.arg(Self::SLEEP_SECONDS).envs([self.variable()]);
+        command
     }
 
     fn entry(&self) -> Vec<u8> {

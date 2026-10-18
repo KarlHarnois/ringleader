@@ -519,6 +519,20 @@ mod tests {
     }
 
     #[test]
+    fn a_direct_child_of_the_probes_process_is_not_listed_in_its_directory() {
+        let directory = tempfile::tempdir().unwrap();
+        let marker = ProcessMarker::new();
+        let mut child = marker.sleeping_child_in(directory.path());
+        let probe = ProbeFixture::probe_on(marker.table());
+
+        let listed = probe.processes_in(directory.path(), &[]);
+
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert!(listed.is_empty(), "{listed:?}");
+    }
+
+    #[test]
     fn a_direct_child_of_the_probes_process_is_refused_and_not_signalled() {
         let marker = ProcessMarker::new();
         let mut child = marker.sleeping_child();
