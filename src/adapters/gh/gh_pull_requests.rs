@@ -166,12 +166,13 @@ mod tests {
     use super::*;
     use crate::adapters::Deadlines;
     use crate::domain::PullRequestState;
-    use crate::test_support::{ExecutableScript, ServiceFixture};
+    use crate::test_support::ExecutableScript;
 
     struct ParseFixture;
 
     impl ParseFixture {
         const OPENED_AT: u64 = 1_700_000_000;
+        const URL: &'static str = "https://github.example.com/example-org/example-project/pull/42";
         const RECORDED: &'static str =
             include_str!("../../../tests/fixtures/gh-graphql-pull-requests.json");
         const HOST: &'static str = "github.example.com";
@@ -202,8 +203,7 @@ printf '{"data":{"viewer":{"login":"octocat"},"repository":{"owner":{"login":"ex
         }
 
         fn fix_auth_pull_request() -> PullRequest {
-            let url = ServiceFixture::pull_request_url(42);
-            PullRequest::new(42, PullRequestState::Open, Self::OPENED_AT, &url)
+            PullRequest::new(42, PullRequestState::Open, Self::OPENED_AT, Self::URL)
         }
 
         fn output(code: i32, stdout: &str) -> CommandOutput {
