@@ -47,6 +47,7 @@ use adapters::terminal_emulator::system_terminal_emulator::SystemTerminalEmulato
 use adapters::tmux::server_files::ServerFiles;
 use adapters::tmux::tmux_command::TmuxCommand;
 use adapters::tmux::tmux_multiplexer::TmuxMultiplexer;
+use adapters::web_browser::xdg_web_browser::XdgWebBrowser;
 use adapters::{BoundedCommand, Deadlines, GitWorkspace};
 use application::ports::{ConfigSource, HostProbe, Lock, LockError, PullRequests, UsageMeter};
 use application::{
@@ -295,11 +296,7 @@ impl CompositionRoot {
         let usage_meters = self.usage_meters(host.as_ref(), bounded);
         let directory_environment =
             DirenvDirectoryEnvironment::when_installed(host.as_ref(), &self.environment, bounded);
-        let desktop = DesktopPorts::new(SystemTerminalEmulator::detect(
-            host.as_ref(),
-            &self.environment,
-            bounded,
-        ));
+        let desktop = self.desktop_ports(host.as_ref(), bounded);
         let repos = RepoPorts::new(
             Arc::new(GitWorkspace::new(self.programs.git(), bounded)),
             Arc::new(DirectoryRepoScanner::new(
@@ -373,6 +370,13 @@ impl CompositionRoot {
             Arc::new(ClaudeUsageMeter::new(probe.clone())),
             Arc::new(OpencodeUsageMeter::new(probe, database, quotas)),
         ]
+    }
+
+    fn desktop_ports(&self, host: &SystemHostProbe, bounded: BoundedCommand) -> DesktopPorts {
+        DesktopPorts::new(
+            SystemTerminalEmulator::detect(host, &self.environment, bounded),
+            XdgWebBrowser::detect(host, &self.environment),
+        )
     }
 
     fn pull_requests(host: &SystemHostProbe, bounded: BoundedCommand) -> Arc<dyn PullRequests> {

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use super::ports::{
     Clock, ConfigSource, DirectoryEnvironment, HostProbe, Multiplexer, PullRequests, RepoScanner,
-    ScratchSpace, SessionRegistry, TerminalEmulator, UsageMeter, Workspace,
+    ScratchSpace, SessionRegistry, TerminalEmulator, UsageMeter, WebBrowser, Workspace,
 };
 
 pub struct ServicePorts {
@@ -165,15 +165,26 @@ impl TmuxPorts {
 
 pub struct DesktopPorts {
     terminal_emulator: Arc<dyn TerminalEmulator>,
+    web_browser: Arc<dyn WebBrowser>,
 }
 
 impl DesktopPorts {
-    pub fn new(terminal_emulator: Arc<dyn TerminalEmulator>) -> Self {
-        Self { terminal_emulator }
+    pub fn new(
+        terminal_emulator: Arc<dyn TerminalEmulator>,
+        web_browser: Arc<dyn WebBrowser>,
+    ) -> Self {
+        Self {
+            terminal_emulator,
+            web_browser,
+        }
     }
 
     pub fn terminal_emulator(&self) -> Arc<dyn TerminalEmulator> {
         Arc::clone(&self.terminal_emulator)
+    }
+
+    pub fn web_browser(&self) -> Arc<dyn WebBrowser> {
+        Arc::clone(&self.web_browser)
     }
 }
 

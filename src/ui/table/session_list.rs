@@ -65,7 +65,7 @@ impl SessionList {
         self.rows = rows
             .into_iter()
             .map(|row| match pull_requests.get(row.name()) {
-                Some(pull_request) => row.with_pull_request(*pull_request),
+                Some(pull_request) => row.with_pull_request(pull_request.clone()),
                 None => row,
             })
             .collect();

@@ -12,6 +12,7 @@ impl KeySequence {
         let pending_g = std::mem::take(&mut self.pending_g);
         match key.code {
             KeyCode::Char('g') if pending_g => KeyAction::Navigate(Navigation::SelectFirst),
+            KeyCode::Char('x') if pending_g => gate.open_pull_request(),
             KeyCode::Char('g') => {
                 self.pending_g = true;
                 KeyAction::Ignore
@@ -24,18 +25,36 @@ impl KeySequence {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::{SessionState, SessionSummary};
+    use crate::test_support::ServiceFixture;
+    use crate::ui::keys::action_gate::DesktopOpening;
 
     struct SequenceFixture;
 
     impl SequenceFixture {
         fn actions(characters: &str) -> Vec<KeyAction> {
-            let gate = ActionGate::new(None, None);
+            Self::actions_with(&ActionGate::new(None, None), characters)
+        }
+
+        fn actions_on(row: &SessionSummary, characters: &str) -> Vec<KeyAction> {
+            Self::actions_with(&ActionGate::new(Some(row), None), characters)
+        }
+
+        fn actions_with(gate: &ActionGate, characters: &str) -> Vec<KeyAction> {
             let mut sequence = KeySequence::default();
             characters
                 .chars()
                 .map(|character| KeyEvent::from(KeyCode::Char(character)))
-                .map(|key| sequence.handle_key(&key, &gate))
+                .map(|key| sequence.handle_key(&key, gate))
                 .collect()
+        }
+
+        fn row() -> SessionSummary {
+            SessionSummary::managed(
+                ServiceFixture::session("fix-auth"),
+                SessionState::Waiting,
+                false,
+            )
         }
     }
 
@@ -73,6 +92,25 @@ mod tests {
                 KeyAction::Ignore,
                 KeyAction::Navigate(Navigation::SelectFirst)
             ]
+        );
+    }
+
+    #[test]
+    fn gx_opens_the_pull_request_of_the_selected_session() {
+        assert_eq!(
+            SequenceFixture::actions_on(&SequenceFixture::row(), "gx"),
+            [
+                KeyAction::Ignore,
+                KeyAction::OpenOnDesktop(DesktopOpening::PullRequest("fix-auth".to_string()))
+            ]
+        );
+    }
+
+    #[test]
+    fn a_lone_x_does_nothing() {
+        assert_eq!(
+            SequenceFixture::actions_on(&SequenceFixture::row(), "x"),
+            [KeyAction::Ignore]
         );
     }
 }

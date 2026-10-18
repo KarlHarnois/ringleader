@@ -117,8 +117,8 @@ impl ProcessEnvironment {
         Self::TERMINAL_EMULATOR
     }
 
-    pub fn display_variables() -> [&'static str; 2] {
-        Self::DISPLAYS
+    pub fn no_display_reason() -> String {
+        format!("{} are unset or empty", Self::DISPLAYS.join(" and "))
     }
 
     pub fn has_graphical_display(&self) -> bool {

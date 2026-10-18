@@ -4,7 +4,7 @@ use std::sync::Arc;
 use super::{
     FakeClock, FakeConfigSource, FakeDirectoryEnvironment, FakeHostProbe, FakeMultiplexer,
     FakePullRequests, FakeRepoScanner, FakeScratchSpace, FakeSessionRegistry, FakeTerminalEmulator,
-    FakeUsageMeter, FakeWorkspace,
+    FakeUsageMeter, FakeWebBrowser, FakeWorkspace,
 };
 use crate::application::ports::{
     ConfigError, MergeOutcome, MultiplexerError, ScratchSpace, WorktreeEntry,
@@ -32,6 +32,7 @@ pub struct ServiceFixture {
     scratch_space: Arc<FakeScratchSpace>,
     directory_environment: Arc<FakeDirectoryEnvironment>,
     terminal_emulator: Arc<FakeTerminalEmulator>,
+    web_browser: Arc<FakeWebBrowser>,
     usage_meter: Arc<FakeUsageMeter>,
     config_error: Option<ConfigError>,
     launch_directory: PathBuf,
@@ -72,6 +73,7 @@ impl ServiceFixture {
             scratch_space: Arc::new(FakeScratchSpace::default()),
             directory_environment: Arc::new(FakeDirectoryEnvironment::default()),
             terminal_emulator: Arc::new(FakeTerminalEmulator::default()),
+            web_browser: Arc::new(FakeWebBrowser::default()),
             usage_meter: Arc::new(FakeUsageMeter::new()),
             config_error: None,
             launch_directory: PathBuf::from(Self::REPO),
@@ -173,6 +175,13 @@ impl ServiceFixture {
         }
     }
 
+    pub fn with_web_browser(self, web_browser: FakeWebBrowser) -> Self {
+        Self {
+            web_browser: Arc::new(web_browser),
+            ..self
+        }
+    }
+
     pub fn with_usage_meter(self, usage_meter: FakeUsageMeter) -> Self {
         Self {
             usage_meter: Arc::new(usage_meter),
@@ -263,6 +272,10 @@ impl ServiceFixture {
         &self.terminal_emulator
     }
 
+    pub fn web_browser(&self) -> &FakeWebBrowser {
+        &self.web_browser
+    }
+
     pub fn usage_meter(&self) -> &FakeUsageMeter {
         &self.usage_meter
     }
@@ -318,7 +331,11 @@ impl ServiceFixture {
     }
 
     pub fn pull_request(number: u64, state: PullRequestState) -> PullRequest {
-        PullRequest::new(number, state, Self::NOW)
+        PullRequest::new(number, state, Self::NOW, &Self::pull_request_url(number))
+    }
+
+    pub fn pull_request_url(number: u64) -> String {
+        format!("https://github.example.com/example-org/example-project/pull/{number}")
     }
 
     pub fn session(name: &str) -> Session {
@@ -523,7 +540,7 @@ impl ServiceFixture {
             )
             .with_diff_workspace(self.measuring_workspace()),
             TmuxPorts::new(self.multiplexer.clone()),
-            DesktopPorts::new(self.terminal_emulator.clone()),
+            DesktopPorts::new(self.terminal_emulator.clone(), self.web_browser.clone()),
             AgentPorts::new(vec![self.usage_meter.clone()]),
         )
     }

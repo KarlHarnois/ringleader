@@ -172,6 +172,7 @@ mod tests {
 
     impl ParseFixture {
         const OPENED_AT: u64 = 1_700_000_000;
+        const URL: &'static str = "https://github.example.com/example-org/example-project/pull/42";
         const RECORDED: &'static str =
             include_str!("../../../tests/fixtures/gh-graphql-pull-requests.json");
         const HOST: &'static str = "github.example.com";
@@ -185,7 +186,7 @@ listing=''
 while [ $# -gt 0 ]; do
   if [ "$1" = "-f" ]; then
     case "$2" in
-      branch*=fix-auth) entry='{"nodes":[{"number":42,"state":"OPEN","isDraft":false,"createdAt":"2023-11-14T22:13:20Z","headRepositoryOwner":{"login":"octocat"}}]}' ;;
+      branch*=fix-auth) entry='{"nodes":[{"number":42,"url":"https://github.example.com/example-org/example-project/pull/42","state":"OPEN","isDraft":false,"createdAt":"2023-11-14T22:13:20Z","headRepositoryOwner":{"login":"octocat"}}]}' ;;
       branch*=*) entry='{"nodes":[]}' ;;
       *) entry='' ;;
     esac
@@ -199,6 +200,10 @@ printf '{"data":{"viewer":{"login":"octocat"},"repository":{"owner":{"login":"ex
 
         fn branches() -> Vec<String> {
             vec!["fix-auth".to_string(), "dark-mode".to_string()]
+        }
+
+        fn fix_auth_pull_request() -> PullRequest {
+            PullRequest::new(42, PullRequestState::Open, Self::OPENED_AT, Self::URL)
         }
 
         fn output(code: i32, stdout: &str) -> CommandOutput {
@@ -243,11 +248,7 @@ printf '{"data":{"viewer":{"login":"octocat"},"repository":{"owner":{"login":"ex
 
         assert_eq!(
             found.get("fix-auth"),
-            Some(&Some(PullRequest::new(
-                42,
-                PullRequestState::Open,
-                ParseFixture::OPENED_AT
-            )))
+            Some(&Some(ParseFixture::fix_auth_pull_request()))
         );
         assert_eq!(found.get("dark-mode"), Some(&None));
     }
@@ -355,11 +356,7 @@ printf '{"data":{"viewer":{"login":"octocat"},"repository":{"owner":{"login":"ex
 
         assert_eq!(
             found.get("fix-auth"),
-            Some(&Some(PullRequest::new(
-                42,
-                PullRequestState::Open,
-                ParseFixture::OPENED_AT
-            )))
+            Some(&Some(ParseFixture::fix_auth_pull_request()))
         );
         assert_eq!(found.get("dark-mode"), Some(&None));
         assert_eq!(ParseFixture::calls(&directory, "api").len(), 1);
