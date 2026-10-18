@@ -231,7 +231,7 @@ mod tests {
     struct ProbeFixture;
 
     impl ProbeFixture {
-        const ABSENT_PIDS_START: u32 = 4_000_000;
+        const HIGHEST_ABSENT_PID: u32 = u32::MAX;
 
         fn probe() -> SystemHostProbe {
             Self::probe_on(ProcessMarker::new().table())
@@ -283,7 +283,7 @@ mod tests {
 
         fn absent_pids(count: usize) -> Vec<u32> {
             (0..count)
-                .map(|offset| Self::ABSENT_PIDS_START + u32::try_from(offset).unwrap())
+                .map(|offset| Self::HIGHEST_ABSENT_PID - u32::try_from(offset).unwrap())
                 .collect()
         }
 
