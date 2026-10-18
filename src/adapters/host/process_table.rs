@@ -175,13 +175,19 @@ mod tests {
     }
 
     #[test]
-    fn the_lineage_starts_at_the_pid_and_climbs_to_the_root() {
+    fn the_lineage_starts_at_the_pid_and_ends_at_pid_one_without_the_kernel_parent() {
         let table = ProcessMarker::new().table();
 
         let lineage = table.lineage_of(std::process::id());
 
         assert_eq!(lineage.first(), Some(&std::process::id()));
-        assert!(lineage.len() > 1);
+        assert_eq!(lineage.last(), Some(&1));
+        assert!(!lineage.contains(&0));
+    }
+
+    #[test]
+    fn the_production_scope_lists_every_pid() {
+        assert!(EveryProcess.lists(u32::MAX));
     }
 
     #[test]
