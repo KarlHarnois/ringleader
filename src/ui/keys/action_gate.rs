@@ -89,7 +89,11 @@ impl<'a> ActionGate<'a> {
         let action = match code {
             KeyCode::Enter => self.enter(),
             KeyCode::Char('t') => KeyAction::from(self.shell().map(KeyAction::Request)),
-            KeyCode::Char('T') => KeyAction::from(self.terminal().map(KeyAction::OpenTerminal)),
+            KeyCode::Char('T') => KeyAction::from(
+                self.terminal()
+                    .map(|name| KeyAction::OpenOnDesktop(DesktopOpening::Terminal(name))),
+            ),
+            KeyCode::Char('o') => self.open_pull_request(),
             _ => return None,
         };
         Some(action)
@@ -136,6 +140,13 @@ impl<'a> ActionGate<'a> {
 
     pub fn terminal(&self) -> Result<String, String> {
         self.managed_name("T cannot open a terminal in it")
+    }
+
+    pub fn open_pull_request(&self) -> KeyAction {
+        let name = self.selected().map(|row| row.name().to_string());
+        KeyAction::from(
+            name.map(|name| KeyAction::OpenOnDesktop(DesktopOpening::PullRequest(name))),
+        )
     }
 
     fn managed_name(&self, refusal: &str) -> Result<String, String> {
@@ -231,9 +242,15 @@ pub enum KeyAction {
     Open(DialogOpening),
     FindSession,
     Reload,
-    OpenTerminal(String),
+    OpenOnDesktop(DesktopOpening),
     Refuse(String),
     Ignore,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DesktopOpening {
+    Terminal(String),
+    PullRequest(String),
 }
 
 impl From<Result<KeyAction, String>> for KeyAction {
@@ -661,7 +678,7 @@ mod tests {
         let gate = ActionGate::on_heading(None);
         let refusal = |character| gate.action_for(&KeyEvent::from(KeyCode::Char(character)));
 
-        for character in ['d', 'R', 's', 't', 'T'] {
+        for character in ['d', 'R', 's', 't', 'T', 'o'] {
             assert_eq!(
                 refusal(character),
                 KeyAction::Refuse("No session is selected.".to_string())
@@ -678,6 +695,22 @@ mod tests {
         assert_eq!(gate.shell(), refusal);
         assert_eq!(gate.restart(), refusal);
         assert_eq!(gate.terminal(), Err("No session is selected.".to_string()));
+        assert_eq!(
+            gate.open_pull_request(),
+            KeyAction::Refuse("No session is selected.".to_string())
+        );
+    }
+
+    #[test]
+    fn o_opens_the_pull_request_of_the_selected_session_even_read_only() {
+        let error = GateFixture::config_error();
+        let row = GateFixture::row(SessionState::Working);
+
+        assert_eq!(
+            ActionGate::new(Some(&row), Some(&error))
+                .action_for(&KeyEvent::from(KeyCode::Char('o'))),
+            KeyAction::OpenOnDesktop(DesktopOpening::PullRequest("fix-auth".to_string()))
+        );
     }
 
     #[test]
@@ -695,7 +728,7 @@ mod tests {
 
             assert_eq!(
                 ActionGate::new(Some(&row), Some(&error)).action_for(&key),
-                KeyAction::OpenTerminal("fix-auth".to_string())
+                KeyAction::OpenOnDesktop(DesktopOpening::Terminal("fix-auth".to_string()))
             );
         }
     }

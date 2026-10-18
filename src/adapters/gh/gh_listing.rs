@@ -74,6 +74,7 @@ struct GhConnection {
 #[derive(Deserialize)]
 struct GhEntry {
     number: u64,
+    url: String,
     state: String,
     #[serde(default, rename = "isDraft")]
     is_draft: bool,
@@ -96,6 +97,7 @@ impl GhEntry {
             self.number,
             state,
             self.created_at.epoch_seconds,
+            &self.url,
         ))
     }
 
@@ -128,6 +130,7 @@ impl<'de> Deserialize<'de> for GhTimestamp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::ServiceFixture;
 
     struct ListingFixture;
 
@@ -148,13 +151,15 @@ mod tests {
 
         fn node(number: u64, state: &str, is_draft: bool, head_owner: &str) -> String {
             format!(
-                r#"{{"number":{number},"state":"{state}","isDraft":{is_draft},"createdAt":"{}","headRepositoryOwner":{{"login":"{head_owner}"}}}}"#,
+                r#"{{"number":{number},"url":"{}","state":"{state}","isDraft":{is_draft},"createdAt":"{}","headRepositoryOwner":{{"login":"{head_owner}"}}}}"#,
+                ServiceFixture::pull_request_url(number),
                 Self::OPENED_AT_TEXT
             )
         }
 
         fn opened(number: u64, state: PullRequestState) -> Option<PullRequest> {
-            Some(PullRequest::new(number, state, Self::OPENED_AT))
+            let url = ServiceFixture::pull_request_url(number);
+            Some(PullRequest::new(number, state, Self::OPENED_AT, &url))
         }
     }
 
@@ -164,6 +169,17 @@ mod tests {
             ListingFixture::pull_request(&[ListingFixture::node(142, "OPEN", false, "octocat")]);
 
         assert_eq!(found, ListingFixture::opened(142, PullRequestState::Open));
+    }
+
+    #[test]
+    fn a_pull_request_keeps_the_url_gh_reports() {
+        let found =
+            ListingFixture::pull_request(&[ListingFixture::node(142, "OPEN", false, "octocat")]);
+
+        assert_eq!(
+            found.as_ref().map(PullRequest::url),
+            Some(ServiceFixture::pull_request_url(142).as_str())
+        );
     }
 
     #[test]

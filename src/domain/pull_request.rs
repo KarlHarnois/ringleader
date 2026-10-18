@@ -1,23 +1,29 @@
 use std::fmt;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PullRequest {
     number: u64,
     state: PullRequestState,
     opened_at: u64,
+    url: String,
 }
 
 impl PullRequest {
-    pub fn new(number: u64, state: PullRequestState, opened_at: u64) -> Self {
+    pub fn new(number: u64, state: PullRequestState, opened_at: u64, url: &str) -> Self {
         Self {
             number,
             state,
             opened_at,
+            url: url.to_string(),
         }
     }
 
     pub fn state(&self) -> PullRequestState {
         self.state
+    }
+
+    pub fn url(&self) -> &str {
+        &self.url
     }
 
     pub fn opened_since(&self, epoch_seconds: u64) -> bool {
@@ -65,20 +71,33 @@ mod tests {
 
     impl PullRequestFixture {
         const OPENED_AT: u64 = 1_700_000_000;
+        const URL: &'static str = "https://github.example.com/example-org/example-project/pull/7";
+
+        fn open() -> PullRequest {
+            PullRequest::new(7, PullRequestState::Open, Self::OPENED_AT, Self::URL)
+        }
     }
 
     #[test]
     fn a_pull_request_shows_a_hash_then_its_number() {
-        let pull_request =
-            PullRequest::new(142, PullRequestState::Open, PullRequestFixture::OPENED_AT);
+        let pull_request = PullRequest::new(
+            142,
+            PullRequestState::Open,
+            PullRequestFixture::OPENED_AT,
+            PullRequestFixture::URL,
+        );
 
         assert_eq!(pull_request.to_string(), "#142");
     }
 
     #[test]
     fn the_state_is_kept() {
-        let pull_request =
-            PullRequest::new(7, PullRequestState::Merged, PullRequestFixture::OPENED_AT);
+        let pull_request = PullRequest::new(
+            7,
+            PullRequestState::Merged,
+            PullRequestFixture::OPENED_AT,
+            PullRequestFixture::URL,
+        );
 
         assert_eq!(pull_request.state(), PullRequestState::Merged);
         assert_eq!(pull_request.to_string(), "#7");
@@ -86,8 +105,7 @@ mod tests {
 
     #[test]
     fn a_pull_request_is_opened_since_its_own_second_and_any_earlier_one() {
-        let pull_request =
-            PullRequest::new(7, PullRequestState::Open, PullRequestFixture::OPENED_AT);
+        let pull_request = PullRequestFixture::open();
 
         assert!(pull_request.opened_since(PullRequestFixture::OPENED_AT));
         assert!(pull_request.opened_since(PullRequestFixture::OPENED_AT - 1));
@@ -95,10 +113,14 @@ mod tests {
 
     #[test]
     fn a_pull_request_is_not_opened_since_a_later_second() {
-        let pull_request =
-            PullRequest::new(7, PullRequestState::Open, PullRequestFixture::OPENED_AT);
+        let pull_request = PullRequestFixture::open();
 
         assert!(!pull_request.opened_since(PullRequestFixture::OPENED_AT + 1));
+    }
+
+    #[test]
+    fn a_pull_request_keeps_its_url() {
+        assert_eq!(PullRequestFixture::open().url(), PullRequestFixture::URL);
     }
 
     #[test]
