@@ -130,7 +130,11 @@ mod tests {
 
         fn open_with(&self, variables: &[(&str, &str)]) -> Result<(), WebBrowserError> {
             let environment = self.programs.environment(variables);
-            let host = SystemHostProbe::new(&environment, OsStr::new("tmux"));
+            let host = SystemHostProbe::new(
+                &environment,
+                OsStr::new("tmux"),
+                self.programs.process_table(),
+            );
             XdgWebBrowser::detect(&host, &environment).open(Self::URL)
         }
     }

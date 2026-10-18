@@ -188,11 +188,13 @@ impl TmuxScripts {
     }
 
     pub fn server_values(formats: &[impl AsRef<str>]) -> TmuxSequence {
-        formats
-            .iter()
-            .fold(TmuxSequence::new(), |sequence, format| {
-                sequence.command(["display-message", "-p", format.as_ref()])
-            })
+        formats.iter().fold(Self::server_pid(), |sequence, format| {
+            sequence.command(["display-message", "-p", format.as_ref()])
+        })
+    }
+
+    pub fn server_pid() -> TmuxSequence {
+        TmuxSequence::new().command(["display-message", "-p", TmuxListing::SERVER_PID_FORMAT])
     }
 
     pub fn type_text(pane: &str, text: &str) -> TmuxSequence {
@@ -217,7 +219,7 @@ impl TmuxScripts {
     }
 
     pub fn root_keys() -> TmuxSequence {
-        TmuxSequence::new().command(["list-keys", "-T", "root"])
+        Self::server_pid().command(["list-keys", "-T", "root"])
     }
 
     pub fn attach_session(target: &str) -> TmuxSequence {

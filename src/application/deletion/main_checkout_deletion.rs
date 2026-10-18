@@ -21,6 +21,8 @@ pub struct MainCheckoutDeletion {
 
 impl MainCheckoutDeletion {
     const KEPT_ON_TMUX_FAILURE: &'static str = "kept the registry entry, run ringleader doctor";
+    const SESSION_STOPPED: &'static str =
+        "the session is now stopped and a second delete cannot find them";
 
     pub fn new(ports: &ServicePorts) -> Self {
         Self {
@@ -53,13 +55,17 @@ impl MainCheckoutDeletion {
 
     fn end_tmux_session(&self, row: &ManagedRow) -> Result<(), ServiceError> {
         let started_by_the_agent = self.teardown.kill(row, Self::KEPT_ON_TMUX_FAILURE)?;
-        let survivors = self.host.terminate(&started_by_the_agent);
+        let survivors = self
+            .host
+            .terminate(&started_by_the_agent)
+            .map_err(|error| ServiceError::from(error).adding_context(Self::SESSION_STOPPED))?;
         if survivors.is_empty() {
             return Ok(());
         }
         Err(ServiceError::Conflict(format!(
-            "processes the agent started still run: {}; end them by hand, since the session is now stopped and a second delete cannot find them",
-            ProcessInfo::listed(&survivors)
+            "processes the agent started still run: {}; end them by hand, since {}",
+            ProcessInfo::listed(&survivors),
+            Self::SESSION_STOPPED
         )))
     }
 }
@@ -212,6 +218,31 @@ mod tests {
         let error = CheckoutDeleteFixture::force(&fixture).unwrap_err();
 
         assert!(error.to_string().contains("end them by hand"));
+    }
+
+    #[test]
+    fn a_batch_the_host_refuses_to_end_keeps_the_session_recorded_and_ends_nothing() {
+        let host = CheckoutDeleteFixture::agent_host()
+            .with_process(
+                CheckoutDeleteFixture::DEV_SERVER,
+                "npm run dev",
+                CheckoutDeleteFixture::checkout(),
+                CheckoutDeleteFixture::PANE_SESSION,
+            )
+            .refusing_to_terminate(CheckoutDeleteFixture::DEV_SERVER);
+        let fixture = CheckoutDeleteFixture::with_agent_process(host);
+
+        let error = CheckoutDeleteFixture::force(&fixture).unwrap_err();
+
+        assert!(matches!(error, ServiceError::Conflict(_)), "{error}");
+        assert!(error.to_string().contains("end the processes by hand"));
+        assert!(
+            error
+                .to_string()
+                .contains("a second delete cannot find them")
+        );
+        assert!(fixture.host().terminated().is_empty());
+        assert_eq!(fixture.registry().sessions().len(), 1);
     }
 
     #[test]

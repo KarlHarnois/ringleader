@@ -7,8 +7,8 @@ use std::time::{Duration, SystemTime};
 
 use super::agent_variables::AgentVariables;
 use super::handoff_contents::HandoffContents;
-use crate::adapters::host::live_process::LiveProcess;
 use crate::adapters::host::process_environment::ProcessEnvironment;
+use crate::adapters::host::process_table::ProcessTable;
 use crate::application::ports::AgentLaunch;
 
 static HANDOFF_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -16,6 +16,7 @@ static HANDOFF_COUNTER: AtomicU64 = AtomicU64::new(0);
 pub struct AgentHandoff {
     directory: PathBuf,
     environment: ProcessEnvironment,
+    processes: ProcessTable,
 }
 
 impl AgentHandoff {
@@ -27,16 +28,25 @@ impl AgentHandoff {
     const RELAY_PREFIX: &'static str = "relay";
     const NAME_SEPARATOR: char = '-';
 
-    pub fn new(directory: &Path, environment: &ProcessEnvironment) -> Self {
+    pub fn new(
+        directory: &Path,
+        environment: &ProcessEnvironment,
+        processes: ProcessTable,
+    ) -> Self {
         Self {
             directory: directory.to_path_buf(),
             environment: environment.clone(),
+            processes,
         }
     }
 
-    pub fn beside(handoff: &Path, environment: &ProcessEnvironment) -> Self {
+    pub fn beside(
+        handoff: &Path,
+        environment: &ProcessEnvironment,
+        processes: ProcessTable,
+    ) -> Self {
         let directory = handoff.parent().unwrap_or(Path::new(Self::ROOT));
-        Self::new(directory, environment)
+        Self::new(directory, environment, processes)
     }
 
     pub fn write(&self, launch: &AgentLaunch) -> io::Result<PathBuf> {
@@ -103,16 +113,14 @@ impl AgentHandoff {
                 .ok()
                 .and_then(|modified| now.duration_since(modified).ok());
             let stale = metadata.is_file() && age.is_some_and(|age| age > Self::STALE_AFTER);
-            if stale && !Self::relay_writer_runs(&entry.path()) {
+            if stale && !self.relay_writer_runs(&entry.path()) {
                 Self::delete(&entry.path());
             }
         }
     }
 
-    fn relay_writer_runs(path: &Path) -> bool {
-        Self::relay_writer(path)
-            .and_then(LiveProcess::read)
-            .is_some_and(|writer| writer.is_alive())
+    fn relay_writer_runs(&self, path: &Path) -> bool {
+        Self::relay_writer(path).is_some_and(|writer| self.processes.is_alive(writer))
     }
 
     fn relay_writer(path: &Path) -> Option<u32> {
@@ -145,6 +153,7 @@ mod tests {
     use std::fs::File;
 
     use super::*;
+    use crate::test_support::ProcessMarker;
 
     struct HandoffFixture {
         directory: tempfile::TempDir,
@@ -172,6 +181,7 @@ mod tests {
             AgentHandoff::new(
                 &self.handoff_directory(),
                 &ProcessEnvironment::new(variables, None),
+                ProcessMarker::new().table(),
             )
         }
 
@@ -330,9 +340,13 @@ mod tests {
             .unwrap();
         let contents = AgentHandoff::take(&first).unwrap();
 
-        let second = AgentHandoff::beside(&first, &ProcessEnvironment::default())
-            .write_relay(&contents.inside_envrc())
-            .unwrap();
+        let second = AgentHandoff::beside(
+            &first,
+            &ProcessEnvironment::default(),
+            ProcessMarker::new().table(),
+        )
+        .write_relay(&contents.inside_envrc())
+        .unwrap();
 
         assert_eq!(second.parent(), Some(fixture.handoff_directory().as_path()));
     }

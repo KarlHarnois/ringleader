@@ -132,7 +132,7 @@ mod tests {
 
     use super::*;
     use crate::adapters::Deadlines;
-    use crate::adapters::host::live_process::LiveProcess;
+    use crate::adapters::host::process_table::ProcessTable;
     use crate::adapters::host::system_host_probe::SystemHostProbe;
     use crate::test_support::{Deadline, LogCapture, RecordingPrograms};
 
@@ -218,6 +218,10 @@ fi"#;
             self.programs.session_of(name)
         }
 
+        fn processes(&self) -> ProcessTable {
+            self.programs.process_table()
+        }
+
         fn worktree(&self) -> &Path {
             &self.worktree
         }
@@ -237,7 +241,7 @@ fi"#;
 
         fn open_with(&self, variables: &[(&str, &str)]) -> Result<(), TerminalEmulatorError> {
             let environment = self.programs.environment(variables);
-            let host = SystemHostProbe::new(&environment, OsStr::new("tmux"));
+            let host = SystemHostProbe::new(&environment, OsStr::new("tmux"), self.processes());
             let bounded = BoundedCommand::new(Deadlines::standard());
             SystemTerminalEmulator::detect(&host, &environment, bounded)
                 .open_window(self.worktree())
@@ -282,8 +286,9 @@ fi"#;
         fixture.open_with(&[TerminalFixture::WAYLAND]).unwrap();
 
         let pid = fixture.pid(TerminalFixture::XDG_TERMINAL_EXEC).unwrap();
-        let process = LiveProcess::read(pid).unwrap();
-        let running = process.is_alive();
+        let processes = fixture.processes();
+        let process = processes.read(pid).unwrap();
+        let running = processes.is_alive(pid);
         process.signal(libc::SIGTERM).unwrap();
         assert!(running);
     }

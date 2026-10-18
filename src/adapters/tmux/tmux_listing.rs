@@ -17,6 +17,7 @@ impl<'a> TmuxListing<'a> {
     pub const PANE_PID_FORMAT: &'static str = "ringleader-pane-pid #{pane_dead} #{pane_pid}";
     pub const TTY_FORMAT: &'static str = "ringleader-tty #{pane_dead} #{pane_tty}";
     pub const SERVER_FORMAT: &'static str = "ringleader-server #{version}";
+    pub const SERVER_PID_FORMAT: &'static str = "ringleader-server-pid #{pid}";
     pub const SESSION_FORMAT: &'static str = "ringleader-session";
     pub const SESSION_ID_FORMAT: &'static str =
         "ringleader-session-id #{session_id} #{session_name}";
@@ -74,6 +75,10 @@ impl<'a> TmuxListing<'a> {
         let version = self.output.first("ringleader-server")?;
         let sessions = self.output.labeled(Self::SESSION_FORMAT).count();
         Some(ServerState::new(version, sessions))
+    }
+
+    pub fn server_pid(&self) -> Option<u32> {
+        self.output.first("ringleader-server-pid")?.parse().ok()
     }
 
     pub fn shows_terminal(&self, terminal: &OsStr) -> bool {

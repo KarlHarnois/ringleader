@@ -184,7 +184,7 @@ mod tests {
 
     use super::*;
     use crate::application::ports::AgentLaunch;
-    use crate::test_support::{DirenvTestHome, InheritedPath};
+    use crate::test_support::{DirenvTestHome, InheritedPath, ProcessMarker};
 
     #[derive(Clone, Default)]
     struct CapturingExec {
@@ -377,7 +377,11 @@ mod tests {
         }
 
         fn handoff_from(&self, creating: &ProcessEnvironment, launch: &AgentLaunch) -> PathBuf {
-            let handoff = AgentHandoff::new(&self.handoff_directory(), creating);
+            let handoff = AgentHandoff::new(
+                &self.handoff_directory(),
+                creating,
+                ProcessMarker::new().table(),
+            );
             handoff.write(launch).unwrap()
         }
 
@@ -391,8 +395,10 @@ mod tests {
             handoff: &Path,
             reentry: &[&str],
         ) -> AgentLauncher {
-            let reentry =
-                LauncherCommand::new(Self::words(reentry), AgentHandoff::beside(handoff, pane));
+            let reentry = LauncherCommand::new(
+                Self::words(reentry),
+                AgentHandoff::beside(handoff, pane, ProcessMarker::new().table()),
+            );
             AgentLauncher::new(pane, seam, reentry)
         }
 
@@ -435,7 +441,7 @@ mod tests {
             let first = self.handoff_from(creating, &Self::envrc_launch(&self.worktree()));
             let contents = AgentHandoff::take(&first).unwrap().inside_envrc();
             let envrc = Self::envrc_snapshot();
-            let handoff = AgentHandoff::beside(&first, &envrc)
+            let handoff = AgentHandoff::beside(&first, &envrc, ProcessMarker::new().table())
                 .write_relay(&contents)
                 .unwrap();
             let seam = CapturingExec::default();
@@ -601,7 +607,11 @@ mod tests {
         let pane = LauncherFixture::pane_snapshot(None);
         let reentry = LauncherCommand::new(
             LauncherFixture::words(&LauncherFixture::REENTRY),
-            AgentHandoff::new(&blocked.join("handoff"), &pane),
+            AgentHandoff::new(
+                &blocked.join("handoff"),
+                &pane,
+                ProcessMarker::new().table(),
+            ),
         );
         let seam = RecordingExec::default();
 

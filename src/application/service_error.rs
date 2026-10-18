@@ -96,7 +96,13 @@ impl From<ConfigError> for ServiceError {
 
 impl From<HostProbeError> for ServiceError {
     fn from(error: HostProbeError) -> Self {
-        ServiceError::Invalid(error.to_string())
+        let message = error.to_string();
+        match error {
+            HostProbeError::RelativePath { .. } => ServiceError::Invalid(message),
+            HostProbeError::OwnProcess { .. } | HostProbeError::BatchAboveCeiling { .. } => {
+                ServiceError::Conflict(message)
+            }
+        }
     }
 }
 

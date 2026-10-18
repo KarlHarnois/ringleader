@@ -3,12 +3,14 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
-use super::{Deadline, ExecutableScript, InheritedPath};
+use super::{Deadline, ExecutableScript, InheritedPath, ProcessMarker};
 use crate::adapters::host::process_environment::ProcessEnvironment;
+use crate::adapters::host::process_table::ProcessTable;
 
 pub struct RecordingPrograms {
     directory: tempfile::TempDir,
     prelude: String,
+    marker: ProcessMarker,
 }
 
 impl RecordingPrograms {
@@ -43,6 +45,7 @@ echo $$ > "$record/pid"
         let programs = Self {
             directory: tempfile::tempdir().unwrap(),
             prelude: String::new(),
+            marker: ProcessMarker::new(),
         };
         fs::create_dir(programs.program_directory()).unwrap();
         programs
@@ -91,9 +94,16 @@ echo $$ > "$record/pid"
             .iter()
             .map(|(name, value)| (OsString::from(name), OsString::from(value)));
         ProcessEnvironment::new(
-            std::iter::once(search_path).chain(variables).collect(),
+            std::iter::once(search_path)
+                .chain(variables)
+                .chain([self.marker.variable()])
+                .collect(),
             None,
         )
+    }
+
+    pub fn process_table(&self) -> ProcessTable {
+        self.marker.table()
     }
 
     pub fn pid(&self, name: &str) -> Option<u32> {
@@ -115,10 +125,11 @@ echo $$ > "$record/pid"
     }
 
     pub fn environment_of(&self, name: &str) -> Vec<String> {
+        let marker = format!("{}=", ProcessMarker::NAME);
         let mut variables: Vec<String> = self
             .recorded_once_started(name, "environ")
             .split('\0')
-            .filter(|variable| !variable.is_empty())
+            .filter(|variable| !variable.is_empty() && !variable.starts_with(&marker))
             .map(str::to_string)
             .collect();
         variables.sort();

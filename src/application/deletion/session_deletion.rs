@@ -30,6 +30,8 @@ pub struct SessionDeletion {
 impl SessionDeletion {
     const KEPT_ON_TMUX_FAILURE: &'static str =
         "kept the worktree, the branch, and the registry entry, run ringleader doctor";
+    const KEPT_AFTER_STOP: &'static str =
+        "kept the worktree, the branch, and the session, which is now stopped";
 
     pub fn new(ports: &ServicePorts) -> Self {
         Self {
@@ -132,13 +134,17 @@ impl SessionDeletion {
                 .iter()
                 .map(ProcessInfo::pid),
         );
-        let mut remaining = self.host.terminate(&targets);
+        let mut remaining = self
+            .host
+            .terminate(&targets)
+            .map_err(|error| ServiceError::from(error).adding_context(Self::KEPT_AFTER_STOP))?;
         remaining.extend(self.host.processes_in(session.worktree_path(), &[]));
         if !remaining.is_empty() {
             return Err(ServiceError::Conflict(format!(
-                "processes still run in {}: {}; kept the worktree, the branch, and the session, which is now stopped",
+                "processes still run in {}: {}; {}",
                 session.worktree_path().display(),
-                ProcessInfo::listed(&remaining)
+                ProcessInfo::listed(&remaining),
+                Self::KEPT_AFTER_STOP
             )));
         }
         self.refuse_new_commits(session, measurement)
@@ -684,6 +690,24 @@ mod tests {
 
         assert!(error.to_string().contains("5300 (bash)"));
         assert!(fixture.multiplexer().live_names().is_empty());
+        DeleteFixture::assert_everything_kept(&fixture);
+    }
+
+    #[test]
+    fn a_batch_the_host_refuses_to_end_keeps_the_worktree_and_entry_and_signals_nothing() {
+        let session = DeleteFixture::session();
+        let fixture = DeleteFixture::live_fixture().with_host(
+            ServiceFixture::host_for(&[&session])
+                .with_process(5200, "vim", session.worktree_path(), 5200)
+                .refusing_to_terminate(5200),
+        );
+
+        let error = DeleteFixture::force(&mut fixture.service()).unwrap_err();
+
+        assert!(matches!(error, ServiceError::Conflict(_)), "{error}");
+        assert!(error.to_string().contains("end the processes by hand"));
+        assert!(error.to_string().contains("which is now stopped"));
+        assert!(fixture.host().terminated().is_empty());
         DeleteFixture::assert_everything_kept(&fixture);
     }
 
