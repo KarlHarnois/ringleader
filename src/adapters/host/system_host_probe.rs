@@ -81,10 +81,13 @@ impl SystemHostProbe {
     }
 
     fn owns_pid(&self, pid: u32) -> bool {
-        self.own_lineage.contains(&pid)
-            || self.processes.read(pid).is_some_and(|process| {
-                self.is_own(&process) || Some(process.session()) == self.own_session
-            })
+        self.processes
+            .read(pid)
+            .is_some_and(|process| self.is_own(&process) || self.shares_own_session(&process))
+    }
+
+    fn shares_own_session(&self, process: &LiveProcess) -> bool {
+        Some(process.session()) == self.own_session
     }
 
     fn others_in<'p>(
