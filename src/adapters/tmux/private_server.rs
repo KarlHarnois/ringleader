@@ -27,7 +27,6 @@ pub struct PrivateServer<'a> {
 impl<'a> PrivateServer<'a> {
     const RESTORE_LIMIT: Duration = Duration::from_secs(2);
     const RESTORE_POLL: Duration = Duration::from_millis(20);
-    const RESTORE_BY_HAND: &'static str = "send SIGUSR1 to Ringleader's tmux server by hand";
 
     pub fn new(tmux: &'a TmuxCommand, processes: ProcessTable) -> Self {
         Self { tmux, processes }
@@ -52,17 +51,15 @@ impl<'a> PrivateServer<'a> {
     }
 
     pub fn socket_lost(&self) -> bool {
-        let files = self.tmux.server();
-        Self::is_missing(files.socket())
-            && !files.server_is_starting()
-            && !self.processes.tmux_servers_on(files.socket()).is_empty()
+        !self.servers_without_socket().is_empty()
     }
 
     pub fn restore_socket(&self) -> Result<bool, MultiplexerError> {
-        if !self.socket_lost() {
+        let found = self.servers_without_socket();
+        if found.is_empty() {
             return Ok(false);
         }
-        let server = self.recorded_server()?;
+        let server = self.recorded_server(&found)?;
         self.tmux.server().prepare_socket_directory()?;
         server.signal(libc::SIGUSR1).map_err(|error| {
             self.socket_not_restored(&format!(
@@ -79,22 +76,46 @@ impl<'a> PrivateServer<'a> {
         )))
     }
 
-    fn recorded_server(&self) -> Result<LiveProcess, MultiplexerError> {
+    fn servers_without_socket(&self) -> Vec<LiveProcess> {
+        let files = self.tmux.server();
+        match Self::is_missing(files.socket()) && !files.server_is_starting() {
+            true => self.processes.tmux_servers_on(files.socket()),
+            false => Vec::new(),
+        }
+    }
+
+    fn recorded_server(&self, found: &[LiveProcess]) -> Result<LiveProcess, MultiplexerError> {
         let files = self.tmux.server();
         let Some(pid) = files.recorded_server_pid() else {
-            return Err(self.refused("no server pid is recorded, so no process was signalled"));
+            return Err(self.refused(
+                "no server pid is recorded, so no process was signalled",
+                found,
+            ));
         };
         let Some(process) = self.processes.read(pid) else {
-            return Err(self.refused(&format!("the recorded server pid {pid} no longer runs")));
+            return Err(self.refused(
+                &format!("the recorded server pid {pid} no longer runs"),
+                found,
+            ));
         };
         if !process.serves(files.socket()) {
-            return Err(self.refused(&format!("the recorded pid {pid} now names another process")));
+            return Err(self.refused(
+                &format!("the recorded pid {pid} now names another process"),
+                found,
+            ));
         }
         Ok(process)
     }
 
-    fn refused(&self, reason: &str) -> MultiplexerError {
-        self.socket_not_restored(&format!("{reason}; {}", Self::RESTORE_BY_HAND))
+    fn refused(&self, reason: &str, found: &[LiveProcess]) -> MultiplexerError {
+        let pids: Vec<String> = found
+            .iter()
+            .map(|server| server.pid().to_string())
+            .collect();
+        self.socket_not_restored(&format!(
+            "{reason}; send SIGUSR1 by hand to the tmux server the scan found at pid {}",
+            pids.join(" or ")
+        ))
     }
 
     fn socket_returns(&self) -> bool {
@@ -362,9 +383,10 @@ mod tests {
     }
 
     #[test]
-    fn a_server_whose_pid_was_never_recorded_is_refused_a_restore() {
+    fn a_server_whose_pid_was_never_recorded_is_refused_a_restore_that_names_its_pid() {
         let server = TmuxTestServer::with_session("holder");
         let tmux = server.command();
+        let pid = server.server_pid();
         fs::remove_file(server.socket()).unwrap();
 
         let error = PrivateServer::new(&tmux, server.process_table())
@@ -376,6 +398,7 @@ mod tests {
             "{error}"
         );
         assert!(error.to_string().contains("SIGUSR1"), "{error}");
+        assert!(error.to_string().contains(&format!("pid {pid}")), "{error}");
         assert!(!server.socket().exists());
     }
 
