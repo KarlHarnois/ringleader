@@ -26,6 +26,11 @@ impl MountinfoFile {
         }
     }
 
+    #[cfg(test)]
+    fn path(&self) -> &Path {
+        &self.path
+    }
+
     fn mount(line: &str) -> Option<Mount> {
         let fields: Vec<&str> = line.split(' ').collect();
         let separator = fields
@@ -127,6 +132,13 @@ mod tests {
     #[test]
     fn a_mount_below_a_directory_is_within_it() {
         assert!(MountinfoFixture::table().has_mount_within(Path::new("/home/user")));
+    }
+
+    #[test]
+    fn production_reads_the_mount_table_of_this_process_and_its_mount_namespace() {
+        let file = MountinfoFile::of_this_process();
+
+        assert_eq!(file.path(), Path::new("/proc/self/mountinfo"));
     }
 
     #[test]
