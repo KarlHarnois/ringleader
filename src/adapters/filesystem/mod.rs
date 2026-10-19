@@ -5,4 +5,6 @@ pub mod file_lock;
 pub mod fnv_hash;
 pub mod host_path;
 pub mod json_session_registry;
+pub mod mount_source;
 pub mod mount_table;
+pub mod mountinfo_file;

@@ -2,6 +2,7 @@ use std::collections::VecDeque;
 use std::fs::{self, DirEntry};
 use std::path::{Path, PathBuf};
 
+use super::mount_source::MountSource;
 use super::mount_table::MountTable;
 use crate::adapters::git::git_invocation::GitInvocation;
 use crate::adapters::git::git_porcelain::RepoKind;
@@ -12,7 +13,7 @@ use crate::domain::{Repo, RepoName, RepoScope};
 pub struct DirectoryRepoScanner {
     git: GitRunner,
     visit_cap: usize,
-    mount_table: PathBuf,
+    mounts: Box<dyn MountSource>,
 }
 
 impl DirectoryRepoScanner {
@@ -21,11 +22,11 @@ impl DirectoryRepoScanner {
     const SYSTEM_DIRECTORIES: [&'static str; 4] = ["/proc", "/sys", "/dev", "/nix/store"];
     const GIT_MARKER: &'static str = ".git";
 
-    pub fn new(git: GitRunner, visit_cap: usize, mount_table: &Path) -> Self {
+    pub fn new(git: GitRunner, visit_cap: usize, mounts: Box<dyn MountSource>) -> Self {
         Self {
             git,
             visit_cap,
-            mount_table: mount_table.to_path_buf(),
+            mounts,
         }
     }
 
@@ -137,7 +138,7 @@ impl RepoScanner for DirectoryRepoScanner {
     }
 
     fn scan(&self, scope: &RepoScope, depth: usize) -> Result<ScanOutcome, ScanError> {
-        let mounts = MountTable::read_or_empty(&self.mount_table);
+        let mounts = self.mounts.mount_table().unwrap_or_default();
         let root = scope.root();
         if Self::sorted_entries(root).is_none() {
             return Err(ScanError::Unreadable {
@@ -194,6 +195,7 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     use super::*;
+    use crate::adapters::filesystem::mountinfo_file::MountinfoFile;
     use crate::adapters::{BoundedCommand, Deadlines};
     use crate::test_support::GitTestRepo;
 
@@ -227,7 +229,7 @@ mod tests {
                 BoundedCommand::new(Deadlines::standard()),
             )
             .with_environment(self.git.environment());
-            DirectoryRepoScanner::new(git, cap, mount_table)
+            DirectoryRepoScanner::new(git, cap, Box::new(MountinfoFile::at(mount_table)))
         }
 
         fn repo_at(&self, relative: &str) -> PathBuf {

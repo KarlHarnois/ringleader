@@ -29,7 +29,6 @@ use adapters::filesystem::directory_repo_scanner::DirectoryRepoScanner;
 use adapters::filesystem::directory_scratch_space::DirectoryScratchSpace;
 use adapters::filesystem::file_lock::FileLock;
 use adapters::filesystem::json_session_registry::JsonSessionRegistry;
-use adapters::filesystem::mount_table::MountTable;
 use adapters::gh::gh_pull_requests::GhPullRequests;
 use adapters::gh::null_pull_requests::NullPullRequests;
 use adapters::git::git_runner::GitRunner;
@@ -48,7 +47,7 @@ use adapters::tmux::server_files::ServerFiles;
 use adapters::tmux::tmux_command::TmuxCommand;
 use adapters::tmux::tmux_multiplexer::TmuxMultiplexer;
 use adapters::web_browser::xdg_web_browser::XdgWebBrowser;
-use adapters::{BoundedCommand, Deadlines, GitWorkspace};
+use adapters::{BoundedCommand, Deadlines, GitWorkspace, HostMounts};
 use application::ports::{ConfigSource, HostProbe, Lock, LockError, PullRequests, UsageMeter};
 use application::{
     AgentPorts, CorruptRegistry, DesktopPorts, DiagnosticPaths, LoadedConfig, RepoPorts,
@@ -302,7 +301,7 @@ impl CompositionRoot {
             Arc::new(DirectoryRepoScanner::new(
                 GitRunner::new(self.programs.git(), bounded),
                 DirectoryRepoScanner::VISIT_CAP,
-                Path::new(MountTable::PROCESS_TABLE),
+                Box::new(HostMounts::of_this_process()),
             )),
             host,
             pull_requests,
@@ -345,7 +344,7 @@ impl CompositionRoot {
             clock,
             Arc::new(DirectoryScratchSpace::new(
                 &self.paths.scratch_root(),
-                Path::new(MountTable::PROCESS_TABLE),
+                Box::new(HostMounts::of_this_process()),
             )),
         )
     }

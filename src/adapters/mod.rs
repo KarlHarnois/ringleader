@@ -16,6 +16,7 @@ pub mod web_browser;
 
 pub use child_process::bounded_command::BoundedCommand;
 pub use child_process::deadlines::Deadlines;
+pub use filesystem::mountinfo_file::MountinfoFile as HostMounts;
 pub use git::git_workspace::GitWorkspace;
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
