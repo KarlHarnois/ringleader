@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use super::{
     FakeClock, FakeConfigSource, FakeDirectoryEnvironment, FakeHostProbe, FakeMultiplexer,
@@ -242,6 +242,22 @@ impl ServiceFixture {
 
     pub fn shared_multiplexer(&self) -> Arc<FakeMultiplexer> {
         Arc::clone(&self.multiplexer)
+    }
+
+    pub fn refuse_to_terminate_at(&self, operation: &'static str, pid: u32) {
+        let host = Arc::clone(&self.host);
+        self.multiplexer
+            .add_call_hook(operation, move || host.refuse_to_terminate(pid));
+    }
+
+    pub fn terminated_before(&self, operation: &'static str) -> TerminationSnapshot {
+        let pids = Arc::new(Mutex::new(None));
+        let host = Arc::clone(&self.host);
+        let recorder = Arc::clone(&pids);
+        self.multiplexer.add_call_hook(operation, move || {
+            *recorder.lock().unwrap() = Some(host.terminated());
+        });
+        TerminationSnapshot { pids }
     }
 
     pub fn config_source(&self) -> &FakeConfigSource {
@@ -560,5 +576,19 @@ impl ServiceFixture {
             .with_diagnostics(self.diagnostics.clone())
             .with_home(self.home.as_deref())
             .with_shell(&self.shell)
+    }
+}
+
+pub struct TerminationSnapshot {
+    pids: Arc<Mutex<Option<Vec<u32>>>>,
+}
+
+impl TerminationSnapshot {
+    pub fn pids(&self) -> Vec<u32> {
+        self.pids
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("the operation never ran")
     }
 }

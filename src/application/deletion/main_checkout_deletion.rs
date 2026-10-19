@@ -2,11 +2,11 @@ use std::sync::Arc;
 
 use super::delete_impact::{DeleteConfirmation, DeleteImpact};
 use super::delete_outcome::DeleteOutcome;
-use super::tmux_teardown::TmuxTeardown;
+use super::tmux_teardown::{TeardownContexts, TmuxTeardown};
 use crate::application::ServiceError;
 use crate::application::ServicePorts;
 use crate::application::checks::unseen_session::UnseenSession;
-use crate::application::ports::{HostProbe, ProcessInfo, SessionRegistry};
+use crate::application::ports::{ProcessInfo, SessionRegistry};
 use crate::application::reconciliation::ManagedRow;
 use crate::application::session_scratch::SessionScratch;
 use crate::domain::{Session, SessionState};
@@ -14,21 +14,26 @@ use crate::domain::{Session, SessionState};
 pub struct MainCheckoutDeletion {
     unseen: UnseenSession,
     teardown: TmuxTeardown,
-    host: Arc<dyn HostProbe>,
     registry: Arc<dyn SessionRegistry>,
     scratch: SessionScratch,
 }
 
 impl MainCheckoutDeletion {
     const KEPT_ON_TMUX_FAILURE: &'static str = "kept the registry entry, run ringleader doctor";
+    const KEPT_WHILE_RUNNING: &'static str =
+        "kept the registry entry and the session, which still runs";
     const SESSION_STOPPED: &'static str =
         "the session is now stopped and a second delete cannot find them";
+    const TEARDOWN_CONTEXTS: TeardownContexts = TeardownContexts::new(
+        Self::KEPT_ON_TMUX_FAILURE,
+        Self::KEPT_WHILE_RUNNING,
+        Self::SESSION_STOPPED,
+    );
 
     pub fn new(ports: &ServicePorts) -> Self {
         Self {
             unseen: UnseenSession::new(ports),
-            teardown: TmuxTeardown::new(ports),
-            host: ports.repos().host(),
+            teardown: TmuxTeardown::new(ports, Self::TEARDOWN_CONTEXTS),
             registry: ports.state().registry(),
             scratch: SessionScratch::new(ports),
         }
@@ -54,17 +59,17 @@ impl MainCheckoutDeletion {
     }
 
     fn end_tmux_session(&self, row: &ManagedRow) -> Result<(), ServiceError> {
-        let started_by_the_agent = self.teardown.kill(row, Self::KEPT_ON_TMUX_FAILURE)?;
-        let survivors = self
-            .host
-            .terminate(&started_by_the_agent)
-            .map_err(|error| ServiceError::from(error).adding_context(Self::SESSION_STOPPED))?;
+        let survivors = self.teardown.stop(row, &[])?;
+        Self::refuse_survivors(&survivors)
+    }
+
+    fn refuse_survivors(survivors: &[ProcessInfo]) -> Result<(), ServiceError> {
         if survivors.is_empty() {
             return Ok(());
         }
         Err(ServiceError::Conflict(format!(
             "processes the agent started still run: {}; end them by hand, since {}",
-            ProcessInfo::listed(&survivors),
+            ProcessInfo::listed(survivors),
             Self::SESSION_STOPPED
         )))
     }
@@ -113,6 +118,21 @@ mod tests {
 
         fn agent_host() -> FakeHostProbe {
             ServiceFixture::host_for(&[&Self::session()])
+        }
+
+        fn dev_server_host() -> FakeHostProbe {
+            Self::agent_host().with_process(
+                Self::DEV_SERVER,
+                "npm run dev",
+                Self::checkout(),
+                Self::PANE_SESSION,
+            )
+        }
+
+        fn refusing_dev_server() -> ServiceFixture {
+            Self::with_agent_process(
+                Self::dev_server_host().refusing_to_terminate(Self::DEV_SERVER),
+            )
         }
 
         fn live(observation: SessionObservation) -> ServiceFixture {
@@ -173,13 +193,8 @@ mod tests {
 
     #[test]
     fn deleting_a_session_in_the_main_checkout_stops_the_processes_its_agent_started() {
-        let host = CheckoutDeleteFixture::agent_host().with_process(
-            CheckoutDeleteFixture::DEV_SERVER,
-            "npm run dev",
-            CheckoutDeleteFixture::checkout(),
-            CheckoutDeleteFixture::PANE_SESSION,
-        );
-        let fixture = CheckoutDeleteFixture::with_agent_process(host);
+        let fixture =
+            CheckoutDeleteFixture::with_agent_process(CheckoutDeleteFixture::dev_server_host());
 
         CheckoutDeleteFixture::force(&fixture).unwrap();
 
@@ -221,27 +236,57 @@ mod tests {
     }
 
     #[test]
-    fn a_batch_the_host_refuses_to_end_keeps_the_session_recorded_and_ends_nothing() {
-        let host = CheckoutDeleteFixture::agent_host()
-            .with_process(
-                CheckoutDeleteFixture::DEV_SERVER,
-                "npm run dev",
-                CheckoutDeleteFixture::checkout(),
-                CheckoutDeleteFixture::PANE_SESSION,
-            )
-            .refusing_to_terminate(CheckoutDeleteFixture::DEV_SERVER);
-        let fixture = CheckoutDeleteFixture::with_agent_process(host);
+    fn a_batch_the_host_refuses_to_end_leaves_the_session_live_and_recorded() {
+        let fixture = CheckoutDeleteFixture::refusing_dev_server();
 
         let error = CheckoutDeleteFixture::force(&fixture).unwrap_err();
 
         assert!(matches!(error, ServiceError::Conflict(_)), "{error}");
         assert!(error.to_string().contains("end the processes by hand"));
+        assert!(error.to_string().contains("which still runs"));
+        assert_eq!(fixture.multiplexer().live_names(), ["ringleader-fix-auth"]);
+        assert_eq!(fixture.registry().sessions().len(), 1);
+    }
+
+    #[test]
+    fn a_batch_the_host_refuses_to_end_signals_nothing() {
+        let fixture = CheckoutDeleteFixture::refusing_dev_server();
+
+        CheckoutDeleteFixture::force(&fixture).unwrap_err();
+
+        assert!(fixture.host().terminated().is_empty());
+    }
+
+    #[test]
+    fn the_processes_its_agent_started_are_ended_only_after_the_tmux_session_is_killed() {
+        let fixture =
+            CheckoutDeleteFixture::with_agent_process(CheckoutDeleteFixture::dev_server_host());
+        let before_kill = fixture.terminated_before("kill_session");
+
+        CheckoutDeleteFixture::force(&fixture).unwrap();
+
+        assert!(before_kill.pids().is_empty());
+        assert_eq!(
+            fixture.host().terminated(),
+            [CheckoutDeleteFixture::DEV_SERVER]
+        );
+    }
+
+    #[test]
+    fn a_refusal_the_kill_reveals_says_the_session_is_now_stopped() {
+        let fixture =
+            CheckoutDeleteFixture::with_agent_process(CheckoutDeleteFixture::dev_server_host());
+        fixture.refuse_to_terminate_at("kill_session", CheckoutDeleteFixture::DEV_SERVER);
+
+        let error = CheckoutDeleteFixture::force(&fixture).unwrap_err();
+
         assert!(
             error
                 .to_string()
-                .contains("a second delete cannot find them")
+                .contains("a second delete cannot find them"),
+            "{error}"
         );
-        assert!(fixture.host().terminated().is_empty());
+        assert!(fixture.multiplexer().live_names().is_empty());
         assert_eq!(fixture.registry().sessions().len(), 1);
     }
 

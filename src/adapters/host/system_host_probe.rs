@@ -63,19 +63,6 @@ impl SystemHostProbe {
         })
     }
 
-    fn refuse_wrong_batch(&self, pids: &[u32]) -> Result<(), HostProbeError> {
-        if pids.len() > Self::TERMINATE_CEILING {
-            return Err(HostProbeError::BatchAboveCeiling {
-                count: pids.len(),
-                ceiling: Self::TERMINATE_CEILING,
-            });
-        }
-        match pids.iter().copied().find(|pid| self.owns_pid(*pid)) {
-            Some(pid) => Err(HostProbeError::OwnProcess { pid }),
-            None => Ok(()),
-        }
-    }
-
     fn owns_pid(&self, pid: u32) -> bool {
         self.processes
             .read(pid)
@@ -203,7 +190,7 @@ impl HostProbe for SystemHostProbe {
     }
 
     fn terminate(&self, pids: &[u32]) -> Result<Vec<ProcessInfo>, HostProbeError> {
-        self.refuse_wrong_batch(pids)?;
+        self.check_batch(pids)?;
         let targets: Vec<LiveProcess> = pids
             .iter()
             .filter_map(|pid| self.processes.read(*pid))
@@ -222,6 +209,19 @@ impl HostProbe for SystemHostProbe {
                 return Ok(remaining.into_iter().map(LiveProcess::info).collect());
             }
             thread::sleep(Self::TERMINATE_POLL);
+        }
+    }
+
+    fn check_batch(&self, pids: &[u32]) -> Result<(), HostProbeError> {
+        if pids.len() > Self::TERMINATE_CEILING {
+            return Err(HostProbeError::BatchAboveCeiling {
+                count: pids.len(),
+                ceiling: Self::TERMINATE_CEILING,
+            });
+        }
+        match pids.iter().copied().find(|pid| self.owns_pid(*pid)) {
+            Some(pid) => Err(HostProbeError::OwnProcess { pid }),
+            None => Ok(()),
         }
     }
 }
@@ -288,6 +288,35 @@ mod tests {
             (0..count)
                 .map(|offset| Self::HIGHEST_ABSENT_PID - u32::try_from(offset).unwrap())
                 .collect()
+        }
+
+        fn absent_pids_and(count: usize, pid: u32) -> Vec<u32> {
+            let mut batch = Self::absent_pids(count);
+            batch.push(pid);
+            batch
+        }
+
+        fn own_pid_refusal() -> HostProbeError {
+            HostProbeError::OwnProcess {
+                pid: std::process::id(),
+            }
+        }
+
+        fn ceiling_refusal() -> HostProbeError {
+            HostProbeError::BatchAboveCeiling {
+                count: SystemHostProbe::TERMINATE_CEILING + 1,
+                ceiling: SystemHostProbe::TERMINATE_CEILING,
+            }
+        }
+
+        fn call_with_pane_child<T>(call: impl FnOnce(&SystemHostProbe, u32) -> T) -> (T, bool) {
+            let server = Self::started_probe_session();
+            let child = Self::nohup_child(&server);
+            let probe = Self::probe_on(server.process_table());
+            let result = call(&probe, child);
+            let child_untouched = Self::is_alive(child);
+            probe.terminate(&[child]).unwrap();
+            (result, child_untouched)
         }
 
         fn started_probe_session() -> TmuxTestServer {
@@ -494,20 +523,11 @@ mod tests {
 
     #[test]
     fn a_batch_that_holds_the_probes_own_pid_is_refused_whole_and_signals_nothing() {
-        let server = ProbeFixture::started_probe_session();
-        let child = ProbeFixture::nohup_child(&server);
-        let probe = ProbeFixture::probe_on(server.process_table());
+        let (refused, child_untouched) = ProbeFixture::call_with_pane_child(|probe, child| {
+            probe.terminate(&[std::process::id(), child])
+        });
 
-        let refused = probe.terminate(&[std::process::id(), child]);
-
-        let child_untouched = ProbeFixture::is_alive(child);
-        probe.terminate(&[child]).unwrap();
-        assert_eq!(
-            refused,
-            Err(HostProbeError::OwnProcess {
-                pid: std::process::id()
-            })
-        );
+        assert_eq!(refused, Err(ProbeFixture::own_pid_refusal()));
         assert!(child_untouched);
     }
 
@@ -581,23 +601,50 @@ mod tests {
 
     #[test]
     fn a_batch_above_the_ceiling_is_refused_whole_and_signals_nothing() {
-        let server = ProbeFixture::started_probe_session();
-        let child = ProbeFixture::nohup_child(&server);
-        let probe = ProbeFixture::probe_on(server.process_table());
-        let mut batch = ProbeFixture::absent_pids(SystemHostProbe::TERMINATE_CEILING);
-        batch.push(child);
+        let (refused, child_untouched) = ProbeFixture::call_with_pane_child(|probe, child| {
+            probe.terminate(&ProbeFixture::absent_pids_and(
+                SystemHostProbe::TERMINATE_CEILING,
+                child,
+            ))
+        });
 
-        let refused = probe.terminate(&batch);
+        assert_eq!(refused, Err(ProbeFixture::ceiling_refusal()));
+        assert!(child_untouched);
+    }
 
-        let child_untouched = ProbeFixture::is_alive(child);
-        probe.terminate(&[child]).unwrap();
-        assert_eq!(
-            refused,
-            Err(HostProbeError::BatchAboveCeiling {
-                count: SystemHostProbe::TERMINATE_CEILING + 1,
-                ceiling: SystemHostProbe::TERMINATE_CEILING
-            })
-        );
+    #[test]
+    fn check_batch_refuses_a_batch_that_holds_the_probes_own_pid_and_signals_nothing() {
+        let (refused, child_untouched) = ProbeFixture::call_with_pane_child(|probe, child| {
+            probe.check_batch(&[std::process::id(), child])
+        });
+
+        assert_eq!(refused, Err(ProbeFixture::own_pid_refusal()));
+        assert!(child_untouched);
+    }
+
+    #[test]
+    fn check_batch_refuses_a_batch_above_the_ceiling_and_signals_nothing() {
+        let (refused, child_untouched) = ProbeFixture::call_with_pane_child(|probe, child| {
+            probe.check_batch(&ProbeFixture::absent_pids_and(
+                SystemHostProbe::TERMINATE_CEILING,
+                child,
+            ))
+        });
+
+        assert_eq!(refused, Err(ProbeFixture::ceiling_refusal()));
+        assert!(child_untouched);
+    }
+
+    #[test]
+    fn check_batch_accepts_a_batch_of_exactly_the_ceiling_and_signals_nothing() {
+        let (accepted, child_untouched) = ProbeFixture::call_with_pane_child(|probe, child| {
+            probe.check_batch(&ProbeFixture::absent_pids_and(
+                SystemHostProbe::TERMINATE_CEILING - 1,
+                child,
+            ))
+        });
+
+        assert_eq!(accepted, Ok(()));
         assert!(child_untouched);
     }
 }

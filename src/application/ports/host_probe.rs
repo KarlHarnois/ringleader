@@ -19,6 +19,7 @@ pub trait HostProbe: Send + Sync {
     fn tmux_server_serves(&self, socket: &Path) -> bool;
     fn session_processes(&self, sessions: &[u32]) -> Vec<ProcessInfo>;
     fn terminate(&self, pids: &[u32]) -> Result<Vec<ProcessInfo>, HostProbeError>;
+    fn check_batch(&self, pids: &[u32]) -> Result<(), HostProbeError>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
