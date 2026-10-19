@@ -322,6 +322,12 @@ mod tests {
             (dialog, service)
         }
 
+        fn named_without_a_repo() -> (NewSessionDialog, SessionService) {
+            let (mut dialog, service) = Self::opened(&ServiceFixture::new());
+            Self::type_text(&mut dialog, &service, "fix-auth");
+            (dialog, service)
+        }
+
         fn refused_on_the_prompt() -> (NewSessionDialog, SessionService) {
             let agent = Agent::new("plain-agent", "plain-agent");
             let fixture = Self::launched_in_repo()
@@ -742,13 +748,12 @@ mod tests {
 
     #[test]
     fn without_a_repo_submitting_asks_for_one() {
-        let (mut dialog, service) = DialogFixture::opened(&ServiceFixture::new());
-        DialogFixture::type_text(&mut dialog, &service, "fix-auth");
+        let (mut dialog, service) = DialogFixture::named_without_a_repo();
 
         let step = DialogFixture::create(&mut dialog, &service);
 
         assert_eq!(step, DialogStep::Stay);
-        assert!(DialogFixture::text(&dialog).contains("pick a repo"));
+        assert!(DialogFixture::text(&dialog).contains(NewSessionDialog::REPO_MISSING));
     }
 
     #[test]
@@ -1931,8 +1936,7 @@ mod tests {
 
     #[test]
     fn a_missing_repo_moves_the_focus_to_the_repo() {
-        let (mut dialog, service) = DialogFixture::opened(&ServiceFixture::new());
-        DialogFixture::type_text(&mut dialog, &service, "fix-auth");
+        let (mut dialog, service) = DialogFixture::named_without_a_repo();
         DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
         DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
 
@@ -1988,8 +1992,7 @@ mod tests {
 
     #[test]
     fn opening_the_repo_search_clears_the_error() {
-        let (mut dialog, service) = DialogFixture::opened(&ServiceFixture::new());
-        DialogFixture::type_text(&mut dialog, &service, "fix-auth");
+        let (mut dialog, service) = DialogFixture::named_without_a_repo();
         DialogFixture::create(&mut dialog, &service);
         let refused = DialogFixture::shown_error(&dialog);
 
