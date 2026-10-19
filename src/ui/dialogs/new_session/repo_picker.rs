@@ -5,7 +5,7 @@ use ratatui::text::Line;
 use super::chosen_repo::ChosenRepo;
 use crate::application::SessionService;
 use crate::domain::Repo;
-use crate::ui::dialogs::repo_search::repo_finder::RepoFinder;
+use crate::ui::dialogs::repo_search::repo_finder::{FinderStep, RepoFinder};
 use crate::ui::text_fit::TextFit;
 use crate::ui::theme::Theme;
 
@@ -49,7 +49,7 @@ impl RepoPicker {
         }
         self.finder.begin(key);
         self.searching = true;
-        PickerStep::Handled
+        PickerStep::Edited
     }
 
     pub fn paste(&mut self, text: &str) -> Result<(), String> {
@@ -87,11 +87,16 @@ impl RepoPicker {
                     return self.choose(repo);
                 }
             }
-            _ => {
-                self.finder.handle_key(key);
-            }
+            _ => return self.query_key(key),
         }
         PickerStep::Handled
+    }
+
+    fn query_key(&mut self, key: &KeyEvent) -> PickerStep {
+        match self.finder.handle_key(key) {
+            FinderStep::Edited => PickerStep::Edited,
+            FinderStep::Moved | FinderStep::Ignored => PickerStep::Handled,
+        }
     }
 
     fn choose(&mut self, repo: Repo) -> PickerStep {
@@ -110,6 +115,7 @@ impl RepoPicker {
 pub enum PickerStep {
     Ignored,
     Handled,
+    Edited,
     Picked,
 }
 
@@ -234,7 +240,7 @@ mod tests {
 
         let step = PickerFixture::press(&mut picker, &service, KeyCode::Char('r'));
 
-        assert_eq!(step, PickerStep::Handled);
+        assert_eq!(step, PickerStep::Edited);
         assert!(PickerFixture::is_searching(&picker));
         assert!(PickerFixture::text(&picker).starts_with("Find: r█"));
     }

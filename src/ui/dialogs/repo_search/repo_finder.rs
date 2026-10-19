@@ -59,15 +59,15 @@ impl RepoFinder {
         picked
     }
 
-    pub fn handle_key(&mut self, key: &KeyEvent) -> bool {
+    pub fn handle_key(&mut self, key: &KeyEvent) -> FinderStep {
         if self.matches.move_cursor(key) {
-            return true;
+            return FinderStep::Moved;
         }
-        let edited = self.query.edit(key);
-        if edited {
-            self.query_changed();
+        if !self.query.edit(key) {
+            return FinderStep::Ignored;
         }
-        edited
+        self.query_changed();
+        FinderStep::Edited
     }
 
     pub fn paste(&mut self, text: &str) -> Result<(), String> {
@@ -150,6 +150,13 @@ impl RepoFinder {
         }
         vec![Line::styled(Self::NO_MATCH, theme.dim())]
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FinderStep {
+    Ignored,
+    Moved,
+    Edited,
 }
 
 #[cfg(test)]
