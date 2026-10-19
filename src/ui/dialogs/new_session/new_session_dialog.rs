@@ -60,9 +60,8 @@ impl NewSessionDialog {
     }
 
     pub fn poll(&mut self) {
-        if self.repos.poll() == PickerStep::Picked {
-            self.move_past_repo();
-        }
+        let step = self.repos.poll();
+        self.follow_picker(step);
     }
 
     pub fn fail(&mut self, error: String) {
@@ -74,8 +73,12 @@ impl NewSessionDialog {
             self.change(setting);
             return DialogStep::Stay;
         }
-        if self.focus == NewSessionField::Repo && self.picker_took(key, service) {
-            return DialogStep::Stay;
+        if self.focus == NewSessionField::Repo {
+            let step = self.repos.handle_key(key, service);
+            self.follow_picker(step);
+            if step != PickerStep::Ignored {
+                return DialogStep::Stay;
+            }
         }
         if Self::creates(key) {
             return self.submit();
@@ -115,18 +118,11 @@ impl NewSessionDialog {
         DialogStep::Stay
     }
 
-    fn picker_took(&mut self, key: &KeyEvent, service: &SessionService) -> bool {
-        match self.repos.handle_key(key, service) {
-            PickerStep::Ignored => false,
-            PickerStep::Handled => true,
-            PickerStep::Edited => {
-                self.clear_error();
-                true
-            }
-            PickerStep::Picked => {
-                self.move_past_repo();
-                true
-            }
+    fn follow_picker(&mut self, step: PickerStep) {
+        match step {
+            PickerStep::Ignored | PickerStep::Handled => {}
+            PickerStep::Edited => self.clear_error(),
+            PickerStep::Picked => self.move_past_repo(),
         }
     }
 
