@@ -739,9 +739,9 @@ mod tests {
         let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
         DialogFixture::search(&mut dialog, &service, "g");
 
-        dialog.paste("/work\n/other");
+        dialog.paste(DialogFixture::TWO_LINE_PATH);
 
-        assert!(DialogFixture::text(&dialog).contains("a path cannot contain a line break"));
+        assert!(DialogFixture::text(&dialog).contains(DialogFixture::LINE_BREAK_IN_PATH));
     }
 
     #[test]
@@ -1567,7 +1567,7 @@ mod tests {
         let (mut dialog, _service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
         let rows_without_an_error = DialogFixture::text(&dialog).lines().count();
 
-        dialog.fail("session fix-auth already exists".to_string());
+        dialog.fail(DialogFixture::CREATE_FAILURE.to_string());
 
         assert_eq!(
             DialogFixture::text(&dialog).lines().count(),
@@ -1732,11 +1732,7 @@ mod tests {
         let step = DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
 
         assert_eq!(step, DialogStep::Stay);
-        assert!(
-            DialogFixture::flat_text(&dialog).contains(
-                "agent plain-agent cannot take a prompt, its prompt_args has no {prompt}"
-            )
-        );
+        assert!(DialogFixture::flat_text(&dialog).contains(DialogFixture::PROMPT_REFUSAL));
     }
 
     #[test]
@@ -1888,24 +1884,25 @@ mod tests {
     fn the_hints_sit_on_the_last_row_with_the_error_right_above_them() {
         let (mut dialog, _service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
 
-        dialog.fail("session fix-auth already exists".to_string());
+        dialog.fail(DialogFixture::CREATE_FAILURE.to_string());
 
-        let shown = DialogFixture::text(&dialog);
-        let rows: Vec<&str> = shown.lines().collect();
-        assert_eq!(rows.len(), usize::from(DialogFixture::FULL_HEIGHT));
-        assert_eq!(rows[rows.len() - 2], "session fix-auth already exists");
-        assert_eq!(rows[rows.len() - 1], DialogFixture::NAME_HINTS);
+        let rows = DialogFixture::text(&dialog).lines().count();
+        assert_eq!(rows, usize::from(DialogFixture::FULL_HEIGHT));
+        assert_eq!(
+            DialogFixture::shown_error(&dialog),
+            DialogFixture::CREATE_FAILURE
+        );
+        assert_eq!(DialogFixture::hints(&dialog), DialogFixture::NAME_HINTS);
     }
 
     #[test]
     fn a_row_above_the_hints_stays_free_for_an_error() {
         let (dialog, _service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
 
-        let shown = DialogFixture::text(&dialog);
-        let rows: Vec<&str> = shown.lines().collect();
-        assert_eq!(rows.len(), usize::from(DialogFixture::FULL_HEIGHT));
-        assert_eq!(rows[rows.len() - 2], "");
-        assert_eq!(rows[rows.len() - 1], DialogFixture::NAME_HINTS);
+        let rows = DialogFixture::text(&dialog).lines().count();
+        assert_eq!(rows, usize::from(DialogFixture::FULL_HEIGHT));
+        assert_eq!(DialogFixture::shown_error(&dialog), "");
+        assert_eq!(DialogFixture::hints(&dialog), DialogFixture::NAME_HINTS);
     }
 
     #[test]
@@ -1915,7 +1912,7 @@ mod tests {
         dialog.paste(&DialogFixture::twelve_lines());
         let before = DialogFixture::prompt_text(&dialog);
 
-        dialog.fail("session fix-auth already exists".to_string());
+        dialog.fail(DialogFixture::CREATE_FAILURE.to_string());
 
         assert_eq!(before.lines().count(), 12);
         assert_eq!(DialogFixture::prompt_text(&dialog), before);
@@ -1966,9 +1963,9 @@ mod tests {
         let fixture = DialogFixture::launched_in_repo();
         let (mut dialog, _service) = DialogFixture::opened(&fixture);
 
-        dialog.fail("session fix-auth already exists".to_string());
+        dialog.fail(DialogFixture::CREATE_FAILURE.to_string());
 
-        assert!(DialogFixture::text(&dialog).contains("session fix-auth already exists"));
+        assert!(DialogFixture::text(&dialog).contains(DialogFixture::CREATE_FAILURE));
     }
 
     #[test]
