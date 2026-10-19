@@ -60,9 +60,8 @@ impl NewSessionDialog {
     }
 
     pub fn poll(&mut self) {
-        if self.repos.poll() == PickerStep::Picked {
-            self.move_past_repo();
-        }
+        let step = self.repos.poll();
+        self.follow_picker(step);
     }
 
     pub fn fail(&mut self, error: String) {
@@ -74,8 +73,12 @@ impl NewSessionDialog {
             self.change(setting);
             return DialogStep::Stay;
         }
-        if self.focus == NewSessionField::Repo && self.picker_took(key, service) {
-            return DialogStep::Stay;
+        if self.focus == NewSessionField::Repo {
+            let step = self.repos.handle_key(key, service);
+            self.follow_picker(step);
+            if step != PickerStep::Ignored {
+                return DialogStep::Stay;
+            }
         }
         if Self::creates(key) {
             return self.submit();
@@ -115,14 +118,11 @@ impl NewSessionDialog {
         DialogStep::Stay
     }
 
-    fn picker_took(&mut self, key: &KeyEvent, service: &SessionService) -> bool {
-        match self.repos.handle_key(key, service) {
-            PickerStep::Ignored => false,
-            PickerStep::Handled => true,
-            PickerStep::Picked => {
-                self.move_past_repo();
-                true
-            }
+    fn follow_picker(&mut self, step: PickerStep) {
+        match step {
+            PickerStep::Ignored | PickerStep::Handled => {}
+            PickerStep::Edited => self.clear_error(),
+            PickerStep::Picked => self.move_past_repo(),
         }
     }
 
@@ -155,15 +155,18 @@ impl NewSessionDialog {
     }
 
     fn edit_focused(&mut self, key: &KeyEvent) {
-        match self.focus {
-            NewSessionField::Name => {
-                self.name.edit(key);
-            }
-            NewSessionField::Prompt => {
-                self.prompt.edit(key);
-            }
-            NewSessionField::Repo => {}
+        let edited = match self.focus {
+            NewSessionField::Name => self.name.edit(key),
+            NewSessionField::Prompt => self.prompt.edit(key),
+            NewSessionField::Repo => false,
+        };
+        if edited {
+            self.clear_error();
         }
+    }
+
+    fn clear_error(&mut self) {
+        self.error = None;
     }
 
     fn submit(&mut self) -> DialogStep {
@@ -267,6 +270,11 @@ mod tests {
         const COMPACT_TIER_HEIGHT: u16 = 8;
         const COMPACT_PANEL_WIDTH: usize = Self::COMPACT_TIER_WIDTH as usize;
         const SEVEN_LINES: &'static str = "one\ntwo\nthree\nfour\nfive\nsix\nseven";
+        const CREATE_FAILURE: &'static str = "session fix-auth already exists";
+        const PROMPT_REFUSAL: &'static str =
+            "agent plain-agent cannot take a prompt, its prompt_args has no {prompt}";
+        const TWO_LINE_PATH: &'static str = "/work\n/other";
+        const LINE_BREAK_IN_PATH: &'static str = "a path cannot contain a line break";
 
         fn launched_in_repo() -> ServiceFixture {
             let found = Repo::discovered(
@@ -305,6 +313,28 @@ mod tests {
             Self::type_text(&mut dialog, &service, "fix-auth");
             Self::press(&mut dialog, &service, KeyCode::Tab);
             Self::press(&mut dialog, &service, KeyCode::Tab);
+            (dialog, service)
+        }
+
+        fn refused_for_a_missing_name() -> (NewSessionDialog, SessionService) {
+            let (mut dialog, service) = Self::opened(&Self::launched_in_repo());
+            Self::create(&mut dialog, &service);
+            (dialog, service)
+        }
+
+        fn named_without_a_repo() -> (NewSessionDialog, SessionService) {
+            let (mut dialog, service) = Self::opened(&ServiceFixture::new());
+            Self::type_text(&mut dialog, &service, "fix-auth");
+            (dialog, service)
+        }
+
+        fn refused_on_the_prompt() -> (NewSessionDialog, SessionService) {
+            let agent = Agent::new("plain-agent", "plain-agent");
+            let fixture = Self::launched_in_repo()
+                .with_config(ServiceFixture::config().with_agents(vec![agent]));
+            let (mut dialog, service) = Self::focused_on_prompt(&fixture);
+            Self::type_text(&mut dialog, &service, "fix the tests");
+            Self::press(&mut dialog, &service, KeyCode::Enter);
             (dialog, service)
         }
 
@@ -543,6 +573,12 @@ mod tests {
                 .to_string()
         }
 
+        fn row_above_the_hints(dialog: &NewSessionDialog) -> String {
+            let shown = Self::text(dialog);
+            let row = shown.lines().rev().nth(1);
+            row.unwrap_or_default().to_string()
+        }
+
         fn type_text(dialog: &mut NewSessionDialog, service: &SessionService, text: &str) {
             for character in text.chars() {
                 Self::press(dialog, service, KeyCode::Char(character));
@@ -705,20 +741,19 @@ mod tests {
         let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
         DialogFixture::search(&mut dialog, &service, "g");
 
-        dialog.paste("/work\n/other");
+        dialog.paste(DialogFixture::TWO_LINE_PATH);
 
-        assert!(DialogFixture::text(&dialog).contains("a path cannot contain a line break"));
+        assert!(DialogFixture::text(&dialog).contains(DialogFixture::LINE_BREAK_IN_PATH));
     }
 
     #[test]
     fn without_a_repo_submitting_asks_for_one() {
-        let (mut dialog, service) = DialogFixture::opened(&ServiceFixture::new());
-        DialogFixture::type_text(&mut dialog, &service, "fix-auth");
+        let (mut dialog, service) = DialogFixture::named_without_a_repo();
 
         let step = DialogFixture::create(&mut dialog, &service);
 
         assert_eq!(step, DialogStep::Stay);
-        assert!(DialogFixture::text(&dialog).contains("pick a repo"));
+        assert!(DialogFixture::text(&dialog).contains(NewSessionDialog::REPO_MISSING));
     }
 
     #[test]
@@ -1533,7 +1568,7 @@ mod tests {
         let (mut dialog, _service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
         let rows_without_an_error = DialogFixture::text(&dialog).lines().count();
 
-        dialog.fail("session fix-auth already exists".to_string());
+        dialog.fail(DialogFixture::CREATE_FAILURE.to_string());
 
         assert_eq!(
             DialogFixture::text(&dialog).lines().count(),
@@ -1698,11 +1733,7 @@ mod tests {
         let step = DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
 
         assert_eq!(step, DialogStep::Stay);
-        assert!(
-            DialogFixture::flat_text(&dialog).contains(
-                "agent plain-agent cannot take a prompt, its prompt_args has no {prompt}"
-            )
-        );
+        assert!(DialogFixture::flat_text(&dialog).contains(DialogFixture::PROMPT_REFUSAL));
     }
 
     #[test]
@@ -1854,24 +1885,25 @@ mod tests {
     fn the_hints_sit_on_the_last_row_with_the_error_right_above_them() {
         let (mut dialog, _service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
 
-        dialog.fail("session fix-auth already exists".to_string());
+        dialog.fail(DialogFixture::CREATE_FAILURE.to_string());
 
-        let shown = DialogFixture::text(&dialog);
-        let rows: Vec<&str> = shown.lines().collect();
-        assert_eq!(rows.len(), usize::from(DialogFixture::FULL_HEIGHT));
-        assert_eq!(rows[rows.len() - 2], "session fix-auth already exists");
-        assert_eq!(rows[rows.len() - 1], DialogFixture::NAME_HINTS);
+        let rows = DialogFixture::text(&dialog).lines().count();
+        assert_eq!(rows, usize::from(DialogFixture::FULL_HEIGHT));
+        assert_eq!(
+            DialogFixture::row_above_the_hints(&dialog),
+            DialogFixture::CREATE_FAILURE
+        );
+        assert_eq!(DialogFixture::hints(&dialog), DialogFixture::NAME_HINTS);
     }
 
     #[test]
     fn a_row_above_the_hints_stays_free_for_an_error() {
         let (dialog, _service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
 
-        let shown = DialogFixture::text(&dialog);
-        let rows: Vec<&str> = shown.lines().collect();
-        assert_eq!(rows.len(), usize::from(DialogFixture::FULL_HEIGHT));
-        assert_eq!(rows[rows.len() - 2], "");
-        assert_eq!(rows[rows.len() - 1], DialogFixture::NAME_HINTS);
+        let rows = DialogFixture::text(&dialog).lines().count();
+        assert_eq!(rows, usize::from(DialogFixture::FULL_HEIGHT));
+        assert_eq!(DialogFixture::row_above_the_hints(&dialog), "");
+        assert_eq!(DialogFixture::hints(&dialog), DialogFixture::NAME_HINTS);
     }
 
     #[test]
@@ -1881,7 +1913,7 @@ mod tests {
         dialog.paste(&DialogFixture::twelve_lines());
         let before = DialogFixture::prompt_text(&dialog);
 
-        dialog.fail("session fix-auth already exists".to_string());
+        dialog.fail(DialogFixture::CREATE_FAILURE.to_string());
 
         assert_eq!(before.lines().count(), 12);
         assert_eq!(DialogFixture::prompt_text(&dialog), before);
@@ -1904,8 +1936,7 @@ mod tests {
 
     #[test]
     fn a_missing_repo_moves_the_focus_to_the_repo() {
-        let (mut dialog, service) = DialogFixture::opened(&ServiceFixture::new());
-        DialogFixture::type_text(&mut dialog, &service, "fix-auth");
+        let (mut dialog, service) = DialogFixture::named_without_a_repo();
         DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
         DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
 
@@ -1932,8 +1963,119 @@ mod tests {
         let fixture = DialogFixture::launched_in_repo();
         let (mut dialog, _service) = DialogFixture::opened(&fixture);
 
-        dialog.fail("session fix-auth already exists".to_string());
+        dialog.fail(DialogFixture::CREATE_FAILURE.to_string());
 
-        assert!(DialogFixture::text(&dialog).contains("session fix-auth already exists"));
+        assert!(DialogFixture::text(&dialog).contains(DialogFixture::CREATE_FAILURE));
+    }
+
+    #[test]
+    fn typing_in_the_name_clears_the_error() {
+        let (mut dialog, service) = DialogFixture::refused_for_a_missing_name();
+        let refused = DialogFixture::row_above_the_hints(&dialog);
+
+        DialogFixture::type_text(&mut dialog, &service, "f");
+
+        assert_eq!(refused, NewSessionDialog::NAME_MISSING);
+        assert_eq!(DialogFixture::row_above_the_hints(&dialog), "");
+    }
+
+    #[test]
+    fn typing_in_the_prompt_clears_the_error() {
+        let (mut dialog, service) = DialogFixture::refused_on_the_prompt();
+        let refused = DialogFixture::row_above_the_hints(&dialog);
+
+        DialogFixture::type_text(&mut dialog, &service, "s");
+
+        assert_eq!(refused, DialogFixture::PROMPT_REFUSAL);
+        assert_eq!(DialogFixture::row_above_the_hints(&dialog), "");
+    }
+
+    #[test]
+    fn opening_the_repo_search_clears_the_error() {
+        let (mut dialog, service) = DialogFixture::named_without_a_repo();
+        DialogFixture::create(&mut dialog, &service);
+        let refused = DialogFixture::row_above_the_hints(&dialog);
+
+        DialogFixture::type_text(&mut dialog, &service, "g");
+
+        assert_eq!(refused, NewSessionDialog::REPO_MISSING);
+        assert_eq!(DialogFixture::row_above_the_hints(&dialog), "");
+    }
+
+    #[test]
+    fn editing_the_repo_search_query_clears_the_error() {
+        let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
+        DialogFixture::search(&mut dialog, &service, "g");
+        dialog.paste(DialogFixture::TWO_LINE_PATH);
+        let refused = DialogFixture::row_above_the_hints(&dialog);
+
+        DialogFixture::type_text(&mut dialog, &service, "a");
+
+        assert_eq!(refused, DialogFixture::LINE_BREAK_IN_PATH);
+        assert_eq!(DialogFixture::row_above_the_hints(&dialog), "");
+    }
+
+    #[test]
+    fn typing_clears_an_error_reported_through_fail() {
+        let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
+        dialog.fail(DialogFixture::CREATE_FAILURE.to_string());
+        let failure = DialogFixture::row_above_the_hints(&dialog);
+
+        DialogFixture::type_text(&mut dialog, &service, "f");
+
+        assert_eq!(failure, DialogFixture::CREATE_FAILURE);
+        assert_eq!(DialogFixture::row_above_the_hints(&dialog), "");
+    }
+
+    #[test]
+    fn tab_leaves_the_error_on_screen() {
+        let (mut dialog, service) = DialogFixture::refused_for_a_missing_name();
+
+        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
+
+        assert_eq!(
+            DialogFixture::row_above_the_hints(&dialog),
+            NewSessionDialog::NAME_MISSING
+        );
+    }
+
+    #[test]
+    fn an_arrow_key_in_the_prompt_leaves_the_error_on_screen() {
+        let (mut dialog, service) = DialogFixture::refused_on_the_prompt();
+
+        DialogFixture::press(&mut dialog, &service, KeyCode::Left);
+
+        assert_eq!(
+            DialogFixture::row_above_the_hints(&dialog),
+            DialogFixture::PROMPT_REFUSAL
+        );
+    }
+
+    #[test]
+    fn alt_j_leaves_the_error_on_screen() {
+        let (mut dialog, service) = DialogFixture::refused_for_a_missing_name();
+
+        DialogFixture::toggle_mode(&mut dialog, &service);
+
+        assert_eq!(
+            DialogFixture::row_above_the_hints(&dialog),
+            NewSessionDialog::NAME_MISSING
+        );
+    }
+
+    #[test]
+    fn ctrl_j_through_the_repo_list_leaves_the_error_on_screen() {
+        let (mut dialog, service) =
+            DialogFixture::opened(&DialogFixture::launched_among_gateways());
+        DialogFixture::search(&mut dialog, &service, "gate");
+        DialogFixture::settle(&mut dialog, |text| text.contains("20/20 repos under ~"));
+        dialog.paste(DialogFixture::TWO_LINE_PATH);
+
+        DialogFixture::control(&mut dialog, &service, 'j');
+
+        assert_eq!(
+            DialogFixture::row_above_the_hints(&dialog),
+            DialogFixture::LINE_BREAK_IN_PATH
+        );
     }
 }
