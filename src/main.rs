@@ -47,7 +47,7 @@ use adapters::tmux::server_files::ServerFiles;
 use adapters::tmux::tmux_command::TmuxCommand;
 use adapters::tmux::tmux_multiplexer::TmuxMultiplexer;
 use adapters::web_browser::xdg_web_browser::XdgWebBrowser;
-use adapters::{BoundedCommand, Deadlines, GitWorkspace, HostMounts};
+use adapters::{BoundedCommand, Deadlines, GitWorkspace, HostDesktop, HostMounts};
 use application::ports::{ConfigSource, HostProbe, Lock, LockError, PullRequests, UsageMeter};
 use application::{
     AgentPorts, CorruptRegistry, DesktopPorts, DiagnosticPaths, LoadedConfig, RepoPorts,
@@ -372,9 +372,10 @@ impl CompositionRoot {
     }
 
     fn desktop_ports(&self, host: &SystemHostProbe, bounded: BoundedCommand) -> DesktopPorts {
+        let desktop = HostDesktop::current();
         DesktopPorts::new(
-            SystemTerminalEmulator::detect(host, &self.environment, bounded),
-            XdgWebBrowser::detect(host, &self.environment),
+            SystemTerminalEmulator::detect(&desktop, host, &self.environment, bounded),
+            XdgWebBrowser::detect(&desktop, host, &self.environment),
         )
     }
 

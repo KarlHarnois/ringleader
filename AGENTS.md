@@ -219,12 +219,12 @@ Create each fixture repo with `git init -b <branch>`. Never rely on `init.defaul
 nix develop -c cargo fmt --check
 nix develop -c cargo clippy --all-targets -- -D warnings
 nix develop -c cargo test
-nix build --no-link .#checks.x86_64-linux.readme-version-badge
+nix build --no-link ".#checks.$(nix eval --impure --raw --expr builtins.currentSystem).readme-version-badge"
 nix build .#
 nix flake check
 ```
 
-**The Commands are the six commands above.**
+**The Commands are the six commands above.** CI runs them on Linux and macOS.
 
 **A change is done when the Commands pass.** If the change edits a file under `src/`, the change is done only after the completion steps also pass. If one of the Commands also fails without the change, stop and show its output to the project owner.
 

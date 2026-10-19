@@ -5,6 +5,7 @@ use std::sync::Arc;
 use super::null_web_browser::NullWebBrowser;
 use crate::adapters::child_process::detached_command::DetachedCommand;
 use crate::adapters::host::process_environment::ProcessEnvironment;
+use crate::adapters::terminal_emulator::desktop::Desktop;
 use crate::application::ports::{HostProbe, WebBrowser, WebBrowserError};
 
 pub struct XdgWebBrowser {
@@ -16,7 +17,14 @@ impl XdgWebBrowser {
     const XDG_OPEN: &'static str = "xdg-open";
     const OUTSIDE_EVERY_WORKTREE: &'static str = "/";
 
-    pub fn detect(host: &dyn HostProbe, environment: &ProcessEnvironment) -> Arc<dyn WebBrowser> {
+    pub fn detect(
+        desktop: &Desktop,
+        host: &dyn HostProbe,
+        environment: &ProcessEnvironment,
+    ) -> Arc<dyn WebBrowser> {
+        if let Some(refusal) = desktop.refusal() {
+            return Arc::new(NullWebBrowser::new(WebBrowserError::NoBrowser, refusal));
+        }
         if !environment.has_graphical_display() {
             return Arc::new(Self::without_display());
         }
@@ -129,13 +137,21 @@ mod tests {
         }
 
         fn open_with(&self, variables: &[(&str, &str)]) -> Result<(), WebBrowserError> {
+            self.open_on(&Desktop::new(None), variables)
+        }
+
+        fn open_on(
+            &self,
+            desktop: &Desktop,
+            variables: &[(&str, &str)],
+        ) -> Result<(), WebBrowserError> {
             let environment = self.programs.environment(variables);
             let host = SystemHostProbe::new(
                 &environment,
                 OsStr::new("tmux"),
                 self.programs.process_table(),
             );
-            XdgWebBrowser::detect(&host, &environment).open(Self::URL)
+            XdgWebBrowser::detect(desktop, &host, &environment).open(Self::URL)
         }
     }
 
@@ -214,6 +230,26 @@ mod tests {
         fixture.open_with(&[("DISPLAY", ":0")]).unwrap();
 
         assert!(fixture.pid(BrowserFixture::XDG_OPEN).is_some());
+    }
+
+    #[test]
+    fn a_desktop_that_refuses_opens_no_browser_and_only_the_log_says_why() {
+        let log = LogCapture::installed();
+        let fixture = BrowserFixture::with_xdg_open();
+
+        let error = fixture
+            .open_on(
+                &Desktop::new(Some("example refusal")),
+                &[BrowserFixture::WAYLAND],
+            )
+            .unwrap_err();
+
+        assert_eq!(error, WebBrowserError::NoBrowser);
+        assert!(fixture.never_ran(BrowserFixture::XDG_OPEN));
+        assert_eq!(
+            log.count_containing("cannot open a web browser: example refusal"),
+            1
+        );
     }
 
     #[test]

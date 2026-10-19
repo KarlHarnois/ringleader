@@ -1,4 +1,9 @@
+#[cfg(target_os = "macos")]
+pub mod aqua_desktop;
+pub mod desktop;
 pub mod null_terminal_emulator;
 pub mod path_option;
 pub mod system_terminal_emulator;
 pub mod terminal_program;
+#[cfg(target_os = "linux")]
+pub mod xdg_desktop;

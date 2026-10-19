@@ -34,6 +34,7 @@
       supportedSystems = [
         "x86_64-linux"
         "aarch64-linux"
+        "aarch64-darwin"
       ];
 
       forEachSystem =
@@ -192,6 +193,7 @@
           cargoLock.lockFile = ./Cargo.lock;
           nativeBuildInputs = [ pkgs.makeWrapper ];
           doCheck = true;
+          __darwinAllowLocalNetworking = true;
           nativeCheckInputs = [
             pkgs.gitMinimal
             pkgs.tmux

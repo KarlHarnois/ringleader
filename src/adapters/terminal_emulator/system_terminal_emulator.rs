@@ -5,6 +5,7 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
 
+use super::desktop::Desktop;
 use super::null_terminal_emulator::NullTerminalEmulator;
 use super::terminal_program::TerminalProgram;
 use crate::adapters::BoundedCommand;
@@ -25,11 +26,12 @@ impl SystemTerminalEmulator {
     const PRINT_COMMAND: &'static str = "--print-cmd";
 
     pub fn detect(
+        desktop: &Desktop,
         host: &dyn HostProbe,
         environment: &ProcessEnvironment,
         bounded: BoundedCommand,
     ) -> Arc<dyn TerminalEmulator> {
-        match Self::program(host, environment) {
+        match Self::program(desktop, host, environment) {
             Ok(program) => Arc::new(Self {
                 program,
                 environment: environment.outside_tmux(),
@@ -40,9 +42,15 @@ impl SystemTerminalEmulator {
     }
 
     fn program(
+        desktop: &Desktop,
         host: &dyn HostProbe,
         environment: &ProcessEnvironment,
     ) -> Result<TerminalProgram, TerminalEmulatorError> {
+        if let Some(refusal) = desktop.refusal() {
+            return Err(TerminalEmulatorError::NoTerminal {
+                reason: refusal.to_string(),
+            });
+        }
         if !environment.has_graphical_display() {
             return Err(Self::no_display());
         }
@@ -240,10 +248,18 @@ fi"#;
         }
 
         fn open_with(&self, variables: &[(&str, &str)]) -> Result<(), TerminalEmulatorError> {
+            self.open_on(&Desktop::new(None), variables)
+        }
+
+        fn open_on(
+            &self,
+            desktop: &Desktop,
+            variables: &[(&str, &str)],
+        ) -> Result<(), TerminalEmulatorError> {
             let environment = self.programs.environment(variables);
             let host = SystemHostProbe::new(&environment, OsStr::new("tmux"), self.processes());
             let bounded = BoundedCommand::new(Deadlines::standard());
-            SystemTerminalEmulator::detect(&host, &environment, bounded)
+            SystemTerminalEmulator::detect(desktop, &host, &environment, bounded)
                 .open_window(self.worktree())
         }
 
@@ -354,6 +370,22 @@ fi"#;
             error.to_string(),
             "no terminal to open, xdg-terminal-exec is not on PATH and $TERMINAL is unset or empty"
         );
+    }
+
+    #[test]
+    fn a_desktop_that_refuses_opens_no_window_and_says_why() {
+        let fixture = TerminalFixture::new();
+        fixture.install(TerminalFixture::XDG_TERMINAL_EXEC);
+
+        let error = fixture
+            .open_on(
+                &Desktop::new(Some("example refusal")),
+                &[TerminalFixture::WAYLAND],
+            )
+            .unwrap_err();
+
+        assert_eq!(error.to_string(), "no terminal to open, example refusal");
+        assert!(fixture.never_ran(TerminalFixture::XDG_TERMINAL_EXEC));
     }
 
     #[test]

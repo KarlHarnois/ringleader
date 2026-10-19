@@ -33,3 +33,7 @@ pub use filesystem::mountinfo_file::MountinfoFile as HostMounts;
 pub use host::libproc_process_table::LibprocProcessTable as HostProcessTable;
 #[cfg(target_os = "linux")]
 pub use host::procfs_process_table::ProcfsProcessTable as HostProcessTable;
+#[cfg(target_os = "macos")]
+pub use terminal_emulator::aqua_desktop::AquaDesktop as HostDesktop;
+#[cfg(target_os = "linux")]
+pub use terminal_emulator::xdg_desktop::XdgDesktop as HostDesktop;

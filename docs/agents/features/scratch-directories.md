@@ -2,7 +2,7 @@
 
 **Every rule in this file binds each change to a session's scratch directory.** Unless the agent's `set_env` sets `TMPDIR`, a session's scratch directory is its agent's `TMPDIR`.
 
-- Keep the scratch directory's path short: tools put unix sockets under `TMPDIR`, and a socket path cannot pass 107 bytes.
+- Keep the scratch directory's path short: tools put unix sockets under `TMPDIR`. A socket path cannot pass 107 bytes on Linux or 103 bytes on macOS.
 - The scratch root is never `/tmp` or Ringleader's own `TMPDIR`, for these reasons:
   - systemd ages `/tmp` under an idle agent.
   - `/tmp` can be `noexec` or small.
