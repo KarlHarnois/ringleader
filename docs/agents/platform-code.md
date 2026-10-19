@@ -8,7 +8,7 @@
   - a `mod` line under `adapters/`
   - a seam's re-export in `adapters/mod.rs`
   - the `compile_error!` in `adapters/mod.rs`
-- Name a seam by its re-export, never by the platform type behind it.
+- Name a platform file's type only inside that file and in its seam's re-export.
 - If the production code of only one target OS calls a platform-free file, compile the file under `#[cfg(any(target_os = "<that OS>", test))]`. Without that attribute, the other target OS builds the file as dead code.
 - A change that edits a platform file is done only after the darwin cross-check passes.
 
