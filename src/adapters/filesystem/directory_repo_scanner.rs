@@ -19,8 +19,10 @@ pub struct DirectoryRepoScanner {
 impl DirectoryRepoScanner {
     pub const VISIT_CAP: usize = 5000;
     const PRUNED_NAMES: [&'static str; 4] = ["node_modules", "target", "vendor", "dist"];
-    const SYSTEM_DIRECTORIES: [&'static str; 4] = ["/proc", "/sys", "/dev", "/nix/store"];
+    const SYSTEM_DIRECTORIES: [&'static str; 6] =
+        ["/proc", "/sys", "/dev", "/nix/store", "/System", "/Volumes"];
     const GIT_MARKER: &'static str = ".git";
+    const LIBRARY: &'static str = "Library";
 
     pub fn new(git: GitRunner, visit_cap: usize, mounts: Box<dyn MountSource>) -> Self {
         Self {
@@ -90,7 +92,14 @@ impl DirectoryRepoScanner {
         let system = Self::SYSTEM_DIRECTORIES
             .iter()
             .any(|system| path == Path::new(system));
-        !hidden_or_pruned && !system && entry.file_type().is_ok_and(|kind| kind.is_dir())
+        !hidden_or_pruned
+            && !system
+            && !Self::is_library_without_repo(&path, &name)
+            && entry.file_type().is_ok_and(|kind| kind.is_dir())
+    }
+
+    fn is_library_without_repo(path: &Path, name: &str) -> bool {
+        name == Self::LIBRARY && fs::symlink_metadata(path.join(Self::GIT_MARKER)).is_err()
     }
 
     fn git_marker(entries: &[DirEntry], mounts: &MountTable) -> Option<GitMarker> {
@@ -327,6 +336,23 @@ mod tests {
         let visible = fixture.repo_at("example-project");
 
         assert_eq!(fixture.found(), [visible]);
+    }
+
+    #[test]
+    fn a_library_directory_without_a_repo_is_never_entered() {
+        let fixture = ScanFixture::new();
+        fixture.repo_at("Library/Application Support/example-tool");
+        let visible = fixture.repo_at("example-project");
+
+        assert_eq!(fixture.found(), [visible]);
+    }
+
+    #[test]
+    fn a_repo_named_library_is_found() {
+        let fixture = ScanFixture::new();
+        let library = fixture.repo_at("Library");
+
+        assert_eq!(fixture.found(), [library]);
     }
 
     #[test]
