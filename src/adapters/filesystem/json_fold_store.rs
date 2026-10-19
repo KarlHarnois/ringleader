@@ -216,6 +216,16 @@ mod tests {
     }
 
     #[test]
+    fn an_unreadable_file_is_an_io_error_so_its_failure_is_logged() {
+        let fixture = FoldStoreFixture::new();
+        fs::create_dir(fixture.path()).unwrap();
+
+        let error = fixture.store().load().unwrap_err();
+
+        assert!(matches!(error, FoldStoreError::Io { .. }));
+    }
+
+    #[test]
     fn unparsable_text_is_corrupt() {
         let fixture = FoldStoreFixture::with_contents("{ not json");
 
