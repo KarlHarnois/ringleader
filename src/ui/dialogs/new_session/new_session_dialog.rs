@@ -217,6 +217,7 @@ mod tests {
         const SETTLE_LIMIT: Duration = Duration::from_secs(2);
         const WIDTH: u16 = 72;
         const FULL_HEIGHT: u16 = 20;
+        const SIX_ROW_HEIGHT: u16 = 13;
         const COMPACT_HEIGHT: u16 = 10;
         const CURSOR: &'static str = "█";
 
@@ -310,7 +311,11 @@ mod tests {
         }
 
         fn text_with_cursor(dialog: &NewSessionDialog) -> String {
-            let screen = Self::screen(dialog, Self::FULL_HEIGHT);
+            Self::text_with_cursor_at(dialog, Self::FULL_HEIGHT)
+        }
+
+        fn text_with_cursor_at(dialog: &NewSessionDialog, height: u16) -> String {
+            let screen = Self::screen(dialog, height);
             Self::rows(&screen, |cell| {
                 if Self::is_cursor(cell) {
                     Self::CURSOR
@@ -1302,7 +1307,7 @@ mod tests {
     }
 
     #[test]
-    fn a_tall_prompt_shows_six_rows_ending_at_the_cursor() {
+    fn a_tall_prompt_shows_every_line_the_dialog_has_room_for() {
         let (mut dialog, _service) =
             DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
 
@@ -1310,6 +1315,20 @@ mod tests {
 
         assert_eq!(
             DialogFixture::prompt_box_with_cursor(&dialog),
+            "one\ntwo\nthree\nfour\nfive\nsix\nseven█"
+        );
+    }
+
+    #[test]
+    fn a_prompt_taller_than_its_room_shows_its_last_rows_ending_at_the_cursor() {
+        let (mut dialog, _service) =
+            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
+
+        dialog.paste(DialogFixture::SEVEN_LINES);
+
+        let shown = DialogFixture::text_with_cursor_at(&dialog, DialogFixture::SIX_ROW_HEIGHT);
+        assert_eq!(
+            DialogFixture::boxed(&shown),
             "two\nthree\nfour\nfive\nsix\nseven█"
         );
     }
@@ -1319,15 +1338,16 @@ mod tests {
         let (mut dialog, service) =
             DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
         dialog.paste(DialogFixture::SEVEN_LINES);
-        let scrolled = DialogFixture::text_with_cursor(&dialog);
+        let scrolled = DialogFixture::text_with_cursor_at(&dialog, DialogFixture::SIX_ROW_HEIGHT);
 
         for _ in 0..6 {
             DialogFixture::press(&mut dialog, &service, KeyCode::Up);
         }
 
+        let shown = DialogFixture::text_with_cursor_at(&dialog, DialogFixture::SIX_ROW_HEIGHT);
         assert!(DialogFixture::boxed(&scrolled).starts_with("two\n"));
         assert_eq!(
-            DialogFixture::prompt_box_with_cursor(&dialog),
+            DialogFixture::boxed(&shown),
             "one█\ntwo\nthree\nfour\nfive\nsix"
         );
     }
@@ -1337,15 +1357,16 @@ mod tests {
         let (mut dialog, service) =
             DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
         dialog.paste(DialogFixture::SEVEN_LINES);
-        let scrolled = DialogFixture::text_with_cursor(&dialog);
+        let scrolled = DialogFixture::text_with_cursor_at(&dialog, DialogFixture::SIX_ROW_HEIGHT);
 
         for _ in 0.."\nseven".len() {
             DialogFixture::press(&mut dialog, &service, KeyCode::Backspace);
         }
 
+        let shown = DialogFixture::text_with_cursor_at(&dialog, DialogFixture::SIX_ROW_HEIGHT);
         assert!(DialogFixture::boxed(&scrolled).starts_with("two\n"));
         assert_eq!(
-            DialogFixture::prompt_box_with_cursor(&dialog),
+            DialogFixture::boxed(&shown),
             "one\ntwo\nthree\nfour\nfive\nsix█"
         );
     }
@@ -1356,11 +1377,11 @@ mod tests {
             DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
         let full_row = "x".repeat(DialogFixture::PROMPT_TEXT_WIDTH);
         dialog.paste(&format!("one\ntwo\nthree\nfour\nfive\n{full_row}\nseven"));
-        let scrolled = DialogFixture::text_with_cursor(&dialog);
+        let scrolled = DialogFixture::text_with_cursor_at(&dialog, DialogFixture::SIX_ROW_HEIGHT);
         for _ in 0.."\nseven".len() {
             DialogFixture::press(&mut dialog, &service, KeyCode::Backspace);
         }
-        let restored = DialogFixture::text_with_cursor(&dialog);
+        let restored = DialogFixture::text_with_cursor_at(&dialog, DialogFixture::SIX_ROW_HEIGHT);
 
         DialogFixture::type_text(&mut dialog, &service, "!");
         let step = DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
@@ -1380,11 +1401,11 @@ mod tests {
             DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
         let heart_line = "love \u{2764}\u{fe0f}";
         dialog.paste(&format!("one\ntwo\nthree\nfour\nfive\n{heart_line}\nseven"));
-        let scrolled = DialogFixture::text(&dialog);
+        let scrolled = DialogFixture::text_at(&dialog, DialogFixture::SIX_ROW_HEIGHT);
         for _ in 0.."\nseven".len() {
             DialogFixture::press(&mut dialog, &service, KeyCode::Backspace);
         }
-        let restored = DialogFixture::text(&dialog);
+        let restored = DialogFixture::text_at(&dialog, DialogFixture::SIX_ROW_HEIGHT);
 
         DialogFixture::type_text(&mut dialog, &service, "!");
         let step = DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
@@ -1404,10 +1425,10 @@ mod tests {
             DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
         let accented = "cafe\u{301}\u{302}";
         dialog.paste(&format!("one\ntwo\nthree\nfour\nfive\n{accented}\nseven"));
-        let scrolled = DialogFixture::text(&dialog);
+        let scrolled = DialogFixture::text_at(&dialog, DialogFixture::SIX_ROW_HEIGHT);
         DialogFixture::press(&mut dialog, &service, KeyCode::Home);
         DialogFixture::press(&mut dialog, &service, KeyCode::Backspace);
-        let restored = DialogFixture::text(&dialog);
+        let restored = DialogFixture::text_at(&dialog, DialogFixture::SIX_ROW_HEIGHT);
 
         DialogFixture::type_text(&mut dialog, &service, "!");
         let step = DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
@@ -1561,7 +1582,7 @@ mod tests {
     }
 
     #[test]
-    fn a_repo_search_gives_its_spare_rows_to_a_tall_prompt() {
+    fn a_repo_search_gets_the_rows_a_tall_prompt_leaves() {
         let (mut dialog, service) =
             DialogFixture::focused_on_prompt(&DialogFixture::launched_among_gateways());
         dialog.paste(DialogFixture::SEVEN_LINES);
@@ -1571,8 +1592,8 @@ mod tests {
         DialogFixture::settle(&mut dialog, |text| text.contains("20/20 repos under ~"));
 
         let shown = DialogFixture::text(&dialog);
-        assert!(shown.contains("gateway-06\n\n╭ Prompt "));
-        assert!(DialogFixture::boxed(&shown).starts_with("two\n"));
+        assert!(shown.contains("gateway-05\n\n╭ Prompt "));
+        assert_eq!(DialogFixture::boxed(&shown), DialogFixture::SEVEN_LINES);
         assert!(shown.ends_with(DialogFixture::SEARCH_HINTS));
     }
 

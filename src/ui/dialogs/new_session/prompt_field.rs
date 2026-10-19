@@ -27,7 +27,6 @@ impl Default for PromptField {
 }
 
 impl PromptField {
-    const MOST_ROWS: usize = 6;
     const LINE_BREAK_KEY: char = 'j';
     const DELETE_TO_LINE_START_KEY: char = 'u';
     const CURSOR_COLUMN_WIDTH: u16 = 1;
@@ -60,7 +59,7 @@ impl PromptField {
             height: Self::PROBE_HEIGHT,
             ..Rect::default()
         };
-        Self::wrapped_rows(&self.editor.borrow(), Self::text_area(inner)).min(Self::MOST_ROWS)
+        Self::wrapped_rows(&self.editor.borrow(), Self::text_area(inner))
     }
 
     pub fn render(&self, frame: &mut Frame, inner: Rect, style: PromptStyle) {
