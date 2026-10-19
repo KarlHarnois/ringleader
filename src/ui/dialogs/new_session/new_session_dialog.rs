@@ -217,7 +217,7 @@ mod tests {
         const SETTLE_LIMIT: Duration = Duration::from_secs(2);
         const WIDTH: u16 = 72;
         const FULL_HEIGHT: u16 = 20;
-        const SIX_ROW_HEIGHT: u16 = 13;
+        const SIX_ROW_HEIGHT: u16 = 14;
         const COMPACT_HEIGHT: u16 = 10;
         const CURSOR: &'static str = "█";
 
@@ -496,6 +496,13 @@ mod tests {
             Self::toggle_mode(dialog, service);
             Self::cycle_agent(dialog, service);
             Self::toggle_checkout(dialog, service);
+        }
+
+        fn twelve_lines() -> String {
+            (1..=12)
+                .map(|number| format!("line {number}"))
+                .collect::<Vec<_>>()
+                .join("\n")
         }
 
         fn worktree_error(repeats: usize) -> String {
@@ -1549,15 +1556,17 @@ mod tests {
     }
 
     #[test]
-    fn a_short_dialog_gives_the_rows_kept_for_an_error_to_a_tall_prompt() {
+    fn a_short_dialog_keeps_a_row_free_for_an_error_above_a_tall_prompt() {
         let (mut dialog, _service) =
             DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
 
         dialog.paste(DialogFixture::SEVEN_LINES);
 
         let shown = DialogFixture::text_at(&dialog, DialogFixture::COMPACT_HEIGHT);
-        assert_eq!(DialogFixture::boxed(&shown), "five\nsix\nseven");
-        assert!(shown.ends_with(DialogFixture::PROMPT_HINTS));
+        let rows: Vec<&str> = shown.lines().collect();
+        assert_eq!(DialogFixture::boxed(&shown), "six\nseven");
+        assert_eq!(rows[rows.len() - 2], "");
+        assert_eq!(rows[rows.len() - 1], DialogFixture::PROMPT_HINTS);
     }
 
     #[test]
@@ -1592,7 +1601,7 @@ mod tests {
         DialogFixture::settle(&mut dialog, |text| text.contains("20/20 repos under ~"));
 
         let shown = DialogFixture::text(&dialog);
-        assert!(shown.contains("gateway-05\n\n╭ Prompt "));
+        assert!(shown.contains("gateway-04\n\n╭ Prompt "));
         assert_eq!(DialogFixture::boxed(&shown), DialogFixture::SEVEN_LINES);
         assert!(shown.ends_with(DialogFixture::SEARCH_HINTS));
     }
@@ -1608,7 +1617,7 @@ mod tests {
         DialogFixture::settle(&mut dialog, |text| text.contains("20/20 repos under ~"));
 
         let shown = DialogFixture::text_at(&dialog, DialogFixture::COMPACT_HEIGHT);
-        assert!(shown.contains("gateway-01\n\n╭ Prompt "));
+        assert!(shown.contains("gateway-01\n╭ Prompt "));
         assert_eq!(DialogFixture::boxed(&shown), "seven");
         assert!(shown.ends_with(DialogFixture::SEARCH_HINTS));
     }
@@ -1835,6 +1844,30 @@ mod tests {
         assert_eq!(rows.len(), usize::from(DialogFixture::FULL_HEIGHT));
         assert_eq!(rows[rows.len() - 2], "session fix-auth already exists");
         assert_eq!(rows[rows.len() - 1], DialogFixture::NAME_HINTS);
+    }
+
+    #[test]
+    fn a_row_above_the_hints_stays_free_for_an_error() {
+        let (dialog, _service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
+
+        let shown = DialogFixture::text(&dialog);
+        let rows: Vec<&str> = shown.lines().collect();
+        assert_eq!(rows.len(), usize::from(DialogFixture::FULL_HEIGHT));
+        assert_eq!(rows[rows.len() - 2], "");
+        assert_eq!(rows[rows.len() - 1], DialogFixture::NAME_HINTS);
+    }
+
+    #[test]
+    fn the_box_keeps_its_rows_when_an_error_appears() {
+        let (mut dialog, _service) =
+            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
+        dialog.paste(&DialogFixture::twelve_lines());
+        let before = DialogFixture::prompt_box(&dialog);
+
+        dialog.fail("session fix-auth already exists".to_string());
+
+        assert_eq!(before.lines().count(), 12);
+        assert_eq!(DialogFixture::prompt_box(&dialog), before);
     }
 
     #[test]

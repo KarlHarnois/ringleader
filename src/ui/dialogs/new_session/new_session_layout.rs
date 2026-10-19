@@ -15,6 +15,7 @@ impl NewSessionLayout {
     const SPACER_ROWS: usize = 1;
     const HINT_ROWS: usize = 1;
     const FEWEST_STATUS_ROWS: usize = 1;
+    const ERROR_ROWS_KEPT: usize = 1;
     const GAP: Constraint = Constraint::Fill(1);
 
     pub fn new(area: Rect, error_rows: usize) -> Self {
@@ -67,7 +68,7 @@ impl NewSessionLayout {
         let box_rows = self.box_rows();
         let kept_rows = box_rows + self.status_rows + Self::HINT_ROWS;
         let room = self.height().saturating_sub(kept_rows);
-        let error_rows = self.error_rows.min(room);
+        let error_rows = (self.error_rows + self.free_error_rows()).min(room);
         let upper_rows = upper_rows.min(room.saturating_sub(error_rows));
         [
             upper_rows,
@@ -90,16 +91,22 @@ impl NewSessionLayout {
     }
 
     fn shared_rows(&self) -> usize {
-        self.spare_rows() - self.spacer_rows()
+        self.spare_rows() - self.free_error_rows() - self.spacer_rows()
     }
 
     fn rows_after_prompt(&self) -> usize {
         self.shared_rows().saturating_sub(self.prompt_rows())
     }
 
-    fn spacer_rows(&self) -> usize {
+    fn free_error_rows(&self) -> usize {
+        let wanted = Self::ERROR_ROWS_KEPT.saturating_sub(self.error_rows);
         let room = self.spare_rows().saturating_sub(Self::PROMPT_FLOOR);
-        Self::SPACER_ROWS.min(room)
+        wanted.min(room)
+    }
+
+    fn spacer_rows(&self) -> usize {
+        let taken = self.free_error_rows() + Self::PROMPT_FLOOR;
+        Self::SPACER_ROWS.min(self.spare_rows().saturating_sub(taken))
     }
 
     fn spare_rows(&self) -> usize {
@@ -221,6 +228,7 @@ mod tests {
         let area_height = NewSessionLayout::BOX_FRAME_ROWS
             + NewSessionLayout::FEWEST_STATUS_ROWS
             + NewSessionLayout::HINT_ROWS
+            + NewSessionLayout::ERROR_ROWS_KEPT
             + NewSessionLayout::SPACER_ROWS
             + wanted;
         let layout = LayoutFixture::of_height(area_height)
@@ -323,6 +331,52 @@ mod tests {
     }
 
     #[test]
+    fn a_tall_area_keeps_a_row_free_for_an_error_above_the_hints() {
+        let [_, _, _, errors, hints] = LayoutFixture::tall().areas();
+
+        assert_eq!(
+            LayoutFixture::rows(errors),
+            NewSessionLayout::ERROR_ROWS_KEPT
+        );
+        assert_eq!(errors.bottom(), hints.y);
+    }
+
+    #[test]
+    fn a_one_row_error_takes_the_free_row_and_the_box_keeps_its_rows() {
+        let wanted = 5;
+        let area_height = LayoutFixture::FIELDS_AND_HINTS_HEIGHT
+            + NewSessionLayout::ERROR_ROWS_KEPT
+            + NewSessionLayout::SPACER_ROWS
+            + wanted;
+        let fixture = LayoutFixture::of_height(area_height).wanting_prompt_rows(wanted);
+
+        let [_, prompt_box, _, _, _] = fixture.areas();
+        let [_, errored_box, _, errors, _] = fixture.with_error_rows(1).areas();
+
+        assert_eq!(
+            LayoutFixture::rows(prompt_box),
+            wanted + NewSessionLayout::BOX_FRAME_ROWS
+        );
+        assert_eq!(
+            LayoutFixture::rows(errored_box),
+            LayoutFixture::rows(prompt_box)
+        );
+        assert_eq!(LayoutFixture::rows(errors), 1);
+    }
+
+    #[test]
+    fn the_free_error_row_comes_before_the_spacer() {
+        let [upper, prompt_box, _, errors, _] =
+            LayoutFixture::of_height(LayoutFixture::ROOM_FOR_A_ONE_ROW_PROMPT + 1).areas();
+
+        assert_eq!(
+            LayoutFixture::rows(errors),
+            NewSessionLayout::ERROR_ROWS_KEPT
+        );
+        assert_eq!(prompt_box.y, upper.bottom());
+    }
+
+    #[test]
     fn a_short_area_keeps_the_hints_on_its_last_row() {
         let error_taller_than_the_area = LayoutFixture::ROOM_FOR_A_ONE_ROW_PROMPT + 1;
         let fixture = LayoutFixture::of_height(LayoutFixture::ROOM_FOR_A_ONE_ROW_PROMPT)
@@ -336,7 +390,7 @@ mod tests {
     }
 
     #[test]
-    fn a_short_area_drops_the_spacer_and_the_gap_first() {
+    fn a_short_area_drops_the_spacer_the_free_error_row_and_the_gap_first() {
         let [upper, prompt_box, status, errors, hints] =
             LayoutFixture::of_height(LayoutFixture::ROOM_FOR_A_ONE_ROW_PROMPT).areas();
 
