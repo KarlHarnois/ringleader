@@ -1,4 +1,4 @@
-use ratatui::layout::{Constraint, Flex, Layout, Rect};
+use ratatui::layout::{Constraint, Layout, Rect};
 
 pub struct NewSessionLayout {
     area: Rect,
@@ -13,9 +13,9 @@ impl NewSessionLayout {
     const PROMPT_FLOOR: usize = 1;
     const BOX_FRAME_ROWS: usize = 2;
     const SPACER_ROWS: usize = 1;
-    const ERROR_PLACEHOLDER_ROWS: usize = 1;
     const HINT_ROWS: usize = 1;
     const FEWEST_STATUS_ROWS: usize = 1;
+    const GAP: Constraint = Constraint::Fill(1);
 
     pub fn new(area: Rect, error_rows: usize) -> Self {
         Self {
@@ -51,17 +51,19 @@ impl NewSessionLayout {
     }
 
     pub fn repo_room(&self) -> usize {
-        self.repo_floor + self.rows_after_prompt() - self.placeholder_rows()
+        self.repo_floor + self.rows_after_prompt()
     }
 
     pub fn areas(&self, upper_rows: usize) -> [Rect; 5] {
-        let heights = self.heights_that_fit(upper_rows).map(Self::length);
-        let [upper, _, prompt_box, status, errors, _, hints] =
-            Layout::vertical(heights).flex(Flex::Start).areas(self.area);
+        let [upper, spacer, prompt_box, status, errors, hints] =
+            self.heights_that_fit(upper_rows).map(Self::length);
+        let constraints = [upper, spacer, prompt_box, status, Self::GAP, errors, hints];
+        let [upper, _, prompt_box, status, _, errors, hints] =
+            Layout::vertical(constraints).areas(self.area);
         [upper, prompt_box, status, errors, hints]
     }
 
-    fn heights_that_fit(&self, upper_rows: usize) -> [usize; 7] {
+    fn heights_that_fit(&self, upper_rows: usize) -> [usize; 6] {
         let box_rows = self.box_rows();
         let kept_rows = box_rows + self.status_rows + Self::HINT_ROWS;
         let room = self.height().saturating_sub(kept_rows);
@@ -73,7 +75,6 @@ impl NewSessionLayout {
             box_rows,
             self.status_rows,
             error_rows,
-            self.placeholder_rows(),
             Self::HINT_ROWS,
         ]
     }
@@ -99,11 +100,6 @@ impl NewSessionLayout {
     fn spacer_rows(&self) -> usize {
         let room = self.spare_rows().saturating_sub(Self::PROMPT_FLOOR);
         Self::SPACER_ROWS.min(room)
-    }
-
-    fn placeholder_rows(&self) -> usize {
-        let wanted = Self::ERROR_PLACEHOLDER_ROWS.saturating_sub(self.error_rows);
-        wanted.min(self.rows_after_prompt())
     }
 
     fn spare_rows(&self) -> usize {
@@ -304,6 +300,29 @@ mod tests {
     }
 
     #[test]
+    fn the_hints_sit_on_the_last_row_of_a_tall_area_below_a_gap() {
+        let fixture = LayoutFixture::tall();
+
+        let [_, _, status, _, hints] = fixture.areas();
+
+        assert_eq!(hints.bottom(), fixture.area().bottom());
+        assert_eq!(LayoutFixture::rows(hints), NewSessionLayout::HINT_ROWS);
+        assert!(hints.y > status.bottom());
+    }
+
+    #[test]
+    fn an_error_sits_right_above_the_hints_in_a_tall_area() {
+        let error_rows = 2;
+
+        let [_, _, status, errors, hints] =
+            LayoutFixture::tall().with_error_rows(error_rows).areas();
+
+        assert_eq!(LayoutFixture::rows(errors), error_rows);
+        assert_eq!(errors.bottom(), hints.y);
+        assert!(errors.y > status.bottom());
+    }
+
+    #[test]
     fn a_short_area_keeps_the_hints_on_its_last_row() {
         let error_taller_than_the_area = LayoutFixture::ROOM_FOR_A_ONE_ROW_PROMPT + 1;
         let fixture = LayoutFixture::of_height(LayoutFixture::ROOM_FOR_A_ONE_ROW_PROMPT)
@@ -317,7 +336,7 @@ mod tests {
     }
 
     #[test]
-    fn a_short_area_drops_the_spacer_and_the_empty_error_row_first() {
+    fn a_short_area_drops_the_spacer_and_the_gap_first() {
         let [upper, prompt_box, status, errors, hints] =
             LayoutFixture::of_height(LayoutFixture::ROOM_FOR_A_ONE_ROW_PROMPT).areas();
 
@@ -387,18 +406,5 @@ mod tests {
 
         assert_eq!(LayoutFixture::rows(status), status_rows);
         assert_eq!(LayoutFixture::rows(errors), 0);
-    }
-
-    #[test]
-    fn without_an_error_the_row_kept_for_one_joins_the_gap_above_the_hints() {
-        let [_, _, status, errors, hints] = LayoutFixture::tall().areas();
-        let [_, _, errored_status, _, errored_hints] =
-            LayoutFixture::tall().with_error_rows(1).areas();
-
-        assert_eq!(LayoutFixture::rows(errors), 0);
-        assert_eq!(
-            hints.y - status.bottom(),
-            errored_hints.y - errored_status.bottom()
-        );
     }
 }

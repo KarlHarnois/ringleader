@@ -1571,7 +1571,7 @@ mod tests {
         DialogFixture::settle(&mut dialog, |text| text.contains("20/20 repos under ~"));
 
         let shown = DialogFixture::text(&dialog);
-        assert!(shown.contains("gateway-05\n\n╭ Prompt "));
+        assert!(shown.contains("gateway-06\n\n╭ Prompt "));
         assert!(DialogFixture::boxed(&shown).starts_with("two\n"));
         assert!(shown.ends_with(DialogFixture::SEARCH_HINTS));
     }
@@ -1801,6 +1801,19 @@ mod tests {
                 DialogFixture::NAME_HINTS
             )
         );
+    }
+
+    #[test]
+    fn the_hints_sit_on_the_last_row_with_the_error_right_above_them() {
+        let (mut dialog, _service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
+
+        dialog.fail("session fix-auth already exists".to_string());
+
+        let shown = DialogFixture::text(&dialog);
+        let rows: Vec<&str> = shown.lines().collect();
+        assert_eq!(rows.len(), usize::from(DialogFixture::FULL_HEIGHT));
+        assert_eq!(rows[rows.len() - 2], "session fix-auth already exists");
+        assert_eq!(rows[rows.len() - 1], DialogFixture::NAME_HINTS);
     }
 
     #[test]
