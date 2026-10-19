@@ -18,7 +18,8 @@ pub trait HostProbe: Send + Sync {
     fn processes_under_server(&self, path: &Path, socket: &Path) -> Vec<ProcessInfo>;
     fn tmux_server_serves(&self, socket: &Path) -> bool;
     fn session_processes(&self, sessions: &[u32]) -> Vec<ProcessInfo>;
-    fn terminate(&self, pids: &[u32]) -> Vec<ProcessInfo>;
+    fn terminate(&self, pids: &[u32]) -> Result<Vec<ProcessInfo>, HostProbeError>;
+    fn check_batch(&self, pids: &[u32]) -> Result<(), HostProbeError>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,6 +84,14 @@ impl fmt::Display for ProcessInfo {
 pub enum HostProbeError {
     #[error("{path} is not an absolute path")]
     RelativePath { path: PathBuf },
+    #[error(
+        "refused to end process {pid}, which is Ringleader's own process or shares its session; end the processes by hand"
+    )]
+    OwnProcess { pid: u32 },
+    #[error(
+        "refused to end {count} processes at once, over the limit of {ceiling}; end the processes by hand"
+    )]
+    BatchAboveCeiling { count: usize, ceiling: usize },
 }
 
 #[cfg(test)]

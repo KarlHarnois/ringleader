@@ -12,6 +12,7 @@ pub mod opencode;
 pub mod sqlite;
 pub mod terminal_emulator;
 pub mod tmux;
+pub mod web_browser;
 
 pub use child_process::bounded_command::BoundedCommand;
 pub use child_process::deadlines::Deadlines;

@@ -1,10 +1,10 @@
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use super::{
     FakeClock, FakeConfigSource, FakeDirectoryEnvironment, FakeHostProbe, FakeMultiplexer,
     FakePullRequests, FakeRepoScanner, FakeScratchSpace, FakeSessionRegistry, FakeTerminalEmulator,
-    FakeUsageMeter, FakeWorkspace,
+    FakeUsageMeter, FakeWebBrowser, FakeWorkspace,
 };
 use crate::application::ports::{
     ConfigError, MergeOutcome, MultiplexerError, ScratchSpace, WorktreeEntry,
@@ -32,6 +32,7 @@ pub struct ServiceFixture {
     scratch_space: Arc<FakeScratchSpace>,
     directory_environment: Arc<FakeDirectoryEnvironment>,
     terminal_emulator: Arc<FakeTerminalEmulator>,
+    web_browser: Arc<FakeWebBrowser>,
     usage_meter: Arc<FakeUsageMeter>,
     config_error: Option<ConfigError>,
     launch_directory: PathBuf,
@@ -72,6 +73,7 @@ impl ServiceFixture {
             scratch_space: Arc::new(FakeScratchSpace::default()),
             directory_environment: Arc::new(FakeDirectoryEnvironment::default()),
             terminal_emulator: Arc::new(FakeTerminalEmulator::default()),
+            web_browser: Arc::new(FakeWebBrowser::default()),
             usage_meter: Arc::new(FakeUsageMeter::new()),
             config_error: None,
             launch_directory: PathBuf::from(Self::REPO),
@@ -173,6 +175,13 @@ impl ServiceFixture {
         }
     }
 
+    pub fn with_web_browser(self, web_browser: FakeWebBrowser) -> Self {
+        Self {
+            web_browser: Arc::new(web_browser),
+            ..self
+        }
+    }
+
     pub fn with_usage_meter(self, usage_meter: FakeUsageMeter) -> Self {
         Self {
             usage_meter: Arc::new(usage_meter),
@@ -235,6 +244,22 @@ impl ServiceFixture {
         Arc::clone(&self.multiplexer)
     }
 
+    pub fn refuse_to_terminate_at(&self, operation: &'static str, pid: u32) {
+        let host = Arc::clone(&self.host);
+        self.multiplexer
+            .add_call_hook(operation, move || host.refuse_to_terminate(pid));
+    }
+
+    pub fn terminated_before(&self, operation: &'static str) -> TerminationSnapshot {
+        let pids = Arc::new(Mutex::new(None));
+        let host = Arc::clone(&self.host);
+        let recorder = Arc::clone(&pids);
+        self.multiplexer.add_call_hook(operation, move || {
+            *recorder.lock().unwrap() = Some(host.terminated());
+        });
+        TerminationSnapshot { pids }
+    }
+
     pub fn config_source(&self) -> &FakeConfigSource {
         &self.config_source
     }
@@ -261,6 +286,10 @@ impl ServiceFixture {
 
     pub fn terminal_emulator(&self) -> &FakeTerminalEmulator {
         &self.terminal_emulator
+    }
+
+    pub fn web_browser(&self) -> &FakeWebBrowser {
+        &self.web_browser
     }
 
     pub fn usage_meter(&self) -> &FakeUsageMeter {
@@ -318,7 +347,11 @@ impl ServiceFixture {
     }
 
     pub fn pull_request(number: u64, state: PullRequestState) -> PullRequest {
-        PullRequest::new(number, state, Self::NOW)
+        PullRequest::new(number, state, Self::NOW, &Self::pull_request_url(number))
+    }
+
+    pub fn pull_request_url(number: u64) -> String {
+        format!("https://github.example.com/example-org/example-project/pull/{number}")
     }
 
     pub fn session(name: &str) -> Session {
@@ -523,7 +556,7 @@ impl ServiceFixture {
             )
             .with_diff_workspace(self.measuring_workspace()),
             TmuxPorts::new(self.multiplexer.clone()),
-            DesktopPorts::new(self.terminal_emulator.clone()),
+            DesktopPorts::new(self.terminal_emulator.clone(), self.web_browser.clone()),
             AgentPorts::new(vec![self.usage_meter.clone()]),
         )
     }
@@ -543,5 +576,19 @@ impl ServiceFixture {
             .with_diagnostics(self.diagnostics.clone())
             .with_home(self.home.as_deref())
             .with_shell(&self.shell)
+    }
+}
+
+pub struct TerminationSnapshot {
+    pids: Arc<Mutex<Option<Vec<u32>>>>,
+}
+
+impl TerminationSnapshot {
+    pub fn pids(&self) -> Vec<u32> {
+        self.pids
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("the operation never ran")
     }
 }

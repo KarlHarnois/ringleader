@@ -102,8 +102,8 @@ impl SessionSummary {
         self.diff
     }
 
-    pub fn pull_request(&self) -> Option<PullRequest> {
-        self.pull_request
+    pub fn pull_request(&self) -> Option<&PullRequest> {
+        self.pull_request.as_ref()
     }
 }
 

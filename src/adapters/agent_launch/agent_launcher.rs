@@ -10,6 +10,7 @@ use super::agent_handoff::AgentHandoff;
 use super::handoff_contents::{EnvrcStep, HandoffContents};
 use super::launcher_command::{LauncherCommand, PreparedLaunch};
 use crate::adapters::host::process_environment::ProcessEnvironment;
+use crate::domain::Agent;
 
 pub trait ExecSeam {
     fn exec(&mut self, command: Command) -> io::Error;
@@ -30,7 +31,7 @@ pub struct AgentLauncher {
 }
 
 impl AgentLauncher {
-    const PANE_VARIABLES: [&'static str; 4] = ["TERM", "COLORTERM", "TMUX", "TMUX_PANE"];
+    const PANE_VARIABLES: [&'static str; 3] = ["TERM", "TMUX", "TMUX_PANE"];
     const ENVRC_LOADER: &'static str = "direnv";
     const ENVRC_LOADER_EXEC: &'static str = "exec";
 
@@ -134,6 +135,7 @@ impl AgentLauncher {
             .env_clear()
             .envs(environment)
             .envs(self.pane_variables())
+            .envs(Agent::TRUE_COLOR_VARIABLES)
             .current_dir(contents.worktree());
         if let Some(terminal) = self.environment.terminal() {
             command.env("GPG_TTY", terminal);
@@ -182,7 +184,7 @@ mod tests {
 
     use super::*;
     use crate::application::ports::AgentLaunch;
-    use crate::test_support::{DirenvTestHome, InheritedPath};
+    use crate::test_support::{DirenvTestHome, InheritedPath, ProcessMarker};
 
     #[derive(Clone, Default)]
     struct CapturingExec {
@@ -349,6 +351,7 @@ mod tests {
                     ("EXAMPLE_ACCOUNT_DIR".into(), "/envrc/accounts".into()),
                     ("EXAMPLE_API_KEY".into(), "from-envrc".into()),
                     ("EXAMPLE_FROM_ENVRC".into(), "loaded".into()),
+                    ("COLORTERM".into(), "from-envrc".into()),
                 ],
                 None,
             )
@@ -374,7 +377,11 @@ mod tests {
         }
 
         fn handoff_from(&self, creating: &ProcessEnvironment, launch: &AgentLaunch) -> PathBuf {
-            let handoff = AgentHandoff::new(&self.handoff_directory(), creating);
+            let handoff = AgentHandoff::new(
+                &self.handoff_directory(),
+                creating,
+                ProcessMarker::new().table(),
+            );
             handoff.write(launch).unwrap()
         }
 
@@ -388,8 +395,10 @@ mod tests {
             handoff: &Path,
             reentry: &[&str],
         ) -> AgentLauncher {
-            let reentry =
-                LauncherCommand::new(Self::words(reentry), AgentHandoff::beside(handoff, pane));
+            let reentry = LauncherCommand::new(
+                Self::words(reentry),
+                AgentHandoff::beside(handoff, pane, ProcessMarker::new().table()),
+            );
             AgentLauncher::new(pane, seam, reentry)
         }
 
@@ -432,7 +441,7 @@ mod tests {
             let first = self.handoff_from(creating, &Self::envrc_launch(&self.worktree()));
             let contents = AgentHandoff::take(&first).unwrap().inside_envrc();
             let envrc = Self::envrc_snapshot();
-            let handoff = AgentHandoff::beside(&first, &envrc)
+            let handoff = AgentHandoff::beside(&first, &envrc, ProcessMarker::new().table())
                 .write_relay(&contents)
                 .unwrap();
             let seam = CapturingExec::default();
@@ -443,7 +452,7 @@ mod tests {
     }
 
     #[test]
-    fn the_agent_gets_exactly_the_baseline_the_configured_names_and_the_pane_variables() {
+    fn the_agent_gets_exactly_the_handed_values_the_pane_variables_and_true_color() {
         let fixture = LauncherFixture::new();
 
         let (seam, _, _) = fixture.launch(Some("/dev/pts/9"), &fixture.worktree());
@@ -455,12 +464,32 @@ mod tests {
             ("TERM", "tmux-256color"),
             ("TMUX", "/tmp/tmux-1000/default,1,0"),
             ("TMUX_PANE", "%3"),
+            ("COLORTERM", "truecolor"),
+            ("CLAUDE_CODE_TMUX_TRUECOLOR", "1"),
             ("GPG_TTY", "/dev/pts/9"),
         ]
         .iter()
         .map(|(name, value)| (name.to_string(), value.to_string()))
         .collect();
         assert_eq!(seam.environment(), expected);
+    }
+
+    #[test]
+    fn opencode_is_told_the_terminal_renders_true_color() {
+        let fixture = LauncherFixture::new();
+
+        let (seam, _, _) = fixture.launch(None, &fixture.worktree());
+
+        assert_eq!(seam.environment()["COLORTERM"], "truecolor");
+    }
+
+    #[test]
+    fn claude_code_is_told_it_may_use_true_color_inside_tmux() {
+        let fixture = LauncherFixture::new();
+
+        let (seam, _, _) = fixture.launch(None, &fixture.worktree());
+
+        assert_eq!(seam.environment()["CLAUDE_CODE_TMUX_TRUECOLOR"], "1");
     }
 
     #[test]
@@ -578,7 +607,11 @@ mod tests {
         let pane = LauncherFixture::pane_snapshot(None);
         let reentry = LauncherCommand::new(
             LauncherFixture::words(&LauncherFixture::REENTRY),
-            AgentHandoff::new(&blocked.join("handoff"), &pane),
+            AgentHandoff::new(
+                &blocked.join("handoff"),
+                &pane,
+                ProcessMarker::new().table(),
+            ),
         );
         let seam = RecordingExec::default();
 
@@ -642,6 +675,13 @@ mod tests {
         let seam = LauncherFixture::new().inside_envrc();
 
         assert_eq!(seam.environment()["TMPDIR"], LauncherFixture::SCRATCH);
+    }
+
+    #[test]
+    fn the_vouched_colorterm_wins_over_the_envrc_one() {
+        let seam = LauncherFixture::new().inside_envrc();
+
+        assert_eq!(seam.environment()["COLORTERM"], "truecolor");
     }
 
     #[test]

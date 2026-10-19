@@ -1,15 +1,16 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use super::ports::{AttachTarget, HostProbe, Multiplexer, TerminalEmulator};
+use super::ports::{AttachTarget, HostProbe, Multiplexer, TerminalEmulator, WebBrowser};
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
-use crate::domain::{Session, SessionState, SessionSummary};
+use crate::domain::{PullRequest, Session, SessionState, SessionSummary};
 
 pub struct SessionAccess {
     multiplexer: Arc<dyn Multiplexer>,
     host: Arc<dyn HostProbe>,
     terminal_emulator: Arc<dyn TerminalEmulator>,
+    web_browser: Arc<dyn WebBrowser>,
     shell: String,
 }
 
@@ -19,6 +20,7 @@ impl SessionAccess {
             multiplexer: ports.tmux().multiplexer(),
             host: ports.repos().host(),
             terminal_emulator: ports.desktop().terminal_emulator(),
+            web_browser: ports.desktop().web_browser(),
             shell: shell.to_string(),
         }
     }
@@ -74,6 +76,11 @@ impl SessionAccess {
         Ok(())
     }
 
+    pub fn open_pull_request(&self, pull_request: &PullRequest) -> Result<(), ServiceError> {
+        self.web_browser.open(pull_request.url())?;
+        Ok(())
+    }
+
     fn check_worktree(&self, session: &Session) -> Result<(), ServiceError> {
         if self.host.path_exists(session.worktree_path()) {
             return Ok(());
@@ -117,8 +124,12 @@ impl EphemeralShell {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::application::ports::{ConfigError, TerminalEmulatorError};
-    use crate::test_support::{FakeMultiplexer, FakeTerminalEmulator, ServiceFixture};
+    use crate::application::SessionService;
+    use crate::application::ports::{ConfigError, TerminalEmulatorError, WebBrowserError};
+    use crate::domain::PullRequestState;
+    use crate::test_support::{
+        FakeMultiplexer, FakePullRequests, FakeTerminalEmulator, FakeWebBrowser, ServiceFixture,
+    };
 
     struct AttachFixture;
 
@@ -144,6 +155,35 @@ mod tests {
                 .with_multiplexer(
                     FakeMultiplexer::new().with_live(ServiceFixture::waiting(&session)),
                 )
+        }
+    }
+
+    struct PullRequestFixture;
+
+    impl PullRequestFixture {
+        const NAME: &'static str = "fix-auth";
+        const NUMBER: u64 = 142;
+
+        fn with_pull_request() -> ServiceFixture {
+            let session = ServiceFixture::session(Self::NAME);
+            let pull_request = ServiceFixture::pull_request(Self::NUMBER, PullRequestState::Open);
+            ServiceFixture::new()
+                .with_sessions(std::slice::from_ref(&session))
+                .with_pull_requests(FakePullRequests::new().with_pull_request(
+                    Path::new(ServiceFixture::REPO),
+                    session.branch(),
+                    pull_request,
+                ))
+        }
+
+        fn looked_up(fixture: &ServiceFixture) -> SessionService {
+            let service = fixture.service();
+            service
+                .find_pull_requests(&[Self::NAME.to_string()])
+                .wait_unless(|| false)
+                .unwrap()
+                .unwrap();
+            service
         }
     }
 
@@ -390,6 +430,85 @@ mod tests {
 
         let error = fixture.service().open_terminal("fix-auth").unwrap_err();
 
+        assert_eq!(error.to_string(), missing.to_string());
+    }
+
+    #[test]
+    fn a_looked_up_pull_request_opens_at_its_url_in_the_browser() {
+        let fixture = PullRequestFixture::with_pull_request();
+        let service = PullRequestFixture::looked_up(&fixture);
+
+        service.open_pull_request(PullRequestFixture::NAME).unwrap();
+
+        assert_eq!(
+            fixture.web_browser().opened(),
+            [ServiceFixture::pull_request_url(PullRequestFixture::NUMBER)]
+        );
+    }
+
+    #[test]
+    fn a_session_not_yet_looked_up_has_no_known_pull_request_to_open() {
+        let fixture = PullRequestFixture::with_pull_request();
+
+        let error = fixture
+            .service()
+            .open_pull_request(PullRequestFixture::NAME)
+            .unwrap_err();
+
+        assert!(matches!(error, ServiceError::NotFound(_)));
+        assert_eq!(error.to_string(), "no pull request is known for fix-auth");
+        assert!(fixture.web_browser().opened().is_empty());
+    }
+
+    #[test]
+    fn a_session_with_no_entry_has_no_known_pull_request_to_open() {
+        let fixture = PullRequestFixture::with_pull_request();
+        let service = PullRequestFixture::looked_up(&fixture);
+
+        let error = service.open_pull_request("mystery").unwrap_err();
+
+        assert_eq!(error.to_string(), "no pull request is known for mystery");
+        assert!(fixture.web_browser().opened().is_empty());
+    }
+
+    #[test]
+    fn a_pull_request_opens_while_the_config_failed_to_load() {
+        let fixture =
+            PullRequestFixture::with_pull_request().with_broken_config(ConfigError::Parse {
+                path: "/config/ringleader/config.toml".into(),
+                detail: "expected `=`".to_string(),
+            });
+        let service = PullRequestFixture::looked_up(&fixture);
+
+        service.open_pull_request(PullRequestFixture::NAME).unwrap();
+
+        assert_eq!(fixture.web_browser().opened().len(), 1);
+    }
+
+    #[test]
+    fn opening_a_pull_request_sends_nothing_to_tmux_or_git_and_changes_nothing() {
+        let fixture = PullRequestFixture::with_pull_request();
+        let service = PullRequestFixture::looked_up(&fixture);
+
+        service.open_pull_request(PullRequestFixture::NAME).unwrap();
+
+        assert!(fixture.multiplexer().calls().is_empty());
+        assert!(fixture.workspace().calls().is_empty());
+        assert_eq!(fixture.registry().save_count(), 0);
+    }
+
+    #[test]
+    fn a_browser_that_cannot_open_says_why() {
+        let missing = WebBrowserError::NoBrowser;
+        let fixture = PullRequestFixture::with_pull_request()
+            .with_web_browser(FakeWebBrowser::failing(missing.clone()));
+        let service = PullRequestFixture::looked_up(&fixture);
+
+        let error = service
+            .open_pull_request(PullRequestFixture::NAME)
+            .unwrap_err();
+
+        assert!(matches!(error, ServiceError::Failed(_)));
         assert_eq!(error.to_string(), missing.to_string());
     }
 }

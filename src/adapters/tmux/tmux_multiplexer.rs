@@ -12,6 +12,7 @@ use super::tmux_listing::TmuxListing;
 use super::tmux_output::TmuxOutput;
 use super::tmux_scripts::TmuxScripts;
 use crate::adapters::agent_launch::launcher_command::{LauncherCommand, PreparedLaunch};
+use crate::adapters::host::process_table::ProcessTable;
 use crate::application::ports::{
     AgentLaunch, AttachTarget, Multiplexer, MultiplexerError, ServerConfig, ServerState,
     SessionSpec,
@@ -21,14 +22,23 @@ use crate::domain::{KeyBindings, SessionMetadata, SessionObservation};
 pub struct TmuxMultiplexer {
     tmux: TmuxCommand,
     launcher: LauncherCommand,
+    processes: ProcessTable,
 }
 
 impl TmuxMultiplexer {
     const MISSING_SESSION: &'static str = "can't find session";
     const STARTUP_PATIENCE: Duration = Duration::from_secs(60);
 
-    pub fn new(tmux: TmuxCommand, launcher: LauncherCommand) -> Self {
-        Self { tmux, launcher }
+    pub fn new(tmux: TmuxCommand, launcher: LauncherCommand, processes: ProcessTable) -> Self {
+        Self {
+            tmux,
+            launcher,
+            processes,
+        }
+    }
+
+    fn private_server(&self) -> PrivateServer<'_> {
+        PrivateServer::new(&self.tmux, self.processes.clone())
     }
 
     fn prepare(&self, launch: &AgentLaunch) -> Result<PreparedLaunch, MultiplexerError> {
@@ -54,7 +64,7 @@ impl TmuxMultiplexer {
         spec: &SessionSpec,
         prepared: &PreparedLaunch,
     ) -> Result<PathBuf, MultiplexerError> {
-        let server = PrivateServer::new(&self.tmux);
+        let server = self.private_server();
         server.restore_socket()?;
         server.write_files(spec.key_bindings())?;
         let sequence =
@@ -347,26 +357,26 @@ impl Multiplexer for TmuxMultiplexer {
     }
 
     fn server_state(&self) -> Result<Option<ServerState>, MultiplexerError> {
-        PrivateServer::new(&self.tmux).state()
+        self.private_server().state()
     }
 
     fn server_config(
         &self,
         key_bindings: &KeyBindings,
     ) -> Result<Option<ServerConfig>, MultiplexerError> {
-        PrivateServer::new(&self.tmux).config(key_bindings)
+        self.private_server().config(key_bindings)
     }
 
     fn socket_lost(&self) -> bool {
-        PrivateServer::new(&self.tmux).socket_lost()
+        self.private_server().socket_lost()
     }
 
     fn restore_socket(&self) -> Result<bool, MultiplexerError> {
-        PrivateServer::new(&self.tmux).restore_socket()
+        self.private_server().restore_socket()
     }
 
     fn apply_config(&self, key_bindings: &KeyBindings) -> Result<(), MultiplexerError> {
-        PrivateServer::new(&self.tmux).apply(key_bindings)
+        self.private_server().apply(key_bindings)
     }
 
     fn version(&self) -> Result<String, MultiplexerError> {
@@ -429,6 +439,12 @@ mod tests {
             Self {
                 server: TmuxTestServer::with_session("holder"),
             }
+        }
+
+        fn with_recorded_holder() -> Self {
+            let fixture = Self::with_holder();
+            fixture.server.multiplexer().server_state().unwrap();
+            fixture
         }
 
         fn worktree(&self, name: &str) -> PathBuf {
@@ -546,6 +562,7 @@ mod tests {
             TmuxMultiplexer::new(
                 self.server.command_with(&environment),
                 self.server.stand_in(),
+                self.server.process_table(),
             )
         }
     }
@@ -582,13 +599,18 @@ mod tests {
                 self.fixture
                     .server
                     .launcher(prefix.iter().map(OsString::from).collect()),
+                self.fixture.server.process_table(),
             )
         }
 
         fn runs_in_pane(&self, command: &str) -> bool {
             let multiplexer = self.fixture.server.multiplexer();
             let pane = multiplexer.pane_pids("ringleader-fix-auth").unwrap();
-            let probe = SystemHostProbe::new(&self.home.environment(), OsStr::new("tmux"));
+            let probe = SystemHostProbe::new(
+                &self.home.environment(),
+                OsStr::new("tmux"),
+                self.fixture.server.process_table(),
+            );
             probe
                 .session_processes(&pane)
                 .iter()
@@ -620,6 +642,7 @@ mod tests {
             TmuxMultiplexer::new(
                 fixture.server.command_with(&environment),
                 fixture.server.stand_in(),
+                fixture.server.process_table(),
             )
         }
 
@@ -727,6 +750,7 @@ mod tests {
         let multiplexer = TmuxMultiplexer::new(
             fixture.server.command_with(&environment),
             fixture.server.stand_in(),
+            fixture.server.process_table(),
         );
         let worktree = fixture.server.directory().join("worktrees").join("café-☕");
         fs::create_dir_all(&worktree).unwrap();
@@ -894,6 +918,7 @@ mod tests {
                 .map(OsString::from)
                 .to_vec(),
             ),
+            fixture.server.process_table(),
         );
         multiplexer
             .create_session(&fixture.spec("fix-auth"))
@@ -1055,6 +1080,7 @@ mod tests {
         let multiplexer = TmuxMultiplexer::new(
             fixture.server.command_with(&environment),
             fixture.server.stand_in(),
+            fixture.server.process_table(),
         );
 
         assert_eq!(multiplexer.caller_session().unwrap(), None);
@@ -1088,6 +1114,7 @@ mod tests {
             TmuxMultiplexer::new(
                 fixture.server.command_with(&environment),
                 fixture.server.stand_in(),
+                fixture.server.process_table(),
             )
             .caller_in_other_tmux()
         });
@@ -1304,6 +1331,7 @@ mod tests {
                     .map(OsString::from)
                     .to_vec(),
             ),
+            fixture.server.process_table(),
         );
         multiplexer
             .create_session(&fixture.spec("fix-auth"))
@@ -1390,8 +1418,8 @@ mod tests {
     }
 
     #[test]
-    fn creating_after_the_socket_was_removed_reuses_the_running_server() {
-        let fixture = MultiplexerFixture::with_holder();
+    fn creating_after_the_socket_was_removed_reuses_the_recorded_server() {
+        let fixture = MultiplexerFixture::with_recorded_holder();
         let first_server = fixture.server.server_pid();
         fs::remove_file(fixture.server.socket()).unwrap();
 
@@ -1408,7 +1436,7 @@ mod tests {
 
     #[test]
     fn a_stopped_server_that_cannot_restore_its_socket_refuses_the_creation() {
-        let fixture = MultiplexerFixture::with_holder();
+        let fixture = MultiplexerFixture::with_recorded_holder();
         let first_server = fixture.server.server_pid();
         MultiplexerFixture::signal(&first_server, "-STOP");
         fs::remove_file(fixture.server.socket()).unwrap();
@@ -1436,6 +1464,7 @@ mod tests {
                     .map(OsString::from)
                     .to_vec(),
             ),
+            fixture.server.process_table(),
         );
         multiplexer
             .create_session(&fixture.spec("fix-auth"))
@@ -1481,6 +1510,7 @@ mod tests {
                     .map(OsString::from)
                     .to_vec(),
             ),
+            fixture.server.process_table(),
         );
         multiplexer
             .create_session(&fixture.spec("fix-auth"))
@@ -1534,6 +1564,7 @@ mod tests {
         let multiplexer = TmuxMultiplexer::new(
             fixture.server.command_with(&environment),
             fixture.server.launcher(Vec::new()),
+            fixture.server.process_table(),
         );
 
         assert_eq!(
@@ -1556,6 +1587,7 @@ mod tests {
                 .command_with(&environment)
                 .removing_env_names(&names),
             fixture.server.stand_in(),
+            fixture.server.process_table(),
         );
         let spec = fixture.spec("fix-auth").removing_env_names(&names);
 
@@ -1583,6 +1615,7 @@ mod tests {
                 .command_with(&environment)
                 .removing_env_names(&agent_env),
             fixture.server.stand_in(),
+            fixture.server.process_table(),
         );
         let agent_shell = [("SHELL".to_string(), "/bin/agent-shell".to_string())];
         let launch = fixture
@@ -1609,6 +1642,7 @@ mod tests {
                 Deadlines::uniform(deadline),
             ),
             fixture.server.launcher(Vec::new()),
+            fixture.server.process_table(),
         );
         let pid = fixture.server.server_pid();
         MultiplexerFixture::signal(&pid, "-STOP");
@@ -1631,6 +1665,7 @@ mod tests {
                 Deadlines::uniform(Duration::from_secs(1)),
             ),
             fixture.server.stand_in(),
+            fixture.server.process_table(),
         );
 
         let error = impatient

@@ -56,6 +56,8 @@ Each way comes from an ecosystem users already know, and keeps the meaning it ha
 | A text field | readline |
 | A fuzzy picker | fzf |
 | The key that opens a finder | the `Ctrl-K` quick switcher, as in Slack, Discord, and GitHub |
+| The key that opens a pull request in the browser | the `o` open key, as in gh-dash, newsboat, and GitHub |
+| The keys that cycle the mode and the agent | Claude Code, where `Shift-Tab` cycles the mode and `Alt-P` opens the model picker |
 
 - The arrow keys work wherever an ecosystem's movement keys work.
 - If no ecosystem in the table covers a new key, ask the project owner which ecosystem the key follows.
@@ -80,6 +82,13 @@ Ringleader stays minimal in what it shows, what it asks for, and what it documen
 - The README stays short and holds no architecture.
 - Convention wins over configuration: every setting except the agent list has a working default.
 - Add a setting only for a case that convention cannot serve.
+
+### Break freely before 1.0
+
+Before 1.0, every downstream setup pins Ringleader in its `flake.lock`.
+
+- If the design changes, change the code and tests outright.
+- Never add a deprecation path, a compatibility shim, or a flag that keeps old behavior.
 
 ### Let the code speak
 
@@ -229,7 +238,8 @@ nix flake check
 | `docs/agents/manual-runs.md` | make a manual run |
 | `docs/agents/uml-viewer.md` | open uml-viewer |
 | `docs/agents/source-folders.md` | add a file under `src/`, move a file there, or make a folder there |
-| `docs/agents/darwin-cross-check.md` | run the darwin cross-check |
+| `docs/agents/platform-code.md` | change a platform file or a seam, or write a `target_os` cfg attribute |
+| `docs/agents/tmux-tests.md` | write or change a test that runs tmux |
 | `docs/agents/features/pull.md` | change the pull that the `p` key starts |
 | `docs/agents/features/direnv.md` | change how create or restart launches an agent, or which variables the agent gets |
 | `docs/agents/features/agent-hooks.md` | change how `AgentHooks` types into an agent, or the check that an agent is at its prompt |
@@ -246,6 +256,8 @@ nix flake check
 - If the core shows the user a command, the core asks a port for the command. For example, `BranchOwnership` asks `Workspace::branch_marking_command`.
 
 **Dependencies point inward only.** The tests in `main.rs` check the imports of every layer.
+
+**A boundary change adds a port, an adapter, or a type that another layer imports.** Before you make a boundary change, invoke the `checking-hexagonal-boundaries` skill on your design. Resolve every finding the skill reports before you write the code.
 
 ### `domain`
 
@@ -268,6 +280,7 @@ nix flake check
 
 - `adapters` also holds the process-level types that `CompositionRoot` uses directly.
 - Name each port adapter after its technology and its port, such as `GitWorkspace` or `TmuxMultiplexer`.
+- An adapter holds no business rule. `domain` or `application` decides what a port's answer means, so the adapter only translates.
 
 ### `ui` and `cli`
 
@@ -294,6 +307,10 @@ nix flake check
 | #59 | Port errors carry tool details, and two TUI types branch on those details. |
 | #60 | `ActionGate` decides which actions each session state allows. |
 | #61 | `CompositionRoot::run_tui` calls the TUI's startup use cases. |
+| #70 | The core encodes tmux's config quoting and socket limits. |
+| #71 | `Doctor` repeats the config writability check that the adapter owns. |
+| #72 | The core reasons about whether a worktree's `.git` is a file or a directory. |
+| #73 | `UpstreamMerger` enforces the pull guards. |
 
 ### New ports
 
@@ -385,15 +402,6 @@ Confine each `unsafe` block to one adapter method.
 
 - A binding in the generated config passes `-c '#{session_path}'`. Ringleader renders the config before any session exists, and `create_session` starts each session in its worktree.
 
-## Platform code
-
-**Ringleader builds for Linux and Apple Silicon macOS.** A platform file is a file whose `mod` line limits it to one target OS through a `target_os` cfg attribute. A seam is a capability whose implementation the target OS picks, through one re-export in `adapters/mod.rs`.
-
-- Write a `target_os` cfg attribute only on a `mod` line under `adapters/`, on a seam's re-export, or on the `compile_error!`.
-- Every caller names a seam by its re-export.
-- If only macOS production code calls a platform-free file, compile the file under `#[cfg(any(target_os = "macos", test))]`. Otherwise, Linux builds it as dead code.
-- A change that edits a platform file is done only after the darwin cross-check passes.
-
 ## Wiring
 
 ### Entry points
@@ -439,7 +447,7 @@ Ringleader checks a registry entry recorded on another socket only through `/pro
 **A dialog's hint line lists only two kinds of keys:**
 
 - keys whose meaning is Ringleader's own, such as `Enter create`, `Ctrl-S create`, and `Esc cancel`
-- keys that choose from a list, such as `↑ ↓ j k choose`
+- keys that choose from a list, such as `↑ ↓ Ctrl-J Ctrl-K choose`
 
 A hint line never lists a text-editing key: every terminal user already expects those keys. Text-editing keys include cursor movement, `Ctrl-U`, and `Ctrl-W`.
 
@@ -462,16 +470,6 @@ Add a new editing key to `TextField` with its usual terminal meaning, never to a
 - No test reads wall-clock time to classify a session.
 - Mark a constructor, accessor, or helper that only tests call with `#[cfg(test)]`: `cargo clippy --all-targets -- -D warnings` then stays clean without any dead-code allowance.
 
-### tmux tests
-
-- tmux tests never skip.
-- Each tmux test starts its own server through `TmuxTestServer`, on a private socket under `/tmp`.
-- The test server loads the rendered generated config. If the test is about the config itself, the test server loads a fixture config instead.
-- Each tmux test builds its snapshot from the test process's own `PATH`.
-- A test that needs a client holds a control-mode client.
-- Press keys through the control-mode client with `send-keys -K -c <client>`. Never press keys with `send-keys -t <pane>`, which skips the key tables.
-- Only a test of a nested client's own parsing MAY type raw terminal bytes with `send-keys -t <pane> -H`. That test types into a pane of a second test server that holds the nested client.
-
 ## Commits
 
 - Give each change one commit. Make the commit after the change is done, as the Commands section defines done.
@@ -491,5 +489,8 @@ Add a new editing key to `TextField` with its usual terminal meaning, never to a
 - Never put architecture or the rules of this file in `README.md`.
 - Put a rule that every task needs in this file. Put a rule that only one kind of task needs in a reference file under `docs/agents/`.
 - Name each reference file in the Reference files table.
+- Put a procedure that an agent invokes on demand in a skill at `.agents/skills/<name>/SKILL.md`.
+- Link each skill from `.claude/skills/<name>` with a relative symlink: Claude Code reads a repository's skills only from `.claude/skills/`.
+- Never name a Ringleader type, path, or rule in a skill: each skill ports unchanged to other repos.
 - This repository holds no `CLAUDE.md` or `CLAUDE.local.md`: either file would hide this file from Claude Code.
 - If one of those files is ever needed, make its first line `@AGENTS.md`.

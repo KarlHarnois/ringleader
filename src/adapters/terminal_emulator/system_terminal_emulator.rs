@@ -2,15 +2,15 @@ use std::ffi::OsString;
 use std::io;
 use std::os::unix::ffi::OsStringExt;
 use std::path::Path;
-use std::process::{Child, Command, ExitStatus, Stdio};
+use std::process::Command;
 use std::sync::Arc;
-use std::thread;
 
 use super::null_terminal_emulator::NullTerminalEmulator;
 use super::terminal_program::TerminalProgram;
 use crate::adapters::BoundedCommand;
 use crate::adapters::child_process::bounded_command::Call;
 use crate::adapters::child_process::deadlines::CallKind;
+use crate::adapters::child_process::detached_command::DetachedCommand;
 use crate::adapters::host::process_environment::ProcessEnvironment;
 use crate::application::ports::{HostProbe, TerminalEmulator, TerminalEmulatorError};
 
@@ -53,9 +53,8 @@ impl SystemTerminalEmulator {
     }
 
     fn no_display() -> TerminalEmulatorError {
-        let displays = ProcessEnvironment::display_variables().join(" and ");
         TerminalEmulatorError::NoDisplay {
-            reason: format!("{displays} are unset or empty"),
+            reason: ProcessEnvironment::no_display_reason(),
         }
     }
 
@@ -98,29 +97,12 @@ impl SystemTerminalEmulator {
         None
     }
 
-    fn command(&self, program: &TerminalProgram, directory: &Path) -> Command {
+    fn command(&self, program: &TerminalProgram, directory: &Path) -> DetachedCommand {
         let mut command = program.command_in(directory);
         command
             .env_clear()
-            .envs(self.environment.variables().iter().cloned())
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        BoundedCommand::start_in_own_session(&mut command);
-        command
-    }
-
-    fn reap_in_background(program: &TerminalProgram, mut child: Child) {
-        let shown = program.shown();
-        thread::spawn(move || Self::warn_on_failure(&shown, child.wait()));
-    }
-
-    fn warn_on_failure(program: &str, exit: io::Result<ExitStatus>) {
-        match exit {
-            Ok(status) if !status.success() => log::warn!("{program} ended with {status}"),
-            Ok(_) => {}
-            Err(error) => log::warn!("cannot wait for {program}: {error}"),
-        }
+            .envs(self.environment.variables().iter().cloned());
+        DetachedCommand::new(command)
     }
 
     fn start_failure(program: &TerminalProgram, error: &io::Error) -> TerminalEmulatorError {
@@ -136,12 +118,9 @@ impl TerminalEmulator for SystemTerminalEmulator {
         let program = self
             .program
             .to_start(|launcher| self.terminal_opened_by(launcher));
-        let child = self
-            .command(&program, directory)
-            .spawn()
-            .map_err(|error| Self::start_failure(&program, &error))?;
-        Self::reap_in_background(&program, child);
-        Ok(())
+        self.command(&program, directory)
+            .start()
+            .map_err(|error| Self::start_failure(&program, &error))
     }
 }
 
@@ -149,17 +128,18 @@ impl TerminalEmulator for SystemTerminalEmulator {
 mod tests {
     use std::ffi::OsStr;
     use std::fs;
-    use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
 
     use super::*;
     use crate::adapters::Deadlines;
-    use crate::adapters::host::live_process::LiveProcess;
+    use crate::adapters::host::process_table::ProcessTable;
     use crate::adapters::host::system_host_probe::SystemHostProbe;
-    use crate::test_support::{Deadline, ExecutableScript, InheritedPath, LogCapture};
+    use crate::test_support::{Deadline, LogCapture, RecordingPrograms};
 
     struct TerminalFixture {
-        directory: tempfile::TempDir,
+        programs: RecordingPrograms,
+        answers: PathBuf,
+        worktree: PathBuf,
     }
 
     impl TerminalFixture {
@@ -168,94 +148,82 @@ mod tests {
         const GHOSTTY: &'static str = "ghostty";
         const SINGLE_INSTANCE: &'static str = "--gtk-single-instance=true";
         const WAYLAND: (&'static str, &'static str) = ("WAYLAND_DISPLAY", "wayland-1");
-        const NOT_EXECUTABLE: u32 = 0o644;
-        const SUCCESS: &'static str = "exit 0";
-        const FAILURE: &'static str = "exit 3";
-        const LINGERING_SECONDS: u32 = 30;
-        const SHELL_VARIABLES: [&'static str; 4] = ["OLDPWD", "PWD", "SHLVL", "_"];
-        const RECORDING: &'static str = r#"#!/bin/sh
-if [ "$1" = --print-cmd ]; then
-  answer='{answer}'
+        const LOOKUP_ANSWER: &'static str = r#"if [ "$1" = --print-cmd ]; then
+  answer='{answer_file}'
   if [ -f "$answer" ]; then
     . "$answer"
   fi
   exit 0
-fi
-record='{record}'
-'{env}' > "$record/environ"
-if kill -0 -$$ 2>/dev/null; then
-  echo leader > "$record/group"
-fi
-pwd -P > "$record/cwd"
-: > "$record/arguments"
-for argument in "$@"; do
-  printf '%s\n' "$argument" >> "$record/arguments"
-done
-for descriptor in 0 1 2; do
-  if [ /dev/fd/$descriptor -ef /dev/null ]; then
-    echo null >> "$record/streams"
-  else
-    echo terminal >> "$record/streams"
-  fi
-done
-echo $$ > "$record/pid"
-{ending}
-"#;
+fi"#;
 
         fn new() -> Self {
-            let fixture = Self {
-                directory: tempfile::tempdir().unwrap(),
-            };
-            fs::create_dir(fixture.programs()).unwrap();
-            fs::create_dir(fixture.worktree()).unwrap();
-            fs::create_dir(fixture.answers()).unwrap();
-            fixture
-        }
-
-        fn answers(&self) -> PathBuf {
-            self.directory.path().join("answers")
-        }
-
-        fn programs(&self) -> PathBuf {
-            self.directory.path().join("bin")
-        }
-
-        fn worktree(&self) -> PathBuf {
-            self.directory.path().join("worktree")
+            let programs = RecordingPrograms::new();
+            let answers = programs.make_directory("answers");
+            let worktree = programs.make_directory("worktree");
+            let answer_file = answers.join(RecordingPrograms::NAME_PLACEHOLDER);
+            let prelude =
+                Self::LOOKUP_ANSWER.replace("{answer_file}", &answer_file.to_string_lossy());
+            Self {
+                programs: programs.with_prelude(&prelude),
+                answers,
+                worktree,
+            }
         }
 
         fn install(&self, name: &str) -> PathBuf {
-            self.install_script(name, Self::SUCCESS)
+            self.programs.install(name)
         }
 
         fn install_failing(&self, name: &str) -> PathBuf {
-            self.install_script(name, Self::FAILURE)
+            self.programs.install_failing(name)
         }
 
         fn install_unexecutable(&self, name: &str) -> PathBuf {
-            let program = self.install_script(name, Self::SUCCESS);
-            fs::set_permissions(&program, fs::Permissions::from_mode(Self::NOT_EXECUTABLE))
-                .unwrap();
-            program
+            self.programs.install_unexecutable(name)
         }
 
         fn install_lingering(&self, name: &str) -> PathBuf {
-            let sleep = Self::tool("sleep").display().to_string();
-            let ending = format!("exec '{sleep}' {}", Self::LINGERING_SECONDS);
-            self.install_script(name, &ending)
+            self.programs.install_lingering(name)
         }
 
-        fn install_script(&self, name: &str, ending: &str) -> PathBuf {
-            let record = self.record_directory(name);
-            fs::create_dir_all(&record).unwrap();
-            let script = Self::RECORDING
-                .replace("{answer}", &self.answers().join(name).to_string_lossy())
-                .replace("{record}", &record.to_string_lossy())
-                .replace("{env}", &Self::tool("env").to_string_lossy())
-                .replace("{ending}", ending);
-            let program = self.programs().join(name);
-            ExecutableScript::write(&program, &script);
-            program
+        fn program_directory(&self) -> PathBuf {
+            self.programs.program_directory()
+        }
+
+        fn pid(&self, name: &str) -> Option<u32> {
+            self.programs.pid(name)
+        }
+
+        fn never_ran(&self, name: &str) -> bool {
+            self.programs.never_ran(name)
+        }
+
+        fn ran_in(&self, name: &str) -> Option<PathBuf> {
+            self.programs.ran_in(name)
+        }
+
+        fn environment_of(&self, name: &str) -> Vec<String> {
+            self.programs.environment_of(name)
+        }
+
+        fn streams_of(&self, name: &str) -> String {
+            self.programs.streams_of(name)
+        }
+
+        fn arguments_of(&self, name: &str) -> String {
+            self.programs.arguments_of(name)
+        }
+
+        fn leads_its_process_group(&self, name: &str) -> bool {
+            self.programs.leads_its_process_group(name)
+        }
+
+        fn processes(&self) -> ProcessTable {
+            self.programs.process_table()
+        }
+
+        fn worktree(&self) -> &Path {
+            &self.worktree
         }
 
         fn answer_lookup_with(&self, launcher: &str, terminal: &Path) {
@@ -264,90 +232,19 @@ echo $$ > "$record/pid"
                 terminal.display(),
                 Self::SINGLE_INSTANCE
             );
-            fs::write(self.answers().join(launcher), answer).unwrap();
+            fs::write(self.answers.join(launcher), answer).unwrap();
         }
 
         fn fail_lookup(&self, launcher: &str) {
-            fs::write(self.answers().join(launcher), Self::FAILURE).unwrap();
-        }
-
-        fn tool(name: &str) -> PathBuf {
-            InheritedPath::program(name).expect("the test PATH holds the tool")
-        }
-
-        fn record_directory(&self, name: &str) -> PathBuf {
-            self.directory.path().join("record").join(name)
-        }
-
-        fn environment(&self, variables: &[(&str, &str)]) -> ProcessEnvironment {
-            let search_path = ("PATH".into(), self.programs().into_os_string());
-            let variables = variables
-                .iter()
-                .map(|(name, value)| (OsString::from(name), OsString::from(value)));
-            ProcessEnvironment::new(
-                std::iter::once(search_path).chain(variables).collect(),
-                None,
-            )
+            fs::write(self.answers.join(launcher), RecordingPrograms::FAILURE).unwrap();
         }
 
         fn open_with(&self, variables: &[(&str, &str)]) -> Result<(), TerminalEmulatorError> {
-            let environment = self.environment(variables);
-            let host = SystemHostProbe::new(&environment, OsStr::new("tmux"));
+            let environment = self.programs.environment(variables);
+            let host = SystemHostProbe::new(&environment, OsStr::new("tmux"), self.processes());
             let bounded = BoundedCommand::new(Deadlines::standard());
             SystemTerminalEmulator::detect(&host, &environment, bounded)
-                .open_window(&self.worktree())
-        }
-
-        fn pid(&self, name: &str) -> Option<u32> {
-            let mut pid = None;
-            Deadline::for_background_work().wait_until(|| {
-                pid = self.recorded(name, "pid").trim().parse().ok();
-                pid.is_some()
-            });
-            pid
-        }
-
-        fn recorded(&self, name: &str, file: &str) -> String {
-            fs::read_to_string(self.record_directory(name).join(file)).unwrap_or_default()
-        }
-
-        fn ran_in(&self, name: &str) -> Option<PathBuf> {
-            self.pid(name)?;
-            Some(PathBuf::from(self.recorded(name, "cwd").trim()))
-        }
-
-        fn environment_of(&self, name: &str) -> Vec<String> {
-            let mut variables: Vec<String> = self
-                .recorded_once_started(name, "environ")
-                .lines()
-                .filter(|variable| !Self::set_by_the_shell(variable))
-                .map(str::to_string)
-                .collect();
-            variables.sort();
-            variables
-        }
-
-        fn set_by_the_shell(variable: &str) -> bool {
-            variable
-                .split_once('=')
-                .is_some_and(|(name, _)| Self::SHELL_VARIABLES.contains(&name))
-        }
-
-        fn streams_of(&self, name: &str) -> String {
-            self.recorded_once_started(name, "streams")
-        }
-
-        fn arguments_of(&self, name: &str) -> String {
-            self.recorded_once_started(name, "arguments")
-        }
-
-        fn recorded_once_started(&self, name: &str, file: &str) -> String {
-            self.pid(name);
-            self.recorded(name, file)
-        }
-
-        fn leads_its_process_group(&self, name: &str) -> bool {
-            self.recorded_once_started(name, "group").trim() == "leader"
+                .open_window(self.worktree())
         }
 
         fn canonical_worktree(&self) -> PathBuf {
@@ -389,8 +286,9 @@ echo $$ > "$record/pid"
         fixture.open_with(&[TerminalFixture::WAYLAND]).unwrap();
 
         let pid = fixture.pid(TerminalFixture::XDG_TERMINAL_EXEC).unwrap();
-        let process = LiveProcess::read(pid).unwrap();
-        let running = process.is_alive();
+        let processes = fixture.processes();
+        let process = processes.read(pid).unwrap();
+        let running = processes.is_alive(pid);
         process.signal(libc::SIGTERM).unwrap();
         assert!(running);
     }
@@ -409,7 +307,7 @@ echo $$ > "$record/pid"
             .unwrap();
 
         assert!(fixture.pid(TerminalFixture::XDG_TERMINAL_EXEC).is_some());
-        assert_eq!(fixture.recorded(TerminalFixture::NAMED_TERMINAL, "pid"), "");
+        assert!(fixture.never_ran(TerminalFixture::NAMED_TERMINAL));
     }
 
     #[test]
@@ -472,12 +370,7 @@ echo $$ > "$record/pid"
             error.to_string(),
             "no graphical display is available, WAYLAND_DISPLAY and DISPLAY are unset or empty"
         );
-        assert_eq!(
-            fs::read_dir(fixture.record_directory(TerminalFixture::XDG_TERMINAL_EXEC))
-                .unwrap()
-                .count(),
-            0
-        );
+        assert!(fixture.never_ran(TerminalFixture::XDG_TERMINAL_EXEC));
     }
 
     #[test]
@@ -508,7 +401,7 @@ echo $$ > "$record/pid"
             fixture.environment_of(TerminalFixture::XDG_TERMINAL_EXEC),
             [
                 "EXAMPLE_SETTING=kept".to_string(),
-                format!("PATH={}", fixture.programs().display()),
+                format!("PATH={}", fixture.program_directory().display()),
                 "WAYLAND_DISPLAY=wayland-1".to_string(),
             ]
         );
@@ -597,10 +490,7 @@ echo $$ > "$record/pid"
                 fixture.worktree().display()
             )
         );
-        assert_eq!(
-            fixture.recorded(TerminalFixture::XDG_TERMINAL_EXEC, "pid"),
-            ""
-        );
+        assert!(fixture.never_ran(TerminalFixture::XDG_TERMINAL_EXEC));
     }
 
     #[test]
@@ -616,7 +506,7 @@ echo $$ > "$record/pid"
             fixture.arguments_of(TerminalFixture::XDG_TERMINAL_EXEC),
             format!("--dir={}\n", fixture.worktree().display())
         );
-        assert_eq!(fixture.recorded(TerminalFixture::NAMED_TERMINAL, "pid"), "");
+        assert!(fixture.never_ran(TerminalFixture::NAMED_TERMINAL));
     }
 
     #[test]

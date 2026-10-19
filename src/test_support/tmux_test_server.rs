@@ -8,11 +8,12 @@ use std::time::{Duration, Instant};
 
 use tempfile::TempDir;
 
-use super::InheritedPath;
+use super::{InheritedPath, ProcessMarker};
 use crate::adapters::Deadlines;
 use crate::adapters::agent_launch::agent_handoff::AgentHandoff;
 use crate::adapters::agent_launch::launcher_command::LauncherCommand;
 use crate::adapters::host::process_environment::ProcessEnvironment;
+use crate::adapters::host::process_table::ProcessTable;
 use crate::adapters::tmux::server_files::ServerFiles;
 use crate::adapters::tmux::tmux_command::TmuxCommand;
 use crate::adapters::tmux::tmux_multiplexer::TmuxMultiplexer;
@@ -25,6 +26,7 @@ pub struct TmuxTestServer {
     canonical_directory: PathBuf,
     files: ServerFiles,
     program: OsString,
+    marker: ProcessMarker,
 }
 
 impl TmuxTestServer {
@@ -34,10 +36,22 @@ impl TmuxTestServer {
     const OUTER_SESSION: &'static str = "outer";
 
     pub fn new() -> Self {
-        Self::with_config(&TmuxServerConfig::new(&KeyBindings::default()).render())
+        Self::with_config(&Self::default_config())
     }
 
     pub fn with_config(config_text: &str) -> Self {
+        Self::with_config_marked(config_text, ProcessMarker::new())
+    }
+
+    pub fn sharing_table_with(other: &Self) -> Self {
+        Self::with_config_marked(&Self::default_config(), other.marker.clone())
+    }
+
+    fn default_config() -> String {
+        TmuxServerConfig::new(&KeyBindings::default()).render()
+    }
+
+    fn with_config_marked(config_text: &str, marker: ProcessMarker) -> Self {
         let tempdir = tempfile::Builder::new()
             .prefix("rl")
             .tempdir_in("/tmp")
@@ -45,16 +59,23 @@ impl TmuxTestServer {
         let canonical_directory =
             std::fs::canonicalize(tempdir.path()).expect("a canonical socket directory");
         let files = ServerFiles::new(
-            &canonical_directory.join("tmux.sock"),
+            &canonical_directory.join("tmux").join("tmux.sock"),
             &canonical_directory.join("tmux.conf"),
         );
+        std::fs::create_dir(files.socket().parent().expect("a socket directory"))
+            .expect("the test server socket directory is made");
         std::fs::write(files.config(), config_text).expect("the test server config is written");
         Self {
             _tempdir: tempdir,
             canonical_directory,
             files,
             program: OsString::from("tmux"),
+            marker,
         }
+    }
+
+    pub fn process_table(&self) -> ProcessTable {
+        self.marker.table()
     }
 
     pub fn under_program_name(name: &str) -> Self {
@@ -84,6 +105,10 @@ impl TmuxTestServer {
         self.files.socket()
     }
 
+    pub fn socket_directory(&self) -> &Path {
+        self.socket().parent().expect("a socket directory")
+    }
+
     pub fn config(&self) -> &Path {
         self.files.config()
     }
@@ -102,6 +127,7 @@ impl TmuxTestServer {
             OsString::from("HOME"),
             self.directory().as_os_str().to_os_string(),
         ));
+        variables.push(self.marker.variable());
         variables.extend(
             extra
                 .iter()
@@ -123,7 +149,21 @@ impl TmuxTestServer {
         environment: &ProcessEnvironment,
         deadlines: Deadlines,
     ) -> TmuxCommand {
-        TmuxCommand::new(&self.program, &self.files, environment).with_deadlines(deadlines)
+        TmuxCommand::new(&self.program, &self.files, &self.marked(environment))
+            .with_deadlines(deadlines)
+    }
+
+    fn marked(&self, environment: &ProcessEnvironment) -> ProcessEnvironment {
+        if environment.get(ProcessMarker::NAME).is_some() {
+            return environment.clone();
+        }
+        let variables = environment
+            .variables()
+            .iter()
+            .cloned()
+            .chain([self.marker.variable()])
+            .collect();
+        ProcessEnvironment::new(variables, environment.terminal().map(ToOwned::to_owned))
     }
 
     pub fn server_pid(&self) -> String {
@@ -140,7 +180,7 @@ impl TmuxTestServer {
     }
 
     pub fn multiplexer(&self) -> TmuxMultiplexer {
-        TmuxMultiplexer::new(self.command(), self.stand_in())
+        TmuxMultiplexer::new(self.command(), self.stand_in(), self.process_table())
     }
 
     pub fn stand_in(&self) -> LauncherCommand {
@@ -148,7 +188,11 @@ impl TmuxTestServer {
     }
 
     pub fn launcher(&self, prefix: Vec<OsString>) -> LauncherCommand {
-        let handoff = AgentHandoff::new(&self.handoff_directory(), &self.environment());
+        let handoff = AgentHandoff::new(
+            &self.handoff_directory(),
+            &self.environment(),
+            self.process_table(),
+        );
         LauncherCommand::new(prefix, handoff)
     }
 

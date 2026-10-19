@@ -4,7 +4,7 @@ use crossterm::event::{Event, KeyEvent, KeyEventKind};
 use ratatui::Frame;
 use ratatui::layout::{Margin, Rect};
 use ratatui::text::Line;
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, Padding, Paragraph};
 
 use super::delete_session_dialog::DeleteSessionDialog;
 use super::dialog_labels::DialogLabels;
@@ -32,7 +32,7 @@ pub enum Dialog {
 impl Dialog {
     const WIDTH: u16 = 76;
     const HEIGHT: u16 = 22;
-    const HELP_HEIGHT: u16 = 34;
+    const HELP_HEIGHT: u16 = 35;
 
     pub fn open(opening: DialogOpening, service: &SessionService) -> Self {
         match opening {
@@ -135,7 +135,10 @@ impl Dialog {
 
     pub fn render(&self, frame: &mut Frame, theme: &Theme) {
         let (area, labels) = Self::placement(frame.area(), self.preferred_height());
-        let block = Block::default().borders(Borders::ALL).title(self.title());
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .title(self.title())
+            .padding(self.padding());
         let inner = block.inner(area);
         frame.render_widget(Clear, area);
         frame.render_widget(block, area);
@@ -168,6 +171,17 @@ impl Dialog {
             Self::Help(_) => HelpView::TITLE,
             Self::FindSession(_) => SessionFinder::TITLE,
             Self::Usage(_) => UsageView::TITLE,
+        }
+    }
+
+    fn padding(&self) -> Padding {
+        match self {
+            Self::Usage(_) => Padding::left(1),
+            Self::NewSession(_)
+            | Self::Delete(_)
+            | Self::Rename(_)
+            | Self::Help(_)
+            | Self::FindSession(_) => Padding::ZERO,
         }
     }
 
@@ -256,6 +270,15 @@ mod tests {
         assert_eq!(PlacementFixture::symbol(&help, 12, 30), "└");
         assert_eq!(PlacementFixture::symbol(&new_session, 12, 5), "┌");
         assert_eq!(PlacementFixture::symbol(&new_session, 12, 26), "└");
+    }
+
+    #[test]
+    fn the_usage_view_leaves_a_column_before_its_contents() {
+        let terminal = PlacementFixture::render(DialogOpening::Usage, 100, 28);
+
+        assert_eq!(PlacementFixture::symbol(&terminal, 12, 4), "│");
+        assert_eq!(PlacementFixture::symbol(&terminal, 13, 4), " ");
+        assert_eq!(PlacementFixture::symbol(&terminal, 14, 4), "M");
     }
 
     #[test]

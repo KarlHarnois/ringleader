@@ -16,6 +16,7 @@ pub mod session_registry;
 pub mod terminal_emulator;
 pub mod unmerged_commits;
 pub mod usage_meter;
+pub mod web_browser;
 pub mod workspace;
 
 pub use agent_launch::AgentLaunch;
@@ -38,4 +39,5 @@ pub use session_registry::{RegistryError, SessionRegistry};
 pub use terminal_emulator::{TerminalEmulator, TerminalEmulatorError};
 pub use unmerged_commits::UnmergedCommits;
 pub use usage_meter::{UsageError, UsageMeter};
+pub use web_browser::{WebBrowser, WebBrowserError};
 pub use workspace::{StartPoint, Workspace, WorkspaceError, WorktreeEntry};

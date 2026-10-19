@@ -1,6 +1,17 @@
-# Darwin cross-check
+# Platform code
 
-**This file is the procedure for the darwin cross-check.** The darwin cross-check compiles every target, tests included, for macOS on Linux. It runs no test.
+**Every rule in this file binds each change to a platform file, a seam, or a `target_os` cfg attribute.** Ringleader builds for Linux and Apple Silicon macOS.
+
+**A platform file is a file whose `mod` line limits it to one target OS through a `target_os` cfg attribute.** A seam is a capability whose implementation the target OS picks, through one re-export in `adapters/mod.rs`.
+
+- Write a `target_os` cfg attribute only on a `mod` line under `adapters/`, on a seam's re-export, or on the `compile_error!`.
+- Every caller names a seam by its re-export.
+- If only macOS production code calls a platform-free file, compile the file under `#[cfg(any(target_os = "macos", test))]`. Otherwise, Linux builds it as dead code.
+- A change that edits a platform file is done only after the darwin cross-check passes.
+
+## Darwin cross-check
+
+**The darwin cross-check compiles every target, tests included, for macOS on Linux.** It runs no test.
 
 **Never add the darwin cross-check toolchain to `flake.nix`, to a dev shell, or to CI.**
 

@@ -19,6 +19,7 @@ struct HostState {
     access: HashMap<PathBuf, DirectoryAccess>,
     processes: Vec<FakeProcess>,
     servers: HashSet<PathBuf>,
+    own: HashSet<u32>,
     terminated: Vec<u32>,
 }
 
@@ -111,6 +112,11 @@ impl FakeHostProbe {
         self
     }
 
+    pub fn refusing_to_terminate(self, pid: u32) -> Self {
+        self.refuse_to_terminate(pid);
+        self
+    }
+
     pub fn with_tmux_server_on(self, socket: &Path) -> Self {
         self.state
             .lock()
@@ -125,6 +131,10 @@ impl FakeHostProbe {
         for ancestor in path.ancestors() {
             state.directories.insert(ancestor.to_path_buf());
         }
+    }
+
+    pub fn refuse_to_terminate(&self, pid: u32) {
+        self.state.lock().unwrap().own.insert(pid);
     }
 
     pub fn terminated(&self) -> Vec<u32> {
@@ -225,17 +235,26 @@ impl HostProbe for FakeHostProbe {
             .collect()
     }
 
-    fn terminate(&self, pids: &[u32]) -> Vec<ProcessInfo> {
+    fn terminate(&self, pids: &[u32]) -> Result<Vec<ProcessInfo>, HostProbeError> {
+        self.check_batch(pids)?;
         let mut state = self.state.lock().unwrap();
         state.terminated.extend_from_slice(pids);
         state
             .processes
             .retain(|process| process.survives_sigterm || !pids.contains(&process.info.pid()));
-        state
+        Ok(state
             .processes
             .iter()
             .filter(|process| pids.contains(&process.info.pid()))
             .map(|process| process.info.clone())
-            .collect()
+            .collect())
+    }
+
+    fn check_batch(&self, pids: &[u32]) -> Result<(), HostProbeError> {
+        let state = self.state.lock().unwrap();
+        match pids.iter().copied().find(|pid| state.own.contains(pid)) {
+            Some(pid) => Err(HostProbeError::OwnProcess { pid }),
+            None => Ok(()),
+        }
     }
 }

@@ -10,22 +10,26 @@ use super::tmux_command::TmuxCommand;
 use super::tmux_error::TmuxError;
 use super::tmux_launch::{Launched, TmuxLaunch};
 use super::tmux_listing::TmuxListing;
+use super::tmux_output::TmuxOutput;
 use super::tmux_scripts::TmuxScripts;
+use super::tmux_sequence::TmuxSequence;
 use super::tmux_server_config::TmuxServerConfig;
 use crate::adapters::host::live_process::LiveProcess;
+use crate::adapters::host::process_table::ProcessTable;
 use crate::application::ports::{MultiplexerError, ServerConfig, ServerState};
 use crate::domain::KeyBindings;
 
 pub struct PrivateServer<'a> {
     tmux: &'a TmuxCommand,
+    processes: ProcessTable,
 }
 
 impl<'a> PrivateServer<'a> {
     const RESTORE_LIMIT: Duration = Duration::from_secs(2);
     const RESTORE_POLL: Duration = Duration::from_millis(20);
 
-    pub fn new(tmux: &'a TmuxCommand) -> Self {
-        Self { tmux }
+    pub fn new(tmux: &'a TmuxCommand, processes: ProcessTable) -> Self {
+        Self { tmux, processes }
     }
 
     pub fn write_files(&self, key_bindings: &KeyBindings) -> Result<(), MultiplexerError> {
@@ -51,39 +55,67 @@ impl<'a> PrivateServer<'a> {
     }
 
     pub fn restore_socket(&self) -> Result<bool, MultiplexerError> {
-        let servers = self.servers_without_socket();
-        if servers.is_empty() {
+        let found = self.servers_without_socket();
+        if found.is_empty() {
             return Ok(false);
         }
+        let server = self.recorded_server(&found)?;
         self.tmux.server().prepare_socket_directory()?;
-        let failures: Vec<String> = servers
-            .iter()
-            .filter_map(|server| {
-                let error = server.signal(libc::SIGUSR1).err()?;
-                Some(format!(
-                    "SIGUSR1 to tmux server {} failed: {error}",
-                    server.pid()
-                ))
-            })
-            .collect();
-        if failures.len() == servers.len() {
-            return Err(self.socket_not_restored(&failures.join("; ")));
+        server.signal(libc::SIGUSR1).map_err(|error| {
+            self.socket_not_restored(&format!(
+                "SIGUSR1 to tmux server {} failed: {error}",
+                server.pid()
+            ))
+        })?;
+        if self.socket_returns() {
+            return Ok(true);
         }
-        match self.socket_returns() {
-            true => Ok(true),
-            false => Err(self.socket_not_restored(&format!(
-                "the server did not recreate it within {} seconds",
-                Self::RESTORE_LIMIT.as_secs()
-            ))),
-        }
+        Err(self.socket_not_restored(&format!(
+            "the server did not recreate it within {} seconds",
+            Self::RESTORE_LIMIT.as_secs()
+        )))
     }
 
     fn servers_without_socket(&self) -> Vec<LiveProcess> {
         let files = self.tmux.server();
         match Self::is_missing(files.socket()) && !files.server_is_starting() {
-            true => LiveProcess::tmux_servers_on(files.socket()),
+            true => self.processes.tmux_servers_on(files.socket()),
             false => Vec::new(),
         }
+    }
+
+    fn recorded_server(&self, found: &[LiveProcess]) -> Result<LiveProcess, MultiplexerError> {
+        let files = self.tmux.server();
+        let Some(pid) = files.recorded_server_pid() else {
+            return Err(self.refused(
+                "no server pid is recorded, so no process was signalled",
+                found,
+            ));
+        };
+        let Some(process) = self.processes.read(pid) else {
+            return Err(self.refused(
+                &format!("the recorded server pid {pid} no longer runs"),
+                found,
+            ));
+        };
+        if !process.serves(files.socket()) {
+            return Err(self.refused(
+                &format!("the recorded pid {pid} now names another process"),
+                found,
+            ));
+        }
+        Ok(process)
+    }
+
+    fn refused(&self, reason: &str, found: &[LiveProcess]) -> MultiplexerError {
+        let pids: Vec<String> = found
+            .iter()
+            .map(|server| server.pid().to_string())
+            .collect();
+        self.socket_not_restored(&format!(
+            "{reason}; send SIGUSR1 by hand to the tmux server the scan found at pid {}",
+            pids.join(" or ")
+        ))
     }
 
     fn socket_returns(&self) -> bool {
@@ -109,7 +141,7 @@ impl<'a> PrivateServer<'a> {
     }
 
     pub fn state(&self) -> Result<Option<ServerState>, MultiplexerError> {
-        let output = self.tmux.query(&TmuxScripts::server_state())?;
+        let output = self.query_recording_pid(&TmuxScripts::server_state())?;
         if let Some(state) = TmuxListing::new(&output).server_state() {
             return Ok(Some(state));
         }
@@ -156,13 +188,13 @@ impl<'a> PrivateServer<'a> {
     }
 
     fn binds_return_key(&self) -> Result<bool, MultiplexerError> {
-        let output = self.tmux.query(&TmuxScripts::root_keys())?;
+        let output = self.query_recording_pid(&TmuxScripts::root_keys())?;
         Ok(TmuxListing::new(&output).binds_detach())
     }
 
     fn running_config(&self) -> Result<Option<RunningConfig>, MultiplexerError> {
         let query = TmuxScripts::server_values(&RunningConfig::formats());
-        let output = self.tmux.query(&query)?;
+        let output = self.query_recording_pid(&query)?;
         if let Some(running) = RunningConfig::read(&output) {
             return Ok(Some(running));
         }
@@ -170,6 +202,14 @@ impl<'a> PrivateServer<'a> {
             return Ok(None);
         }
         Err(TmuxError::failed("display-message", &output).into())
+    }
+
+    fn query_recording_pid(&self, query: &TmuxSequence) -> Result<TmuxOutput, MultiplexerError> {
+        let output = self.tmux.query(query)?;
+        if let Some(pid) = TmuxListing::new(&output).server_pid() {
+            self.tmux.server().record_server_pid(pid);
+        }
+        Ok(output)
     }
 }
 
@@ -197,6 +237,26 @@ mod tests {
 
         fn alt_n_and_alt_down() -> KeyBindings {
             KeyBindings::default().with_next_session_keys(HotKey::parse_valid(["M-n", "M-Down"]))
+        }
+
+        fn record_server_pid(server: &TmuxTestServer) {
+            PrivateServer::new(&server.command(), server.process_table())
+                .state()
+                .unwrap();
+        }
+
+        fn restore_by_hand(server: &TmuxTestServer, pid: &str) {
+            std::process::Command::new("kill")
+                .args(["-USR1", pid])
+                .status()
+                .unwrap();
+            assert!(server.wait_for(|| server.socket().exists()));
+        }
+
+        fn exited_pid() -> u32 {
+            let mut child = std::process::Command::new("true").spawn().unwrap();
+            child.wait().unwrap();
+            child.id()
         }
 
         fn start_lock(server: &TmuxTestServer) -> fs::File {
@@ -265,7 +325,10 @@ mod tests {
         server.start_session("second");
         let tmux = server.command();
 
-        let state = PrivateServer::new(&tmux).state().unwrap().unwrap();
+        let state = PrivateServer::new(&tmux, server.process_table())
+            .state()
+            .unwrap()
+            .unwrap();
 
         assert!(state.version().starts_with('3'));
         assert_eq!(state.sessions(), 2);
@@ -278,7 +341,10 @@ mod tests {
         server.text(&["kill-session", "-t", "=holder:"]);
         let tmux = server.command();
 
-        let state = PrivateServer::new(&tmux).state().unwrap().unwrap();
+        let state = PrivateServer::new(&tmux, server.process_table())
+            .state()
+            .unwrap()
+            .unwrap();
 
         assert_eq!(state.sessions(), 0);
     }
@@ -287,7 +353,7 @@ mod tests {
     fn an_absent_server_has_no_state_and_no_config() {
         let server = TmuxTestServer::new();
         let tmux = server.command();
-        let private = PrivateServer::new(&tmux);
+        let private = PrivateServer::new(&tmux, server.process_table());
 
         assert_eq!(private.state().unwrap(), None);
         assert_eq!(private.config(&KeyBindings::default()).unwrap(), None);
@@ -299,19 +365,22 @@ mod tests {
         let tmux = server.command();
         fs::set_permissions(server.directory(), fs::Permissions::from_mode(0o000)).unwrap();
 
-        let state = PrivateServer::new(&tmux).state();
+        let state = PrivateServer::new(&tmux, server.process_table()).state();
 
         fs::set_permissions(server.directory(), fs::Permissions::from_mode(0o700)).unwrap();
         assert!(state.is_err(), "{state:?}");
     }
 
     #[test]
-    fn a_server_whose_socket_was_removed_gets_it_back_with_its_sessions() {
+    fn a_recorded_server_whose_socket_was_removed_gets_it_back_with_its_sessions() {
         let server = TmuxTestServer::with_session("holder");
         let tmux = server.command();
+        ServerFixture::record_server_pid(&server);
         fs::remove_file(server.socket()).unwrap();
 
-        let restored = PrivateServer::new(&tmux).restore_socket().unwrap();
+        let restored = PrivateServer::new(&tmux, server.process_table())
+            .restore_socket()
+            .unwrap();
 
         assert!(restored);
         assert!(
@@ -322,14 +391,75 @@ mod tests {
     }
 
     #[test]
+    fn a_server_whose_pid_was_never_recorded_is_refused_a_restore_that_names_its_pid() {
+        let server = TmuxTestServer::with_session("holder");
+        let tmux = server.command();
+        let pid = server.server_pid();
+        fs::remove_file(server.socket()).unwrap();
+
+        let error = PrivateServer::new(&tmux, server.process_table())
+            .restore_socket()
+            .unwrap_err();
+
+        assert!(
+            error.to_string().contains("no server pid is recorded"),
+            "{error}"
+        );
+        assert!(error.to_string().contains("SIGUSR1"), "{error}");
+        assert!(error.to_string().contains(&format!("pid {pid}")), "{error}");
+        assert!(!server.socket().exists());
+        ServerFixture::restore_by_hand(&server, &pid);
+    }
+
+    #[test]
+    fn a_recorded_pid_that_no_longer_runs_is_refused_a_restore() {
+        let server = TmuxTestServer::with_session("holder");
+        let tmux = server.command();
+        let pid = server.server_pid();
+        tmux.server().record_server_pid(ServerFixture::exited_pid());
+        fs::remove_file(server.socket()).unwrap();
+
+        let error = PrivateServer::new(&tmux, server.process_table())
+            .restore_socket()
+            .unwrap_err();
+
+        assert!(error.to_string().contains("no longer runs"), "{error}");
+        assert!(!server.socket().exists());
+        ServerFixture::restore_by_hand(&server, &pid);
+    }
+
+    #[test]
+    fn a_stale_pid_that_now_names_another_process_is_refused_a_restore() {
+        let server = TmuxTestServer::with_session("holder");
+        let tmux = server.command();
+        let pid = server.server_pid();
+        tmux.server().record_server_pid(std::process::id());
+        fs::remove_file(server.socket()).unwrap();
+
+        let error = PrivateServer::new(&tmux, server.process_table())
+            .restore_socket()
+            .unwrap_err();
+
+        assert!(
+            error.to_string().contains("now names another process"),
+            "{error}"
+        );
+        assert!(!server.socket().exists());
+        ServerFixture::restore_by_hand(&server, &pid);
+    }
+
+    #[test]
     fn a_removed_socket_directory_comes_back_private() {
         let server = TmuxTestServer::with_session("holder");
         let tmux = server.command();
-        fs::remove_dir_all(server.directory()).unwrap();
+        ServerFixture::record_server_pid(&server);
+        fs::remove_dir_all(server.socket_directory()).unwrap();
 
-        let restored = PrivateServer::new(&tmux).restore_socket().unwrap();
+        let restored = PrivateServer::new(&tmux, server.process_table())
+            .restore_socket()
+            .unwrap();
 
-        let mode = fs::metadata(server.directory())
+        let mode = fs::metadata(server.socket_directory())
             .unwrap()
             .permissions()
             .mode();
@@ -341,7 +471,8 @@ mod tests {
     fn a_server_starting_under_the_start_lock_is_left_to_bind_its_socket() {
         let server = TmuxTestServer::with_session("holder");
         let tmux = server.command();
-        let private = PrivateServer::new(&tmux);
+        let private = PrivateServer::new(&tmux, server.process_table());
+        ServerFixture::record_server_pid(&server);
         fs::remove_file(server.socket()).unwrap();
         let lock = ServerFixture::start_lock(&server);
         lock.lock().unwrap();
@@ -359,10 +490,15 @@ mod tests {
     fn a_start_lock_left_behind_does_not_stop_the_recovery() {
         let server = TmuxTestServer::with_session("holder");
         let tmux = server.command();
+        ServerFixture::record_server_pid(&server);
         fs::remove_file(server.socket()).unwrap();
         drop(ServerFixture::start_lock(&server));
 
-        assert!(PrivateServer::new(&tmux).restore_socket().unwrap());
+        assert!(
+            PrivateServer::new(&tmux, server.process_table())
+                .restore_socket()
+                .unwrap()
+        );
     }
 
     #[test]
@@ -370,7 +506,11 @@ mod tests {
         let server = TmuxTestServer::with_session("holder");
         let tmux = server.command();
 
-        assert!(!PrivateServer::new(&tmux).restore_socket().unwrap());
+        assert!(
+            !PrivateServer::new(&tmux, server.process_table())
+                .restore_socket()
+                .unwrap()
+        );
     }
 
     #[test]
@@ -378,7 +518,26 @@ mod tests {
         let server = TmuxTestServer::new();
         let tmux = server.command();
 
-        assert!(!PrivateServer::new(&tmux).restore_socket().unwrap());
+        assert!(
+            !PrivateServer::new(&tmux, server.process_table())
+                .restore_socket()
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn reading_the_state_of_a_live_server_records_its_pid_beside_the_config() {
+        let server = TmuxTestServer::with_session("holder");
+        let tmux = server.command();
+
+        PrivateServer::new(&tmux, server.process_table())
+            .state()
+            .unwrap();
+
+        assert_eq!(
+            tmux.server().recorded_server_pid(),
+            Some(server.server_pid().parse::<u32>().unwrap())
+        );
     }
 
     #[test]
@@ -386,7 +545,7 @@ mod tests {
         let server = TmuxTestServer::with_session("holder");
         let tmux = server.command();
 
-        let running = PrivateServer::new(&tmux)
+        let running = PrivateServer::new(&tmux, server.process_table())
             .config(&KeyBindings::default())
             .unwrap()
             .unwrap();
@@ -400,11 +559,11 @@ mod tests {
         let server = TmuxTestServer::with_session("holder");
         let applier = ServerFixture::command_with_shell(&server, "/bin/example-bash");
         let checker = ServerFixture::command_with_shell(&server, "/bin/example-zsh");
-        PrivateServer::new(&applier)
+        PrivateServer::new(&applier, server.process_table())
             .apply(&KeyBindings::default())
             .unwrap();
 
-        let running = PrivateServer::new(&checker)
+        let running = PrivateServer::new(&checker, server.process_table())
             .config(&KeyBindings::default())
             .unwrap()
             .unwrap();
@@ -416,7 +575,7 @@ mod tests {
     fn moving_the_return_key_off_a_key_copy_mode_binds_gives_that_binding_back() {
         let server = TmuxTestServer::with_session("holder");
         let tmux = server.command();
-        let private = PrivateServer::new(&tmux);
+        let private = PrivateServer::new(&tmux, server.process_table());
 
         private.apply(&ServerFixture::alt_x()).unwrap();
         private.apply(&KeyBindings::default()).unwrap();
@@ -434,7 +593,7 @@ mod tests {
     fn moving_the_return_key_off_a_key_with_a_braced_binding_replays_it_whole() {
         let server = TmuxTestServer::with_session("holder");
         let tmux = server.command();
-        let private = PrivateServer::new(&tmux);
+        let private = PrivateServer::new(&tmux, server.process_table());
         let original = ServerFixture::binding_of(&server, "copy-mode", "C-r");
         assert!(!original.is_empty());
         let alt_r = KeyBindings::default().with_return_key(HotKey::parse("C-r").unwrap());
@@ -452,7 +611,7 @@ mod tests {
     fn moving_the_return_key_off_page_up_gives_copy_mode_its_page_key_back() {
         let server = TmuxTestServer::with_session("holder");
         let tmux = server.command();
-        let private = PrivateServer::new(&tmux);
+        let private = PrivateServer::new(&tmux, server.process_table());
         let original = ServerFixture::binding_of(&server, "copy-mode", "PPage");
         assert!(!original.is_empty());
         let page_up = KeyBindings::default().with_return_key(HotKey::parse("PageUp").unwrap());
@@ -474,7 +633,7 @@ mod tests {
         server.start_session("holder");
         let tmux = server.command();
 
-        PrivateServer::new(&tmux)
+        PrivateServer::new(&tmux, server.process_table())
             .apply(&KeyBindings::default())
             .unwrap();
 
@@ -485,7 +644,7 @@ mod tests {
     fn dropping_a_session_key_copy_mode_binds_gives_that_binding_back() {
         let server = TmuxTestServer::with_session("holder");
         let tmux = server.command();
-        let private = PrivateServer::new(&tmux);
+        let private = PrivateServer::new(&tmux, server.process_table());
         let original = ServerFixture::binding_of(&server, "copy-mode", "M-x");
         assert!(!original.is_empty());
         let next_on_alt_x =
@@ -504,7 +663,7 @@ mod tests {
     fn applying_another_return_key_rebinds_and_records_the_new_render() {
         let server = TmuxTestServer::with_session("holder");
         let tmux = server.command();
-        let private = PrivateServer::new(&tmux);
+        let private = PrivateServer::new(&tmux, server.process_table());
         let before = private.config(&ServerFixture::alt_x()).unwrap().unwrap();
 
         private.apply(&ServerFixture::alt_x()).unwrap();
@@ -527,7 +686,7 @@ mod tests {
         let server = TmuxTestServer::with_session("holder");
         let tmux = server.command();
 
-        PrivateServer::new(&tmux)
+        PrivateServer::new(&tmux, server.process_table())
             .apply(&ServerFixture::alt_n_and_alt_down())
             .unwrap();
 
@@ -550,7 +709,9 @@ mod tests {
             .with_next_session_keys(HotKey::parse_valid(["M-j"]))
             .with_previous_session_keys(HotKey::parse_valid(["M-k"]));
 
-        PrivateServer::new(&tmux).apply(&without_arrows).unwrap();
+        PrivateServer::new(&tmux, server.process_table())
+            .apply(&without_arrows)
+            .unwrap();
 
         let halfpage = |action: &str| {
             ServerFixture::keys_running(&server, "copy-mode", &format!("send-keys -X {action}"))
@@ -565,7 +726,9 @@ mod tests {
         let tmux = server.command();
         let changed = ServerFixture::alt_n_and_alt_down();
 
-        PrivateServer::new(&tmux).apply(&changed).unwrap();
+        PrivateServer::new(&tmux, server.process_table())
+            .apply(&changed)
+            .unwrap();
 
         assert_eq!(
             ServerFixture::option(&server, "@ringleader_config"),
@@ -587,7 +750,9 @@ mod tests {
         let tmux = server.command();
         let changed = KeyBindings::default().with_shell_toggle_keys(HotKey::parse_valid(["M-o"]));
 
-        PrivateServer::new(&tmux).apply(&changed).unwrap();
+        PrivateServer::new(&tmux, server.process_table())
+            .apply(&changed)
+            .unwrap();
 
         for table in ServerFixture::TABLES {
             assert_eq!(
@@ -608,7 +773,9 @@ mod tests {
         let tmux = server.command();
         let without_toggle = KeyBindings::default().with_shell_toggle_keys(Vec::new());
 
-        PrivateServer::new(&tmux).apply(&without_toggle).unwrap();
+        PrivateServer::new(&tmux, server.process_table())
+            .apply(&without_toggle)
+            .unwrap();
 
         for table in ServerFixture::TABLES {
             assert!(
@@ -624,7 +791,7 @@ mod tests {
         server.start_session("holder");
         let tmux = server.command();
 
-        PrivateServer::new(&tmux)
+        PrivateServer::new(&tmux, server.process_table())
             .apply(&KeyBindings::default())
             .unwrap();
 
