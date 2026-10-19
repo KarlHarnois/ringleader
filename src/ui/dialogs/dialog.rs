@@ -176,12 +176,11 @@ impl Dialog {
 
     fn padding(&self) -> Padding {
         match self {
+            Self::NewSession(_) => Padding::horizontal(1),
             Self::Usage(_) => Padding::left(1),
-            Self::NewSession(_)
-            | Self::Delete(_)
-            | Self::Rename(_)
-            | Self::Help(_)
-            | Self::FindSession(_) => Padding::ZERO,
+            Self::Delete(_) | Self::Rename(_) | Self::Help(_) | Self::FindSession(_) => {
+                Padding::ZERO
+            }
         }
     }
 
@@ -258,7 +257,8 @@ mod tests {
         assert_eq!(PlacementFixture::symbol(&terminal, 12, 3), "┌");
         assert_eq!(PlacementFixture::symbol(&terminal, 13, 3), " ");
         assert_eq!(PlacementFixture::symbol(&terminal, 14, 3), "N");
-        assert_eq!(PlacementFixture::symbol(&terminal, 13, 4), "N");
+        assert_eq!(PlacementFixture::symbol(&terminal, 13, 4), " ");
+        assert_eq!(PlacementFixture::symbol(&terminal, 14, 4), "N");
     }
 
     #[test]
@@ -286,8 +286,9 @@ mod tests {
         let terminal = PlacementFixture::render(DialogOpening::NewSession, 60, 12);
 
         assert_eq!(PlacementFixture::symbol(&terminal, 1, 1), "┌");
-        assert_eq!(PlacementFixture::symbol(&terminal, 2, 2), "N");
-        assert_eq!(PlacementFixture::symbol(&terminal, 3, 2), " ");
-        assert_eq!(PlacementFixture::symbol(&terminal, 2, 3), "R");
+        assert_eq!(PlacementFixture::symbol(&terminal, 2, 2), " ");
+        assert_eq!(PlacementFixture::symbol(&terminal, 3, 2), "N");
+        assert_eq!(PlacementFixture::symbol(&terminal, 4, 2), " ");
+        assert_eq!(PlacementFixture::symbol(&terminal, 3, 3), "R");
     }
 }

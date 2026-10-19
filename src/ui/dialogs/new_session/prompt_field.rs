@@ -3,14 +3,11 @@ use std::cell::RefCell;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
-use ratatui::layout::{Constraint, Layout, Position, Rect};
+use ratatui::layout::{Position, Rect};
 use ratatui::style::Style;
-use ratatui::text::Line;
-use ratatui::widgets::{Clear, Paragraph, Widget};
+use ratatui::widgets::{Clear, Widget};
 use ratatui_textarea::{CursorMove, DataCursor, TextArea, WrapMode};
 
-use super::new_session_field::NewSessionField;
-use crate::ui::dialogs::dialog_labels::DialogLabels;
 use crate::ui::theme::Theme;
 
 pub struct PromptField {
@@ -30,7 +27,6 @@ impl Default for PromptField {
 }
 
 impl PromptField {
-    const MOST_ROWS: usize = 6;
     const LINE_BREAK_KEY: char = 'j';
     const DELETE_TO_LINE_START_KEY: char = 'u';
     const CURSOR_COLUMN_WIDTH: u16 = 1;
@@ -57,18 +53,18 @@ impl PromptField {
         self.editor.get_mut().insert_str(unix_line_breaks);
     }
 
-    pub fn rows(&self, field_width: usize) -> usize {
-        let width = u16::try_from(field_width).unwrap_or(u16::MAX);
-        let field = Rect::new(0, 0, width, Self::PROBE_HEIGHT);
-        Self::wrapped_rows(&self.editor.borrow(), Self::text_area(field)).min(Self::MOST_ROWS)
+    pub fn rows(&self, width: usize) -> usize {
+        let inner = Rect {
+            width: u16::try_from(width).unwrap_or(u16::MAX),
+            height: Self::PROBE_HEIGHT,
+            ..Rect::default()
+        };
+        Self::wrapped_rows(&self.editor.borrow(), Self::text_area(inner))
     }
 
-    pub fn render(&self, frame: &mut Frame, area: Rect, labels: DialogLabels, style: PromptStyle) {
-        let label = labels.labeled(NewSessionField::Prompt.label(), vec![Line::default()]);
-        frame.render_widget(Paragraph::new(label), area);
-        let field = labels.field_area(area);
-        self.render_text(frame, Self::text_area(field), style.selection);
-        self.paint_cursor(frame.buffer_mut(), field, self.cursor_style(style));
+    pub fn render(&self, frame: &mut Frame, inner: Rect, style: PromptStyle) {
+        self.render_text(frame, Self::text_area(inner), style.selection);
+        self.paint_cursor(frame.buffer_mut(), inner, self.cursor_style(style));
     }
 
     fn is_control(key: &KeyEvent, character: char) -> bool {
@@ -123,13 +119,11 @@ impl PromptField {
         probe.screen_cursor().row + 1
     }
 
-    fn text_area(field: Rect) -> Rect {
-        let [text, _] = Layout::horizontal([
-            Constraint::Fill(1),
-            Constraint::Length(Self::CURSOR_COLUMN_WIDTH),
-        ])
-        .areas(field);
-        text
+    fn text_area(inner: Rect) -> Rect {
+        Rect {
+            width: inner.width.saturating_sub(Self::CURSOR_COLUMN_WIDTH),
+            ..inner
+        }
     }
 
     fn cursor_style(&self, style: PromptStyle) -> Style {
@@ -148,9 +142,9 @@ impl PromptField {
             .is_some_and(|(start, end)| start == (row, column) && start != end)
     }
 
-    fn paint_cursor(&self, buffer: &mut Buffer, field: Rect, cursor_style: Style) {
-        let position = self.cursor_position(Self::text_area(field));
-        if field.contains(position) {
+    fn paint_cursor(&self, buffer: &mut Buffer, inner: Rect, cursor_style: Style) {
+        let position = self.cursor_position(Self::text_area(inner));
+        if inner.contains(position) {
             buffer[position].set_style(cursor_style);
         }
     }

@@ -26,11 +26,9 @@ impl NewSessionField {
 
     pub fn hints(self) -> &'static str {
         match self {
-            Self::Name => "Enter next field · Ctrl-S create · Shift-Tab mode · Esc cancel",
+            Self::Name => "Enter next field · Ctrl-S create · Esc cancel",
             Self::Repo => "Type to find a repo · Enter next field · Ctrl-S create · Esc cancel",
-            Self::Prompt => {
-                "Enter create · Alt-P agent · Shift-Tab mode · Ctrl-T checkout · Esc cancel"
-            }
+            Self::Prompt => "Enter create · Esc cancel",
         }
     }
 
