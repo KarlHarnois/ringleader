@@ -1,7 +1,8 @@
 use std::fmt;
 use std::path::PathBuf;
 
-use crate::domain::{RepoName, SessionSummary};
+use super::repo_name::RepoName;
+use crate::domain::SessionSummary;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum RepoGroup {

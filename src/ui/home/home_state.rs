@@ -1,11 +1,13 @@
+use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 use super::bell::Bell;
 use super::home_view::LayoutTier;
 use super::preview_panel::PreviewPanel;
 use super::status_bar::{StatusBar, StatusNote};
+use crate::application::ports::FoldStore;
 use crate::application::{ServiceError, SessionService, Tool};
-use crate::domain::SessionSummary;
+use crate::domain::{RepoGroup, SessionSummary};
 use crate::ui::background_jobs::diff_queue::DiffQueue;
 use crate::ui::background_jobs::observation_feed::ObservationFeed;
 use crate::ui::background_jobs::preview_feed::PreviewFeed;
@@ -16,6 +18,7 @@ use crate::ui::theme::Theme;
 
 pub struct HomeState {
     sessions: SessionList,
+    folds: Box<dyn FoldStore>,
     bell: Bell,
     observations: ObservationFeed,
     preview: PreviewFeed,
@@ -28,9 +31,10 @@ pub struct HomeState {
 impl HomeState {
     pub const TMUX_PAUSE: Duration = Duration::from_secs(30);
 
-    pub fn new(now: Instant, bell: Bell) -> Self {
+    pub fn new(now: Instant, bell: Bell, folds: Box<dyn FoldStore>) -> Self {
         Self {
             sessions: SessionList::default(),
+            folds,
             bell,
             observations: ObservationFeed::new(now),
             preview: PreviewFeed::new(now),
@@ -38,6 +42,13 @@ impl HomeState {
             pull_requests: PullRequestFeed::default(),
             screen: (0, 0),
             tmux_paused_until: None,
+        }
+    }
+
+    pub fn restore_folds(&mut self) {
+        match self.folds.load() {
+            Ok(folded) => self.sessions.restore_folds(folded),
+            Err(error) => log::warn!("could not restore the folded repos: {error}"),
         }
     }
 
@@ -134,50 +145,65 @@ impl HomeState {
     }
 
     pub fn select(&mut self, name: &str, service: &SessionService) {
-        self.change_selection(service, |sessions| sessions.select(name));
+        self.change_list(service, |sessions| sessions.select(name));
     }
 
     pub fn move_selection(&mut self, offset: isize, service: &SessionService) {
-        self.change_selection(service, |sessions| sessions.move_selection(offset));
+        self.change_list(service, |sessions| sessions.move_selection(offset));
     }
 
     pub fn select_first(&mut self, service: &SessionService) {
-        self.change_selection(service, SessionList::select_first);
+        self.change_list(service, SessionList::select_first);
     }
 
     pub fn select_last(&mut self, service: &SessionService) {
-        self.change_selection(service, SessionList::select_last);
+        self.change_list(service, SessionList::select_last);
     }
 
     pub fn select_high(&mut self, service: &SessionService) {
-        self.change_selection(service, SessionList::select_high);
+        self.change_list(service, SessionList::select_high);
     }
 
     pub fn select_middle(&mut self, service: &SessionService) {
-        self.change_selection(service, SessionList::select_middle);
+        self.change_list(service, SessionList::select_middle);
     }
 
     pub fn select_low(&mut self, service: &SessionService) {
-        self.change_selection(service, SessionList::select_low);
+        self.change_list(service, SessionList::select_low);
     }
 
     pub fn toggle_fold(&mut self, service: &SessionService) {
-        self.change_selection(service, SessionList::toggle_fold);
+        self.change_list(service, SessionList::toggle_fold);
     }
 
     pub fn jump_to_repo(&mut self, number: usize, service: &SessionService) {
-        self.change_selection(service, |sessions| sessions.jump_to_repo(number));
+        self.change_list(service, |sessions| sessions.jump_to_repo(number));
     }
 
-    fn change_selection(
-        &mut self,
-        service: &SessionService,
-        change: impl FnOnce(&mut SessionList),
-    ) {
-        let before = self.sessions.selected_name().map(str::to_string);
+    fn change_list(&mut self, service: &SessionService, change: impl FnOnce(&mut SessionList)) {
+        let selected_before = self.sessions.selected_name().map(str::to_string);
+        let folded_before = self.sessions.folded().clone();
         change(&mut self.sessions);
-        if self.sessions.selected_name() != before.as_deref() {
+        self.refresh_preview_if_moved_from(selected_before.as_deref(), service);
+        self.save_folds_if_changed_from(&folded_before);
+    }
+
+    fn refresh_preview_if_moved_from(
+        &mut self,
+        selected_before: Option<&str>,
+        service: &SessionService,
+    ) {
+        if self.sessions.selected_name() != selected_before {
             self.refresh_preview(service);
+        }
+    }
+
+    fn save_folds_if_changed_from(&self, folded_before: &HashSet<RepoGroup>) {
+        if self.sessions.folded() == folded_before {
+            return;
+        }
+        if let Err(error) = self.folds.save(self.sessions.folded()) {
+            log::warn!("could not save the folded repos: {error}");
         }
     }
 
@@ -206,7 +232,7 @@ impl HomeState {
     }
 
     fn show(&mut self, rows: Vec<SessionSummary>, service: &SessionService) {
-        self.change_selection(service, |sessions| sessions.show(rows));
+        self.change_list(service, |sessions| sessions.show(rows));
         self.diffs.keep_only(&self.sessions.names());
         self.sessions.apply_diffs(self.diffs.diffs());
         self.pull_requests.keep_only(&self.sessions.names());

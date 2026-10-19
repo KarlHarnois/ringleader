@@ -28,6 +28,7 @@ use adapters::direnv::direnv_directory_environment::DirenvDirectoryEnvironment;
 use adapters::filesystem::directory_repo_scanner::DirectoryRepoScanner;
 use adapters::filesystem::directory_scratch_space::DirectoryScratchSpace;
 use adapters::filesystem::file_lock::FileLock;
+use adapters::filesystem::json_fold_store::JsonFoldStore;
 use adapters::filesystem::json_session_registry::JsonSessionRegistry;
 use adapters::gh::gh_pull_requests::GhPullRequests;
 use adapters::gh::null_pull_requests::NullPullRequests;
@@ -227,8 +228,14 @@ impl CompositionRoot {
         .into_iter()
         .flatten()
         .collect();
-        let mut app = App::new(service, Box::new(io::stdout()), Instant::now())
-            .with_startup_messages(&warnings, socket_recovery.ok().flatten());
+        let folds = JsonFoldStore::new(&state_directory.join("folds.json"));
+        let mut app = App::new(
+            service,
+            Box::new(io::stdout()),
+            Box::new(folds),
+            Instant::now(),
+        )
+        .with_startup_messages(&warnings, socket_recovery.ok().flatten());
         let signals = match SignalHookInterrupts::register() {
             Ok(signals) => signals,
             Err(error) => return Self::fail(&error.to_string()),

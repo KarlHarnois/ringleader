@@ -2,10 +2,9 @@ use std::collections::HashSet;
 use std::iter::once;
 
 use super::list_selection::ListSelection;
-use super::repo_group::RepoGroup;
 use super::repo_heading::RepoHeading;
 use super::viewport::Viewport;
-use crate::domain::SessionSummary;
+use crate::domain::{RepoGroup, SessionSummary};
 
 pub struct SessionTree<'a> {
     rows: &'a [SessionSummary],

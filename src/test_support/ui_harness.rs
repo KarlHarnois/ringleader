@@ -9,7 +9,9 @@ use ratatui::backend::{Backend, ClearType, TestBackend, WindowSize};
 use ratatui::buffer::Cell;
 use ratatui::layout::{Position, Size};
 
-use super::{Deadline, FakeInterrupts, FakeMultiplexer, RecordingScreenMode, ServiceFixture};
+use super::{
+    Deadline, FakeFoldStore, FakeInterrupts, FakeMultiplexer, RecordingScreenMode, ServiceFixture,
+};
 use crate::application::EphemeralShell;
 use crate::ui::App;
 use crate::ui::event_loop::{EventLoop, InputSource};
@@ -45,8 +47,30 @@ impl UiHarness {
             .with_multiplexer(FakeMultiplexer::new().with_live(ServiceFixture::exited(&session)))
     }
 
+    pub fn two_repos() -> ServiceFixture {
+        let docs = ServiceFixture::session_at("docs", "/repos/alpha", ServiceFixture::CREATED_AT);
+        let fix_auth = ServiceFixture::session("fix-auth");
+        ServiceFixture::new()
+            .with_sessions(&[docs.clone(), fix_auth.clone()])
+            .with_multiplexer(
+                FakeMultiplexer::new()
+                    .with_live(ServiceFixture::waiting(&docs))
+                    .with_live(ServiceFixture::waiting(&fix_auth)),
+            )
+    }
+
     pub fn app(fixture: &ServiceFixture) -> App {
-        App::new(fixture.service(), Box::new(io::sink()), Instant::now())
+        Self::app_with_folds(fixture, &FakeFoldStore::default())
+    }
+
+    pub fn app_with_folds(fixture: &ServiceFixture, folds: &FakeFoldStore) -> App {
+        let folds = Box::new(folds.clone());
+        App::new(
+            fixture.service(),
+            Box::new(io::sink()),
+            folds,
+            Instant::now(),
+        )
     }
 
     pub fn settle(app: &mut App) {

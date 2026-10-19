@@ -1,12 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
 use super::list_selection::ListSelection;
-use super::repo_group::RepoGroup;
 use super::repo_heading::RepoHeading;
 use super::session_table::SessionTable;
 use super::session_tree::{SessionTree, TreeLine};
 use super::viewport::Viewport;
-use crate::domain::{DiffStat, PullRequest, SessionSummary};
+use crate::domain::{DiffStat, PullRequest, RepoGroup, SessionSummary};
 use crate::ui::theme::Theme;
 
 #[derive(Debug, Default)]
@@ -43,6 +42,10 @@ impl SessionList {
             .filter(|row| row.session().is_some())
             .map(|row| row.name().to_string())
             .collect()
+    }
+
+    pub fn folded(&self) -> &HashSet<RepoGroup> {
+        &self.folded
     }
 
     pub fn names(&self) -> Vec<String> {
@@ -137,6 +140,10 @@ impl SessionList {
             self.folded.insert(group.clone());
         }
         self.scroll_to_selection();
+    }
+
+    pub fn restore_folds(&mut self, folded: HashSet<RepoGroup>) {
+        self.folded = folded;
     }
 
     pub fn jump_to_repo(&mut self, number: usize) {
@@ -259,6 +266,17 @@ mod tests {
                 .collect();
             let mut list = Self::showing(rows);
             list.resize(Self::ROOM_FOR_THREE_LINES);
+            list
+        }
+
+        fn alpha_folded() -> HashSet<RepoGroup> {
+            HashSet::from([ServiceFixture::repo_group("/repos/alpha")])
+        }
+
+        fn restored_alpha_fold() -> SessionList {
+            let mut list = SessionList::default();
+            list.resize(Self::ROOM_FOR_EVERY_LINE);
+            list.restore_folds(Self::alpha_folded());
             list
         }
 
@@ -467,6 +485,33 @@ mod tests {
         list.show(ListFixture::two_repos());
 
         assert_eq!(list.visible_managed(), ["a-one", "b-two", "c-three"]);
+    }
+
+    #[test]
+    fn a_restored_fold_folds_its_repo_once_the_rows_arrive() {
+        let mut list = ListFixture::restored_alpha_fold();
+
+        list.show(ListFixture::two_repos());
+
+        assert_eq!(list.visible_managed(), ["c-three"]);
+    }
+
+    #[test]
+    fn a_restored_fold_without_a_heading_is_forgotten_by_the_first_rows() {
+        let mut list = ListFixture::restored_alpha_fold();
+
+        list.show(ListFixture::two_repos()[2..].to_vec());
+
+        assert!(list.folded().is_empty());
+    }
+
+    #[test]
+    fn folded_names_the_repo_of_each_folded_heading() {
+        let mut list = ListFixture::showing(ListFixture::two_repos());
+
+        list.toggle_fold();
+
+        assert_eq!(list.folded(), &ListFixture::alpha_folded());
     }
 
     #[test]
