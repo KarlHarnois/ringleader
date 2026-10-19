@@ -1,9 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use ratatui::text::Line;
-
 use crate::domain::Agent;
-use crate::ui::theme::Theme;
 
 pub struct AgentPicker {
     agents: Vec<Agent>,
@@ -12,8 +9,6 @@ pub struct AgentPicker {
 }
 
 impl AgentPicker {
-    const NO_PROMPT_MARK: &'static str = " · no prompt";
-
     pub fn new(agents: &[Agent], config_path: &Path) -> Self {
         Self {
             agents: agents.to_vec(),
@@ -30,22 +25,6 @@ impl AgentPicker {
 
     pub fn cycle(&mut self) {
         self.selected = (self.selected + 1) % self.agents.len().max(1);
-    }
-
-    pub fn line(&self, theme: &Theme) -> Line<'static> {
-        match self.selected() {
-            Ok(agent) => Line::from(Self::text(agent)),
-            Err(problem) => Line::styled(problem, theme.error()),
-        }
-    }
-
-    fn text(agent: &Agent) -> String {
-        let mark = if agent.accepts_prompt() {
-            ""
-        } else {
-            Self::NO_PROMPT_MARK
-        };
-        format!("{}{mark}", agent.name())
     }
 }
 

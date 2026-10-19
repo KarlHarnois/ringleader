@@ -71,7 +71,7 @@ env = ["ANTHROPIC_API_KEY"]
 # set_env = { CLAUDE_CONFIG_DIR = "~/.claude-work" }
 prompt_args = ["{prompt}"]
 # Added after args when a new session starts in plan mode. The new session
-# dialog opens in plan mode when the first agent has plan_args, and Shift-Tab
+# dialog opens in plan mode when the first agent has plan_args, and Alt-j
 # switches modes. An agent without plan_args has no plan mode.
 plan_args = ["--permission-mode", "plan"]
 # Added after args when restart recreates a stopped session, such as after a

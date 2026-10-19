@@ -57,9 +57,11 @@ Each way comes from an ecosystem users already know, and keeps the meaning it ha
 | A fuzzy picker | fzf |
 | The key that opens a finder | the `Ctrl-K` quick switcher, as in Slack, Discord, and GitHub |
 | The key that opens a pull request in the browser | the `o` open key, as in gh-dash, newsboat, and GitHub |
-| The keys that cycle the mode and the agent | Claude Code, where `Shift-Tab` cycles the mode and `Alt-P` opens the model picker |
+| The new-session dialog's prompt box and status line | Claude Code, where the mode and the model show under the prompt box |
 
 - The arrow keys work wherever an ecosystem's movement keys work.
+- `Shift-Tab` also cycles the mode in the new-session dialog, as in Claude Code.
+- The project owner chose `Alt-j`, `Alt-k`, and `Alt-l` for the settings on the new-session dialog's status line. The line shows each key beside its setting.
 - If no ecosystem in the table covers a new key, ask the project owner which ecosystem the key follows.
 - Both the TUI and the CLI offer each of these actions:
   - create

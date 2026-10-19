@@ -7,6 +7,7 @@ use super::new_session_field::NewSessionField;
 use super::new_session_view::NewSessionView;
 use super::prompt_field::PromptField;
 use super::repo_picker::{PickerStep, RepoPicker};
+use super::setting::Setting;
 use crate::application::{CreateRequest, SessionService};
 use crate::domain::{AgentMode, Checkout};
 use crate::ui::app::AppRequest;
@@ -30,8 +31,6 @@ pub struct NewSessionDialog {
 impl NewSessionDialog {
     pub const TITLE: &'static str = " New session ";
     const CREATE_KEY: char = 's';
-    const CHECKOUT_KEY: char = 't';
-    const AGENT_KEY: char = 'p';
 
     pub fn open(service: &SessionService) -> Self {
         let agents = AgentPicker::new(service.config().agents(), &service.config_path());
@@ -69,16 +68,8 @@ impl NewSessionDialog {
     }
 
     pub fn handle_key(&mut self, key: &KeyEvent, service: &SessionService) -> DialogStep {
-        if Self::toggles_mode(key) {
-            self.mode = self.mode.toggled();
-            return DialogStep::Stay;
-        }
-        if Self::toggles_checkout(key) {
-            self.checkout = self.checkout.toggled();
-            return DialogStep::Stay;
-        }
-        if Self::cycles_agent(key) {
-            self.agents.cycle();
+        if let Some(setting) = Setting::for_key(key) {
+            self.change(setting);
             return DialogStep::Stay;
         }
         if self.focus == NewSessionField::Repo && self.picker_took(key, service) {
@@ -137,24 +128,16 @@ impl NewSessionDialog {
         self.focus = NewSessionField::Repo.next();
     }
 
-    fn toggles_mode(key: &KeyEvent) -> bool {
-        key.code == KeyCode::BackTab
-    }
-
-    fn toggles_checkout(key: &KeyEvent) -> bool {
-        Self::is_chord(key, KeyModifiers::CONTROL, Self::CHECKOUT_KEY)
-    }
-
-    fn cycles_agent(key: &KeyEvent) -> bool {
-        Self::is_chord(key, KeyModifiers::ALT, Self::AGENT_KEY)
+    fn change(&mut self, setting: Setting) {
+        match setting {
+            Setting::Mode => self.mode = self.mode.toggled(),
+            Setting::Agent => self.agents.cycle(),
+            Setting::Checkout => self.checkout = self.checkout.toggled(),
+        }
     }
 
     fn creates(key: &KeyEvent) -> bool {
-        Self::is_chord(key, KeyModifiers::CONTROL, Self::CREATE_KEY)
-    }
-
-    fn is_chord(key: &KeyEvent, modifiers: KeyModifiers, character: char) -> bool {
-        key.code == KeyCode::Char(character) && key.modifiers == modifiers
+        key.code == KeyCode::Char(Self::CREATE_KEY) && key.modifiers == KeyModifiers::CONTROL
     }
 
     fn prompt_swallows(&self, enter: &KeyEvent) -> bool {
@@ -232,7 +215,7 @@ mod tests {
 
     impl DialogFixture {
         const SETTLE_LIMIT: Duration = Duration::from_secs(2);
-        const WIDTH: u16 = 74;
+        const WIDTH: u16 = 72;
         const FULL_HEIGHT: u16 = 20;
         const COMPACT_HEIGHT: u16 = 10;
         const CURSOR: &'static str = "█";
@@ -241,10 +224,24 @@ mod tests {
         const WORK: &'static str = "/home/example/work";
         const GATEWAY_COUNT: usize = 20;
         const TYPED: &'static str = "/srv/tools";
-        const PROMPT_HINTS: &'static str =
-            "Enter create · Alt-P agent · Shift-Tab mode · Ctrl-T checkout · Esc cancel";
+        const NAME_HINTS: &'static str = "Enter next field · Ctrl-S create · Esc cancel";
+        const REPO_HINTS: &'static str =
+            "Type to find a repo · Enter next field · Ctrl-S create · Esc cancel";
+        const PROMPT_HINTS: &'static str = "Enter create · Esc cancel";
         const SEARCH_HINTS: &'static str =
             "Type to search · ↑ ↓ Ctrl-J Ctrl-K choose · Enter pick · Esc back";
+        const DEFAULT_SETTINGS: &'static str =
+            "  plan mode (Alt-j) · claude (Alt-k) · new worktree (Alt-l)";
+        const BOX_TITLE: &'static str = "╭ Prompt ";
+        const BOX_CORNERS: usize = 2;
+        const BOX_FRAME_COLUMNS: usize = 4;
+        const CURSOR_COLUMN: usize = 1;
+        const BOX_WIDTH: usize = Self::WIDTH as usize;
+        const PROMPT_TEXT_WIDTH: usize =
+            Self::BOX_WIDTH - Self::BOX_FRAME_COLUMNS - Self::CURSOR_COLUMN;
+        const COMPACT_TIER_WIDTH: u16 = 54;
+        const COMPACT_TIER_HEIGHT: u16 = 8;
+        const COMPACT_BOX_WIDTH: usize = Self::COMPACT_TIER_WIDTH as usize;
         const SEVEN_LINES: &'static str = "one\ntwo\nthree\nfour\nfive\nsix\nseven";
 
         fn launched_in_repo() -> ServiceFixture {
@@ -354,11 +351,30 @@ mod tests {
         }
 
         fn screen(dialog: &NewSessionDialog, height: u16) -> Buffer {
-            let mut terminal = Terminal::new(TestBackend::new(Self::WIDTH, height)).unwrap();
+            Self::screen_sized(dialog, Self::WIDTH, height, DialogLabels::full())
+        }
+
+        fn screen_sized(
+            dialog: &NewSessionDialog,
+            width: u16,
+            height: u16,
+            labels: DialogLabels,
+        ) -> Buffer {
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
             terminal
-                .draw(|frame| dialog.render(frame, frame.area(), DialogLabels::full(), &Theme))
+                .draw(|frame| dialog.render(frame, frame.area(), labels, &Theme))
                 .unwrap();
             terminal.backend().buffer().clone()
+        }
+
+        fn compact_text(dialog: &NewSessionDialog) -> String {
+            let screen = Self::screen_sized(
+                dialog,
+                Self::COMPACT_TIER_WIDTH,
+                Self::COMPACT_TIER_HEIGHT,
+                DialogLabels::abbreviated(),
+            );
+            Self::rows(&screen, |cell| cell.symbol())
         }
 
         fn rows<'a>(screen: &'a Buffer, shown: impl Fn(&'a Cell) -> &'a str) -> String {
@@ -374,6 +390,51 @@ mod tests {
 
         fn flat_text(dialog: &NewSessionDialog) -> String {
             Self::text(dialog).replace('\n', " ")
+        }
+
+        fn prompt_box(dialog: &NewSessionDialog) -> String {
+            Self::boxed(&Self::text(dialog))
+        }
+
+        fn prompt_box_with_cursor(dialog: &NewSessionDialog) -> String {
+            Self::boxed(&Self::text_with_cursor(dialog))
+        }
+
+        fn boxed(text: &str) -> String {
+            text.lines()
+                .skip_while(|row| !row.starts_with(Self::BOX_TITLE))
+                .skip(1)
+                .take_while(|row| !row.starts_with('╰'))
+                .map(Self::unframed)
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+
+        fn unframed(row: &str) -> String {
+            let text = row
+                .strip_prefix("│ ")
+                .and_then(|rest| rest.strip_suffix('│'));
+            text.unwrap_or(row).trim_end().to_string()
+        }
+
+        fn box_top(width: usize) -> String {
+            let rule = "─".repeat(width - Self::BOX_TITLE.chars().count() - 1);
+            format!("{}{rule}╮", Self::BOX_TITLE)
+        }
+
+        fn box_row(text: &str, width: usize) -> String {
+            let inner = width - Self::BOX_FRAME_COLUMNS;
+            format!("│ {text:<inner$} │")
+        }
+
+        fn box_bottom(width: usize) -> String {
+            format!("╰{}╯", "─".repeat(width - Self::BOX_CORNERS))
+        }
+
+        fn box_frame_is_dim(dialog: &NewSessionDialog) -> bool {
+            let screen = Self::screen(dialog, Self::FULL_HEIGHT);
+            let corner = screen.content().iter().find(|cell| cell.symbol() == "╭");
+            corner.is_some_and(|cell| cell.modifier.contains(Modifier::DIM))
         }
 
         fn settle(dialog: &mut NewSessionDialog, done: impl Fn(&str) -> bool) {
@@ -414,8 +475,22 @@ mod tests {
             Self::control(dialog, service, 's')
         }
 
+        fn toggle_mode(dialog: &mut NewSessionDialog, service: &SessionService) -> DialogStep {
+            Self::chord(dialog, service, KeyModifiers::ALT, 'j')
+        }
+
         fn cycle_agent(dialog: &mut NewSessionDialog, service: &SessionService) -> DialogStep {
-            Self::chord(dialog, service, KeyModifiers::ALT, 'p')
+            Self::chord(dialog, service, KeyModifiers::ALT, 'k')
+        }
+
+        fn toggle_checkout(dialog: &mut NewSessionDialog, service: &SessionService) -> DialogStep {
+            Self::chord(dialog, service, KeyModifiers::ALT, 'l')
+        }
+
+        fn change_every_setting(dialog: &mut NewSessionDialog, service: &SessionService) {
+            Self::toggle_mode(dialog, service);
+            Self::cycle_agent(dialog, service);
+            Self::toggle_checkout(dialog, service);
         }
 
         fn worktree_error(repeats: usize) -> String {
@@ -539,8 +614,8 @@ mod tests {
         assert_eq!(
             hints,
             [
-                "Enter next field · Ctrl-S create · Shift-Tab mode · Esc cancel",
-                "Type to find a repo · Enter next field · Ctrl-S create · Esc cancel",
+                DialogFixture::NAME_HINTS,
+                DialogFixture::REPO_HINTS,
                 DialogFixture::PROMPT_HINTS,
             ]
         );
@@ -592,10 +667,7 @@ mod tests {
 
         DialogFixture::type_text(&mut dialog, &service, "g");
 
-        assert!(
-            on_the_field
-                .ends_with("Type to find a repo · Enter next field · Ctrl-S create · Esc cancel")
-        );
+        assert!(on_the_field.ends_with(DialogFixture::REPO_HINTS));
         assert!(DialogFixture::text(&dialog).ends_with(DialogFixture::SEARCH_HINTS));
     }
 
@@ -621,7 +693,7 @@ mod tests {
     }
 
     #[test]
-    fn alt_p_picks_the_next_agent() {
+    fn alt_k_picks_the_next_agent() {
         let (mut dialog, service) =
             DialogFixture::opened(&DialogFixture::launched_with_two_agents());
         DialogFixture::type_text(&mut dialog, &service, "fix-auth");
@@ -633,7 +705,7 @@ mod tests {
     }
 
     #[test]
-    fn alt_p_past_the_last_agent_wraps_to_the_first() {
+    fn alt_k_past_the_last_agent_wraps_to_the_first() {
         let (mut dialog, service) =
             DialogFixture::opened(&DialogFixture::launched_with_two_agents());
         DialogFixture::type_text(&mut dialog, &service, "fix-auth");
@@ -646,19 +718,20 @@ mod tests {
     }
 
     #[test]
-    fn alt_p_shows_the_next_agent_on_the_pinned_row() {
+    fn alt_k_shows_the_next_agent_in_the_settings_line() {
         let (mut dialog, service) =
             DialogFixture::opened(&DialogFixture::launched_with_two_agents());
 
         DialogFixture::cycle_agent(&mut dialog, &service);
 
         assert!(
-            DialogFixture::text(&dialog).contains("Agent     opencode\nCheckout  new worktree\n")
+            DialogFixture::text(&dialog)
+                .contains("\n  plan mode (Alt-j) · opencode (Alt-k) · new worktree (Alt-l)\n")
         );
     }
 
     #[test]
-    fn alt_p_keeps_the_dialog_open_on_the_focused_field_and_types_nothing() {
+    fn alt_k_keeps_the_dialog_open_on_the_focused_field_and_types_nothing() {
         let (mut dialog, service) =
             DialogFixture::opened(&DialogFixture::launched_with_two_agents());
         DialogFixture::type_text(&mut dialog, &service, "ship");
@@ -671,7 +744,7 @@ mod tests {
     }
 
     #[test]
-    fn alt_p_switches_the_agent_without_typing_into_the_prompt() {
+    fn alt_k_switches_the_agent_without_typing_into_the_prompt() {
         let (mut dialog, service) =
             DialogFixture::focused_on_prompt(&DialogFixture::launched_with_two_agents());
         DialogFixture::type_text(&mut dialog, &service, "fix");
@@ -685,7 +758,7 @@ mod tests {
     }
 
     #[test]
-    fn alt_p_switches_the_agent_while_the_repo_search_is_open() {
+    fn alt_k_switches_the_agent_while_the_repo_search_is_open() {
         let (mut dialog, service) =
             DialogFixture::opened(&DialogFixture::launched_with_two_agents());
         DialogFixture::search(&mut dialog, &service, "gate");
@@ -693,12 +766,12 @@ mod tests {
         DialogFixture::cycle_agent(&mut dialog, &service);
 
         let shown = DialogFixture::text(&dialog);
-        assert!(shown.contains("Find: gate"));
-        assert!(shown.contains("Agent     opencode\n"));
+        assert!(shown.contains("Find: gate█"));
+        assert!(shown.contains("· opencode (Alt-k) ·"));
     }
 
     #[test]
-    fn alt_p_with_no_agents_keeps_the_config_path_error() {
+    fn alt_k_with_no_agents_keeps_the_config_path_error() {
         let fixture = DialogFixture::launched_in_repo()
             .with_config(ServiceFixture::config().with_agents(Vec::new()));
         let (mut dialog, service) = DialogFixture::opened(&fixture);
@@ -707,7 +780,7 @@ mod tests {
 
         assert!(
             DialogFixture::text(&dialog)
-                .contains("Agent     no agents configured in /config/ringleader/config.toml")
+                .contains("\n  no agents configured in /config/ringleader/config.toml (Alt-k)\n")
         );
     }
 
@@ -767,9 +840,9 @@ mod tests {
 
         dialog.paste("one\ntwo\nthree");
 
-        assert!(
-            DialogFixture::text_with_cursor(&dialog)
-                .contains("Prompt    one\n          two\n          three█")
+        assert_eq!(
+            DialogFixture::prompt_box_with_cursor(&dialog),
+            "one\ntwo\nthree█"
         );
     }
 
@@ -780,14 +853,14 @@ mod tests {
 
         dialog.paste("steps:\n  - run: cargo test");
 
-        assert!(
-            DialogFixture::text(&dialog)
-                .contains("Prompt    steps:\n            - run: cargo test")
+        assert_eq!(
+            DialogFixture::prompt_box(&dialog),
+            "steps:\n  - run: cargo test"
         );
     }
 
     #[test]
-    fn a_long_typed_prompt_wraps_under_its_label_and_submits_as_one_line() {
+    fn a_long_typed_prompt_wraps_inside_its_box_and_submits_as_one_line() {
         let (mut dialog, service) =
             DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
         let prompt = "fix the flaky login test that times out on the first run after a cold start";
@@ -796,17 +869,18 @@ mod tests {
         let shown = DialogFixture::text_with_cursor(&dialog);
         let step = DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
 
-        assert!(shown.contains(
-            "Prompt    fix the flaky login test that times out on the first run after\n          a cold start█"
-        ));
+        assert_eq!(
+            DialogFixture::boxed(&shown),
+            "fix the flaky login test that times out on the first run after a\ncold start█"
+        );
         assert_eq!(DialogFixture::submitted(step).prompt(), prompt);
     }
 
     #[test]
     fn the_cursor_stays_in_view_as_the_prompt_reaches_the_right_edge() {
-        let field_width = usize::from(DialogFixture::WIDTH) - DialogLabels::full().width();
+        let text_width = DialogFixture::PROMPT_TEXT_WIDTH;
 
-        let shown = [field_width - 1, field_width].map(|length| {
+        let shown = [text_width, text_width + 1].map(|length| {
             let (mut dialog, service) =
                 DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
             DialogFixture::type_text(&mut dialog, &service, &"x".repeat(length));
@@ -907,10 +981,7 @@ mod tests {
         DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
         let step = DialogFixture::create(&mut dialog, &service);
 
-        assert_eq!(
-            DialogFixture::hints(&dialog),
-            "Enter next field · Ctrl-S create · Shift-Tab mode · Esc cancel"
-        );
+        assert_eq!(DialogFixture::hints(&dialog), DialogFixture::NAME_HINTS);
         assert_eq!(DialogFixture::submitted(step).prompt(), "fix");
     }
 
@@ -934,37 +1005,46 @@ mod tests {
 
         assert!(
             DialogFixture::text(&dialog)
-                .contains("Agent     claude\nCheckout  new worktree\nMode      plan\n")
+                .contains(&format!("\n{}\n", DialogFixture::DEFAULT_SETTINGS))
         );
     }
 
     #[test]
-    fn shift_tab_shows_build_mode() {
+    fn alt_j_shows_build_mode() {
         let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
 
-        DialogFixture::press(&mut dialog, &service, KeyCode::BackTab);
+        DialogFixture::toggle_mode(&mut dialog, &service);
 
         assert!(
             DialogFixture::text(&dialog)
-                .contains("Agent     claude\nCheckout  new worktree\nMode      build\n")
+                .contains("\n  build mode (Alt-j) · claude (Alt-k) · new worktree (Alt-l)\n")
         );
     }
 
     #[test]
-    fn a_second_shift_tab_goes_back_to_plan_mode() {
+    fn shift_tab_still_toggles_the_mode() {
         let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
 
         DialogFixture::press(&mut dialog, &service, KeyCode::BackTab);
-        DialogFixture::press(&mut dialog, &service, KeyCode::BackTab);
 
-        assert!(DialogFixture::text(&dialog).contains("Mode      plan\n"));
+        assert!(DialogFixture::text(&dialog).contains("build mode (Alt-j)"));
     }
 
     #[test]
-    fn shift_tab_keeps_the_focused_field() {
+    fn a_second_alt_j_goes_back_to_plan_mode() {
         let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
 
-        DialogFixture::press(&mut dialog, &service, KeyCode::BackTab);
+        DialogFixture::toggle_mode(&mut dialog, &service);
+        DialogFixture::toggle_mode(&mut dialog, &service);
+
+        assert!(DialogFixture::text(&dialog).contains("plan mode (Alt-j)"));
+    }
+
+    #[test]
+    fn alt_j_keeps_the_focused_field() {
+        let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
+
+        DialogFixture::toggle_mode(&mut dialog, &service);
         DialogFixture::type_text(&mut dialog, &service, "fix-auth");
 
         assert!(DialogFixture::text(&dialog).starts_with("Name      fix-auth"));
@@ -974,58 +1054,58 @@ mod tests {
     fn a_new_session_starts_in_a_new_worktree() {
         let (dialog, _service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
 
-        assert!(DialogFixture::text(&dialog).contains("Checkout  new worktree\n"));
+        assert!(DialogFixture::text(&dialog).contains("new worktree (Alt-l)"));
     }
 
     #[test]
-    fn ctrl_t_switches_to_the_main_checkout() {
+    fn alt_l_switches_to_the_main_checkout() {
         let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
 
-        DialogFixture::control(&mut dialog, &service, 't');
+        DialogFixture::toggle_checkout(&mut dialog, &service);
 
-        assert!(DialogFixture::text(&dialog).contains("Checkout  main checkout\n"));
+        assert!(DialogFixture::text(&dialog).contains("main checkout (Alt-l)"));
     }
 
     #[test]
-    fn ctrl_t_twice_switches_back_to_a_new_worktree() {
+    fn alt_l_twice_switches_back_to_a_new_worktree() {
         let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
 
-        DialogFixture::control(&mut dialog, &service, 't');
-        DialogFixture::control(&mut dialog, &service, 't');
+        DialogFixture::toggle_checkout(&mut dialog, &service);
+        DialogFixture::toggle_checkout(&mut dialog, &service);
 
-        assert!(DialogFixture::text(&dialog).contains("Checkout  new worktree\n"));
+        assert!(DialogFixture::text(&dialog).contains("new worktree (Alt-l)"));
     }
 
     #[test]
-    fn ctrl_t_keeps_the_focus_and_types_nothing() {
+    fn alt_l_keeps_the_focus_and_types_nothing() {
         let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
         DialogFixture::type_text(&mut dialog, &service, "fix");
 
-        DialogFixture::control(&mut dialog, &service, 't');
+        DialogFixture::toggle_checkout(&mut dialog, &service);
 
         assert!(DialogFixture::text(&dialog).starts_with("Name      fix█\n"));
         assert_eq!(DialogFixture::hints(&dialog), NewSessionField::Name.hints());
     }
 
     #[test]
-    fn ctrl_t_switches_the_checkout_while_the_repo_search_is_open() {
+    fn alt_l_switches_the_checkout_while_the_repo_search_is_open() {
         let (mut dialog, service) =
             DialogFixture::opened(&DialogFixture::launched_among_gateways());
         DialogFixture::search(&mut dialog, &service, "gate");
 
-        DialogFixture::control(&mut dialog, &service, 't');
+        DialogFixture::toggle_checkout(&mut dialog, &service);
 
         let shown = DialogFixture::text(&dialog);
-        assert!(shown.contains("Find: gate"));
-        assert!(shown.contains("Checkout  main checkout\n"));
+        assert!(shown.contains("Find: gate█"));
+        assert!(shown.contains("main checkout (Alt-l)"));
     }
 
     #[test]
-    fn create_after_ctrl_t_asks_for_the_main_checkout() {
+    fn create_after_alt_l_asks_for_the_main_checkout() {
         let (mut dialog, service) =
             DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
 
-        DialogFixture::control(&mut dialog, &service, 't');
+        DialogFixture::toggle_checkout(&mut dialog, &service);
         let step = DialogFixture::create(&mut dialog, &service);
 
         assert_eq!(
@@ -1041,13 +1121,13 @@ mod tests {
     fn the_main_checkout_is_drawn_in_the_warning_color() {
         let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
 
-        DialogFixture::control(&mut dialog, &service, 't');
+        DialogFixture::toggle_checkout(&mut dialog, &service);
 
         assert_eq!(DialogFixture::in_warning_color(&dialog), "main checkout");
     }
 
     #[test]
-    fn tab_never_stops_on_the_agent_checkout_or_mode_rows() {
+    fn tab_walks_only_name_repo_and_prompt() {
         let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
         DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
         let on_the_repo = DialogFixture::hints(&dialog);
@@ -1059,24 +1139,24 @@ mod tests {
     }
 
     #[test]
-    fn shift_tab_switches_the_mode_while_the_repo_search_is_open() {
+    fn alt_j_switches_the_mode_while_the_repo_search_is_open() {
         let (mut dialog, service) =
             DialogFixture::opened(&DialogFixture::launched_among_gateways());
         DialogFixture::search(&mut dialog, &service, "gate");
 
-        DialogFixture::press(&mut dialog, &service, KeyCode::BackTab);
+        DialogFixture::toggle_mode(&mut dialog, &service);
 
         let shown = DialogFixture::text(&dialog);
-        assert!(shown.contains("Find: gate"));
-        assert!(shown.contains("Mode      build\n"));
+        assert!(shown.contains("Find: gate█"));
+        assert!(shown.contains("build mode (Alt-j)"));
     }
 
     #[test]
-    fn create_after_shift_tab_asks_for_build_mode() {
+    fn create_after_alt_j_asks_for_build_mode() {
         let (mut dialog, service) =
             DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
 
-        DialogFixture::press(&mut dialog, &service, KeyCode::BackTab);
+        DialogFixture::toggle_mode(&mut dialog, &service);
         let step = DialogFixture::create(&mut dialog, &service);
 
         assert_eq!(
@@ -1092,11 +1172,9 @@ mod tests {
             .with_config(ServiceFixture::config().with_agents(vec![agent]));
         let (mut dialog, service) = DialogFixture::opened(&fixture);
 
-        DialogFixture::press(&mut dialog, &service, KeyCode::BackTab);
+        DialogFixture::toggle_mode(&mut dialog, &service);
 
-        assert!(
-            DialogFixture::text(&dialog).contains("Mode      plan · this agent has no plan_args\n")
-        );
+        assert!(DialogFixture::text(&dialog).contains("plan mode, no plan_args (Alt-j)"));
     }
 
     #[test]
@@ -1106,11 +1184,14 @@ mod tests {
             .with_config(ServiceFixture::config().with_agents(vec![agent]));
         let (dialog, _service) = DialogFixture::opened(&fixture);
 
-        assert!(DialogFixture::text(&dialog).contains("Mode      build\n"));
+        assert!(
+            DialogFixture::text(&dialog)
+                .contains("  build mode (Alt-j) · example-agent, no prompt (Alt-k)")
+        );
     }
 
     #[test]
-    fn alt_p_to_an_agent_without_plan_args_keeps_plan_mode_and_warns() {
+    fn alt_k_to_an_agent_without_plan_args_keeps_plan_mode_and_warns() {
         let agents = vec![ServiceFixture::agent(), Agent::new("example-agent", "sh")];
         let fixture = DialogFixture::launched_in_repo()
             .with_config(ServiceFixture::config().with_agents(agents));
@@ -1118,9 +1199,7 @@ mod tests {
 
         DialogFixture::cycle_agent(&mut dialog, &service);
 
-        assert!(
-            DialogFixture::text(&dialog).contains("Mode      plan · this agent has no plan_args\n")
-        );
+        assert!(DialogFixture::text(&dialog).contains("plan mode, no plan_args (Alt-j)"));
     }
 
     #[test]
@@ -1130,7 +1209,7 @@ mod tests {
             .with_config(ServiceFixture::config().with_agents(vec![agent]));
         let (mut dialog, service) = DialogFixture::focused_on_prompt(&fixture);
 
-        DialogFixture::press(&mut dialog, &service, KeyCode::BackTab);
+        DialogFixture::toggle_mode(&mut dialog, &service);
         let step = DialogFixture::create(&mut dialog, &service);
 
         assert_eq!(step, DialogStep::Stay);
@@ -1190,7 +1269,10 @@ mod tests {
         }
 
         assert_eq!(DialogFixture::underlined(&dialog), "the");
-        assert!(DialogFixture::text_with_cursor(&dialog).contains("Prompt    fix the█tests\n"));
+        assert_eq!(
+            DialogFixture::prompt_box_with_cursor(&dialog),
+            "fix the█tests"
+        );
     }
 
     #[test]
@@ -1216,11 +1298,7 @@ mod tests {
         let (dialog, _service) =
             DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
 
-        assert!(
-            DialogFixture::text_with_cursor(&dialog).contains(
-                "Agent     claude\nCheckout  new worktree\nMode      plan\nPrompt    █\n\n"
-            )
-        );
+        assert_eq!(DialogFixture::prompt_box_with_cursor(&dialog), "█");
     }
 
     #[test]
@@ -1230,9 +1308,10 @@ mod tests {
 
         dialog.paste(DialogFixture::SEVEN_LINES);
 
-        assert!(DialogFixture::text_with_cursor(&dialog).contains(
-            "Agent     claude\nCheckout  new worktree\nMode      plan\nPrompt    two\n          three\n          four\n          five\n          six\n          seven█\n\n"
-        ));
+        assert_eq!(
+            DialogFixture::prompt_box_with_cursor(&dialog),
+            "two\nthree\nfour\nfive\nsix\nseven█"
+        );
     }
 
     #[test]
@@ -1246,14 +1325,11 @@ mod tests {
             DialogFixture::press(&mut dialog, &service, KeyCode::Up);
         }
 
-        assert!(
-            scrolled.contains(
-                "Agent     claude\nCheckout  new worktree\nMode      plan\nPrompt    two\n"
-            )
+        assert!(DialogFixture::boxed(&scrolled).starts_with("two\n"));
+        assert_eq!(
+            DialogFixture::prompt_box_with_cursor(&dialog),
+            "one█\ntwo\nthree\nfour\nfive\nsix"
         );
-        assert!(DialogFixture::text_with_cursor(&dialog).contains(
-            "Prompt    one█\n          two\n          three\n          four\n          five\n          six\n\n"
-        ));
     }
 
     #[test]
@@ -1267,22 +1343,18 @@ mod tests {
             DialogFixture::press(&mut dialog, &service, KeyCode::Backspace);
         }
 
-        assert!(
-            scrolled.contains(
-                "Agent     claude\nCheckout  new worktree\nMode      plan\nPrompt    two\n"
-            )
+        assert!(DialogFixture::boxed(&scrolled).starts_with("two\n"));
+        assert_eq!(
+            DialogFixture::prompt_box_with_cursor(&dialog),
+            "one\ntwo\nthree\nfour\nfive\nsix█"
         );
-        assert!(DialogFixture::text_with_cursor(&dialog).contains(
-            "Prompt    one\n          two\n          three\n          four\n          five\n          six█\n\n"
-        ));
     }
 
     #[test]
     fn bringing_back_the_first_line_leaves_the_cursor_at_the_end_of_a_full_row() {
         let (mut dialog, service) =
             DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
-        let text_width = usize::from(DialogFixture::WIDTH) - DialogLabels::full().width() - 1;
-        let full_row = "x".repeat(text_width);
+        let full_row = "x".repeat(DialogFixture::PROMPT_TEXT_WIDTH);
         dialog.paste(&format!("one\ntwo\nthree\nfour\nfive\n{full_row}\nseven"));
         let scrolled = DialogFixture::text_with_cursor(&dialog);
         for _ in 0.."\nseven".len() {
@@ -1293,8 +1365,8 @@ mod tests {
         DialogFixture::type_text(&mut dialog, &service, "!");
         let step = DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
 
-        assert!(scrolled.contains("Prompt    two\n"));
-        assert!(restored.contains("Prompt    one\n"));
+        assert!(DialogFixture::boxed(&scrolled).starts_with("two\n"));
+        assert!(DialogFixture::boxed(&restored).starts_with("one\n"));
         assert!(
             DialogFixture::submitted(step)
                 .prompt()
@@ -1317,8 +1389,8 @@ mod tests {
         DialogFixture::type_text(&mut dialog, &service, "!");
         let step = DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
 
-        assert!(scrolled.contains("Prompt    two\n"));
-        assert!(restored.contains("Prompt    one\n"));
+        assert!(DialogFixture::boxed(&scrolled).starts_with("two\n"));
+        assert!(DialogFixture::boxed(&restored).starts_with("one\n"));
         assert!(
             DialogFixture::submitted(step)
                 .prompt()
@@ -1340,8 +1412,8 @@ mod tests {
         DialogFixture::type_text(&mut dialog, &service, "!");
         let step = DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
 
-        assert!(scrolled.contains("Prompt    two\n"));
-        assert!(restored.contains("Prompt    one\n"));
+        assert!(DialogFixture::boxed(&scrolled).starts_with("two\n"));
+        assert!(DialogFixture::boxed(&restored).starts_with("one\n"));
         assert!(
             DialogFixture::submitted(step)
                 .prompt()
@@ -1360,7 +1432,7 @@ mod tests {
         DialogFixture::type_text(&mut dialog, &service, "Z");
         let step = DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
 
-        assert!(drawn.contains("Prompt    xxx"));
+        assert!(DialogFixture::boxed(&drawn).starts_with("xxx"));
         assert_eq!(
             DialogFixture::submitted(step).prompt(),
             format!("{long_line}Z")
@@ -1377,8 +1449,8 @@ mod tests {
 
         let roomy = DialogFixture::text_with_cursor(&dialog);
 
-        assert!(squeezed.contains("Prompt    three\n"));
-        assert!(roomy.contains("Prompt    one\n          two\n          three█\n"));
+        assert_eq!(DialogFixture::boxed(&squeezed), "three");
+        assert_eq!(DialogFixture::boxed(&roomy), "one\ntwo\nthree█");
     }
 
     #[test]
@@ -1407,7 +1479,7 @@ mod tests {
         dialog.paste("one\ntwo\nthree");
 
         let shown = DialogFixture::text_at(&dialog, no_spare_rows);
-        assert!(shown.contains("Prompt    three\n"));
+        assert_eq!(DialogFixture::boxed(&shown), "three");
         assert!(shown.ends_with(DialogFixture::PROMPT_HINTS));
     }
 
@@ -1425,7 +1497,7 @@ mod tests {
     }
 
     #[test]
-    fn a_short_dialog_keeps_the_chosen_agent_above_the_checkout_row() {
+    fn a_short_dialog_keeps_the_settings_under_the_box() {
         let (mut dialog, service) = DialogFixture::opened_with_agents(5);
 
         for _ in 0..4 {
@@ -1433,10 +1505,11 @@ mod tests {
         }
 
         let shown = DialogFixture::text_at(&dialog, DialogFixture::COMPACT_HEIGHT);
-        assert!(shown.contains(
-            "Agent     agent-5 · no prompt\nCheckout  new worktree\nMode      build\nPrompt"
-        ));
-        assert!(shown.ends_with(NewSessionField::Name.hints()));
+        assert!(shown.contains(&format!(
+            "{}\n  build mode (Alt-j) · agent-5, no prompt (Alt-k) · new worktree (Alt-l)\n",
+            DialogFixture::box_bottom(DialogFixture::BOX_WIDTH)
+        )));
+        assert!(shown.ends_with(DialogFixture::NAME_HINTS));
     }
 
     #[test]
@@ -1451,9 +1524,7 @@ mod tests {
 
         let shown = DialogFixture::text_at(&dialog, rows_without_the_name);
         assert!(shown.starts_with("Repo      Find: gate█\n"));
-        assert!(shown.contains(
-            "~/work/gateway-01\nAgent     claude\nCheckout  new worktree\nMode      plan\nPrompt"
-        ));
+        assert!(shown.contains("~/work/gateway-01\n╭ Prompt "));
     }
 
     #[test]
@@ -1464,7 +1535,7 @@ mod tests {
         dialog.paste(DialogFixture::SEVEN_LINES);
 
         let shown = DialogFixture::text_at(&dialog, DialogFixture::COMPACT_HEIGHT);
-        assert!(shown.contains("Prompt    five\n          six\n          seven\n\n"));
+        assert_eq!(DialogFixture::boxed(&shown), "five\nsix\nseven");
         assert!(shown.ends_with(DialogFixture::PROMPT_HINTS));
     }
 
@@ -1479,7 +1550,11 @@ mod tests {
         assert_eq!(
             shown,
             format!(
-                "Name      fix-auth\nRepo      example-project\nAgent     claude\nCheckout  new worktree\nMode      plan\nPrompt\n{}",
+                "Name      fix-auth\nRepo      example-project\n{}\n{}\n{}\n{}\n{}",
+                DialogFixture::box_top(DialogFixture::BOX_WIDTH),
+                DialogFixture::box_row("", DialogFixture::BOX_WIDTH),
+                DialogFixture::box_bottom(DialogFixture::BOX_WIDTH),
+                DialogFixture::DEFAULT_SETTINGS,
                 DialogFixture::PROMPT_HINTS
             )
         );
@@ -1496,9 +1571,8 @@ mod tests {
         DialogFixture::settle(&mut dialog, |text| text.contains("20/20 repos under ~"));
 
         let shown = DialogFixture::text(&dialog);
-        assert!(shown.contains(
-            "gateway-05\nAgent     claude\nCheckout  new worktree\nMode      plan\nPrompt    two\n"
-        ));
+        assert!(shown.contains("gateway-05\n\n╭ Prompt "));
+        assert!(DialogFixture::boxed(&shown).starts_with("two\n"));
         assert!(shown.ends_with(DialogFixture::SEARCH_HINTS));
     }
 
@@ -1513,7 +1587,8 @@ mod tests {
         DialogFixture::settle(&mut dialog, |text| text.contains("20/20 repos under ~"));
 
         let shown = DialogFixture::text_at(&dialog, DialogFixture::COMPACT_HEIGHT);
-        assert!(shown.contains("gateway-01\nAgent     claude\nCheckout  new worktree\nMode      plan\nPrompt    seven\n"));
+        assert!(shown.contains("gateway-01\n\n╭ Prompt "));
+        assert_eq!(DialogFixture::boxed(&shown), "seven");
         assert!(shown.ends_with(DialogFixture::SEARCH_HINTS));
     }
 
@@ -1527,34 +1602,25 @@ mod tests {
         dialog.fail(error.clone());
 
         let shown = DialogFixture::text_at(&dialog, DialogFixture::COMPACT_HEIGHT);
-        assert!(shown.starts_with(
-            "Name      fix-auth\nRepo      example-project\nAgent     claude\nCheckout  new worktree\nMode      plan\nPrompt    seven\n"
-        ));
+        assert!(shown.starts_with("Name      fix-auth\nRepo      example-project\n╭ Prompt "));
+        assert_eq!(DialogFixture::boxed(&shown), "seven");
         assert!(shown.replace('\n', " ").contains(&error));
         assert!(shown.ends_with(DialogFixture::PROMPT_HINTS));
     }
 
     #[test]
-    fn a_dialog_too_short_for_every_field_keeps_the_mode_above_the_prompt() {
+    fn a_dialog_too_short_for_every_field_keeps_the_settings_under_the_box() {
         let (mut dialog, service) =
             DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
         let rows_without_the_repo = 6;
 
-        DialogFixture::press(&mut dialog, &service, KeyCode::BackTab);
+        DialogFixture::toggle_mode(&mut dialog, &service);
 
         let shown = DialogFixture::text_at(&dialog, rows_without_the_repo);
-        assert!(shown.contains("Mode      build\nPrompt"));
-    }
-
-    #[test]
-    fn a_dialog_too_short_for_every_field_keeps_the_agent_above_the_checkout() {
-        let (dialog, _service) =
-            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
-        let rows_without_the_repo = 6;
-
-        let shown = DialogFixture::text_at(&dialog, rows_without_the_repo);
-
-        assert!(shown.contains("Agent     claude\nCheckout  new worktree\n"));
+        assert!(shown.contains(&format!(
+            "{}\n  build mode (Alt-j) · claude (Alt-k) · new worktree (Alt-l)\n",
+            DialogFixture::box_bottom(DialogFixture::BOX_WIDTH)
+        )));
     }
 
     #[test]
@@ -1568,9 +1634,8 @@ mod tests {
         dialog.fail(error.clone());
 
         let shown = DialogFixture::text_at(&dialog, rows_for_all_but_the_repo);
-        assert!(shown.starts_with(
-            "Name      fix-auth\nAgent     claude\nCheckout  new worktree\nMode      plan\nPrompt    seven\n"
-        ));
+        assert!(shown.starts_with("Name      fix-auth\n╭ Prompt "));
+        assert_eq!(DialogFixture::boxed(&shown), "seven");
         assert!(shown.replace('\n', " ").contains(&error));
         assert!(shown.ends_with(DialogFixture::PROMPT_HINTS));
     }
@@ -1605,12 +1670,12 @@ mod tests {
         assert_eq!(step, DialogStep::Stay);
         assert!(
             DialogFixture::text(&dialog)
-                .contains("Agent     no agents configured in /config/ringleader/config.toml")
+                .contains("\n  no agents configured in /config/ringleader/config.toml (Alt-k)\n")
         );
     }
 
     #[test]
-    fn alt_p_marks_an_agent_without_a_prompt() {
+    fn alt_k_marks_an_agent_without_a_prompt() {
         let agents = vec![
             ServiceFixture::agent(),
             Agent::new("plain-agent", "plain-agent"),
@@ -1621,8 +1686,120 @@ mod tests {
 
         DialogFixture::cycle_agent(&mut dialog, &service);
 
+        assert!(DialogFixture::text(&dialog).contains("plain-agent, no prompt (Alt-k)"));
+    }
+
+    #[test]
+    fn alt_j_switches_the_mode_without_typing_into_the_prompt() {
+        let (mut dialog, service) =
+            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
+        DialogFixture::type_text(&mut dialog, &service, "fix");
+
+        DialogFixture::toggle_mode(&mut dialog, &service);
+        let step = DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
+
+        let request = DialogFixture::submitted(step);
+        assert_eq!(request.prompt(), "fix");
+        assert_eq!(request.mode(), AgentMode::Build);
+    }
+
+    #[test]
+    fn the_prompt_box_is_dim_until_the_prompt_has_focus() {
+        let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
+        let on_the_name = DialogFixture::box_frame_is_dim(&dialog);
+
+        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
+        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
+
+        assert!(on_the_name);
+        assert!(!DialogFixture::box_frame_is_dim(&dialog));
+    }
+
+    #[test]
+    fn the_setting_keys_type_nothing_into_the_name() {
+        let (mut dialog, service) =
+            DialogFixture::opened(&DialogFixture::launched_with_two_agents());
+        DialogFixture::type_text(&mut dialog, &service, "fix");
+
+        DialogFixture::change_every_setting(&mut dialog, &service);
+
+        assert!(DialogFixture::text(&dialog).starts_with("Name      fix█\n"));
+    }
+
+    #[test]
+    fn the_setting_keys_type_nothing_into_the_prompt() {
+        let (mut dialog, service) =
+            DialogFixture::focused_on_prompt(&DialogFixture::launched_with_two_agents());
+        DialogFixture::type_text(&mut dialog, &service, "fix");
+
+        DialogFixture::change_every_setting(&mut dialog, &service);
+        let step = DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
+
+        assert_eq!(
+            DialogFixture::submitted(step),
+            CreateRequest::new("fix-auth", ServiceFixture::repo())
+                .with_agent("opencode")
+                .with_checkout(Checkout::Main)
+                .with_mode(AgentMode::Build)
+                .with_prompt("fix")
+        );
+    }
+
+    #[test]
+    fn the_setting_keys_type_nothing_into_the_repo_search() {
+        let (mut dialog, service) =
+            DialogFixture::opened(&DialogFixture::launched_with_two_agents());
+        DialogFixture::search(&mut dialog, &service, "gate");
+
+        DialogFixture::change_every_setting(&mut dialog, &service);
+
+        let shown = DialogFixture::text(&dialog);
+        assert!(shown.contains("Find: gate█"));
         assert!(
-            DialogFixture::text(&dialog).contains("Agent     plain-agent · no prompt\nCheckout")
+            shown.contains("\n  build mode (Alt-j) · opencode (Alt-k) · main checkout (Alt-l)\n")
+        );
+    }
+
+    #[test]
+    fn the_marks_are_drawn_in_the_warning_color() {
+        let agents = vec![ServiceFixture::agent(), Agent::new("example-agent", "sh")];
+        let fixture = DialogFixture::launched_in_repo()
+            .with_config(ServiceFixture::config().with_agents(agents));
+        let (mut dialog, service) = DialogFixture::opened(&fixture);
+
+        DialogFixture::cycle_agent(&mut dialog, &service);
+
+        assert_eq!(
+            DialogFixture::in_warning_color(&dialog),
+            "no plan_argsno prompt"
+        );
+    }
+
+    #[test]
+    fn a_wide_settings_line_wraps_between_items() {
+        let agents = vec![ServiceFixture::agent(), Agent::new("example-agent", "sh")];
+        let fixture = DialogFixture::launched_in_repo()
+            .with_config(ServiceFixture::config().with_agents(agents));
+        let (mut dialog, service) = DialogFixture::opened(&fixture);
+
+        DialogFixture::cycle_agent(&mut dialog, &service);
+
+        assert!(DialogFixture::text(&dialog).contains("(Alt-k)\n  new worktree (Alt-l)\n"));
+    }
+
+    #[test]
+    fn the_compact_tier_abbreviates_the_labels_and_wraps_the_settings() {
+        let (dialog, _service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
+
+        assert_eq!(
+            DialogFixture::compact_text(&dialog),
+            format!(
+                "N █\nR example-project\n{}\n{}\n{}\n  plan mode (Alt-j) · claude (Alt-k)\n  new worktree (Alt-l)\n{}",
+                DialogFixture::box_top(DialogFixture::COMPACT_BOX_WIDTH),
+                DialogFixture::box_row("", DialogFixture::COMPACT_BOX_WIDTH),
+                DialogFixture::box_bottom(DialogFixture::COMPACT_BOX_WIDTH),
+                DialogFixture::NAME_HINTS
+            )
         );
     }
 
