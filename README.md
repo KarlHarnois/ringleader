@@ -15,7 +15,7 @@
 
 Ringleader is a tmux session manager for Claude Code and opencode. Each session runs an agent in its own git worktree and branch, or in the repo's main checkout. Ringleader's TUI lists the sessions grouped by repo and shows how each one is doing.
 
-Ringleader runs only on Linux.
+Ringleader runs on Linux and Apple Silicon macOS.
 
 ## Install
 

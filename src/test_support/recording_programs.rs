@@ -19,19 +19,21 @@ impl RecordingPrograms {
     const SUCCESS: &'static str = "exit 0";
     const NOT_EXECUTABLE: u32 = 0o644;
     const LINGERING_SECONDS: u32 = 30;
+    const SHELL_VARIABLES: [&'static str; 4] = ["OLDPWD", "PWD", "SHLVL", "_"];
     const RECORDING: &'static str = r#"#!/bin/sh
 {prelude}
 record='{record}'
-'{cat}' /proc/$$/environ > "$record/environ"
-read -r stat < /proc/$$/stat
-echo "$stat" > "$record/stat"
+'{env}' > "$record/environ"
+if kill -0 -$$ 2>/dev/null; then
+  echo leader > "$record/group"
+fi
 pwd -P > "$record/cwd"
 : > "$record/arguments"
 for argument in "$@"; do
   printf '%s\n' "$argument" >> "$record/arguments"
 done
 for descriptor in 0 1 2; do
-  if [ /proc/$$/fd/$descriptor -ef /dev/null ]; then
+  if [ /dev/fd/$descriptor -ef /dev/null ]; then
     echo null >> "$record/streams"
   else
     echo terminal >> "$record/streams"
@@ -125,15 +127,20 @@ echo $$ > "$record/pid"
     }
 
     pub fn environment_of(&self, name: &str) -> Vec<String> {
-        let marker = format!("{}=", ProcessMarker::NAME);
         let mut variables: Vec<String> = self
             .recorded_once_started(name, "environ")
-            .split('\0')
-            .filter(|variable| !variable.is_empty() && !variable.starts_with(&marker))
+            .lines()
+            .filter(|variable| !Self::set_by_the_test_or_the_shell(variable))
             .map(str::to_string)
             .collect();
         variables.sort();
         variables
+    }
+
+    fn set_by_the_test_or_the_shell(variable: &str) -> bool {
+        variable.split_once('=').is_some_and(|(name, _)| {
+            name == ProcessMarker::NAME || Self::SHELL_VARIABLES.contains(&name)
+        })
     }
 
     pub fn streams_of(&self, name: &str) -> String {
@@ -144,11 +151,8 @@ echo $$ > "$record/pid"
         self.recorded_once_started(name, "arguments")
     }
 
-    pub fn session_of(&self, name: &str) -> Option<u32> {
-        self.pid(name)?;
-        let stat = self.recorded(name, "stat");
-        let (_, fields) = stat.rsplit_once(')')?;
-        fields.split_whitespace().nth(3)?.parse().ok()
+    pub fn leads_its_process_group(&self, name: &str) -> bool {
+        self.recorded_once_started(name, "group").trim() == "leader"
     }
 
     fn install_script(&self, name: &str, ending: &str) -> PathBuf {
@@ -158,7 +162,7 @@ echo $$ > "$record/pid"
             .replace("{prelude}", &self.prelude)
             .replace(Self::NAME_PLACEHOLDER, name)
             .replace("{record}", &record.to_string_lossy())
-            .replace("{cat}", &Self::tool("cat").to_string_lossy())
+            .replace("{env}", &Self::tool("env").to_string_lossy())
             .replace("{ending}", ending);
         let program = self.program_directory().join(name);
         ExecutableScript::write(&program, &script);

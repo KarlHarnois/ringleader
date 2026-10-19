@@ -6,28 +6,30 @@ use std::path::{Path, PathBuf};
 
 use super::fnv_hash::FnvHash;
 use super::host_path::HostPath;
-use super::mount_table::MountTable;
+use super::mount_source::MountSource;
 use crate::application::ports::{ScratchSpace, ScratchSpaceError};
 
 pub struct DirectoryScratchSpace {
     root: PathBuf,
-    mount_table: PathBuf,
+    mounts: Box<dyn MountSource>,
 }
 
 impl DirectoryScratchSpace {
     const PRIVATE_MODE: u32 = 0o700;
     const OWNER_ACCESS_BITS: u32 = 0o700;
 
-    pub fn new(root: &Path, mount_table: &Path) -> Self {
+    pub fn new(root: &Path, mounts: Box<dyn MountSource>) -> Self {
         Self {
             root: root.to_path_buf(),
-            mount_table: mount_table.to_path_buf(),
+            mounts,
         }
     }
 
     fn refuse_mounts_within(&self, directory: &Path) -> Result<(), ScratchSpaceError> {
         let canonical = HostPath::new(directory).canonical_lenient();
-        let mounts = MountTable::read(&self.mount_table)
+        let mounts = self
+            .mounts
+            .mount_table()
             .map_err(|error| Self::failure("check for mounts in", directory, &error))?;
         if mounts.has_mount_within(&canonical) {
             return Err(ScratchSpaceError::HoldsMount {
@@ -99,6 +101,7 @@ mod tests {
     use std::fs::Permissions;
 
     use super::*;
+    use crate::adapters::filesystem::mountinfo_file::MountinfoFile;
 
     struct ScratchFixture {
         base: tempfile::TempDir,
@@ -133,7 +136,7 @@ mod tests {
         fn rooted_at(base: tempfile::TempDir, root: &Path) -> Self {
             let mount_table = base.path().join(Self::MOUNT_TABLE);
             fs::write(&mount_table, "").unwrap();
-            let space = DirectoryScratchSpace::new(root, &mount_table);
+            let space = DirectoryScratchSpace::new(root, Box::new(MountinfoFile::at(&mount_table)));
             Self { base, space }
         }
 

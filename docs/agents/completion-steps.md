@@ -56,7 +56,7 @@ If `cargo llvm-cov` fails, from a missing tool or one failing test, every functi
 | Changed function | A production function the change's diff adds or edits |
 | Changed file | A file under `src/` that holds a changed function |
 | Added line | A line the change's diff adds |
-| Untestable function | A production function that needs a terminal or reads the process environment. The Tests rules in `AGENTS.md` keep a terminal out of every test, and `clippy.toml` keeps the process environment out. |
+| Untestable function | A production function that needs a terminal, reads the process environment, or compiles only for a target other than Linux. The Tests rules in `AGENTS.md` keep a terminal out of every test. `clippy.toml` keeps the process environment out. The metrics tools run on Linux, which never compiles another target's function. |
 | Step edit | Any change to a file under `src/` after step 1 first runs. A change made to pass a later Commands run is a step edit too. |
 | Edited test | A test that a step edit adds, rewrites, or deletes |
 

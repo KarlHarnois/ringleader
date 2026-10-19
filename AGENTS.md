@@ -219,12 +219,12 @@ Create each fixture repo with `git init -b <branch>`. Never rely on `init.defaul
 nix develop -c cargo fmt --check
 nix develop -c cargo clippy --all-targets -- -D warnings
 nix develop -c cargo test
-nix build --no-link .#checks.x86_64-linux.readme-version-badge
+nix build --no-link ".#checks.$(nix eval --impure --raw --expr builtins.currentSystem).readme-version-badge"
 nix build .#
 nix flake check
 ```
 
-**The Commands are the six commands above.**
+**The Commands are the six commands above.** CI runs them on Linux and macOS.
 
 **A change is done when the Commands pass.** If the change edits a file under `src/`, the change is done only after the completion steps also pass. If one of the Commands also fails without the change, stop and show its output to the project owner.
 
@@ -238,6 +238,7 @@ nix flake check
 | `docs/agents/manual-runs.md` | make a manual run |
 | `docs/agents/uml-viewer.md` | open uml-viewer |
 | `docs/agents/source-folders.md` | add a file under `src/`, move a file there, or make a folder there |
+| `docs/agents/platform-code.md` | change a file or a re-export that a `target_os` cfg attribute limits, or write such an attribute |
 | `docs/agents/tmux-tests.md` | write or change a test that runs tmux |
 | `docs/agents/features/pull.md` | change the pull that the `p` key starts |
 | `docs/agents/features/direnv.md` | change how create or restart launches an agent, or which variables the agent gets |
@@ -275,7 +276,7 @@ nix flake check
 
 ### `adapters`
 
-`adapters` holds the driven adapters. A driven adapter implements a port with git, tmux, files, or `/proc`.
+`adapters` holds the driven adapters. A driven adapter implements a port with git, tmux, files, or the host's process table.
 
 - `adapters` also holds the process-level types that `CompositionRoot` uses directly.
 - Name each port adapter after its technology and its port, such as `GitWorkspace` or `TmuxMultiplexer`.
@@ -435,7 +436,7 @@ The hidden `__exec-agent` path loads no config, opens no log, and takes no lock.
 
 ### Private tmux server
 
-Ringleader checks a registry entry recorded on another socket only through `/proc`.
+Ringleader checks a registry entry recorded on another socket only through `ProcessTable`.
 
 ### Blocking operations
 

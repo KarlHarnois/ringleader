@@ -13,7 +13,7 @@ pub struct LiveProcess {
     cwd: Option<PathBuf>,
     executable: String,
     arguments: Vec<String>,
-    name: String,
+    server_shape: bool,
 }
 
 impl LiveProcess {
@@ -29,7 +29,7 @@ impl LiveProcess {
             cwd: None,
             executable: String::new(),
             arguments: Vec::new(),
-            name: String::new(),
+            server_shape: false,
         }
     }
 
@@ -48,9 +48,9 @@ impl LiveProcess {
         Self { arguments, ..self }
     }
 
-    pub fn with_name(self, name: &str) -> Self {
+    pub fn with_server_shape(self, server_shape: bool) -> Self {
         Self {
-            name: name.to_string(),
+            server_shape,
             ..self
         }
     }
@@ -124,10 +124,9 @@ impl LiveProcess {
     }
 
     pub fn serves(&self, socket: &Path) -> bool {
-        let command_line = TmuxCommandLine::new(&self.arguments);
         self.owner == Self::current_user()
-            && self.name == command_line.server_name()
-            && command_line
+            && self.server_shape
+            && TmuxCommandLine::new(&self.arguments)
                 .socket()
                 .is_some_and(|named| Path::new(named) == socket)
     }
@@ -160,7 +159,7 @@ mod tests {
                 arguments: ["tmux", "-S", Self::SOCKET, "new-session"]
                     .map(String::from)
                     .to_vec(),
-                name: "tmux: server".to_string(),
+                server_shape: true,
             }
         }
 
@@ -172,7 +171,6 @@ mod tests {
                 cwd: None,
                 executable: server.executable.clone(),
                 arguments: server.arguments.clone(),
-                name: server.name.clone(),
                 ..*server
             }
         }
@@ -186,7 +184,7 @@ mod tests {
                 cwd: None,
                 executable: "/usr/bin/sleep".to_string(),
                 arguments: ["sleep", "30"].map(String::from).to_vec(),
-                name: "sleep".to_string(),
+                server_shape: false,
             }
         }
     }
@@ -254,5 +252,22 @@ mod tests {
         let by_pid = HashMap::from([(server.pid, &server), (agent.pid, &agent)]);
 
         assert!(!agent.runs_under_server(&by_pid, Path::new(ProcessFixture::SOCKET)));
+    }
+
+    #[test]
+    fn a_tmux_command_naming_the_socket_does_not_serve_it_without_the_server_shape() {
+        let client = LiveProcess::new(
+            ProcessFixture::SERVER_PID,
+            1,
+            ProcessFixture::SERVER_PID,
+            LiveProcess::current_user(),
+        )
+        .with_arguments(
+            ["tmux", "-S", ProcessFixture::SOCKET, "new-session"]
+                .map(String::from)
+                .to_vec(),
+        );
+
+        assert!(!client.serves(Path::new(ProcessFixture::SOCKET)));
     }
 }

@@ -22,7 +22,8 @@ use crate::application::ports::{AgentLaunch, Multiplexer, SessionSpec};
 use crate::domain::{KeyBindings, RepoName, SessionMetadata, SessionRepo, SessionWorktree};
 
 pub struct TmuxTestServer {
-    directory: TempDir,
+    _tempdir: TempDir,
+    canonical_directory: PathBuf,
     files: ServerFiles,
     program: OsString,
     marker: ProcessMarker,
@@ -51,19 +52,22 @@ impl TmuxTestServer {
     }
 
     fn with_config_marked(config_text: &str, marker: ProcessMarker) -> Self {
-        let directory = tempfile::Builder::new()
+        let tempdir = tempfile::Builder::new()
             .prefix("rl")
             .tempdir_in("/tmp")
             .expect("a socket directory under /tmp");
+        let canonical_directory =
+            std::fs::canonicalize(tempdir.path()).expect("a canonical socket directory");
         let files = ServerFiles::new(
-            &directory.path().join("tmux").join("tmux.sock"),
-            &directory.path().join("tmux.conf"),
+            &canonical_directory.join("tmux").join("tmux.sock"),
+            &canonical_directory.join("tmux.conf"),
         );
         std::fs::create_dir(files.socket().parent().expect("a socket directory"))
             .expect("the test server socket directory is made");
         std::fs::write(files.config(), config_text).expect("the test server config is written");
         Self {
-            directory,
+            _tempdir: tempdir,
+            canonical_directory,
             files,
             program: OsString::from("tmux"),
             marker,
@@ -110,7 +114,7 @@ impl TmuxTestServer {
     }
 
     pub fn directory(&self) -> &Path {
-        self.directory.path()
+        &self.canonical_directory
     }
 
     pub fn environment(&self) -> ProcessEnvironment {

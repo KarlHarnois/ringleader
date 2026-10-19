@@ -229,7 +229,7 @@ impl HostProbe for SystemHostProbe {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{InheritedPath, ProcessMarker, TmuxTestServer};
+    use crate::test_support::{Deadline, InheritedPath, ProcessMarker, TmuxTestServer};
 
     struct ProbeFixture;
 
@@ -413,7 +413,11 @@ mod tests {
             .status()
             .unwrap();
         let probe = ProbeFixture::probe_on(marker.table());
-        let orphan = probe.processes_in(directory.path(), &[]);
+        let mut orphan = Vec::new();
+        Deadline::for_background_work().wait_until(|| {
+            orphan = probe.processes_in(directory.path(), &[]);
+            !orphan.is_empty()
+        });
 
         let under = probe.processes_under_server(directory.path(), server.socket());
 

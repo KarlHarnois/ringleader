@@ -9,7 +9,8 @@ use super::InheritedPath;
 use crate::adapters::host::process_environment::ProcessEnvironment;
 
 pub struct DirenvTestHome {
-    directory: TempDir,
+    _tempdir: TempDir,
+    canonical_root: PathBuf,
 }
 
 impl DirenvTestHome {
@@ -17,8 +18,10 @@ impl DirenvTestHome {
     const ENVRC: &'static str = ".envrc";
 
     pub fn new() -> Self {
+        let tempdir = tempfile::tempdir().expect("a temporary direnv home");
         let home = Self {
-            directory: tempfile::tempdir().expect("a temporary direnv home"),
+            canonical_root: fs::canonicalize(tempdir.path()).expect("a canonical direnv home"),
+            _tempdir: tempdir,
         };
         for directory in [home.data(), home.config(), home.projects()] {
             fs::create_dir_all(directory).expect("the direnv home directories are created");
@@ -89,7 +92,7 @@ impl DirenvTestHome {
     }
 
     pub fn config_variable_whitelisting(&self, project: &Path) -> (OsString, OsString) {
-        let config = self.directory.path().join("direnv-config");
+        let config = self.canonical_root.join("direnv-config");
         fs::create_dir_all(&config).expect("the direnv config directory is created");
         let whitelist = format!("[whitelist]\nprefix = [\"{}\"]\n", project.display());
         fs::write(config.join("direnv.toml"), whitelist).expect("the direnv config is written");
@@ -97,7 +100,7 @@ impl DirenvTestHome {
     }
 
     fn home(&self) -> PathBuf {
-        self.directory.path().join("home")
+        self.canonical_root.join("home")
     }
 
     fn data(&self) -> PathBuf {
@@ -109,6 +112,6 @@ impl DirenvTestHome {
     }
 
     fn projects(&self) -> PathBuf {
-        self.directory.path().join("projects")
+        self.canonical_root.join("projects")
     }
 }

@@ -1,5 +1,4 @@
 use std::io::{self, Write};
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::thread;
@@ -9,6 +8,8 @@ use thiserror::Error;
 
 use super::command_output::{CommandOutput, PendingOutput};
 use super::deadlines::{CallKind, Deadlines};
+use crate::adapters::ExitWatch;
+use crate::adapters::host::errno::Errno;
 
 #[derive(Debug, Clone, Copy)]
 pub struct BoundedCommand {
@@ -17,7 +18,6 @@ pub struct BoundedCommand {
 
 impl BoundedCommand {
     const POLL_INTERVAL: Duration = Duration::from_millis(10);
-    const MICROS_PER_MILLI: u128 = 1000;
     const READER_GRACE: Duration = Duration::from_secs(1);
     const TERMINATE_GRACE: Duration = Duration::from_secs(2);
     const KILL_GRACE: Duration = Duration::from_secs(1);
@@ -66,59 +66,24 @@ impl BoundedCommand {
         // SAFETY: the closure runs in the forked child before exec and only calls setsid,
         // which is async-signal-safe and touches no memory shared with the parent.
         unsafe {
-            command.pre_exec(|| match libc::setsid() {
-                -1 => Err(io::Error::last_os_error()),
-                _ => Ok(()),
-            });
+            command.pre_exec(|| Errno::result(libc::setsid()).map(drop));
         }
     }
 
     fn wait_until(child: &mut Child, deadline: Instant) -> Option<ExitStatus> {
-        match Self::block_until_exit(child, deadline) {
+        match ExitWatch::block_until_exit(child, deadline) {
             Ok(()) => child.try_wait().ok().flatten(),
-            Err(error) => Self::check_without_pidfd(child, deadline, &error),
+            Err(error) => Self::check_without_exit_watch(child, deadline, &error),
         }
     }
 
-    fn block_until_exit(child: &Child, deadline: Instant) -> io::Result<()> {
-        let pid = libc::pid_t::try_from(child.id()).map_err(io::Error::other)?;
-        // SAFETY: pidfd_open creates a descriptor that only OwnedFd closes, for a child this
-        // thread has not reaped, so the pid still names it; poll reads and writes only the one
-        // pollfd on this stack frame, which outlives the call.
-        unsafe {
-            let raw = libc::syscall(libc::SYS_pidfd_open, pid, 0);
-            if raw < 0 {
-                return Err(io::Error::last_os_error());
-            }
-            let exit = OwnedFd::from_raw_fd(RawFd::try_from(raw).map_err(io::Error::other)?);
-            let mut readable = libc::pollfd {
-                fd: exit.as_raw_fd(),
-                events: libc::POLLIN,
-                revents: 0,
-            };
-            while libc::poll(&mut readable, 1, Self::milliseconds_until(deadline)) < 0 {
-                let error = io::Error::last_os_error();
-                if error.kind() != io::ErrorKind::Interrupted {
-                    return Err(error);
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn milliseconds_until(deadline: Instant) -> libc::c_int {
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        let rounded_up = remaining.as_micros().div_ceil(Self::MICROS_PER_MILLI);
-        libc::c_int::try_from(rounded_up).unwrap_or(libc::c_int::MAX)
-    }
-
-    fn check_without_pidfd(
+    fn check_without_exit_watch(
         child: &mut Child,
         deadline: Instant,
         error: &io::Error,
     ) -> Option<ExitStatus> {
         log::debug!(
-            "could not wait on a pidfd for child {}, checking it every {}ms: {error}",
+            "could not watch child {} for its exit, checking it every {}ms: {error}",
             child.id(),
             Self::POLL_INTERVAL.as_millis()
         );
@@ -218,29 +183,18 @@ mod tests {
         fn call() -> Call {
             Call::new("sh", CallKind::GitRead)
         }
-
-        fn session_of_this_process() -> String {
-            let stat = std::fs::read_to_string("/proc/self/stat").unwrap();
-            Self::session_field(&stat)
-        }
-
-        fn session_field(stat: &str) -> String {
-            let after_name = &stat[stat.rfind(')').unwrap() + 2..];
-            after_name.split(' ').nth(3).unwrap().to_string()
-        }
     }
 
     #[test]
     fn the_child_runs_in_its_own_session() {
         let output = ChildFixture::bounded(Duration::from_secs(5))
             .run(
-                ChildFixture::shell("cat /proc/$$/stat"),
+                ChildFixture::shell("kill -s 0 -- -$$"),
                 &ChildFixture::call(),
             )
             .unwrap();
 
-        let child_session = ChildFixture::session_field(&output.stdout_text());
-        assert_ne!(child_session, ChildFixture::session_of_this_process());
+        assert!(output.succeeded(), "{}", output.stderr_text());
     }
 
     #[test]
@@ -300,17 +254,6 @@ mod tests {
 
         assert!(output.succeeded());
         assert!(started.elapsed() < Duration::from_secs(2));
-    }
-
-    #[test]
-    fn an_exited_child_is_seen_through_its_pidfd() {
-        let mut child = ChildFixture::shell("exit 0").spawn().unwrap();
-
-        let waited =
-            BoundedCommand::block_until_exit(&child, Instant::now() + Duration::from_secs(5));
-
-        assert!(waited.is_ok());
-        assert!(child.try_wait().unwrap().is_some());
     }
 
     #[test]

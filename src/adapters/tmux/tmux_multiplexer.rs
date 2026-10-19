@@ -409,10 +409,10 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use super::*;
-    use crate::adapters::Deadlines;
     use crate::adapters::host::process_environment::ProcessEnvironment;
     use crate::adapters::host::system_host_probe::SystemHostProbe;
     use crate::adapters::tmux::tmux_sequence::TmuxSequence;
+    use crate::adapters::{Deadlines, HostProcessTable};
     use crate::application::ports::HostProbe;
     use crate::domain::{
         HotKey, KeyBindings, RepoName, SessionClassifier, SessionRepo, SessionState,
@@ -1593,13 +1593,26 @@ mod tests {
 
         multiplexer.create_session(&spec).unwrap();
 
-        let pid = fixture.server.server_pid();
+        let pid = fixture.server.server_pid().parse().unwrap();
         let global = fixture.server.text(&["show-environment", "-g"]);
-        let environ = fs::read(format!("/proc/{pid}/environ")).unwrap();
-        let cmdline = fs::read(format!("/proc/{pid}/cmdline")).unwrap();
+        let environment = HostProcessTable::environment(pid);
+        let server = fixture
+            .server
+            .process_table()
+            .read(pid)
+            .expect("the server process is readable");
         assert!(!global.contains(secret));
-        assert!(!String::from_utf8_lossy(&environ).contains(secret));
-        assert!(!String::from_utf8_lossy(&cmdline).contains(secret));
+        assert!(
+            environment
+                .iter()
+                .any(|variable| variable.starts_with("PATH="))
+        );
+        assert!(
+            environment
+                .iter()
+                .all(|variable| !variable.contains(secret))
+        );
+        assert!(!server.info().command().contains(secret));
     }
 
     #[test]
