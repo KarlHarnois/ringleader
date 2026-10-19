@@ -438,8 +438,8 @@ fi"#;
         fixture.open_with(&[TerminalFixture::WAYLAND]).unwrap();
 
         let pid = fixture.pid(TerminalFixture::XDG_TERMINAL_EXEC).unwrap();
-        let process = PathBuf::from(format!("/proc/{pid}"));
-        assert!(Deadline::for_background_work().wait_until(|| !process.exists()));
+        let processes = fixture.processes();
+        assert!(Deadline::for_background_work().wait_until(|| processes.read(pid).is_none()));
     }
 
     #[test]

@@ -1,10 +1,10 @@
 use std::ffi::OsString;
-use std::fs;
 use std::path::Path;
 use std::process::{Child, Command};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::adapters::HostProcessTable;
 use crate::adapters::host::process_table::{ProcessScope, ProcessTable};
 
 static MARKER_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -50,18 +50,13 @@ impl ProcessMarker {
         command
     }
 
-    fn entry(&self) -> Vec<u8> {
-        format!("{}={}", Self::NAME, self.value).into_bytes()
+    fn entry(&self) -> String {
+        format!("{}={}", Self::NAME, self.value)
     }
 }
 
 impl ProcessScope for ProcessMarker {
     fn lists(&self, pid: u32) -> bool {
-        let entry = self.entry();
-        fs::read(format!("/proc/{pid}/environ")).is_ok_and(|environ| {
-            environ
-                .split(|byte| *byte == 0)
-                .any(|candidate| candidate == entry)
-        })
+        HostProcessTable::environment(pid).contains(&self.entry())
     }
 }

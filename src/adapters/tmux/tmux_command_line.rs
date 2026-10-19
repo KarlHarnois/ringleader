@@ -1,5 +1,3 @@
-use std::path::Path;
-
 pub struct TmuxCommandLine<'a> {
     words: &'a [String],
 }
@@ -7,8 +5,6 @@ pub struct TmuxCommandLine<'a> {
 impl<'a> TmuxCommandLine<'a> {
     const VALUE_FLAGS: [char; 5] = ['S', 'f', 'L', 'c', 'T'];
     const SOCKET_FLAG: char = 'S';
-    const SERVER_TITLE: &'static str = ": server (";
-    const PROCESS_NAME_LIMIT: usize = 15;
 
     pub fn new(words: &'a [String]) -> Self {
         Self { words }
@@ -19,25 +15,6 @@ impl<'a> TmuxCommandLine<'a> {
             .into_iter()
             .rev()
             .find_map(|(flag, value)| (flag == Self::SOCKET_FLAG).then_some(value))
-    }
-
-    pub fn server_name(&self) -> String {
-        let title = format!("{}{}", self.program_name(), Self::SERVER_TITLE);
-        let kept = title.get(..Self::PROCESS_NAME_LIMIT).unwrap_or(&title);
-        Self::without_cut_word(kept).to_string()
-    }
-
-    fn program_name(&self) -> String {
-        self.words
-            .first()
-            .and_then(|program| Path::new(program).file_name())
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_default()
-    }
-
-    fn without_cut_word(kept: &str) -> &str {
-        kept.rsplit_once(' ')
-            .map_or(kept, |(whole_words, _)| whole_words)
     }
 
     fn global_values(&self) -> Vec<(char, &'a str)> {
@@ -110,19 +87,5 @@ mod tests {
         ]);
 
         assert_eq!(TmuxCommandLine::new(&words).socket(), None);
-    }
-
-    #[test]
-    fn a_server_of_tmux_is_named_after_its_program_and_role() {
-        let words = CommandLineFixture::words(&["/usr/bin/tmux", "-S", "/run/example.sock"]);
-
-        assert_eq!(TmuxCommandLine::new(&words).server_name(), "tmux: server");
-    }
-
-    #[test]
-    fn a_long_program_name_leaves_only_the_whole_words_that_fit() {
-        let words = CommandLineFixture::words(&["/opt/tmux-next", "-S", "/run/example.sock"]);
-
-        assert_eq!(TmuxCommandLine::new(&words).server_name(), "tmux-next:");
     }
 }

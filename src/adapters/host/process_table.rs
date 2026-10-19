@@ -1,9 +1,8 @@
-use std::fs;
-use std::os::unix::fs::MetadataExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use super::live_process::LiveProcess;
+use crate::adapters::HostProcessTable;
 
 pub trait ProcessScope: Send + Sync {
     fn lists(&self, pid: u32) -> bool;
@@ -23,8 +22,6 @@ pub struct ProcessTable {
 }
 
 impl ProcessTable {
-    const ROOT: &'static str = "/proc";
-
     pub fn new() -> Self {
         Self::within(Arc::new(EveryProcess))
     }
@@ -38,12 +35,8 @@ impl ProcessTable {
     }
 
     pub fn all(&self) -> Vec<LiveProcess> {
-        let Ok(entries) = fs::read_dir(Self::ROOT) else {
-            return Vec::new();
-        };
-        entries
-            .filter_map(Result::ok)
-            .filter_map(|entry| entry.file_name().to_string_lossy().parse().ok())
+        HostProcessTable::pids()
+            .into_iter()
             .filter(|pid| self.scope.lists(*pid))
             .filter_map(|pid| self.read(pid))
             .collect()
@@ -60,72 +53,11 @@ impl ProcessTable {
     }
 
     pub fn is_alive(&self, pid: u32) -> bool {
-        ProcessStat::read(pid).is_some_and(|stat| !stat.is_zombie())
+        HostProcessTable::is_alive(pid)
     }
 
     pub fn read(&self, pid: u32) -> Option<LiveProcess> {
-        let directory = Self::directory_of(pid);
-        let stat = ProcessStat::read(pid)?;
-        let owner = fs::metadata(&directory).ok()?.uid();
-        let command_line = fs::read(directory.join("cmdline")).unwrap_or_default();
-        let arguments = String::from_utf8_lossy(&command_line)
-            .split('\0')
-            .filter(|part| !part.is_empty())
-            .map(str::to_string)
-            .collect();
-        let executable = fs::read_link(directory.join("exe"))
-            .map(|path| path.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let name = fs::read_to_string(directory.join("comm"))
-            .map(|name| name.trim_end().to_string())
-            .unwrap_or_default();
-        Some(
-            LiveProcess::new(pid, stat.parent()?, stat.session()?, owner)
-                .with_cwd(fs::read_link(directory.join("cwd")).ok())
-                .with_executable(&executable)
-                .with_arguments(arguments)
-                .with_name(&name),
-        )
-    }
-
-    fn directory_of(pid: u32) -> PathBuf {
-        Path::new(Self::ROOT).join(pid.to_string())
-    }
-}
-
-struct ProcessStat {
-    fields_after_name: Vec<String>,
-}
-
-impl ProcessStat {
-    const NAME_END: char = ')';
-    const ZOMBIE: &'static str = "Z";
-    const STATE: usize = 0;
-    const PARENT: usize = 1;
-    const SESSION: usize = 3;
-
-    fn read(pid: u32) -> Option<Self> {
-        let stat = fs::read_to_string(ProcessTable::directory_of(pid).join("stat")).ok()?;
-        let after_name = stat.get(stat.rfind(Self::NAME_END)? + 2..)?;
-        Some(Self {
-            fields_after_name: after_name.split(' ').map(str::to_string).collect(),
-        })
-    }
-
-    fn is_zombie(&self) -> bool {
-        self.fields_after_name.get(Self::STATE).map(String::as_str) == Some(Self::ZOMBIE)
-    }
-
-    fn parent(&self) -> Option<u32> {
-        self.number(Self::PARENT)
-    }
-
-    fn session(&self) -> Option<u32> {
-        self.number(Self::SESSION)
-    }
-
-    fn number(&self, index: usize) -> Option<u32> {
-        self.fields_after_name.get(index)?.parse().ok()
+        HostProcessTable::read(pid)
     }
 }
 

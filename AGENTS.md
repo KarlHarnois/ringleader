@@ -276,7 +276,7 @@ nix flake check
 
 ### `adapters`
 
-`adapters` holds the driven adapters. A driven adapter implements a port with git, tmux, files, or `/proc`.
+`adapters` holds the driven adapters. A driven adapter implements a port with git, tmux, files, or the host's process table.
 
 - `adapters` also holds the process-level types that `CompositionRoot` uses directly.
 - Name each port adapter after its technology and its port, such as `GitWorkspace` or `TmuxMultiplexer`.
@@ -436,7 +436,7 @@ The hidden `__exec-agent` path loads no config, opens no log, and takes no lock.
 
 ### Private tmux server
 
-Ringleader checks a registry entry recorded on another socket only through `/proc`.
+Ringleader checks a registry entry recorded on another socket only through `ProcessTable`.
 
 ### Blocking operations
 

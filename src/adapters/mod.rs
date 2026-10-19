@@ -25,3 +25,7 @@ compile_error!("Ringleader builds only for Linux and macOS");
 pub use child_process::kqueue_exit_watch::KqueueExitWatch as ExitWatch;
 #[cfg(target_os = "linux")]
 pub use child_process::pidfd_exit_watch::PidfdExitWatch as ExitWatch;
+#[cfg(target_os = "macos")]
+pub use host::libproc_process_table::LibprocProcessTable as HostProcessTable;
+#[cfg(target_os = "linux")]
+pub use host::procfs_process_table::ProcfsProcessTable as HostProcessTable;

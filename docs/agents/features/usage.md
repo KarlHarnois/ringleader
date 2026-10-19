@@ -8,7 +8,7 @@
 
 **Take a provider's key only from the variables the agent gets.** An example is an `OLLAMA_API_KEY` that the agent names in `env`. Each agent can use its own account, so one key for every agent can report another account's quota.
 
-**Never put a key in a helper's arguments or environment.** A helper is a child process other than the agent's own command, such as `curl` or `sqlite3`. Any process on the host can read a child's arguments through `ps`. Any process of the same user can read its environment through `/proc`. Pass the key on the helper's standard input instead.
+**Never put a key in a helper's arguments or environment.** A helper is a child process other than the agent's own command, such as `curl` or `sqlite3`. Any process on the host can read a child's arguments through `ps`. Any process of the same user can read its environment, through `/proc` on Linux or `sysctl` on macOS. Pass the key on the helper's standard input instead.
 
 **Run every probe in Ringleader's usage directory, never in a worktree.** A worktree's `.envrc` or project settings could switch the probe to another account.
 
