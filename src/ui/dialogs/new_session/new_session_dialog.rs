@@ -573,10 +573,10 @@ mod tests {
                 .to_string()
         }
 
-        fn shown_error(dialog: &NewSessionDialog) -> String {
+        fn row_above_the_hints(dialog: &NewSessionDialog) -> String {
             let shown = Self::text(dialog);
-            let row_above_the_hints = shown.lines().rev().nth(1);
-            row_above_the_hints.unwrap_or_default().to_string()
+            let row = shown.lines().rev().nth(1);
+            row.unwrap_or_default().to_string()
         }
 
         fn type_text(dialog: &mut NewSessionDialog, service: &SessionService, text: &str) {
@@ -1890,7 +1890,7 @@ mod tests {
         let rows = DialogFixture::text(&dialog).lines().count();
         assert_eq!(rows, usize::from(DialogFixture::FULL_HEIGHT));
         assert_eq!(
-            DialogFixture::shown_error(&dialog),
+            DialogFixture::row_above_the_hints(&dialog),
             DialogFixture::CREATE_FAILURE
         );
         assert_eq!(DialogFixture::hints(&dialog), DialogFixture::NAME_HINTS);
@@ -1902,7 +1902,7 @@ mod tests {
 
         let rows = DialogFixture::text(&dialog).lines().count();
         assert_eq!(rows, usize::from(DialogFixture::FULL_HEIGHT));
-        assert_eq!(DialogFixture::shown_error(&dialog), "");
+        assert_eq!(DialogFixture::row_above_the_hints(&dialog), "");
         assert_eq!(DialogFixture::hints(&dialog), DialogFixture::NAME_HINTS);
     }
 
@@ -1971,35 +1971,35 @@ mod tests {
     #[test]
     fn typing_in_the_name_clears_the_error() {
         let (mut dialog, service) = DialogFixture::refused_for_a_missing_name();
-        let refused = DialogFixture::shown_error(&dialog);
+        let refused = DialogFixture::row_above_the_hints(&dialog);
 
         DialogFixture::type_text(&mut dialog, &service, "f");
 
         assert_eq!(refused, NewSessionDialog::NAME_MISSING);
-        assert_eq!(DialogFixture::shown_error(&dialog), "");
+        assert_eq!(DialogFixture::row_above_the_hints(&dialog), "");
     }
 
     #[test]
     fn typing_in_the_prompt_clears_the_error() {
         let (mut dialog, service) = DialogFixture::refused_on_the_prompt();
-        let refused = DialogFixture::shown_error(&dialog);
+        let refused = DialogFixture::row_above_the_hints(&dialog);
 
         DialogFixture::type_text(&mut dialog, &service, "s");
 
         assert_eq!(refused, DialogFixture::PROMPT_REFUSAL);
-        assert_eq!(DialogFixture::shown_error(&dialog), "");
+        assert_eq!(DialogFixture::row_above_the_hints(&dialog), "");
     }
 
     #[test]
     fn opening_the_repo_search_clears_the_error() {
         let (mut dialog, service) = DialogFixture::named_without_a_repo();
         DialogFixture::create(&mut dialog, &service);
-        let refused = DialogFixture::shown_error(&dialog);
+        let refused = DialogFixture::row_above_the_hints(&dialog);
 
         DialogFixture::type_text(&mut dialog, &service, "g");
 
         assert_eq!(refused, NewSessionDialog::REPO_MISSING);
-        assert_eq!(DialogFixture::shown_error(&dialog), "");
+        assert_eq!(DialogFixture::row_above_the_hints(&dialog), "");
     }
 
     #[test]
@@ -2007,24 +2007,24 @@ mod tests {
         let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
         DialogFixture::search(&mut dialog, &service, "g");
         dialog.paste(DialogFixture::TWO_LINE_PATH);
-        let refused = DialogFixture::shown_error(&dialog);
+        let refused = DialogFixture::row_above_the_hints(&dialog);
 
         DialogFixture::type_text(&mut dialog, &service, "a");
 
         assert_eq!(refused, DialogFixture::LINE_BREAK_IN_PATH);
-        assert_eq!(DialogFixture::shown_error(&dialog), "");
+        assert_eq!(DialogFixture::row_above_the_hints(&dialog), "");
     }
 
     #[test]
     fn typing_clears_an_error_reported_through_fail() {
         let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
         dialog.fail(DialogFixture::CREATE_FAILURE.to_string());
-        let failure = DialogFixture::shown_error(&dialog);
+        let failure = DialogFixture::row_above_the_hints(&dialog);
 
         DialogFixture::type_text(&mut dialog, &service, "f");
 
         assert_eq!(failure, DialogFixture::CREATE_FAILURE);
-        assert_eq!(DialogFixture::shown_error(&dialog), "");
+        assert_eq!(DialogFixture::row_above_the_hints(&dialog), "");
     }
 
     #[test]
@@ -2034,7 +2034,7 @@ mod tests {
         DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
 
         assert_eq!(
-            DialogFixture::shown_error(&dialog),
+            DialogFixture::row_above_the_hints(&dialog),
             NewSessionDialog::NAME_MISSING
         );
     }
@@ -2046,7 +2046,7 @@ mod tests {
         DialogFixture::press(&mut dialog, &service, KeyCode::Left);
 
         assert_eq!(
-            DialogFixture::shown_error(&dialog),
+            DialogFixture::row_above_the_hints(&dialog),
             DialogFixture::PROMPT_REFUSAL
         );
     }
@@ -2058,7 +2058,7 @@ mod tests {
         DialogFixture::toggle_mode(&mut dialog, &service);
 
         assert_eq!(
-            DialogFixture::shown_error(&dialog),
+            DialogFixture::row_above_the_hints(&dialog),
             NewSessionDialog::NAME_MISSING
         );
     }
@@ -2074,7 +2074,7 @@ mod tests {
         DialogFixture::control(&mut dialog, &service, 'j');
 
         assert_eq!(
-            DialogFixture::shown_error(&dialog),
+            DialogFixture::row_above_the_hints(&dialog),
             DialogFixture::LINE_BREAK_IN_PATH
         );
     }
