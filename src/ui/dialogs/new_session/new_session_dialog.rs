@@ -31,6 +31,8 @@ pub struct NewSessionDialog {
 impl NewSessionDialog {
     pub const TITLE: &'static str = " New session ";
     const CREATE_KEY: char = 's';
+    const NAME_MISSING: &'static str = "enter a session name";
+    const REPO_MISSING: &'static str = "pick a repo";
 
     pub fn open(service: &SessionService) -> Self {
         let agents = AgentPicker::new(service.config().agents(), &service.config_path());
@@ -169,23 +171,39 @@ impl NewSessionDialog {
             Ok(request) => {
                 DialogStep::Request(AppRequest::Block(BlockingOperation::Create(request)))
             }
-            Err(problem) => {
-                self.error = Some(problem);
+            Err(refusal) => {
+                self.refuse(refusal);
                 DialogStep::Stay
             }
         }
     }
 
-    fn request(&self) -> Result<CreateRequest, String> {
+    fn refuse(&mut self, refusal: Refusal) {
+        match refusal {
+            Refusal::MissingField(field, problem) => {
+                self.focus = field;
+                self.error = Some(problem.to_string());
+            }
+            Refusal::General(problem) => self.error = Some(problem),
+        }
+    }
+
+    fn request(&self) -> Result<CreateRequest, Refusal> {
         let name = self.name.value().trim();
         if name.is_empty() {
-            return Err("enter a session name".to_string());
+            return Err(Refusal::MissingField(
+                NewSessionField::Name,
+                Self::NAME_MISSING,
+            ));
         }
-        let repo = self.repos.selected_repo().ok_or("pick a repo")?;
-        let agent = self.agents.selected()?;
+        let repo = self.repos.selected_repo().ok_or(Refusal::MissingField(
+            NewSessionField::Repo,
+            Self::REPO_MISSING,
+        ))?;
+        let agent = self.agents.selected().map_err(Refusal::General)?;
         let prompt = self.prompt.value();
-        if let Some(refusal) = agent.launch_refusal(self.mode, &prompt) {
-            return Err(refusal);
+        if let Some(problem) = agent.launch_refusal(self.mode, &prompt) {
+            return Err(Refusal::General(problem));
         }
         Ok(CreateRequest::new(name, repo.clone())
             .with_agent(agent.name())
@@ -193,6 +211,11 @@ impl NewSessionDialog {
             .with_mode(self.mode)
             .with_prompt(&prompt))
     }
+}
+
+enum Refusal {
+    MissingField(NewSessionField, &'static str),
+    General(String),
 }
 
 #[cfg(test)]
@@ -1862,6 +1885,46 @@ mod tests {
 
         assert_eq!(before.lines().count(), 12);
         assert_eq!(DialogFixture::prompt_text(&dialog), before);
+    }
+
+    #[test]
+    fn a_missing_name_moves_the_focus_to_the_name() {
+        let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
+        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
+        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
+        DialogFixture::type_text(&mut dialog, &service, "fix");
+
+        let step = DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
+        DialogFixture::type_text(&mut dialog, &service, "auth");
+
+        assert_eq!(step, DialogStep::Stay);
+        assert_eq!(DialogFixture::hints(&dialog), DialogFixture::NAME_HINTS);
+        assert!(DialogFixture::text(&dialog).starts_with("Name      auth█\n"));
+    }
+
+    #[test]
+    fn a_missing_repo_moves_the_focus_to_the_repo() {
+        let (mut dialog, service) = DialogFixture::opened(&ServiceFixture::new());
+        DialogFixture::type_text(&mut dialog, &service, "fix-auth");
+        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
+        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
+
+        DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
+
+        assert_eq!(DialogFixture::hints(&dialog), DialogFixture::REPO_HINTS);
+    }
+
+    #[test]
+    fn an_agent_refusal_keeps_the_focus_on_the_prompt() {
+        let agent = Agent::new("plain-agent", "plain-agent");
+        let fixture = DialogFixture::launched_in_repo()
+            .with_config(ServiceFixture::config().with_agents(vec![agent]));
+        let (mut dialog, service) = DialogFixture::focused_on_prompt(&fixture);
+        DialogFixture::type_text(&mut dialog, &service, "fix the tests");
+
+        DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
+
+        assert_eq!(DialogFixture::hints(&dialog), DialogFixture::PROMPT_HINTS);
     }
 
     #[test]
