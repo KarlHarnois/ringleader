@@ -2,11 +2,11 @@ use std::sync::Arc;
 
 use super::delete_impact::{DeleteConfirmation, DeleteImpact};
 use super::delete_outcome::DeleteOutcome;
-use super::tmux_teardown::TmuxTeardown;
+use super::tmux_teardown::{TeardownContexts, TmuxTeardown};
 use crate::application::ServiceError;
 use crate::application::ServicePorts;
 use crate::application::checks::unseen_session::UnseenSession;
-use crate::application::ports::{HostProbe, ProcessInfo, SessionRegistry};
+use crate::application::ports::{ProcessInfo, SessionRegistry};
 use crate::application::reconciliation::ManagedRow;
 use crate::application::session_scratch::SessionScratch;
 use crate::domain::{Session, SessionState};
@@ -14,7 +14,6 @@ use crate::domain::{Session, SessionState};
 pub struct MainCheckoutDeletion {
     unseen: UnseenSession,
     teardown: TmuxTeardown,
-    host: Arc<dyn HostProbe>,
     registry: Arc<dyn SessionRegistry>,
     scratch: SessionScratch,
 }
@@ -25,12 +24,16 @@ impl MainCheckoutDeletion {
         "kept the registry entry and the session, which still runs";
     const SESSION_STOPPED: &'static str =
         "the session is now stopped and a second delete cannot find them";
+    const TEARDOWN_CONTEXTS: TeardownContexts = TeardownContexts::new(
+        Self::KEPT_ON_TMUX_FAILURE,
+        Self::KEPT_WHILE_RUNNING,
+        Self::SESSION_STOPPED,
+    );
 
     pub fn new(ports: &ServicePorts) -> Self {
         Self {
             unseen: UnseenSession::new(ports),
-            teardown: TmuxTeardown::new(ports),
-            host: ports.repos().host(),
+            teardown: TmuxTeardown::new(ports, Self::TEARDOWN_CONTEXTS),
             registry: ports.state().registry(),
             scratch: SessionScratch::new(ports),
         }
@@ -56,25 +59,8 @@ impl MainCheckoutDeletion {
     }
 
     fn end_tmux_session(&self, row: &ManagedRow) -> Result<(), ServiceError> {
-        let pane_sessions = self
-            .teardown
-            .pane_sessions(row, Self::KEPT_ON_TMUX_FAILURE)?;
-        self.refuse_wrong_batch(&pane_sessions)?;
-        self.teardown.kill(row, Self::KEPT_ON_TMUX_FAILURE)?;
-        let survivors = self.end_processes(&pane_sessions)?;
+        let survivors = self.teardown.stop(row, &[])?;
         Self::refuse_survivors(&survivors)
-    }
-
-    fn refuse_wrong_batch(&self, pane_sessions: &[u32]) -> Result<(), ServiceError> {
-        self.host
-            .check_batch(&self.teardown.pane_processes(pane_sessions))
-            .map_err(|error| ServiceError::from(error).adding_context(Self::KEPT_WHILE_RUNNING))
-    }
-
-    fn end_processes(&self, pane_sessions: &[u32]) -> Result<Vec<ProcessInfo>, ServiceError> {
-        self.host
-            .terminate(&self.teardown.pane_processes(pane_sessions))
-            .map_err(|error| ServiceError::from(error).adding_context(Self::SESSION_STOPPED))
     }
 
     fn refuse_survivors(survivors: &[ProcessInfo]) -> Result<(), ServiceError> {

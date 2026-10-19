@@ -4,7 +4,7 @@ use super::delete_impact::{DeleteConfirmation, DeleteImpact};
 use super::delete_outcome::DeleteOutcome;
 use super::deletion_guards::{DeletionGuards, Measurement};
 use super::main_checkout_deletion::MainCheckoutDeletion;
-use super::tmux_teardown::TmuxTeardown;
+use super::tmux_teardown::{TeardownContexts, TmuxTeardown};
 use crate::application::ServiceError;
 use crate::application::ServicePorts;
 use crate::application::checks::unseen_session::UnseenSession;
@@ -34,11 +34,16 @@ impl SessionDeletion {
         "kept the worktree, the branch, and the session, which is now stopped";
     const KEPT_WHILE_RUNNING: &'static str =
         "kept the worktree, the branch, and the session, which still runs";
+    const TEARDOWN_CONTEXTS: TeardownContexts = TeardownContexts::new(
+        Self::KEPT_ON_TMUX_FAILURE,
+        Self::KEPT_WHILE_RUNNING,
+        Self::KEPT_AFTER_STOP,
+    );
 
     pub fn new(ports: &ServicePorts) -> Self {
         Self {
             main_checkout: MainCheckoutDeletion::new(ports),
-            teardown: TmuxTeardown::new(ports),
+            teardown: TmuxTeardown::new(ports, Self::TEARDOWN_CONTEXTS),
             guards: DeletionGuards::new(ports),
             unseen: UnseenSession::new(ports),
             inspection: WorktreeInspection::new(ports),
@@ -128,13 +133,9 @@ impl SessionDeletion {
         measurement: &Measurement,
     ) -> Result<(), ServiceError> {
         let session = row.session();
-        let pane_sessions = self
+        let survivors = self
             .teardown
-            .pane_sessions(row, Self::KEPT_ON_TMUX_FAILURE)?;
-        let confirmed = Self::confirmed_pids(measurement);
-        self.refuse_wrong_batch(&pane_sessions, &confirmed)?;
-        self.teardown.kill(row, Self::KEPT_ON_TMUX_FAILURE)?;
-        let survivors = self.end_processes(&pane_sessions, &confirmed)?;
+            .stop(row, &Self::confirmed_pids(measurement))?;
         self.refuse_remaining(session, survivors)?;
         self.refuse_new_commits(session, measurement)
     }
@@ -146,32 +147,6 @@ impl SessionDeletion {
             .iter()
             .map(ProcessInfo::pid)
             .collect()
-    }
-
-    fn refuse_wrong_batch(
-        &self,
-        pane_sessions: &[u32],
-        confirmed: &[u32],
-    ) -> Result<(), ServiceError> {
-        self.host
-            .check_batch(&self.processes_to_end(pane_sessions, confirmed))
-            .map_err(|error| ServiceError::from(error).adding_context(Self::KEPT_WHILE_RUNNING))
-    }
-
-    fn end_processes(
-        &self,
-        pane_sessions: &[u32],
-        confirmed: &[u32],
-    ) -> Result<Vec<ProcessInfo>, ServiceError> {
-        self.host
-            .terminate(&self.processes_to_end(pane_sessions, confirmed))
-            .map_err(|error| ServiceError::from(error).adding_context(Self::KEPT_AFTER_STOP))
-    }
-
-    fn processes_to_end(&self, pane_sessions: &[u32], confirmed: &[u32]) -> Vec<u32> {
-        let mut batch = self.teardown.pane_processes(pane_sessions);
-        batch.extend_from_slice(confirmed);
-        batch
     }
 
     fn refuse_remaining(
