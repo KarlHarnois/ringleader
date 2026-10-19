@@ -1,39 +1,47 @@
 use std::collections::{BTreeSet, HashSet};
-use std::fs;
-use std::io;
+use std::fs::{self, OpenOptions};
+use std::io::{self, Write};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::durable_file::DurableFile;
 use crate::application::ports::{FoldStore, FoldStoreError};
 use crate::domain::{RepoGroup, RepoName};
 
 pub struct JsonFoldStore {
-    file: DurableFile,
+    path: PathBuf,
 }
 
 impl JsonFoldStore {
+    const PRIVATE_MODE: u32 = 0o600;
+
     pub fn new(path: &Path) -> Self {
         Self {
-            file: DurableFile::new(path),
+            path: path.to_path_buf(),
         }
     }
 
-    fn path(&self) -> &Path {
-        self.file.path()
+    fn write_without_syncing(&self, text: &str) -> io::Result<()> {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(Self::PRIVATE_MODE)
+            .open(&self.path)?;
+        file.write_all(text.as_bytes())
     }
 
     fn corrupt(&self, detail: impl ToString) -> FoldStoreError {
         FoldStoreError::Corrupt {
-            path: self.path().to_path_buf(),
+            path: self.path.clone(),
             detail: detail.to_string(),
         }
     }
 
     fn io_error(&self, error: io::Error) -> FoldStoreError {
         FoldStoreError::Io {
-            path: self.path().to_path_buf(),
+            path: self.path.clone(),
             detail: error.to_string(),
         }
     }
@@ -55,7 +63,7 @@ impl JsonFoldStore {
 
 impl FoldStore for JsonFoldStore {
     fn load(&self) -> Result<HashSet<RepoGroup>, FoldStoreError> {
-        match fs::read_to_string(self.path()) {
+        match fs::read_to_string(&self.path) {
             Ok(text) => self.parse(&text),
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(HashSet::new()),
             Err(error) => Err(self.io_error(error)),
@@ -65,8 +73,7 @@ impl FoldStore for JsonFoldStore {
     fn save(&self, folded: &HashSet<RepoGroup>) -> Result<(), FoldStoreError> {
         let document = FoldDocument::in_repo_order(folded);
         let text = serde_json::to_string_pretty(&document).map_err(|error| self.corrupt(error))?;
-        self.file
-            .write(text.as_bytes())
+        self.write_without_syncing(&text)
             .map_err(|error| self.io_error(error))
     }
 }
@@ -113,6 +120,8 @@ impl FoldEntry {
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::fs::PermissionsExt;
+
     use super::*;
     use crate::test_support::ServiceFixture;
 
@@ -191,6 +200,19 @@ mod tests {
                 ]
             })
         );
+    }
+
+    #[test]
+    fn a_saved_fold_file_is_readable_only_by_its_owner() {
+        let fixture = FoldStoreFixture::new();
+
+        fixture
+            .store()
+            .save(&HashSet::from([RepoGroup::Other]))
+            .unwrap();
+
+        let mode = fs::metadata(fixture.path()).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
     }
 
     #[test]
