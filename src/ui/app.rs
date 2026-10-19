@@ -330,8 +330,8 @@ mod tests {
         WebBrowserError,
     };
     use crate::domain::{
-        AgentUsage, Config, ConfigDraft, DiffStat, LimitWindow, PullRequestState, RepoGroup,
-        Session, UsageLimit, UsageRow,
+        AgentUsage, Config, ConfigDraft, DiffStat, LimitWindow, PullRequestState, Session,
+        UsageLimit, UsageRow,
     };
     use crate::test_support::{
         CapturedWriter, Deadline, FakeFoldStore, FakeMultiplexer, FakePullRequests,
@@ -459,10 +459,6 @@ mod tests {
             app.resize(UiHarness::WIDTH, UiHarness::HEIGHT);
             UiHarness::settle(&mut app);
             app
-        }
-
-        fn alpha() -> RepoGroup {
-            ServiceFixture::repo_group("/repos/alpha")
         }
 
         fn observed(fixture: &ServiceFixture) -> App {
@@ -908,14 +904,20 @@ mod tests {
 
         AppFixture::press(&mut app, ' ');
 
-        assert_eq!(folds.folded(), HashSet::from([AppFixture::alpha()]));
+        assert_eq!(
+            folds.folded(),
+            HashSet::from([UiHarness::docs_repo_group()])
+        );
     }
 
     #[test]
     fn folds_saved_by_an_earlier_run_show_at_start() {
         let fixture = UiHarness::two_repos();
 
-        let app = AppFixture::restored(&fixture, &FakeFoldStore::holding(&[AppFixture::alpha()]));
+        let app = AppFixture::restored(
+            &fixture,
+            &FakeFoldStore::holding(&[UiHarness::docs_repo_group()]),
+        );
 
         let screen = AppFixture::screen(&app, 100, 28);
         assert!(screen.contains("1 ▸ alpha ●1"));
@@ -925,7 +927,7 @@ mod tests {
     #[test]
     fn observing_and_moving_without_a_fold_change_saves_nothing_so_ticks_write_no_file() {
         let fixture = UiHarness::two_repos();
-        let folds = FakeFoldStore::holding(&[AppFixture::alpha()]);
+        let folds = FakeFoldStore::holding(&[UiHarness::docs_repo_group()]);
         let mut app = AppFixture::restored(&fixture, &folds);
 
         AppFixture::press(&mut app, 'j');
@@ -937,7 +939,7 @@ mod tests {
     #[test]
     fn returning_from_a_session_in_a_folded_repo_saves_its_repo_unfolded() {
         let fixture = UiHarness::two_repos();
-        let folds = FakeFoldStore::holding(&[AppFixture::alpha()]);
+        let folds = FakeFoldStore::holding(&[UiHarness::docs_repo_group()]);
         let mut app = AppFixture::restored(&fixture, &folds);
 
         app.attach("docs");

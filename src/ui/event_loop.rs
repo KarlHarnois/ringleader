@@ -561,7 +561,7 @@ mod tests {
     #[test]
     fn the_loop_shows_the_folds_saved_by_an_earlier_run() {
         let fixture = UiHarness::two_repos();
-        let folds = FakeFoldStore::holding(&[ServiceFixture::repo_group("/repos/alpha")]);
+        let folds = FakeFoldStore::holding(&[UiHarness::docs_repo_group()]);
         let harness = UiHarness::new();
         let mut app = UiHarness::app_with_folds(&fixture, &folds);
         let mut event_loop = harness.event_loop(ScriptedInput::events(vec![]));

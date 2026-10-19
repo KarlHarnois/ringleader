@@ -13,6 +13,7 @@ use super::{
     Deadline, FakeFoldStore, FakeInterrupts, FakeMultiplexer, RecordingScreenMode, ServiceFixture,
 };
 use crate::application::EphemeralShell;
+use crate::domain::RepoGroup;
 use crate::ui::App;
 use crate::ui::event_loop::{EventLoop, InputSource};
 use crate::ui::shell_runner::ShellRunner;
@@ -27,6 +28,7 @@ pub struct UiHarness {
 impl UiHarness {
     pub const WIDTH: u16 = 100;
     pub const HEIGHT: u16 = 28;
+    const DOCS_REPO: &'static str = "/repos/alpha";
 
     pub fn new() -> Self {
         let mode = RecordingScreenMode::default();
@@ -48,7 +50,7 @@ impl UiHarness {
     }
 
     pub fn two_repos() -> ServiceFixture {
-        let docs = ServiceFixture::session_at("docs", "/repos/alpha", ServiceFixture::CREATED_AT);
+        let docs = ServiceFixture::session_at("docs", Self::DOCS_REPO, ServiceFixture::CREATED_AT);
         let fix_auth = ServiceFixture::session("fix-auth");
         ServiceFixture::new()
             .with_sessions(&[docs.clone(), fix_auth.clone()])
@@ -57,6 +59,10 @@ impl UiHarness {
                     .with_live(ServiceFixture::waiting(&docs))
                     .with_live(ServiceFixture::waiting(&fix_auth)),
             )
+    }
+
+    pub fn docs_repo_group() -> RepoGroup {
+        ServiceFixture::repo_group(Self::DOCS_REPO)
     }
 
     pub fn app(fixture: &ServiceFixture) -> App {
