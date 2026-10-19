@@ -61,13 +61,13 @@ impl NewSessionLayout {
         let constraints = [
             upper,
             spacer,
+            Self::GAP,
             prompt_panel,
             status,
-            Self::GAP,
             errors,
             hints,
         ];
-        let [upper, _, prompt_panel, status, _, errors, hints] =
+        let [upper, _, _, prompt_panel, status, errors, hints] =
             Layout::vertical(constraints).areas(self.area);
         [upper, prompt_panel, status, errors, hints]
     }
@@ -309,8 +309,32 @@ mod tests {
     }
 
     #[test]
-    fn a_tall_area_puts_a_blank_row_between_the_upper_rows_and_the_panel() {
+    fn a_tall_area_stacks_the_panel_status_error_and_hint_rows_on_its_last_rows() {
+        let fixture = LayoutFixture::tall();
+
+        let [_, prompt_panel, status, errors, hints] = fixture.areas();
+
+        assert_eq!(status.y, prompt_panel.bottom());
+        assert_eq!(errors.y, status.bottom());
+        assert_eq!(hints.y, errors.bottom());
+        assert_eq!(hints.bottom(), fixture.area().bottom());
+    }
+
+    #[test]
+    fn a_tall_area_leaves_its_spare_rows_between_the_upper_rows_and_the_panel() {
         let [upper, prompt_panel, _, _, _] = LayoutFixture::tall().areas();
+
+        assert!(
+            usize::from(prompt_panel.y)
+                > usize::from(upper.bottom()) + NewSessionLayout::SPACER_ROWS
+        );
+    }
+
+    #[test]
+    fn a_prompt_that_fills_the_area_keeps_a_blank_row_under_the_upper_rows() {
+        let [upper, prompt_panel, _, _, _] = LayoutFixture::tall()
+            .wanting_prompt_rows(LayoutFixture::TALL_HEIGHT)
+            .areas();
 
         assert_eq!(
             usize::from(prompt_panel.y),
@@ -319,26 +343,15 @@ mod tests {
     }
 
     #[test]
-    fn the_hints_sit_on_the_last_row_of_a_tall_area_below_a_gap() {
-        let fixture = LayoutFixture::tall();
-
-        let [_, _, status, _, hints] = fixture.areas();
-
-        assert_eq!(hints.bottom(), fixture.area().bottom());
-        assert_eq!(LayoutFixture::rows(hints), NewSessionLayout::HINT_ROWS);
-        assert!(hints.y > status.bottom());
-    }
-
-    #[test]
-    fn an_error_sits_right_above_the_hints_in_a_tall_area() {
+    fn an_error_sits_between_the_status_rows_and_the_hints_in_a_tall_area() {
         let error_rows = 2;
 
         let [_, _, status, errors, hints] =
             LayoutFixture::tall().with_error_rows(error_rows).areas();
 
         assert_eq!(LayoutFixture::rows(errors), error_rows);
+        assert_eq!(errors.y, status.bottom());
         assert_eq!(errors.bottom(), hints.y);
-        assert!(errors.y > status.bottom());
     }
 
     #[test]
