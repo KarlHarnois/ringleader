@@ -261,11 +261,11 @@ mod tests {
     fn the_processes_its_agent_started_are_ended_only_after_the_tmux_session_is_killed() {
         let fixture =
             CheckoutDeleteFixture::with_agent_process(CheckoutDeleteFixture::dev_server_host());
-        let ended_at_kill = fixture.terminated_at("kill_session");
+        let before_kill = fixture.terminated_before("kill_session");
 
         CheckoutDeleteFixture::force(&fixture).unwrap();
 
-        assert_eq!(*ended_at_kill.lock().unwrap(), Some(Vec::new()));
+        assert!(before_kill.pids().is_empty());
         assert_eq!(
             fixture.host().terminated(),
             [CheckoutDeleteFixture::DEV_SERVER]

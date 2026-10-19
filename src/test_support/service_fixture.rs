@@ -250,14 +250,14 @@ impl ServiceFixture {
             .add_call_hook(operation, move || host.refuse_to_terminate(pid));
     }
 
-    pub fn terminated_at(&self, operation: &'static str) -> Arc<Mutex<Option<Vec<u32>>>> {
-        let snapshot = Arc::new(Mutex::new(None));
+    pub fn terminated_before(&self, operation: &'static str) -> TerminationSnapshot {
+        let pids = Arc::new(Mutex::new(None));
         let host = Arc::clone(&self.host);
-        let recorder = Arc::clone(&snapshot);
+        let recorder = Arc::clone(&pids);
         self.multiplexer.add_call_hook(operation, move || {
             *recorder.lock().unwrap() = Some(host.terminated());
         });
-        snapshot
+        TerminationSnapshot { pids }
     }
 
     pub fn config_source(&self) -> &FakeConfigSource {
@@ -576,5 +576,19 @@ impl ServiceFixture {
             .with_diagnostics(self.diagnostics.clone())
             .with_home(self.home.as_deref())
             .with_shell(&self.shell)
+    }
+}
+
+pub struct TerminationSnapshot {
+    pids: Arc<Mutex<Option<Vec<u32>>>>,
+}
+
+impl TerminationSnapshot {
+    pub fn pids(&self) -> Vec<u32> {
+        self.pids
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("the operation never ran")
     }
 }

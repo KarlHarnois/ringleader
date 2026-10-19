@@ -800,11 +800,11 @@ mod tests {
         let fixture = DeleteFixture::live_fixture().with_host(DeleteFixture::with_outside_process(
             DeleteFixture::host_with_pane_child(),
         ));
-        let ended_at_kill = fixture.terminated_at("kill_session");
+        let before_kill = fixture.terminated_before("kill_session");
 
         DeleteFixture::force(&mut fixture.service()).unwrap();
 
-        assert_eq!(*ended_at_kill.lock().unwrap(), Some(Vec::new()));
+        assert!(before_kill.pids().is_empty());
         assert_eq!(
             fixture.host().terminated(),
             [DeleteFixture::PANE_CHILD, DeleteFixture::OUTSIDE_PROCESS]
