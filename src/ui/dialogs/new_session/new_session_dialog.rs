@@ -233,16 +233,16 @@ mod tests {
             "Type to search · ↑ ↓ Ctrl-J Ctrl-K choose · Enter pick · Esc back";
         const DEFAULT_SETTINGS: &'static str =
             "  plan mode (Alt-j) · claude (Alt-k) · new worktree (Alt-l)";
-        const BOX_TITLE: &'static str = "╭ Prompt ";
-        const BOX_CORNERS: usize = 2;
-        const BOX_FRAME_COLUMNS: usize = 4;
+        const RULE: &'static str = "─";
+        const EMPTY_PROMPT_ROW: &'static str = "❯";
+        const TEXT_INDENT: usize = 2;
         const CURSOR_COLUMN: usize = 1;
-        const BOX_WIDTH: usize = Self::WIDTH as usize;
+        const PANEL_WIDTH: usize = Self::WIDTH as usize;
         const PROMPT_TEXT_WIDTH: usize =
-            Self::BOX_WIDTH - Self::BOX_FRAME_COLUMNS - Self::CURSOR_COLUMN;
+            Self::PANEL_WIDTH - Self::TEXT_INDENT - Self::CURSOR_COLUMN;
         const COMPACT_TIER_WIDTH: u16 = 54;
         const COMPACT_TIER_HEIGHT: u16 = 8;
-        const COMPACT_BOX_WIDTH: usize = Self::COMPACT_TIER_WIDTH as usize;
+        const COMPACT_PANEL_WIDTH: usize = Self::COMPACT_TIER_WIDTH as usize;
         const SEVEN_LINES: &'static str = "one\ntwo\nthree\nfour\nfive\nsix\nseven";
 
         fn launched_in_repo() -> ServiceFixture {
@@ -397,49 +397,43 @@ mod tests {
             Self::text(dialog).replace('\n', " ")
         }
 
-        fn prompt_box(dialog: &NewSessionDialog) -> String {
-            Self::boxed(&Self::text(dialog))
+        fn prompt_text(dialog: &NewSessionDialog) -> String {
+            Self::prompt_in(&Self::text(dialog))
         }
 
-        fn prompt_box_with_cursor(dialog: &NewSessionDialog) -> String {
-            Self::boxed(&Self::text_with_cursor(dialog))
+        fn prompt_text_with_cursor(dialog: &NewSessionDialog) -> String {
+            Self::prompt_in(&Self::text_with_cursor(dialog))
         }
 
-        fn boxed(text: &str) -> String {
+        fn prompt_in(text: &str) -> String {
             text.lines()
-                .skip_while(|row| !row.starts_with(Self::BOX_TITLE))
+                .skip_while(|row| !Self::is_rule(row))
                 .skip(1)
-                .take_while(|row| !row.starts_with('╰'))
-                .map(Self::unframed)
+                .take_while(|row| !Self::is_rule(row))
+                .map(Self::without_indent)
                 .collect::<Vec<_>>()
                 .join("\n")
         }
 
-        fn unframed(row: &str) -> String {
-            let text = row
-                .strip_prefix("│ ")
-                .and_then(|rest| rest.strip_suffix('│'));
-            text.unwrap_or(row).trim_end().to_string()
+        fn is_rule(row: &str) -> bool {
+            row.starts_with(Self::RULE)
         }
 
-        fn box_top(width: usize) -> String {
-            let rule = "─".repeat(width - Self::BOX_TITLE.chars().count() - 1);
-            format!("{}{rule}╮", Self::BOX_TITLE)
+        fn without_indent(row: &str) -> String {
+            row.chars().skip(Self::TEXT_INDENT).collect()
         }
 
-        fn box_row(text: &str, width: usize) -> String {
-            let inner = width - Self::BOX_FRAME_COLUMNS;
-            format!("│ {text:<inner$} │")
+        fn rule(width: usize) -> String {
+            Self::RULE.repeat(width)
         }
 
-        fn box_bottom(width: usize) -> String {
-            format!("╰{}╯", "─".repeat(width - Self::BOX_CORNERS))
-        }
-
-        fn box_frame_is_dim(dialog: &NewSessionDialog) -> bool {
+        fn rules_are_dim(dialog: &NewSessionDialog) -> bool {
             let screen = Self::screen(dialog, Self::FULL_HEIGHT);
-            let corner = screen.content().iter().find(|cell| cell.symbol() == "╭");
-            corner.is_some_and(|cell| cell.modifier.contains(Modifier::DIM))
+            let rule = screen
+                .content()
+                .iter()
+                .find(|cell| cell.symbol() == Self::RULE);
+            rule.is_some_and(|cell| cell.modifier.contains(Modifier::DIM))
         }
 
         fn settle(dialog: &mut NewSessionDialog, done: impl Fn(&str) -> bool) {
@@ -853,7 +847,7 @@ mod tests {
         dialog.paste("one\ntwo\nthree");
 
         assert_eq!(
-            DialogFixture::prompt_box_with_cursor(&dialog),
+            DialogFixture::prompt_text_with_cursor(&dialog),
             "one\ntwo\nthree█"
         );
     }
@@ -866,13 +860,13 @@ mod tests {
         dialog.paste("steps:\n  - run: cargo test");
 
         assert_eq!(
-            DialogFixture::prompt_box(&dialog),
+            DialogFixture::prompt_text(&dialog),
             "steps:\n  - run: cargo test"
         );
     }
 
     #[test]
-    fn a_long_typed_prompt_wraps_inside_its_box_and_submits_as_one_line() {
+    fn a_long_typed_prompt_wraps_and_submits_as_one_line() {
         let (mut dialog, service) =
             DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
         let prompt = "fix the flaky login test that times out on the first run after a cold start";
@@ -882,8 +876,8 @@ mod tests {
         let step = DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
 
         assert_eq!(
-            DialogFixture::boxed(&shown),
-            "fix the flaky login test that times out on the first run after a\ncold start█"
+            DialogFixture::prompt_in(&shown),
+            "fix the flaky login test that times out on the first run after a cold\n start█"
         );
         assert_eq!(DialogFixture::submitted(step).prompt(), prompt);
     }
@@ -1282,7 +1276,7 @@ mod tests {
 
         assert_eq!(DialogFixture::underlined(&dialog), "the");
         assert_eq!(
-            DialogFixture::prompt_box_with_cursor(&dialog),
+            DialogFixture::prompt_text_with_cursor(&dialog),
             "fix the█tests"
         );
     }
@@ -1310,7 +1304,7 @@ mod tests {
         let (dialog, _service) =
             DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
 
-        assert_eq!(DialogFixture::prompt_box_with_cursor(&dialog), "█");
+        assert_eq!(DialogFixture::prompt_text_with_cursor(&dialog), "█");
     }
 
     #[test]
@@ -1321,7 +1315,7 @@ mod tests {
         dialog.paste(DialogFixture::SEVEN_LINES);
 
         assert_eq!(
-            DialogFixture::prompt_box_with_cursor(&dialog),
+            DialogFixture::prompt_text_with_cursor(&dialog),
             "one\ntwo\nthree\nfour\nfive\nsix\nseven█"
         );
     }
@@ -1335,7 +1329,7 @@ mod tests {
 
         let shown = DialogFixture::text_with_cursor_at(&dialog, DialogFixture::SIX_ROW_HEIGHT);
         assert_eq!(
-            DialogFixture::boxed(&shown),
+            DialogFixture::prompt_in(&shown),
             "two\nthree\nfour\nfive\nsix\nseven█"
         );
     }
@@ -1352,9 +1346,9 @@ mod tests {
         }
 
         let shown = DialogFixture::text_with_cursor_at(&dialog, DialogFixture::SIX_ROW_HEIGHT);
-        assert!(DialogFixture::boxed(&scrolled).starts_with("two\n"));
+        assert!(DialogFixture::prompt_in(&scrolled).starts_with("two\n"));
         assert_eq!(
-            DialogFixture::boxed(&shown),
+            DialogFixture::prompt_in(&shown),
             "one█\ntwo\nthree\nfour\nfive\nsix"
         );
     }
@@ -1371,9 +1365,9 @@ mod tests {
         }
 
         let shown = DialogFixture::text_with_cursor_at(&dialog, DialogFixture::SIX_ROW_HEIGHT);
-        assert!(DialogFixture::boxed(&scrolled).starts_with("two\n"));
+        assert!(DialogFixture::prompt_in(&scrolled).starts_with("two\n"));
         assert_eq!(
-            DialogFixture::boxed(&shown),
+            DialogFixture::prompt_in(&shown),
             "one\ntwo\nthree\nfour\nfive\nsix█"
         );
     }
@@ -1393,8 +1387,8 @@ mod tests {
         DialogFixture::type_text(&mut dialog, &service, "!");
         let step = DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
 
-        assert!(DialogFixture::boxed(&scrolled).starts_with("two\n"));
-        assert!(DialogFixture::boxed(&restored).starts_with("one\n"));
+        assert!(DialogFixture::prompt_in(&scrolled).starts_with("two\n"));
+        assert!(DialogFixture::prompt_in(&restored).starts_with("one\n"));
         assert!(
             DialogFixture::submitted(step)
                 .prompt()
@@ -1417,8 +1411,8 @@ mod tests {
         DialogFixture::type_text(&mut dialog, &service, "!");
         let step = DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
 
-        assert!(DialogFixture::boxed(&scrolled).starts_with("two\n"));
-        assert!(DialogFixture::boxed(&restored).starts_with("one\n"));
+        assert!(DialogFixture::prompt_in(&scrolled).starts_with("two\n"));
+        assert!(DialogFixture::prompt_in(&restored).starts_with("one\n"));
         assert!(
             DialogFixture::submitted(step)
                 .prompt()
@@ -1440,8 +1434,8 @@ mod tests {
         DialogFixture::type_text(&mut dialog, &service, "!");
         let step = DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
 
-        assert!(DialogFixture::boxed(&scrolled).starts_with("two\n"));
-        assert!(DialogFixture::boxed(&restored).starts_with("one\n"));
+        assert!(DialogFixture::prompt_in(&scrolled).starts_with("two\n"));
+        assert!(DialogFixture::prompt_in(&restored).starts_with("one\n"));
         assert!(
             DialogFixture::submitted(step)
                 .prompt()
@@ -1460,7 +1454,7 @@ mod tests {
         DialogFixture::type_text(&mut dialog, &service, "Z");
         let step = DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
 
-        assert!(DialogFixture::boxed(&drawn).starts_with("xxx"));
+        assert!(DialogFixture::prompt_in(&drawn).starts_with("xxx"));
         assert_eq!(
             DialogFixture::submitted(step).prompt(),
             format!("{long_line}Z")
@@ -1477,8 +1471,8 @@ mod tests {
 
         let roomy = DialogFixture::text_with_cursor(&dialog);
 
-        assert_eq!(DialogFixture::boxed(&squeezed), "three");
-        assert_eq!(DialogFixture::boxed(&roomy), "one\ntwo\nthree█");
+        assert_eq!(DialogFixture::prompt_in(&squeezed), "three");
+        assert_eq!(DialogFixture::prompt_in(&roomy), "one\ntwo\nthree█");
     }
 
     #[test]
@@ -1507,7 +1501,7 @@ mod tests {
         dialog.paste("one\ntwo\nthree");
 
         let shown = DialogFixture::text_at(&dialog, no_spare_rows);
-        assert_eq!(DialogFixture::boxed(&shown), "three");
+        assert_eq!(DialogFixture::prompt_in(&shown), "three");
         assert!(shown.ends_with(DialogFixture::PROMPT_HINTS));
     }
 
@@ -1525,7 +1519,7 @@ mod tests {
     }
 
     #[test]
-    fn a_short_dialog_keeps_the_settings_under_the_box() {
+    fn a_short_dialog_keeps_the_settings_under_the_prompt() {
         let (mut dialog, service) = DialogFixture::opened_with_agents(5);
 
         for _ in 0..4 {
@@ -1535,7 +1529,7 @@ mod tests {
         let shown = DialogFixture::text_at(&dialog, DialogFixture::COMPACT_HEIGHT);
         assert!(shown.contains(&format!(
             "{}\n  build mode (Alt-j) · agent-5, no prompt (Alt-k) · new worktree (Alt-l)\n",
-            DialogFixture::box_bottom(DialogFixture::BOX_WIDTH)
+            DialogFixture::rule(DialogFixture::PANEL_WIDTH)
         )));
         assert!(shown.ends_with(DialogFixture::NAME_HINTS));
     }
@@ -1552,7 +1546,7 @@ mod tests {
 
         let shown = DialogFixture::text_at(&dialog, rows_without_the_name);
         assert!(shown.starts_with("Repo      Find: gate█\n"));
-        assert!(shown.contains("~/work/gateway-01\n╭ Prompt "));
+        assert!(shown.contains("~/work/gateway-01\n─"));
     }
 
     #[test]
@@ -1564,7 +1558,7 @@ mod tests {
 
         let shown = DialogFixture::text_at(&dialog, DialogFixture::COMPACT_HEIGHT);
         let rows: Vec<&str> = shown.lines().collect();
-        assert_eq!(DialogFixture::boxed(&shown), "six\nseven");
+        assert_eq!(DialogFixture::prompt_in(&shown), "six\nseven");
         assert_eq!(rows[rows.len() - 2], "");
         assert_eq!(rows[rows.len() - 1], DialogFixture::PROMPT_HINTS);
     }
@@ -1581,9 +1575,9 @@ mod tests {
             shown,
             format!(
                 "Name      fix-auth\nRepo      example-project\n{}\n{}\n{}\n{}\n{}",
-                DialogFixture::box_top(DialogFixture::BOX_WIDTH),
-                DialogFixture::box_row("", DialogFixture::BOX_WIDTH),
-                DialogFixture::box_bottom(DialogFixture::BOX_WIDTH),
+                DialogFixture::rule(DialogFixture::PANEL_WIDTH),
+                DialogFixture::EMPTY_PROMPT_ROW,
+                DialogFixture::rule(DialogFixture::PANEL_WIDTH),
                 DialogFixture::DEFAULT_SETTINGS,
                 DialogFixture::PROMPT_HINTS
             )
@@ -1601,8 +1595,8 @@ mod tests {
         DialogFixture::settle(&mut dialog, |text| text.contains("20/20 repos under ~"));
 
         let shown = DialogFixture::text(&dialog);
-        assert!(shown.contains("gateway-04\n\n╭ Prompt "));
-        assert_eq!(DialogFixture::boxed(&shown), DialogFixture::SEVEN_LINES);
+        assert!(shown.contains("gateway-04\n\n─"));
+        assert_eq!(DialogFixture::prompt_in(&shown), DialogFixture::SEVEN_LINES);
         assert!(shown.ends_with(DialogFixture::SEARCH_HINTS));
     }
 
@@ -1617,8 +1611,8 @@ mod tests {
         DialogFixture::settle(&mut dialog, |text| text.contains("20/20 repos under ~"));
 
         let shown = DialogFixture::text_at(&dialog, DialogFixture::COMPACT_HEIGHT);
-        assert!(shown.contains("gateway-01\n╭ Prompt "));
-        assert_eq!(DialogFixture::boxed(&shown), "seven");
+        assert!(shown.contains("gateway-01\n─"));
+        assert_eq!(DialogFixture::prompt_in(&shown), "seven");
         assert!(shown.ends_with(DialogFixture::SEARCH_HINTS));
     }
 
@@ -1632,14 +1626,14 @@ mod tests {
         dialog.fail(error.clone());
 
         let shown = DialogFixture::text_at(&dialog, DialogFixture::COMPACT_HEIGHT);
-        assert!(shown.starts_with("Name      fix-auth\nRepo      example-project\n╭ Prompt "));
-        assert_eq!(DialogFixture::boxed(&shown), "seven");
+        assert!(shown.starts_with("Name      fix-auth\nRepo      example-project\n─"));
+        assert_eq!(DialogFixture::prompt_in(&shown), "seven");
         assert!(shown.replace('\n', " ").contains(&error));
         assert!(shown.ends_with(DialogFixture::PROMPT_HINTS));
     }
 
     #[test]
-    fn a_dialog_too_short_for_every_field_keeps_the_settings_under_the_box() {
+    fn a_dialog_too_short_for_every_field_keeps_the_settings_under_the_prompt() {
         let (mut dialog, service) =
             DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
         let rows_without_the_repo = 6;
@@ -1649,7 +1643,7 @@ mod tests {
         let shown = DialogFixture::text_at(&dialog, rows_without_the_repo);
         assert!(shown.contains(&format!(
             "{}\n  build mode (Alt-j) · claude (Alt-k) · new worktree (Alt-l)\n",
-            DialogFixture::box_bottom(DialogFixture::BOX_WIDTH)
+            DialogFixture::rule(DialogFixture::PANEL_WIDTH)
         )));
     }
 
@@ -1664,8 +1658,8 @@ mod tests {
         dialog.fail(error.clone());
 
         let shown = DialogFixture::text_at(&dialog, rows_for_all_but_the_repo);
-        assert!(shown.starts_with("Name      fix-auth\n╭ Prompt "));
-        assert_eq!(DialogFixture::boxed(&shown), "seven");
+        assert!(shown.starts_with("Name      fix-auth\n─"));
+        assert_eq!(DialogFixture::prompt_in(&shown), "seven");
         assert!(shown.replace('\n', " ").contains(&error));
         assert!(shown.ends_with(DialogFixture::PROMPT_HINTS));
     }
@@ -1734,15 +1728,15 @@ mod tests {
     }
 
     #[test]
-    fn the_prompt_box_is_dim_until_the_prompt_has_focus() {
+    fn the_prompt_rules_are_dim_until_the_prompt_has_focus() {
         let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
-        let on_the_name = DialogFixture::box_frame_is_dim(&dialog);
+        let on_the_name = DialogFixture::rules_are_dim(&dialog);
 
         DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
         DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
 
         assert!(on_the_name);
-        assert!(!DialogFixture::box_frame_is_dim(&dialog));
+        assert!(!DialogFixture::rules_are_dim(&dialog));
     }
 
     #[test]
@@ -1825,9 +1819,9 @@ mod tests {
             DialogFixture::compact_text(&dialog),
             format!(
                 "N █\nR example-project\n{}\n{}\n{}\n  plan mode (Alt-j) · claude (Alt-k)\n  new worktree (Alt-l)\n{}",
-                DialogFixture::box_top(DialogFixture::COMPACT_BOX_WIDTH),
-                DialogFixture::box_row("", DialogFixture::COMPACT_BOX_WIDTH),
-                DialogFixture::box_bottom(DialogFixture::COMPACT_BOX_WIDTH),
+                DialogFixture::rule(DialogFixture::COMPACT_PANEL_WIDTH),
+                DialogFixture::EMPTY_PROMPT_ROW,
+                DialogFixture::rule(DialogFixture::COMPACT_PANEL_WIDTH),
                 DialogFixture::NAME_HINTS
             )
         );
@@ -1858,16 +1852,16 @@ mod tests {
     }
 
     #[test]
-    fn the_box_keeps_its_rows_when_an_error_appears() {
+    fn the_prompt_keeps_its_rows_when_an_error_appears() {
         let (mut dialog, _service) =
             DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
         dialog.paste(&DialogFixture::twelve_lines());
-        let before = DialogFixture::prompt_box(&dialog);
+        let before = DialogFixture::prompt_text(&dialog);
 
         dialog.fail("session fix-auth already exists".to_string());
 
         assert_eq!(before.lines().count(), 12);
-        assert_eq!(DialogFixture::prompt_box(&dialog), before);
+        assert_eq!(DialogFixture::prompt_text(&dialog), before);
     }
 
     #[test]

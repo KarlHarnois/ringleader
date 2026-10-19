@@ -11,7 +11,7 @@ pub struct NewSessionLayout {
 
 impl NewSessionLayout {
     const PROMPT_FLOOR: usize = 1;
-    const BOX_FRAME_ROWS: usize = 2;
+    const RULE_ROWS: usize = 2;
     const SPACER_ROWS: usize = 1;
     const HINT_ROWS: usize = 1;
     const FEWEST_STATUS_ROWS: usize = 1;
@@ -56,32 +56,40 @@ impl NewSessionLayout {
     }
 
     pub fn areas(&self, upper_rows: usize) -> [Rect; 5] {
-        let [upper, spacer, prompt_box, status, errors, hints] =
+        let [upper, spacer, prompt_panel, status, errors, hints] =
             self.heights_that_fit(upper_rows).map(Self::length);
-        let constraints = [upper, spacer, prompt_box, status, Self::GAP, errors, hints];
-        let [upper, _, prompt_box, status, _, errors, hints] =
+        let constraints = [
+            upper,
+            spacer,
+            prompt_panel,
+            status,
+            Self::GAP,
+            errors,
+            hints,
+        ];
+        let [upper, _, prompt_panel, status, _, errors, hints] =
             Layout::vertical(constraints).areas(self.area);
-        [upper, prompt_box, status, errors, hints]
+        [upper, prompt_panel, status, errors, hints]
     }
 
     fn heights_that_fit(&self, upper_rows: usize) -> [usize; 6] {
-        let box_rows = self.box_rows();
-        let kept_rows = box_rows + self.status_rows + Self::HINT_ROWS;
+        let panel_rows = self.panel_rows();
+        let kept_rows = panel_rows + self.status_rows + Self::HINT_ROWS;
         let room = self.height().saturating_sub(kept_rows);
         let error_rows = (self.error_rows + self.free_error_rows()).min(room);
         let upper_rows = upper_rows.min(room.saturating_sub(error_rows));
         [
             upper_rows,
             self.spacer_rows(),
-            box_rows,
+            panel_rows,
             self.status_rows,
             error_rows,
             Self::HINT_ROWS,
         ]
     }
 
-    fn box_rows(&self) -> usize {
-        self.prompt_rows() + Self::BOX_FRAME_ROWS
+    fn panel_rows(&self) -> usize {
+        self.prompt_rows() + Self::RULE_ROWS
     }
 
     fn prompt_rows(&self) -> usize {
@@ -112,7 +120,7 @@ impl NewSessionLayout {
     fn spare_rows(&self) -> usize {
         let settled = self.fixed_upper_rows
             + self.repo_floor
-            + Self::BOX_FRAME_ROWS
+            + Self::RULE_ROWS
             + self.status_rows
             + self.error_rows
             + Self::HINT_ROWS;
@@ -144,9 +152,9 @@ mod tests {
         const FIXED_UPPER_ROWS: usize = 1;
         const REPO_FLOOR: usize = 1;
         const UPPER_ROWS: usize = Self::FIXED_UPPER_ROWS + Self::REPO_FLOOR;
-        const BOX_FLOOR: usize = NewSessionLayout::PROMPT_FLOOR + NewSessionLayout::BOX_FRAME_ROWS;
+        const PANEL_FLOOR: usize = NewSessionLayout::PROMPT_FLOOR + NewSessionLayout::RULE_ROWS;
         const FIELDS_AND_HINTS_HEIGHT: usize = Self::UPPER_ROWS
-            + NewSessionLayout::BOX_FRAME_ROWS
+            + NewSessionLayout::RULE_ROWS
             + NewSessionLayout::FEWEST_STATUS_ROWS
             + NewSessionLayout::HINT_ROWS;
         const ROOM_FOR_A_ONE_ROW_PROMPT: usize =
@@ -211,21 +219,21 @@ mod tests {
     }
 
     #[test]
-    fn the_box_grows_to_the_rows_the_prompt_wants_when_they_are_left() {
+    fn the_panel_grows_to_the_rows_the_prompt_wants_when_they_are_left() {
         let wanted = 4;
 
-        let [_, prompt_box, _, _, _] = LayoutFixture::tall().wanting_prompt_rows(wanted).areas();
+        let [_, prompt_panel, _, _, _] = LayoutFixture::tall().wanting_prompt_rows(wanted).areas();
 
         assert_eq!(
-            LayoutFixture::rows(prompt_box),
-            wanted + NewSessionLayout::BOX_FRAME_ROWS
+            LayoutFixture::rows(prompt_panel),
+            wanted + NewSessionLayout::RULE_ROWS
         );
     }
 
     #[test]
     fn a_layout_without_upper_rows_gives_the_prompt_every_spare_row() {
         let wanted = 5;
-        let area_height = NewSessionLayout::BOX_FRAME_ROWS
+        let area_height = NewSessionLayout::RULE_ROWS
             + NewSessionLayout::FEWEST_STATUS_ROWS
             + NewSessionLayout::HINT_ROWS
             + NewSessionLayout::ERROR_ROWS_KEPT
@@ -236,11 +244,11 @@ mod tests {
             .without_upper_rows();
         let no_upper_rows = 0;
 
-        let [_, prompt_box, _, _, _] = layout.areas(no_upper_rows);
+        let [_, prompt_panel, _, _, _] = layout.areas(no_upper_rows);
 
         assert_eq!(
-            LayoutFixture::rows(prompt_box),
-            wanted + NewSessionLayout::BOX_FRAME_ROWS
+            LayoutFixture::rows(prompt_panel),
+            wanted + NewSessionLayout::RULE_ROWS
         );
         assert_eq!(layout.repo_room(), 0);
     }
@@ -254,25 +262,28 @@ mod tests {
             + NewSessionLayout::SPACER_ROWS
             + rows_left;
 
-        let [_, prompt_box, _, _, _] = LayoutFixture::of_height(area_height)
+        let [_, prompt_panel, _, _, _] = LayoutFixture::of_height(area_height)
             .with_error_rows(error_rows)
             .wanting_prompt_rows(rows_left + 1)
             .areas();
 
         assert_eq!(
-            LayoutFixture::rows(prompt_box),
-            rows_left + NewSessionLayout::BOX_FRAME_ROWS
+            LayoutFixture::rows(prompt_panel),
+            rows_left + NewSessionLayout::RULE_ROWS
         );
     }
 
     #[test]
     fn the_prompt_keeps_one_row_when_nothing_is_left() {
-        let [_, prompt_box, _, _, _] =
+        let [_, prompt_panel, _, _, _] =
             LayoutFixture::of_height(LayoutFixture::FIELDS_AND_HINTS_HEIGHT)
                 .wanting_prompt_rows(3)
                 .areas();
 
-        assert_eq!(LayoutFixture::rows(prompt_box), LayoutFixture::BOX_FLOOR);
+        assert_eq!(
+            LayoutFixture::rows(prompt_panel),
+            LayoutFixture::PANEL_FLOOR
+        );
     }
 
     #[test]
@@ -298,11 +309,11 @@ mod tests {
     }
 
     #[test]
-    fn a_tall_area_puts_a_blank_row_between_the_upper_rows_and_the_box() {
-        let [upper, prompt_box, _, _, _] = LayoutFixture::tall().areas();
+    fn a_tall_area_puts_a_blank_row_between_the_upper_rows_and_the_panel() {
+        let [upper, prompt_panel, _, _, _] = LayoutFixture::tall().areas();
 
         assert_eq!(
-            usize::from(prompt_box.y),
+            usize::from(prompt_panel.y),
             usize::from(upper.bottom()) + NewSessionLayout::SPACER_ROWS
         );
     }
@@ -342,7 +353,7 @@ mod tests {
     }
 
     #[test]
-    fn a_one_row_error_takes_the_free_row_and_the_box_keeps_its_rows() {
+    fn a_one_row_error_takes_the_free_row_and_the_panel_keeps_its_rows() {
         let wanted = 5;
         let area_height = LayoutFixture::FIELDS_AND_HINTS_HEIGHT
             + NewSessionLayout::ERROR_ROWS_KEPT
@@ -350,30 +361,30 @@ mod tests {
             + wanted;
         let fixture = LayoutFixture::of_height(area_height).wanting_prompt_rows(wanted);
 
-        let [_, prompt_box, _, _, _] = fixture.areas();
-        let [_, errored_box, _, errors, _] = fixture.with_error_rows(1).areas();
+        let [_, prompt_panel, _, _, _] = fixture.areas();
+        let [_, errored_panel, _, errors, _] = fixture.with_error_rows(1).areas();
 
         assert_eq!(
-            LayoutFixture::rows(prompt_box),
-            wanted + NewSessionLayout::BOX_FRAME_ROWS
+            LayoutFixture::rows(prompt_panel),
+            wanted + NewSessionLayout::RULE_ROWS
         );
         assert_eq!(
-            LayoutFixture::rows(errored_box),
-            LayoutFixture::rows(prompt_box)
+            LayoutFixture::rows(errored_panel),
+            LayoutFixture::rows(prompt_panel)
         );
         assert_eq!(LayoutFixture::rows(errors), 1);
     }
 
     #[test]
     fn the_free_error_row_comes_before_the_spacer() {
-        let [upper, prompt_box, _, errors, _] =
+        let [upper, prompt_panel, _, errors, _] =
             LayoutFixture::of_height(LayoutFixture::ROOM_FOR_A_ONE_ROW_PROMPT + 1).areas();
 
         assert_eq!(
             LayoutFixture::rows(errors),
             NewSessionLayout::ERROR_ROWS_KEPT
         );
-        assert_eq!(prompt_box.y, upper.bottom());
+        assert_eq!(prompt_panel.y, upper.bottom());
     }
 
     #[test]
@@ -391,11 +402,11 @@ mod tests {
 
     #[test]
     fn a_short_area_drops_the_spacer_the_free_error_row_and_the_gap_first() {
-        let [upper, prompt_box, status, errors, hints] =
+        let [upper, prompt_panel, status, errors, hints] =
             LayoutFixture::of_height(LayoutFixture::ROOM_FOR_A_ONE_ROW_PROMPT).areas();
 
         assert_eq!(LayoutFixture::rows(upper), LayoutFixture::UPPER_ROWS);
-        assert_eq!(prompt_box.y, upper.bottom());
+        assert_eq!(prompt_panel.y, upper.bottom());
         assert_eq!(LayoutFixture::rows(errors), 0);
         assert_eq!(hints.y, status.bottom());
     }
@@ -404,13 +415,16 @@ mod tests {
     fn a_short_area_shrinks_the_upper_rows_before_the_error() {
         let error_rows = 1;
 
-        let [upper, prompt_box, _, errors, _] =
+        let [upper, prompt_panel, _, errors, _] =
             LayoutFixture::of_height(LayoutFixture::ROOM_FOR_A_ONE_ROW_PROMPT)
                 .with_error_rows(error_rows)
                 .areas();
 
         assert_eq!(LayoutFixture::rows(errors), error_rows);
-        assert_eq!(LayoutFixture::rows(prompt_box), LayoutFixture::BOX_FLOOR);
+        assert_eq!(
+            LayoutFixture::rows(prompt_panel),
+            LayoutFixture::PANEL_FLOOR
+        );
         assert_eq!(
             LayoutFixture::rows(upper),
             LayoutFixture::UPPER_ROWS - error_rows
@@ -418,10 +432,10 @@ mod tests {
     }
 
     #[test]
-    fn a_short_area_keeps_the_status_rows_under_the_box_while_the_upper_rows_shrink() {
+    fn a_short_area_keeps_the_status_rows_under_the_panel_while_the_upper_rows_shrink() {
         let error_rows = 1;
 
-        let [upper, prompt_box, status, _, _] =
+        let [upper, prompt_panel, status, _, _] =
             LayoutFixture::of_height(LayoutFixture::ROOM_FOR_A_ONE_ROW_PROMPT)
                 .with_error_rows(error_rows)
                 .areas();
@@ -431,21 +445,24 @@ mod tests {
             LayoutFixture::rows(status),
             NewSessionLayout::FEWEST_STATUS_ROWS
         );
-        assert_eq!(status.y, prompt_box.bottom());
+        assert_eq!(status.y, prompt_panel.bottom());
     }
 
     #[test]
     fn a_wrapped_status_line_keeps_both_rows_before_the_prompt_grows() {
         let status_rows = 2;
 
-        let [_, prompt_box, status, _, _] =
+        let [_, prompt_panel, status, _, _] =
             LayoutFixture::of_height(LayoutFixture::ROOM_FOR_A_ONE_ROW_PROMPT + 1)
                 .with_status_rows(status_rows)
                 .wanting_prompt_rows(3)
                 .areas();
 
         assert_eq!(LayoutFixture::rows(status), status_rows);
-        assert_eq!(LayoutFixture::rows(prompt_box), LayoutFixture::BOX_FLOOR);
+        assert_eq!(
+            LayoutFixture::rows(prompt_panel),
+            LayoutFixture::PANEL_FLOOR
+        );
     }
 
     #[test]

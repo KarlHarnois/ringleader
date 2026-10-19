@@ -1,8 +1,8 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
-use ratatui::text::Line;
-use ratatui::widgets::{Block, BorderType, Padding, Paragraph};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Padding, Paragraph};
 
 use super::agent_picker::AgentPicker;
 use super::new_session_field::NewSessionField;
@@ -30,7 +30,9 @@ pub struct NewSessionView<'a> {
 impl<'a> NewSessionView<'a> {
     const CURSOR: char = '█';
     const NAME_ROWS: usize = 1;
-    const BOX_PADDING: u16 = 1;
+    const CHEVRON: &'static str = "❯";
+    const TEXT_INDENT: u16 = 2;
+    const CHEVRON_ROWS: u16 = 1;
 
     pub fn new(
         name: &'a TextField,
@@ -72,9 +74,10 @@ impl<'a> NewSessionView<'a> {
         let status = self.settings_line().lines(width, theme);
         let layout = self.layout(area, labels, errors.len(), status.len(), theme);
         let upper = self.upper_lines(labels.field_width(area), layout.repo_room(), labels, theme);
-        let [upper_area, box_area, status_area, error_area, hints_area] = layout.areas(upper.len());
+        let [upper_area, panel_area, status_area, error_area, hints_area] =
+            layout.areas(upper.len());
         self.render_upper(frame, upper_area, upper);
-        self.render_prompt_box(frame, box_area, theme);
+        self.render_prompt_panel(frame, panel_area, theme);
         frame.render_widget(Paragraph::new(status), status_area);
         frame.render_widget(Paragraph::new(errors), error_area);
         frame.render_widget(Line::styled(self.hints(), theme.dim()), hints_area);
@@ -130,11 +133,24 @@ impl<'a> NewSessionView<'a> {
         }
     }
 
-    fn render_prompt_box(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
+    fn render_prompt_panel(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
         let block = self.prompt_block(theme);
         let inner = block.inner(area);
         frame.render_widget(block, area);
+        frame.render_widget(
+            Span::styled(Self::CHEVRON, self.rule_style(theme)),
+            Self::chevron_area(area, inner),
+        );
         self.prompt.render(frame, inner, self.prompt_style(theme));
+    }
+
+    fn chevron_area(panel: Rect, inner: Rect) -> Rect {
+        Rect {
+            x: panel.x,
+            y: inner.y,
+            width: Self::TEXT_INDENT,
+            height: inner.height.min(Self::CHEVRON_ROWS),
+        }
     }
 
     fn prompt_text_width(&self, area: Rect, theme: &Theme) -> usize {
@@ -142,13 +158,10 @@ impl<'a> NewSessionView<'a> {
     }
 
     fn prompt_block(&self, theme: &Theme) -> Block<'static> {
-        let frame_style = self.frame_style(theme);
-        Block::bordered()
-            .border_type(BorderType::Rounded)
-            .border_style(frame_style)
-            .title(format!(" {} ", NewSessionField::Prompt.label()))
-            .title_style(frame_style)
-            .padding(Padding::horizontal(Self::BOX_PADDING))
+        Block::new()
+            .borders(Borders::TOP | Borders::BOTTOM)
+            .border_style(self.rule_style(theme))
+            .padding(Padding::left(Self::TEXT_INDENT))
     }
 
     fn error_lines(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
@@ -156,7 +169,7 @@ impl<'a> NewSessionView<'a> {
         self.error.map(wrapped).unwrap_or_default()
     }
 
-    fn frame_style(&self, theme: &Theme) -> Style {
+    fn rule_style(&self, theme: &Theme) -> Style {
         if self.is_focused(NewSessionField::Prompt) {
             theme.base()
         } else {
