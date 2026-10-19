@@ -45,16 +45,24 @@ impl TmuxTeardown {
         row: &ManagedRow,
         confirmed: &[u32],
     ) -> Result<Vec<ProcessInfo>, ServiceError> {
+        if row.is_live() {
+            return self.stop_live(row, confirmed);
+        }
+        self.end(confirmed)
+    }
+
+    fn stop_live(
+        &self,
+        row: &ManagedRow,
+        confirmed: &[u32],
+    ) -> Result<Vec<ProcessInfo>, ServiceError> {
         let pane_sessions = self.pane_sessions(row)?;
         self.refuse_wrong_batch(&pane_sessions, confirmed)?;
         self.kill(row)?;
-        self.terminate(&pane_sessions, confirmed)
+        self.end(&self.processes_to_end(&pane_sessions, confirmed))
     }
 
     fn pane_sessions(&self, row: &ManagedRow) -> Result<Vec<u32>, ServiceError> {
-        if !row.is_live() {
-            return Ok(Vec::new());
-        }
         self.multiplexer
             .pane_pids(row.session().tmux_name())
             .map_err(Self::adding(self.kept.on_tmux_failure))
@@ -71,21 +79,14 @@ impl TmuxTeardown {
     }
 
     fn kill(&self, row: &ManagedRow) -> Result<(), ServiceError> {
-        if !row.is_live() {
-            return Ok(());
-        }
         self.multiplexer
             .kill_session(row.session().tmux_name())
             .map_err(Self::adding(self.kept.on_tmux_failure))
     }
 
-    fn terminate(
-        &self,
-        pane_sessions: &[u32],
-        confirmed: &[u32],
-    ) -> Result<Vec<ProcessInfo>, ServiceError> {
+    fn end(&self, pids: &[u32]) -> Result<Vec<ProcessInfo>, ServiceError> {
         self.host
-            .terminate(&self.processes_to_end(pane_sessions, confirmed))
+            .terminate(pids)
             .map_err(Self::adding(self.kept.after_stop))
     }
 

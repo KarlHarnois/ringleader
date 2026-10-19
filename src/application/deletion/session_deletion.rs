@@ -829,6 +829,24 @@ mod tests {
     }
 
     #[test]
+    fn a_refusal_on_a_stopped_session_says_the_session_is_stopped_and_changes_nothing() {
+        let host = ServiceFixture::host_for(&[&DeleteFixture::session()]);
+        let fixture = DeleteFixture::stopped_fixture().with_host(
+            DeleteFixture::with_outside_process(host)
+                .refusing_to_terminate(DeleteFixture::OUTSIDE_PROCESS),
+        );
+
+        let error = DeleteFixture::force(&mut fixture.service()).unwrap_err();
+
+        assert!(
+            error.to_string().contains("which is now stopped"),
+            "{error}"
+        );
+        assert!(fixture.multiplexer().state_changing_calls().is_empty());
+        DeleteFixture::assert_everything_kept(&fixture);
+    }
+
+    #[test]
     fn a_vanished_repository_refuses_delete_without_forget() {
         let fixture = DeleteFixture::live_fixture().with_workspace(
             ServiceFixture::workspace_for(&[&DeleteFixture::session()])
