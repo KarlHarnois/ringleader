@@ -2,11 +2,14 @@
 
 **Every rule in this file binds each change to a platform file, a seam, or a `target_os` cfg attribute.** Ringleader builds for Linux and Apple Silicon macOS.
 
-**A platform file is a file whose `mod` line limits it to one target OS through a `target_os` cfg attribute.** A seam is a capability whose implementation the target OS picks, through one re-export in `adapters/mod.rs`.
+**A platform file is a file whose `mod` line limits it to one target OS through a `target_os` cfg attribute.** A platform-free file is any other file under `src/`. A seam is a capability whose implementation the target OS picks, through one re-export in `adapters/mod.rs`.
 
-- Write a `target_os` cfg attribute only on a `mod` line under `adapters/`, on a seam's re-export, or on the `compile_error!`.
-- Every caller names a seam by its re-export.
-- If only macOS production code calls a platform-free file, compile the file under `#[cfg(any(target_os = "macos", test))]`. Otherwise, Linux builds it as dead code.
+- Write a `target_os` cfg attribute only on one of these:
+  - a `mod` line under `adapters/`
+  - a seam's re-export in `adapters/mod.rs`
+  - the `compile_error!` in `adapters/mod.rs`
+- Name a seam by its re-export, never by the platform type behind it.
+- If the production code of only one target OS calls a platform-free file, compile the file under `#[cfg(any(target_os = "<that OS>", test))]`. Without that attribute, the other target OS builds the file as dead code.
 - A change that edits a platform file is done only after the darwin cross-check passes.
 
 ## Darwin cross-check

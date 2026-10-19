@@ -238,7 +238,7 @@ nix flake check
 | `docs/agents/manual-runs.md` | make a manual run |
 | `docs/agents/uml-viewer.md` | open uml-viewer |
 | `docs/agents/source-folders.md` | add a file under `src/`, move a file there, or make a folder there |
-| `docs/agents/platform-code.md` | change a platform file or a seam, or write a `target_os` cfg attribute |
+| `docs/agents/platform-code.md` | change a file or a re-export that a `target_os` cfg attribute limits, or write such an attribute |
 | `docs/agents/tmux-tests.md` | write or change a test that runs tmux |
 | `docs/agents/features/pull.md` | change the pull that the `p` key starts |
 | `docs/agents/features/direnv.md` | change how create or restart launches an agent, or which variables the agent gets |
