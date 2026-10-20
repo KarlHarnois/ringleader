@@ -3,8 +3,9 @@ use std::time::{Duration, Instant};
 
 use super::bell::Bell;
 use super::home_view::LayoutTier;
+use super::key_hints::KeyHints;
 use super::preview_panel::PreviewPanel;
-use super::status_bar::{KeyHints, StatusBar, StatusNote};
+use super::status_bar::{StatusBar, StatusNote};
 use crate::application::ports::FoldStore;
 use crate::application::{ServiceError, SessionService, Tool};
 use crate::domain::{RepoGroup, SessionSummary};
