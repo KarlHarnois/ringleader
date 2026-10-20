@@ -28,7 +28,8 @@ return_key = "C-q"
 # Inside your own tmux, they must not be bound in its root table, and its
 # escape-time must be low, such as 10, or Esc followed by j, k, or an arrow
 # switches sessions. A removed key that tmux binds in copy mode, other than
-# M-Up and M-Down, stays unbound there until Ringleader's tmux server restarts.
+# M-Up, M-Down, and C-k, stays unbound there until Ringleader's tmux server
+# restarts.
 next_session_keys = ["M-j", "M-Down"]
 previous_session_keys = ["M-k", "M-Up"]
 # Keys that switch between a session's agent and its shell, the one t opens,
