@@ -1,6 +1,7 @@
 pub mod fake_clock;
 pub mod fake_config_source;
 pub mod fake_directory_environment;
+pub mod fake_fold_store;
 pub mod fake_host_probe;
 pub mod fake_interrupts;
 pub mod fake_lock;

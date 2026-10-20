@@ -9,8 +9,11 @@ use ratatui::backend::{Backend, ClearType, TestBackend, WindowSize};
 use ratatui::buffer::Cell;
 use ratatui::layout::{Position, Size};
 
-use super::{Deadline, FakeInterrupts, FakeMultiplexer, RecordingScreenMode, ServiceFixture};
+use super::{
+    Deadline, FakeFoldStore, FakeInterrupts, FakeMultiplexer, RecordingScreenMode, ServiceFixture,
+};
 use crate::application::EphemeralShell;
+use crate::domain::RepoGroup;
 use crate::ui::App;
 use crate::ui::event_loop::{EventLoop, InputSource};
 use crate::ui::shell_runner::ShellRunner;
@@ -25,6 +28,7 @@ pub struct UiHarness {
 impl UiHarness {
     pub const WIDTH: u16 = 100;
     pub const HEIGHT: u16 = 28;
+    const DOCS_REPO: &'static str = "/repos/alpha";
 
     pub fn new() -> Self {
         let mode = RecordingScreenMode::default();
@@ -45,8 +49,34 @@ impl UiHarness {
             .with_multiplexer(FakeMultiplexer::new().with_live(ServiceFixture::exited(&session)))
     }
 
+    pub fn two_repos() -> ServiceFixture {
+        let docs = ServiceFixture::session_at("docs", Self::DOCS_REPO, ServiceFixture::CREATED_AT);
+        let fix_auth = ServiceFixture::session("fix-auth");
+        ServiceFixture::new()
+            .with_sessions(&[docs.clone(), fix_auth.clone()])
+            .with_multiplexer(
+                FakeMultiplexer::new()
+                    .with_live(ServiceFixture::waiting(&docs))
+                    .with_live(ServiceFixture::waiting(&fix_auth)),
+            )
+    }
+
+    pub fn docs_repo_group() -> RepoGroup {
+        ServiceFixture::repo_group(Self::DOCS_REPO)
+    }
+
     pub fn app(fixture: &ServiceFixture) -> App {
-        App::new(fixture.service(), Box::new(io::sink()), Instant::now())
+        Self::app_with_folds(fixture, &FakeFoldStore::default())
+    }
+
+    pub fn app_with_folds(fixture: &ServiceFixture, folds: &FakeFoldStore) -> App {
+        let folds = Box::new(folds.clone());
+        App::new(
+            fixture.service(),
+            Box::new(io::sink()),
+            folds,
+            Instant::now(),
+        )
     }
 
     pub fn settle(app: &mut App) {

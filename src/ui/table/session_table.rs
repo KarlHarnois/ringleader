@@ -244,9 +244,8 @@ mod tests {
     use ratatui::style::{Color, Modifier};
 
     use super::*;
-    use crate::domain::{DiffStat, PullRequestState, SessionState, UnmanagedSession};
+    use crate::domain::{DiffStat, PullRequestState, RepoGroup, SessionState, UnmanagedSession};
     use crate::test_support::ServiceFixture;
-    use crate::ui::table::repo_group::RepoGroup;
 
     struct TableFixture;
 

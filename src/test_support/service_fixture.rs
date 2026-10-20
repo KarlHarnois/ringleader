@@ -15,8 +15,9 @@ use crate::application::{
 };
 use crate::domain::{
     Agent, AgentPane, BaseBranch, Config, HotKey, KeyBindings, NamingScheme, PullRequest,
-    PullRequestState, Registration, Repo, RepoName, Session, SessionMetadata, SessionName,
-    SessionObservation, SessionRepo, SessionState, SessionSummary, SessionWorktree, TmuxAddress,
+    PullRequestState, Registration, Repo, RepoGroup, RepoName, Session, SessionMetadata,
+    SessionName, SessionObservation, SessionRepo, SessionState, SessionSummary, SessionWorktree,
+    TmuxAddress,
 };
 
 pub struct ServiceFixture {
@@ -371,6 +372,12 @@ impl ServiceFixture {
     pub fn summary_in(name: &str, repo_path: &str, state: SessionState) -> SessionSummary {
         let session = Self::session_at(name, repo_path, Self::CREATED_AT);
         SessionSummary::managed(session, state, false)
+    }
+
+    pub fn repo_group(repo_path: &str) -> RepoGroup {
+        let repo_path = Path::new(repo_path);
+        let repo_name = RepoName::of_directory(repo_path).unwrap();
+        RepoGroup::Named(repo_name, repo_path.to_path_buf())
     }
 
     pub fn session_with_agent(name: &str, agent: &str) -> Session {

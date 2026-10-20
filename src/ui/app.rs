@@ -7,6 +7,7 @@ use ratatui::Frame;
 use super::blocking_operation::{BlockingOperation, OperationOutcome};
 use super::dialogs::{Dialog, DialogSlot, DialogStep};
 use super::theme::Theme;
+use crate::application::ports::FoldStore;
 use crate::application::{EphemeralShell, ServiceError, SessionService, ShellOutcome};
 use crate::ui::home::bell::Bell;
 use crate::ui::home::home_state::HomeState;
@@ -30,10 +31,15 @@ impl App {
     const RELOADED: &'static str = "Reloaded the config and the registry.";
     const RELOAD_FAILED: &'static str = "reload failed, kept the previous config";
 
-    pub fn new(service: SessionService, bell_sink: Box<dyn Write>, now: Instant) -> Self {
+    pub fn new(
+        service: SessionService,
+        bell_sink: Box<dyn Write>,
+        folds: Box<dyn FoldStore>,
+        now: Instant,
+    ) -> Self {
         Self {
             service,
-            home: HomeState::new(now, Bell::new(bell_sink)),
+            home: HomeState::new(now, Bell::new(bell_sink), folds),
             key_sequence: KeySequence::default(),
             dialogs: DialogSlot::default(),
             status: StatusReport::default(),
@@ -67,6 +73,10 @@ impl App {
             Event::Key(key) if key.kind != KeyEventKind::Release => self.handle_key(key),
             _ => AppRequest::Continue,
         }
+    }
+
+    pub fn restore_folds(&mut self) {
+        self.home.restore_folds();
     }
 
     pub fn resize(&mut self, width: u16, height: u16) {
@@ -302,6 +312,7 @@ pub enum AppRequest {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
     use std::time::{Duration, Instant};
@@ -323,8 +334,9 @@ mod tests {
         UsageLimit, UsageRow,
     };
     use crate::test_support::{
-        CapturedWriter, Deadline, FakeMultiplexer, FakePullRequests, FakeTerminalEmulator,
-        FakeUsageMeter, FakeWebBrowser, HeldCalls, ServiceFixture, UiHarness,
+        CapturedWriter, Deadline, FakeFoldStore, FakeMultiplexer, FakePullRequests,
+        FakeTerminalEmulator, FakeUsageMeter, FakeWebBrowser, HeldCalls, LogCapture,
+        ServiceFixture, UiHarness,
     };
 
     struct AppFixture;
@@ -376,19 +388,6 @@ mod tests {
                 .with_capture(session.tmux_name(), preview)
         }
 
-        fn two_repos() -> ServiceFixture {
-            let docs =
-                ServiceFixture::session_at("docs", "/repos/alpha", ServiceFixture::CREATED_AT);
-            let fix_auth = ServiceFixture::session("fix-auth");
-            ServiceFixture::new()
-                .with_sessions(&[docs.clone(), fix_auth.clone()])
-                .with_multiplexer(
-                    FakeMultiplexer::new()
-                        .with_live(ServiceFixture::waiting(&docs))
-                        .with_live(ServiceFixture::waiting(&fix_auth)),
-                )
-        }
-
         fn log_file_outside_the_state_directory() -> ServiceFixture {
             let log_file = Path::new(Self::LOG_FILE_OUTSIDE_THE_STATE_DIRECTORY);
             ServiceFixture::new()
@@ -428,7 +427,13 @@ mod tests {
         }
 
         fn ringing(fixture: &ServiceFixture, bell: &CapturedWriter) -> App {
-            let mut app = App::new(fixture.service(), Box::new(bell.clone()), Instant::now());
+            let folds = Box::new(FakeFoldStore::default());
+            let mut app = App::new(
+                fixture.service(),
+                Box::new(bell.clone()),
+                folds,
+                Instant::now(),
+            );
             app.resize(100, 28);
             UiHarness::settle(&mut app);
             app
@@ -444,6 +449,14 @@ mod tests {
         fn started(fixture: &ServiceFixture, width: u16, height: u16) -> App {
             let mut app = UiHarness::app(fixture);
             app.resize(width, height);
+            UiHarness::settle(&mut app);
+            app
+        }
+
+        fn restored(fixture: &ServiceFixture, folds: &FakeFoldStore) -> App {
+            let mut app = UiHarness::app_with_folds(fixture, folds);
+            app.restore_folds();
+            app.resize(UiHarness::WIDTH, UiHarness::HEIGHT);
             UiHarness::settle(&mut app);
             app
         }
@@ -872,7 +885,7 @@ mod tests {
 
     #[test]
     fn space_folds_the_selected_repo() {
-        let fixture = AppFixture::two_repos();
+        let fixture = UiHarness::two_repos();
         let mut app = AppFixture::started(&fixture, 100, 28);
 
         AppFixture::press(&mut app, ' ');
@@ -884,8 +897,107 @@ mod tests {
     }
 
     #[test]
+    fn space_saves_the_folded_repo() {
+        let fixture = UiHarness::two_repos();
+        let folds = FakeFoldStore::default();
+        let mut app = AppFixture::restored(&fixture, &folds);
+
+        AppFixture::press(&mut app, ' ');
+
+        assert_eq!(
+            folds.folded(),
+            HashSet::from([UiHarness::docs_repo_group()])
+        );
+    }
+
+    #[test]
+    fn folds_saved_by_an_earlier_run_show_at_start() {
+        let fixture = UiHarness::two_repos();
+
+        let app = AppFixture::restored(
+            &fixture,
+            &FakeFoldStore::holding(&[UiHarness::docs_repo_group()]),
+        );
+
+        let screen = AppFixture::screen(&app, 100, 28);
+        assert!(screen.contains("1 ▸ alpha ●1"));
+        assert!(!screen.contains("docs"));
+    }
+
+    #[test]
+    fn observing_and_moving_without_a_fold_change_saves_nothing_so_ticks_write_no_file() {
+        let fixture = UiHarness::two_repos();
+        let folds = FakeFoldStore::holding(&[UiHarness::docs_repo_group()]);
+        let mut app = AppFixture::restored(&fixture, &folds);
+
+        AppFixture::press(&mut app, 'j');
+        app.observe();
+
+        assert_eq!(folds.save_count(), 0);
+    }
+
+    #[test]
+    fn returning_from_a_session_in_a_folded_repo_saves_its_repo_unfolded() {
+        let fixture = UiHarness::two_repos();
+        let folds = FakeFoldStore::holding(&[UiHarness::docs_repo_group()]);
+        let mut app = AppFixture::restored(&fixture, &folds);
+
+        app.attach("docs");
+
+        assert!(folds.folded().is_empty());
+    }
+
+    #[test]
+    fn a_saved_fold_is_saved_as_forgotten_when_its_repo_starts_without_a_heading() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let folds = FakeFoldStore::holding(&[ServiceFixture::repo_group(ServiceFixture::REPO)]);
+
+        AppFixture::restored(&fixture, &folds);
+
+        assert!(folds.folded().is_empty());
+    }
+
+    #[test]
+    fn a_failed_fold_save_is_logged_and_the_fold_still_shows() {
+        const DETAIL: &str = "the disk refused the fold save";
+        let log = LogCapture::installed();
+        let fixture = UiHarness::two_repos();
+        let mut app = AppFixture::restored(&fixture, &FakeFoldStore::failing_saves(DETAIL));
+
+        AppFixture::press(&mut app, ' ');
+
+        let screen = AppFixture::screen(&app, 100, 28);
+        assert!(screen.contains("1 ▸ alpha ●1"));
+        assert!(!screen.contains(DETAIL));
+        assert_eq!(log.count_containing(DETAIL), 1);
+    }
+
+    #[test]
+    fn an_unreadable_fold_file_is_logged_and_every_repo_starts_unfolded() {
+        const DETAIL: &str = "the disk refused the fold load";
+        let log = LogCapture::installed();
+        let fixture = UiHarness::two_repos();
+
+        let app = AppFixture::restored(&fixture, &FakeFoldStore::failing_loads(DETAIL));
+
+        assert!(AppFixture::screen(&app, 100, 28).contains("docs"));
+        assert_eq!(log.count_containing(DETAIL), 1);
+    }
+
+    #[test]
+    fn a_read_only_tui_still_saves_its_folds_because_a_fold_changes_no_session() {
+        let fixture = UiHarness::two_repos().with_broken_config(AppFixture::config_error());
+        let folds = FakeFoldStore::default();
+        let mut app = AppFixture::restored(&fixture, &folds);
+
+        AppFixture::press(&mut app, ' ');
+
+        assert_eq!(folds.save_count(), 1);
+    }
+
+    #[test]
     fn a_digit_jumps_to_that_repo_and_previews_its_first_session() {
-        let fixture = AppFixture::two_repos();
+        let fixture = UiHarness::two_repos();
         let mut app = AppFixture::started(&fixture, 100, 28);
 
         AppFixture::press(&mut app, '2');

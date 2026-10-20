@@ -1,7 +1,8 @@
 use std::fmt;
 use std::path::PathBuf;
 
-use crate::domain::{RepoName, SessionSummary};
+use super::repo_name::RepoName;
+use crate::domain::SessionSummary;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum RepoGroup {
@@ -37,21 +38,12 @@ mod tests {
     use crate::domain::{SessionState, UnmanagedSession};
     use crate::test_support::ServiceFixture;
 
-    struct GroupFixture;
-
-    impl GroupFixture {
-        fn named(name: &str) -> RepoGroup {
-            let path = PathBuf::from(format!("/repos/{name}"));
-            RepoGroup::Named(RepoName::parse(name).unwrap(), path)
-        }
-    }
-
     #[test]
     fn named_repos_sort_alphabetically_before_other() {
         let mut groups = vec![
             RepoGroup::Other,
-            GroupFixture::named("zebra"),
-            GroupFixture::named("alpha"),
+            ServiceFixture::repo_group("/repos/zebra"),
+            ServiceFixture::repo_group("/repos/alpha"),
         ];
 
         groups.sort();
@@ -59,8 +51,8 @@ mod tests {
         assert_eq!(
             groups,
             [
-                GroupFixture::named("alpha"),
-                GroupFixture::named("zebra"),
+                ServiceFixture::repo_group("/repos/alpha"),
+                ServiceFixture::repo_group("/repos/zebra"),
                 RepoGroup::Other
             ]
         );

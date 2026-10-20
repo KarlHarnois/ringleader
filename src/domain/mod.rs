@@ -39,6 +39,7 @@ pub use naming_scheme::NamingScheme;
 pub use pull_request::{PullRequest, PullRequestState};
 pub use repo_draft::RepoDraft;
 pub use repos::repo::{Repo, RepoScope};
+pub use repos::repo_group::RepoGroup;
 pub use repos::repo_name::RepoName;
 pub use sessions::session::{Registration, Session, TmuxAddress};
 pub use sessions::session_classifier::SessionClassifier;

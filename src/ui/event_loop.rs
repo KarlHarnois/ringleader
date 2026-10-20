@@ -71,6 +71,7 @@ where
 
     fn start(&mut self, app: &mut App) -> io::Result<()> {
         let size = self.terminal.size().map_err(io::Error::other)?;
+        app.restore_folds();
         app.resize(size.width, size.height);
         app.observe();
         app.refresh_usage();
@@ -214,8 +215,8 @@ mod tests {
     use crate::application::EphemeralShell;
     use crate::application::ports::AttachTarget;
     use crate::test_support::{
-        Deadline, FakeMultiplexer, FixtureBackend, HeldCalls, RecordingShells, ScriptedInput,
-        ServiceFixture, UiHarness,
+        Deadline, FakeFoldStore, FakeMultiplexer, FixtureBackend, HeldCalls, RecordingShells,
+        ScriptedInput, ServiceFixture, UiHarness,
     };
     use crate::ui::App;
 
@@ -555,6 +556,19 @@ mod tests {
         let measured = Deadline::for_background_work()
             .wait_until(|| fixture.usage_meter().calls() == ["measure claude"]);
         assert!(measured, "{:?}", fixture.usage_meter().calls());
+    }
+
+    #[test]
+    fn the_loop_shows_the_folds_saved_by_an_earlier_run() {
+        let fixture = UiHarness::two_repos();
+        let folds = FakeFoldStore::holding(&[UiHarness::docs_repo_group()]);
+        let harness = UiHarness::new();
+        let mut app = UiHarness::app_with_folds(&fixture, &folds);
+        let mut event_loop = harness.event_loop(ScriptedInput::events(vec![]));
+
+        event_loop.run(&mut app).unwrap();
+
+        assert!(event_loop.backend().text().contains("▸ alpha"));
     }
 
     #[test]
