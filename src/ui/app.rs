@@ -9,6 +9,7 @@ use super::dialogs::{Dialog, DialogSlot, DialogStep};
 use super::theme::Theme;
 use crate::application::ports::FoldStore;
 use crate::application::{EphemeralShell, ServiceError, SessionService, ShellOutcome};
+use crate::domain::RepoGroup;
 use crate::ui::home::bell::Bell;
 use crate::ui::home::home_state::HomeState;
 use crate::ui::home::home_view::HomeView;
@@ -266,7 +267,8 @@ impl App {
 
     fn open_on_desktop(&mut self, opening: DesktopOpening) {
         match opening {
-            DesktopOpening::Terminal(name) => self.open_terminal(&name),
+            DesktopOpening::SessionTerminal(name) => self.open_terminal(&name),
+            DesktopOpening::RepoTerminal(group) => self.open_repo_terminal(&group),
             DesktopOpening::PullRequest(name) => self.open_pull_request(&name),
         }
     }
@@ -274,6 +276,12 @@ impl App {
     fn open_terminal(&mut self, name: &str) {
         let outcome = self.service.open_terminal(name);
         let opened = format!("Opened a terminal window in the worktree of {name}.");
+        self.status.outcome(outcome, opened);
+    }
+
+    fn open_repo_terminal(&mut self, group: &RepoGroup) {
+        let outcome = self.service.open_repo_terminal(group);
+        let opened = format!("Opened a terminal window in the main checkout of {group}.");
         self.status.outcome(outcome, opened);
     }
 
@@ -578,6 +586,18 @@ mod tests {
                 app.on_tick(Instant::now());
                 !Self::screen(app, 100, 28).contains("Finding the repo")
             });
+        }
+
+        fn beside_a_stranger() -> ServiceFixture {
+            let session = ServiceFixture::session("fix-auth");
+            let stranger = ServiceFixture::session("mystery");
+            ServiceFixture::new()
+                .with_sessions(std::slice::from_ref(&session))
+                .with_multiplexer(
+                    FakeMultiplexer::new()
+                        .with_live(ServiceFixture::waiting(&session))
+                        .with_live(ServiceFixture::waiting(&stranger).without_metadata()),
+                )
         }
 
         fn deletable() -> ServiceFixture {
@@ -1456,6 +1476,44 @@ mod tests {
                 "worktree {} is missing, run ringleader doctor",
                 ServiceFixture::worktree_path("dark-mode").display()
             )))
+        );
+        assert!(fixture.terminal_emulator().opened().is_empty());
+    }
+
+    #[test]
+    fn capital_t_on_a_repo_heading_opens_a_terminal_in_its_main_checkout() {
+        let docs_repo = UiHarness::docs_repo_group();
+        let main_checkout = docs_repo.path().unwrap();
+        let fixture = UiHarness::two_repos()
+            .with_host(ServiceFixture::host_for(&[]).with_directory(main_checkout));
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press(&mut app, 'T');
+
+        assert_eq!(fixture.terminal_emulator().opened(), [main_checkout]);
+        assert_eq!(
+            app.status.message(),
+            Some(&StatusMessage::Info(
+                "Opened a terminal window in the main checkout of alpha.".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn capital_t_on_the_other_heading_says_it_has_no_main_checkout() {
+        let fixture = AppFixture::beside_a_stranger();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, 'G');
+        AppFixture::press(&mut app, 'k');
+
+        AppFixture::press(&mut app, 'T');
+
+        assert_eq!(
+            app.status.message(),
+            Some(&StatusMessage::Error(
+                "the sessions under other belong to no repo, so there is no main checkout to open"
+                    .to_string()
+            ))
         );
         assert!(fixture.terminal_emulator().opened().is_empty());
     }
