@@ -127,6 +127,8 @@ impl KeyHints {
         ("q", "quit"),
     ];
     const HEADING_DROP_ORDER: [&'static str; 2] = ["u", "/"];
+    const NO_SELECTION_HINTS: [(&'static str, &'static str); 4] =
+        [("n", "new"), ("u", "usage"), ("?", "help"), ("q", "quit")];
     const WIDE_GAP: &'static str = "   ";
     const NARROW_GAP: &'static str = "  ";
 
@@ -141,6 +143,13 @@ impl KeyHints {
         Self {
             hints: &Self::HEADING_HINTS,
             drop_order: &Self::HEADING_DROP_ORDER,
+        }
+    }
+
+    pub fn without_selection() -> Self {
+        Self {
+            hints: &Self::NO_SELECTION_HINTS,
+            drop_order: &[],
         }
     }
 
@@ -284,6 +293,16 @@ mod tests {
         assert_eq!(
             BarFixture::render(status, 95),
             " n new   Enter fold   / find   u usage   ? help   q quit"
+        );
+    }
+
+    #[test]
+    fn a_bar_without_a_selection_lists_only_keys_that_need_no_session() {
+        let status = StatusBar::new(Theme).with_hints(KeyHints::without_selection());
+
+        assert_eq!(
+            BarFixture::render(status, 95),
+            " n new   u usage   ? help   q quit"
         );
     }
 

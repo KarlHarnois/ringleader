@@ -74,7 +74,10 @@ impl HomeState {
         if self.sessions.heading_selected() {
             return KeyHints::on_heading();
         }
-        KeyHints::on_session()
+        match self.sessions.selected() {
+            Some(_) => KeyHints::on_session(),
+            None => KeyHints::without_selection(),
+        }
     }
 
     pub fn resize(
