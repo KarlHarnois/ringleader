@@ -23,8 +23,13 @@ impl PullRequestFeed {
     }
 
     pub fn adopt_latest(&mut self, name: &str, service: &SessionService) {
-        if let Some(pull_request) = service.latest_pull_request(name) {
-            self.pull_requests.insert(name.to_string(), pull_request);
+        match service.latest_pull_request(name) {
+            Some(pull_request) => {
+                self.pull_requests.insert(name.to_string(), pull_request);
+            }
+            None => {
+                self.pull_requests.remove(name);
+            }
         }
     }
 
@@ -35,20 +40,22 @@ impl PullRequestFeed {
 
     pub fn tick(&mut self, now: Instant, visible: &[String], service: &SessionService) {
         let next_refresh = now + service.config().intervals().pull_request_refresh();
-        self.collect(next_refresh);
+        self.collect(next_refresh, service);
         if self.is_due(now, visible) && !visible.is_empty() {
             self.start(next_refresh, visible, service);
         }
     }
 
-    fn collect(&mut self, next_refresh: Instant) {
+    fn collect(&mut self, next_refresh: Instant, service: &SessionService) {
         let Some(finished) = self.pending.as_ref().and_then(Pending::poll) else {
             return;
         };
         self.pending = None;
         self.next_refresh = Some(next_refresh);
         match finished {
-            Ok(found) => self.merge(found),
+            Ok(looked_up) => looked_up
+                .keys()
+                .for_each(|name| self.adopt_latest(name, service)),
             Err(error) => log::warn!("could not look up pull requests: {error}"),
         }
     }
@@ -68,19 +75,6 @@ impl PullRequestFeed {
         self.looked_up.extend(visible.iter().cloned());
         self.pending = Some(service.find_pull_requests(visible));
     }
-
-    fn merge(&mut self, found: HashMap<String, Option<PullRequest>>) {
-        for (name, pull_request) in found {
-            match pull_request {
-                Some(pull_request) => {
-                    self.pull_requests.insert(name, pull_request);
-                }
-                None => {
-                    self.pull_requests.remove(&name);
-                }
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -90,7 +84,7 @@ mod tests {
 
     use super::*;
     use crate::domain::PullRequestState;
-    use crate::test_support::{FakePullRequests, ServiceFixture};
+    use crate::test_support::{Deadline, FakePullRequests, ServiceFixture};
 
     struct FeedFixture;
 
@@ -134,6 +128,26 @@ mod tests {
 
         fn visible() -> Vec<String> {
             vec![Self::NAME.to_string()]
+        }
+
+        fn look_up_in_catalog(service: &SessionService) {
+            service
+                .find_pull_requests(&Self::visible())
+                .wait_unless(|| false)
+                .unwrap()
+                .unwrap();
+        }
+
+        fn start_stale_lookup(feed: &mut PullRequestFeed) {
+            let stale = HashMap::from([(Self::NAME.to_string(), None)]);
+            feed.pending = Some(Pending::start(move || Ok(stale)));
+        }
+
+        fn collect(feed: &mut PullRequestFeed, service: &SessionService) {
+            Deadline::for_background_work().wait_until(|| {
+                feed.tick(Instant::now(), &[], service);
+                feed.pending.is_none()
+            });
         }
 
         fn settle(feed: &mut PullRequestFeed, fixture: &ServiceFixture, service: &SessionService) {
@@ -268,11 +282,7 @@ mod tests {
     fn adopting_the_latest_pull_request_takes_the_catalogs_answer_without_a_lookup() {
         let fixture = FeedFixture::with_pull_request(142);
         let service = fixture.service();
-        service
-            .find_pull_requests(&FeedFixture::visible())
-            .wait_unless(|| false)
-            .unwrap()
-            .unwrap();
+        FeedFixture::look_up_in_catalog(&service);
         let mut feed = PullRequestFeed::default();
 
         feed.adopt_latest(FeedFixture::NAME, &service);
@@ -282,6 +292,23 @@ mod tests {
             Some(&FeedFixture::open(142))
         );
         assert_eq!(fixture.pull_requests().calls().len(), 1);
+    }
+
+    #[test]
+    fn a_lookup_that_lands_after_o_keeps_the_pull_request_o_found() {
+        let fixture = FeedFixture::with_pull_request(142);
+        let service = fixture.service();
+        FeedFixture::look_up_in_catalog(&service);
+        let mut feed = PullRequestFeed::default();
+        FeedFixture::start_stale_lookup(&mut feed);
+        feed.adopt_latest(FeedFixture::NAME, &service);
+
+        FeedFixture::collect(&mut feed, &service);
+
+        assert_eq!(
+            feed.pull_requests().get(FeedFixture::NAME),
+            Some(&FeedFixture::open(142))
+        );
     }
 
     #[test]
