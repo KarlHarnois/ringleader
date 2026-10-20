@@ -243,6 +243,7 @@ nix flake check
 | `docs/agents/platform-code.md` | change a file or a re-export that a `target_os` cfg attribute limits, or write such an attribute |
 | `docs/agents/tmux-tests.md` | write or change a test that runs tmux |
 | `docs/agents/hint-lines.md` | write or change a dialog's hint line, or add a text-editing key |
+| `docs/agents/tmux-commands.md` | write or change a tmux command that Ringleader runs or binds |
 | `docs/agents/features/pull.md` | change the pull that the `p` key starts |
 | `docs/agents/features/direnv.md` | change how create or restart launches an agent, or which variables the agent gets |
 | `docs/agents/features/agent-hooks.md` | change how `AgentHooks` types into an agent, or the check that an agent is at its prompt |
@@ -385,25 +386,6 @@ nix flake check
 `clippy.toml` refuses every other read. Never add an `#[expect(clippy::disallowed_methods)]`: each existing one marks a reader that `main` calls, or the `PATH` that tests inherit.
 
 Confine each `unsafe` block to one adapter method.
-
-### tmux targets
-
-**Every tmux target is exact.** An exact target is one of these:
-
-- `=<session>:` from `TmuxScripts::exact`
-- a session id
-- a window id
-- a pane id
-
-**Never pass a bare `-t <name>`:** tmux resolves a name with no exact match by prefix. A bare `-t fix` would reach `fix-auth`.
-
-- If a session's name starts with `$`, target the session by its id. tmux reads `=$0:` as the session whose id is `$0`.
-
-### tmux start directories
-
-**Every `new-session`, `new-window`, and `respawn-window` passes `-c` with the worktree.** Without `-c`, tmux starts the pane in the caller's directory and still exits 0.
-
-- A binding in the generated config passes `-c '#{session_path}'`. Ringleader renders the config before any session exists, and `create_session` starts each session in its worktree.
 
 ## Wiring
 
