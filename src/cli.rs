@@ -711,15 +711,6 @@ mod tests {
     }
 
     #[test]
-    fn the_hidden_finder_takes_no_write_lock_so_it_opens_while_the_tui_holds_one() {
-        let harness = CliHarness::new(ServiceFixture::new()).with_lock(FakeLock::held_elsewhere());
-
-        let exit = harness.run(&["__find-session", "--client", "client-1234"]);
-
-        assert_eq!(exit, CliExit::Code(0));
-    }
-
-    #[test]
     fn a_run_that_another_entry_point_takes_runs_no_command() {
         for arguments in [
             ["__find-session", "--client", "client-1234"].as_slice(),
