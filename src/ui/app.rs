@@ -902,19 +902,15 @@ mod tests {
         let fixture = UiHarness::two_repos();
         let app = AppFixture::started(&fixture, 100, 28);
 
-        let screen = AppFixture::screen(&app, 100, 28);
-
-        assert!(screen.lines().last().unwrap().contains("Enter fold"));
+        assert!(AppFixture::status_line(&app, 100).contains("Enter fold"));
     }
 
     #[test]
     fn the_empty_home_screen_offers_no_session_key_in_the_hint_bar() {
         let app = AppFixture::started(&ServiceFixture::new(), 100, 28);
 
-        let screen = AppFixture::screen(&app, 100, 28);
-
         assert_eq!(
-            screen.lines().last().unwrap().trim_end(),
+            AppFixture::status_line(&app, 100),
             " n new   u usage   ? help   q quit"
         );
     }
