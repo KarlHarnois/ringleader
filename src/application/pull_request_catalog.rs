@@ -41,6 +41,12 @@ impl PullRequestCatalog {
         pull_request
     }
 
+    pub fn look_up_unless_known(&self, session: &Session) {
+        if self.latest(session).is_none() {
+            self.fetch(PullRequestQuery::of_worktree(session).into_iter().collect());
+        }
+    }
+
     fn fetch(&self, queries: Vec<PullRequestQuery>) -> HashMap<String, Option<PullRequest>> {
         let mut found = HashMap::new();
         for (repo, group) in Self::by_repo(queries) {
@@ -333,6 +339,44 @@ mod tests {
             ServiceFixture::session_at("fix-auth", ServiceFixture::REPO, ServiceFixture::NOW + 1);
 
         assert_eq!(catalog.latest(&recreated), None);
+    }
+
+    #[test]
+    fn a_pull_request_opened_since_the_last_lookup_is_found_on_demand() {
+        let session = ServiceFixture::session("fix-auth");
+        let fake = Arc::new(FakePullRequests::new());
+        let catalog = CatalogFixture::looked_up(fake.clone(), &session);
+
+        fake.add_pull_request(
+            Path::new(ServiceFixture::REPO),
+            session.branch(),
+            CatalogFixture::open(142),
+        );
+        catalog.look_up_unless_known(&session);
+
+        assert_eq!(catalog.latest(&session), Some(CatalogFixture::open(142)));
+    }
+
+    #[test]
+    fn a_known_pull_request_is_not_looked_up_again() {
+        let session = ServiceFixture::session("fix-auth");
+        let fake = CatalogFixture::with_pull_request(&session, 142);
+        let catalog = CatalogFixture::looked_up(fake.clone(), &session);
+
+        catalog.look_up_unless_known(&session);
+
+        assert_eq!(fake.calls().len(), 1);
+    }
+
+    #[test]
+    fn a_main_checkout_session_is_never_looked_up_on_demand() {
+        let session = ServiceFixture::main_checkout_session("fix-auth");
+        let fake = Arc::new(FakePullRequests::new());
+        let catalog = PullRequestCatalog::new(fake.clone());
+
+        catalog.look_up_unless_known(&session);
+
+        assert!(fake.calls().is_empty());
     }
 
     #[test]

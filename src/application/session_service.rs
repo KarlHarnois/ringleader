@@ -336,12 +336,14 @@ impl SessionService {
     }
 
     pub fn open_pull_request(&self, name: &str) -> Result<(), ServiceError> {
-        let pull_request = self
+        let session = self
             .entry(name)
-            .and_then(|session| self.pull_request_catalog.latest(session))
-            .ok_or_else(|| {
-                ServiceError::NotFound(format!("no pull request is known for {name}"))
-            })?;
+            .ok_or_else(|| Self::no_known_pull_request(name))?;
+        self.pull_request_catalog.look_up_unless_known(session);
+        let pull_request = self
+            .pull_request_catalog
+            .latest(session)
+            .ok_or_else(|| Self::no_known_pull_request(name))?;
         self.access.open_pull_request(&pull_request)
     }
 
@@ -374,6 +376,10 @@ impl SessionService {
         self.entries
             .iter()
             .find(|entry| entry.name().as_str() == name)
+    }
+
+    fn no_known_pull_request(name: &str) -> ServiceError {
+        ServiceError::NotFound(format!("no pull request is known for {name}"))
     }
 }
 

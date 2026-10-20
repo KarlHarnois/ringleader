@@ -142,6 +142,7 @@ impl HomeState {
 
     pub fn returned_from(&mut self, name: &str) {
         self.bell.forget(name);
+        self.pull_requests.refresh_soon();
     }
 
     pub fn select(&mut self, name: &str, service: &SessionService) {

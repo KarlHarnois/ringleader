@@ -5,6 +5,7 @@ use crate::application::ports::ConfigError;
 use crate::domain::{Session, SessionState, SessionSummary};
 use crate::ui::app::AppRequest;
 use crate::ui::blocking_operation::BlockingOperation;
+use crate::ui::delete_step::DeleteStep;
 use crate::ui::dialogs::DialogOpening;
 
 pub struct ActionGate<'a> {
@@ -89,10 +90,7 @@ impl<'a> ActionGate<'a> {
         let action = match code {
             KeyCode::Enter => self.enter(),
             KeyCode::Char('t') => KeyAction::from(self.shell().map(KeyAction::Request)),
-            KeyCode::Char('T') => KeyAction::from(
-                self.terminal()
-                    .map(|name| KeyAction::OpenOnDesktop(DesktopOpening::Terminal(name))),
-            ),
+            KeyCode::Char('T') => KeyAction::from(self.terminal().map(KeyAction::OpenTerminal)),
             KeyCode::Char('o') => self.open_pull_request(),
             _ => return None,
         };
@@ -144,9 +142,9 @@ impl<'a> ActionGate<'a> {
 
     pub fn open_pull_request(&self) -> KeyAction {
         let name = self.selected().map(|row| row.name().to_string());
-        KeyAction::from(
-            name.map(|name| KeyAction::OpenOnDesktop(DesktopOpening::PullRequest(name))),
-        )
+        KeyAction::from(name.map(|name| {
+            KeyAction::Request(AppRequest::Block(BlockingOperation::OpenPullRequest(name)))
+        }))
     }
 
     fn managed_name(&self, refusal: &str) -> Result<String, String> {
@@ -165,7 +163,7 @@ impl<'a> ActionGate<'a> {
         if row.state() == SessionState::Unmanaged {
             return Err(format!("{name} is unmanaged, so it cannot be deleted."));
         }
-        let operation = BlockingOperation::MeasureDelete(name.to_string());
+        let operation = BlockingOperation::Delete(DeleteStep::Measure(name.to_string()));
         Ok(AppRequest::Block(operation))
     }
 
@@ -242,15 +240,9 @@ pub enum KeyAction {
     Open(DialogOpening),
     FindSession,
     Reload,
-    OpenOnDesktop(DesktopOpening),
+    OpenTerminal(String),
     Refuse(String),
     Ignore,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DesktopOpening {
-    Terminal(String),
-    PullRequest(String),
 }
 
 impl From<Result<KeyAction, String>> for KeyAction {
@@ -579,8 +571,8 @@ mod tests {
 
         assert_eq!(
             ActionGate::new(Some(&row), None).action_for(&key),
-            KeyAction::Request(AppRequest::Block(BlockingOperation::MeasureDelete(
-                "fix-auth".to_string()
+            KeyAction::Request(AppRequest::Block(BlockingOperation::Delete(
+                DeleteStep::Measure("fix-auth".to_string())
             )))
         );
     }
@@ -709,7 +701,9 @@ mod tests {
         assert_eq!(
             ActionGate::new(Some(&row), Some(&error))
                 .action_for(&KeyEvent::from(KeyCode::Char('o'))),
-            KeyAction::OpenOnDesktop(DesktopOpening::PullRequest("fix-auth".to_string()))
+            KeyAction::Request(AppRequest::Block(BlockingOperation::OpenPullRequest(
+                "fix-auth".to_string()
+            )))
         );
     }
 
@@ -728,7 +722,7 @@ mod tests {
 
             assert_eq!(
                 ActionGate::new(Some(&row), Some(&error)).action_for(&key),
-                KeyAction::OpenOnDesktop(DesktopOpening::Terminal("fix-auth".to_string()))
+                KeyAction::OpenTerminal("fix-auth".to_string())
             );
         }
     }

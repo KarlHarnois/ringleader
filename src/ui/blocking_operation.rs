@@ -1,17 +1,16 @@
-use crate::application::{
-    CreateRequest, DeleteConfirmation, DeleteImpact, DeleteOutcome, RestartReport, ServiceError,
-    SessionService, StartOutcome,
-};
+use crate::application::{CreateRequest, RestartReport, SessionService, StartOutcome};
+use crate::ui::delete_step::DeleteStep;
+use crate::ui::operation_outcome::OperationOutcome;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BlockingOperation {
     Restart(String),
     RestartAll,
     Create(CreateRequest),
-    MeasureDelete(String),
-    Delete { name: String, seen: DeleteImpact },
+    Delete(DeleteStep),
     Rename { old: String, new: String },
     Merge(String),
+    OpenPullRequest(String),
 }
 
 impl BlockingOperation {
@@ -20,10 +19,10 @@ impl BlockingOperation {
             Self::Restart(name) => format!("Restarting {name}…"),
             Self::RestartAll => "Restarting every exited or stopped session…".to_string(),
             Self::Create(request) => format!("Creating {}…", request.name()),
-            Self::MeasureDelete(name) => format!("Checking what deleting {name} would lose…"),
-            Self::Delete { name, .. } => format!("Deleting {name}…"),
+            Self::Delete(step) => step.busy_message(),
             Self::Rename { old, .. } => format!("Renaming {old}…"),
             Self::Merge(name) => format!("Fetching origin and merging it into {name}…"),
+            Self::OpenPullRequest(name) => format!("Finding the pull request of {name}…"),
         }
     }
 
@@ -32,10 +31,20 @@ impl BlockingOperation {
             Self::Restart(name) => Self::restart(service, name),
             Self::RestartAll => Self::restart_all(service),
             Self::Create(request) => Self::create(service, &request),
-            Self::MeasureDelete(name) => Self::measure(service, name),
-            Self::Delete { name, seen } => Self::delete(service, name, seen),
+            Self::Delete(step) => step.run(service),
             Self::Rename { old, new } => Self::rename(service, &old, &new),
             Self::Merge(name) => Self::merge(service, name),
+            Self::OpenPullRequest(name) => Self::open_pull_request(service, &name),
+        }
+    }
+
+    fn open_pull_request(service: &SessionService, name: &str) -> OperationOutcome {
+        match service.open_pull_request(name) {
+            Ok(()) => OperationOutcome::done(
+                format!("Asked the browser to open the pull request of {name}."),
+                None,
+            ),
+            Err(error) => OperationOutcome::Failed(error),
         }
     }
 
@@ -103,78 +112,6 @@ impl BlockingOperation {
                 Some(session.name().to_string()),
             ),
             Err(error) => OperationOutcome::Failed(error),
-        }
-    }
-
-    fn measure(service: &mut SessionService, name: String) -> OperationOutcome {
-        match service.delete_impact(&name) {
-            Ok(impact) => OperationOutcome::ConfirmDelete {
-                name,
-                impact,
-                changed: false,
-            },
-            Err(error @ ServiceError::Unmeasurable(_)) => OperationOutcome::Failed(error.adding_context(&format!(
-                "ringleader delete {name} --forget needs this TUI to quit first, since the TUI holds the lock"
-            ))),
-            Err(error) => OperationOutcome::Failed(error),
-        }
-    }
-
-    fn deleted(name: &str, outcome: &DeleteOutcome) -> OperationOutcome {
-        let summary = outcome.summary(name);
-        match outcome.stray_session() {
-            Some(warning) => OperationOutcome::Warned {
-                message: format!("{summary}; {warning}"),
-                select: None,
-            },
-            None => OperationOutcome::done(summary, None),
-        }
-    }
-
-    fn delete(service: &mut SessionService, name: String, seen: DeleteImpact) -> OperationOutcome {
-        match service.delete_session(&name, &DeleteConfirmation::confirmed(seen)) {
-            Ok(outcome) => Self::deleted(&name, &outcome),
-            Err(ServiceError::GuardsChanged { impact, .. }) => OperationOutcome::ConfirmDelete {
-                name,
-                impact: *impact,
-                changed: true,
-            },
-            Err(error) => OperationOutcome::Failed(error),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum OperationOutcome {
-    Done {
-        message: String,
-        select: Option<String>,
-    },
-    Warned {
-        message: String,
-        select: Option<String>,
-    },
-    ConfirmDelete {
-        name: String,
-        impact: DeleteImpact,
-        changed: bool,
-    },
-    Failed(ServiceError),
-}
-
-impl OperationOutcome {
-    fn done(message: String, select: Option<String>) -> Self {
-        Self::Done { message, select }
-    }
-
-    fn started(message: String, outcome: &StartOutcome) -> Self {
-        let select = Some(outcome.session().name().to_string());
-        match outcome.warning() {
-            Some(warning) => Self::Warned {
-                message: format!("{message} But {warning}."),
-                select,
-            },
-            None => Self::done(message, select),
         }
     }
 }
@@ -248,6 +185,16 @@ mod tests {
         assert_eq!(
             operation.busy_message(),
             "Fetching origin and merging it into fix-auth…"
+        );
+    }
+
+    #[test]
+    fn opening_a_pull_request_announces_the_lookup_while_it_runs() {
+        let operation = BlockingOperation::OpenPullRequest("fix-auth".to_string());
+
+        assert_eq!(
+            operation.busy_message(),
+            "Finding the pull request of fix-auth…"
         );
     }
 
