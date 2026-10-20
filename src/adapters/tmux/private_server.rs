@@ -215,13 +215,11 @@ impl<'a> PrivateServer<'a> {
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::OsString;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
 
     use super::*;
     use crate::adapters::tmux::server_files::ServerFiles;
-    use crate::adapters::tmux::tmux_finder_popup::TmuxFinderPopup;
     use crate::domain::HotKey;
     use crate::test_support::TmuxTestServer;
 
@@ -299,7 +297,7 @@ mod tests {
 
         fn command_running(server: &TmuxTestServer, executable: &str) -> TmuxCommand {
             let files = ServerFiles::new(server.socket(), server.config());
-            let finder = TmuxFinderPopup::new(vec![OsString::from(executable)], &[]);
+            let finder = TmuxTestServer::stand_in_finder_at(executable);
             TmuxCommand::new(server.program(), &files, &server.environment(), &finder)
         }
 

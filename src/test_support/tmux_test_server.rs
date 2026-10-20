@@ -1,5 +1,6 @@
 use std::ffi::OsString;
 use std::io::{Read, Write};
+use std::iter::once;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Output, Stdio};
 use std::sync::mpsc::{self, Receiver};
@@ -32,11 +33,8 @@ pub struct TmuxTestServer {
 
 impl TmuxTestServer {
     pub const STAND_IN: [&'static str; 4] = ["sh", "-c", "sleep 30", "--"];
-    const STAND_IN_FINDER: [&'static str; 3] = [
-        "/nix/store/example-ringleader/bin/ringleader",
-        "__find-session",
-        "--client",
-    ];
+    const STAND_IN_EXECUTABLE: &'static str = "/nix/store/example-ringleader/bin/ringleader";
+    const STAND_IN_FINDER_ARGUMENTS: [&'static str; 2] = ["__find-session", "--client"];
     const STAND_IN_PROGRAMS: [&'static str; 2] = [
         "RINGLEADER_TMUX=/nix/store/example-tmux/bin/tmux",
         "RINGLEADER_GIT=/nix/store/example-git/bin/git",
@@ -62,10 +60,15 @@ impl TmuxTestServer {
     }
 
     pub fn stand_in_finder() -> TmuxFinderPopup {
-        TmuxFinderPopup::new(
-            Self::STAND_IN_FINDER.map(OsString::from).to_vec(),
-            &Self::STAND_IN_PROGRAMS.map(OsString::from),
-        )
+        Self::stand_in_finder_at(Self::STAND_IN_EXECUTABLE)
+    }
+
+    pub fn stand_in_finder_at(executable: &str) -> TmuxFinderPopup {
+        let finder_prefix = once(executable)
+            .chain(Self::STAND_IN_FINDER_ARGUMENTS)
+            .map(OsString::from)
+            .collect();
+        TmuxFinderPopup::new(finder_prefix, &Self::STAND_IN_PROGRAMS.map(OsString::from))
     }
 
     fn with_config_marked(config_text: &str, marker: ProcessMarker) -> Self {
