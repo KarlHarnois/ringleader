@@ -147,7 +147,9 @@ impl App {
 
     pub fn perform(&mut self, operation: BlockingOperation) {
         let outcome = operation.run(&mut self.service);
-        self.observe();
+        if outcome.may_have_changed_sessions() {
+            self.observe();
+        }
         match outcome {
             OperationOutcome::Done { message, select } => {
                 self.settle(select);
@@ -167,6 +169,7 @@ impl App {
                     .open(Dialog::delete(row, &name, impact, changed));
                 self.status.show(None);
             }
+            OperationOutcome::Opened(message) => self.status.info(message),
             OperationOutcome::Failed(error) => self.report_failure(error),
         }
     }
@@ -623,6 +626,14 @@ mod tests {
                 subcommand: "list-panes".to_string(),
                 seconds: 2,
             }
+        }
+
+        fn diff_measurements(fixture: &ServiceFixture) -> usize {
+            let calls = fixture.workspace().calls();
+            calls
+                .iter()
+                .filter(|call| call.starts_with("diff_stat"))
+                .count()
         }
 
         fn observe_calls(fixture: &ServiceFixture) -> usize {
@@ -1404,6 +1415,30 @@ mod tests {
                 "Opened a terminal window in the worktree of fix-auth.".to_string()
             ))
         );
+    }
+
+    #[test]
+    fn o_sends_nothing_to_tmux() {
+        let fixture = AppFixture::with_pull_request();
+        let mut app = AppFixture::showing(&fixture, "#142");
+        let before = fixture.multiplexer().calls();
+
+        AppFixture::perform_key(&mut app, 'o');
+
+        assert_eq!(fixture.multiplexer().calls(), before);
+    }
+
+    #[test]
+    fn o_measures_no_diff_again() {
+        let fixture = AppFixture::with_pull_request();
+        let mut app = AppFixture::showing(&fixture, "#142");
+        UiHarness::settle(&mut app);
+        let before = AppFixture::diff_measurements(&fixture);
+
+        AppFixture::perform_key(&mut app, 'o');
+        UiHarness::settle(&mut app);
+
+        assert_eq!(AppFixture::diff_measurements(&fixture), before);
     }
 
     #[test]
