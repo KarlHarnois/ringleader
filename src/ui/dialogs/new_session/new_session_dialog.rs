@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -34,11 +36,11 @@ impl NewSessionDialog {
     const NAME_MISSING: &'static str = "enter a session name";
     const REPO_MISSING: &'static str = "pick a repo";
 
-    pub fn open(service: &SessionService) -> Self {
+    pub fn open(service: &SessionService, preferred_repo: Option<PathBuf>) -> Self {
         let agents = AgentPicker::new(service.config().agents(), &service.config_path());
         Self {
             name: TextField::new(FieldKind::Name),
-            repos: RepoPicker::open(service),
+            repos: RepoPicker::open(service, preferred_repo),
             mode: Self::starting_mode(&agents),
             agents,
             prompt: PromptField::default(),
@@ -288,7 +290,7 @@ mod tests {
 
         fn opened(fixture: &ServiceFixture) -> (NewSessionDialog, SessionService) {
             let service = fixture.service();
-            let mut dialog = NewSessionDialog::open(&service);
+            let mut dialog = NewSessionDialog::open(&service, None);
             Self::settle(&mut dialog, |text| !text.contains("Finding the repo"));
             (dialog, service)
         }
@@ -621,7 +623,7 @@ mod tests {
         let fixture =
             ServiceFixture::new().with_scanner(FakeRepoScanner::finding(Vec::new()).blocked());
         let service = fixture.service();
-        let mut dialog = NewSessionDialog::open(&service);
+        let mut dialog = NewSessionDialog::open(&service, None);
 
         DialogFixture::type_text(&mut dialog, &service, "fix-auth");
 
