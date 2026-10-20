@@ -239,10 +239,10 @@ mod tests {
 
         fn render(opening: DialogOpening, width: u16, height: u16) -> Terminal<TestBackend> {
             let service = ServiceFixture::new().service();
-            Self::draw(&Dialog::open(opening, &service), width, height)
+            Self::render_dialog(&Dialog::open(opening, &service), width, height)
         }
 
-        fn draw(dialog: &Dialog, width: u16, height: u16) -> Terminal<TestBackend> {
+        fn render_dialog(dialog: &Dialog, width: u16, height: u16) -> Terminal<TestBackend> {
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
             terminal.draw(|frame| dialog.render(frame, &Theme)).unwrap();
             terminal
@@ -298,8 +298,11 @@ mod tests {
 
     #[test]
     fn the_session_finder_chevron_lines_up_with_the_new_session_prompt_chevron() {
-        let finder =
-            PlacementFixture::draw(&Dialog::find_session(vec!["docs".to_string()]), 100, 28);
+        let finder = PlacementFixture::render_dialog(
+            &Dialog::find_session(vec!["docs".to_string()]),
+            100,
+            28,
+        );
         let new_session = PlacementFixture::render(DialogOpening::NewSession, 100, 28);
 
         assert_eq!(
