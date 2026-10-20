@@ -420,7 +420,7 @@ The hidden `__find-session` path runs in the popup that a finder key opens on th
 
 - If the server runs, `r` re-sources the generated config, even when the server's `@ringleader_config` hash matches the current render. A `tmux source-file` run from a pane can change the server without changing that hash.
 - Only a lock holder writes or re-sources the generated config, so only one process ever writes the generated config.
-- The finder binding names Ringleader's executable and its program paths. The config hash covers those paths, but not the shell. A config applied by another build therefore reads as stale. Two builds that share one server rebind the finder in turn.
+- The finder binding names Ringleader's executable and its program paths, so the config hash covers those paths. A config applied by another build therefore reads as stale. Two builds that share one server rebind the finder in turn.
 
 ### Private tmux server
 
