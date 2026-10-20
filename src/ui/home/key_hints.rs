@@ -130,7 +130,7 @@ mod tests {
     }
 
     #[test]
-    fn a_thirty_six_column_bar_keeps_the_fixed_keys_with_narrower_gaps() {
+    fn a_thirty_six_column_bar_keeps_help_and_quit_so_every_key_stays_reachable() {
         assert_eq!(
             KeyHints::on_session().text(36),
             " n new  Enter attach  ? help  q quit"
