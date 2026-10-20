@@ -193,7 +193,7 @@ mod tests {
             Self::without_pull_request().with_pull_requests(pull_requests)
         }
 
-        fn refusal(fixture: &ServiceFixture) -> ServiceError {
+        fn open_error(fixture: &ServiceFixture) -> ServiceError {
             fixture.service().open_pull_request(Self::NAME).unwrap_err()
         }
 
@@ -486,7 +486,7 @@ mod tests {
     fn a_branch_without_a_pull_request_has_no_known_pull_request_to_open() {
         let fixture = PullRequestFixture::without_pull_request();
 
-        let error = PullRequestFixture::refusal(&fixture);
+        let error = PullRequestFixture::open_error(&fixture);
 
         assert!(matches!(error, ServiceError::NotFound(_)));
         assert_eq!(error.to_string(), "no pull request is known for fix-auth");
@@ -497,7 +497,7 @@ mod tests {
     fn a_failed_lookup_says_the_pull_request_could_not_be_looked_up() {
         let fixture = PullRequestFixture::failing_lookup();
 
-        let error = PullRequestFixture::refusal(&fixture);
+        let error = PullRequestFixture::open_error(&fixture);
 
         assert!(matches!(error, ServiceError::Failed(_)));
         assert!(
@@ -512,7 +512,7 @@ mod tests {
     fn a_main_checkout_session_has_no_known_pull_request_to_open() {
         let fixture = PullRequestFixture::in_main_checkout_with_pull_request();
 
-        let error = PullRequestFixture::refusal(&fixture);
+        let error = PullRequestFixture::open_error(&fixture);
 
         assert_eq!(error.to_string(), "no pull request is known for fix-auth");
         assert!(fixture.web_browser().opened().is_empty());
