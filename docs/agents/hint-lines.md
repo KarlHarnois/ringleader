@@ -1,6 +1,6 @@
 # Hint lines
 
-**Every rule in this file binds each change to a dialog's hint line and each text-editing key added to `TextField`.**
+**Every rule in this file binds each change to a dialog's hint line and each new text-editing key.**
 
 **A dialog's hint line lists only two kinds of keys:**
 

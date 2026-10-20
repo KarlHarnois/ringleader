@@ -242,7 +242,7 @@ nix flake check
 | `docs/agents/source-folders.md` | add a file under `src/`, move a file there, or make a folder there |
 | `docs/agents/platform-code.md` | change a file or a re-export that a `target_os` cfg attribute limits, or write such an attribute |
 | `docs/agents/tmux-tests.md` | write or change a test that runs tmux |
-| `docs/agents/hint-lines.md` | write or change a dialog's hint line, or add a text-editing key to `TextField` |
+| `docs/agents/hint-lines.md` | write or change a dialog's hint line, or add a text-editing key |
 | `docs/agents/features/pull.md` | change the pull that the `p` key starts |
 | `docs/agents/features/direnv.md` | change how create or restart launches an agent, or which variables the agent gets |
 | `docs/agents/features/agent-hooks.md` | change how `AgentHooks` types into an agent, or the check that an agent is at its prompt |
