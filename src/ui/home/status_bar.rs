@@ -11,6 +11,7 @@ use crate::ui::theme::Theme;
 pub struct StatusBar<'a> {
     message: Option<&'a StatusMessage>,
     note: Option<String>,
+    hints: KeyHints,
     theme: Theme,
 }
 
@@ -22,6 +23,7 @@ impl<'a> StatusBar<'a> {
         Self {
             message: None,
             note: None,
+            hints: KeyHints::on_session(),
             theme,
         }
     }
@@ -32,6 +34,10 @@ impl<'a> StatusBar<'a> {
 
     pub fn with_note(self, note: Option<String>) -> Self {
         Self { note, ..self }
+    }
+
+    pub fn with_hints(self, hints: KeyHints) -> Self {
+        Self { hints, ..self }
     }
 
     pub fn height(&self, width: u16, screen_height: u16) -> u16 {
@@ -52,7 +58,7 @@ impl<'a> StatusBar<'a> {
                 .into_iter()
                 .map(|line| Line::from(Span::styled(format!("{}{line}", Self::MARGIN), style)))
                 .collect(),
-            None => vec![Line::from(KeyHints::new(usize::from(area.width)).text())],
+            None => vec![Line::from(self.hints.text(usize::from(area.width)))],
         };
         frame.render_widget(Paragraph::new(lines), area);
     }
@@ -92,44 +98,55 @@ impl StatusMessage {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct KeyHints {
-    width: usize,
+    hints: &'static [(&'static str, &'static str)],
+    drop_order: &'static [&'static str],
 }
 
 impl KeyHints {
-    const HINTS: [(&'static str, &'static str); 11] = [
+    const SESSION_HINTS: [(&'static str, &'static str); 10] = [
         ("n", "new"),
         ("d", "delete"),
-        ("R", "rename"),
         ("Enter", "attach"),
+        ("/", "find"),
         ("t", "shell"),
-        ("s", "restart"),
+        ("o", "PR"),
         ("p", "pull"),
-        ("r", "refresh"),
         ("u", "usage"),
         ("?", "help"),
         ("q", "quit"),
     ];
-    const DROP_ORDER: [&'static str; 7] = ["u", "p", "r", "s", "t", "R", "d"];
+    const SESSION_DROP_ORDER: [&'static str; 6] = ["u", "p", "/", "t", "o", "d"];
+    const HEADING_HINTS: [(&'static str, &'static str); 6] = [
+        ("n", "new"),
+        ("Enter", "fold"),
+        ("/", "find"),
+        ("u", "usage"),
+        ("?", "help"),
+        ("q", "quit"),
+    ];
+    const HEADING_DROP_ORDER: [&'static str; 2] = ["u", "/"];
     const WIDE_GAP: &'static str = "   ";
     const NARROW_GAP: &'static str = "  ";
 
-    pub fn new(width: usize) -> Self {
-        Self { width }
+    pub fn on_session() -> Self {
+        Self {
+            hints: &Self::SESSION_HINTS,
+            drop_order: &Self::SESSION_DROP_ORDER,
+        }
     }
 
-    pub fn text(&self) -> String {
-        let mut shown: Vec<String> = Self::HINTS
-            .iter()
-            .map(|(key, action)| format!("{key} {action}"))
-            .collect();
-        for dropped in Self::DROP_ORDER {
-            if self.fits(&shown, Self::WIDE_GAP) {
-                break;
-            }
-            shown.retain(|hint| hint.split(' ').next() != Some(dropped));
+    pub fn on_heading() -> Self {
+        Self {
+            hints: &Self::HEADING_HINTS,
+            drop_order: &Self::HEADING_DROP_ORDER,
         }
-        let gap = if self.fits(&shown, Self::WIDE_GAP) {
+    }
+
+    pub fn text(&self, width: usize) -> String {
+        let shown = self.fitted(width);
+        let gap = if Self::width_of(&shown, Self::WIDE_GAP) <= width {
             Self::WIDE_GAP
         } else {
             Self::NARROW_GAP
@@ -137,8 +154,23 @@ impl KeyHints {
         Self::joined(&shown, gap)
     }
 
-    fn fits(&self, hints: &[String], gap: &str) -> bool {
-        Self::joined(hints, gap).chars().count() <= self.width
+    fn fitted(&self, width: usize) -> Vec<String> {
+        let mut shown: Vec<String> = self
+            .hints
+            .iter()
+            .map(|(key, action)| format!("{key} {action}"))
+            .collect();
+        for dropped in self.drop_order {
+            if Self::width_of(&shown, Self::WIDE_GAP) <= width {
+                break;
+            }
+            shown.retain(|hint| hint.split(' ').next() != Some(*dropped));
+        }
+        shown
+    }
+
+    fn width_of(hints: &[String], gap: &str) -> usize {
+        Self::joined(hints, gap).chars().count()
     }
 
     fn joined(hints: &[String], gap: &str) -> String {
@@ -209,40 +241,33 @@ mod tests {
     }
 
     #[test]
-    fn a_hundred_column_bar_drops_merge_first() {
-        let text = BarFixture::render(StatusBar::new(Theme), 100);
+    fn a_ninety_five_column_bar_lists_every_session_hint() {
+        let text = BarFixture::render(StatusBar::new(Theme), 95);
 
         assert_eq!(
             text,
-            " n new   d delete   R rename   Enter attach   t shell   s restart   r refresh   ? help   q quit"
+            " n new   d delete   Enter attach   / find   t shell   o PR   p pull   u usage   ? help   q quit"
         );
     }
 
     #[test]
-    fn a_hundred_and_ten_column_bar_also_lists_pull() {
-        let text = BarFixture::render(StatusBar::new(Theme), 110);
+    fn an_eighty_column_bar_drops_usage_and_pull() {
+        let text = BarFixture::render(StatusBar::new(Theme), 80);
 
         assert_eq!(
             text,
-            " n new   d delete   R rename   Enter attach   t shell   s restart   p pull   r refresh   ? help   q quit"
+            " n new   d delete   Enter attach   / find   t shell   o PR   ? help   q quit"
         );
     }
 
     #[test]
-    fn a_hundred_and_twenty_column_bar_also_lists_usage() {
-        let text = BarFixture::render(StatusBar::new(Theme), 120);
-
-        assert_eq!(
-            text,
-            " n new   d delete   R rename   Enter attach   t shell   s restart   p pull   r refresh   u usage   ? help   q quit"
-        );
-    }
-
-    #[test]
-    fn a_sixty_column_bar_drops_refresh_restart_shell_and_rename() {
+    fn a_sixty_column_bar_also_drops_find_and_shell() {
         let text = BarFixture::render(StatusBar::new(Theme), 60);
 
-        assert_eq!(text, " n new   d delete   Enter attach   ? help   q quit");
+        assert_eq!(
+            text,
+            " n new   d delete   Enter attach   o PR   ? help   q quit"
+        );
     }
 
     #[test]
@@ -250,6 +275,16 @@ mod tests {
         let text = BarFixture::render(StatusBar::new(Theme), 36);
 
         assert_eq!(text, " n new  Enter attach  ? help  q quit");
+    }
+
+    #[test]
+    fn a_heading_bar_offers_enter_fold_and_no_session_key() {
+        let status = StatusBar::new(Theme).with_hints(KeyHints::on_heading());
+
+        assert_eq!(
+            BarFixture::render(status, 95),
+            " n new   Enter fold   / find   u usage   ? help   q quit"
+        );
     }
 
     #[test]

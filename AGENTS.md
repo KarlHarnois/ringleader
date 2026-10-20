@@ -455,6 +455,18 @@ A hint line never lists a text-editing key: every terminal user already expects 
 
 Add a new editing key to `TextField` with its usual terminal meaning, never to a hint.
 
+**The hint bar is the row of keys that `KeyHints` shows at the bottom of the home screen.** The hint bar lists only keys that pass both tests:
+
+- The key's meaning is Ringleader's own.
+- A user presses the key often.
+
+Only the `?` help lists these keys:
+
+- a key that a user presses at most once per session
+- a key that a user needs only after a session exits or stops
+- a key that repeats work a background job already does
+- a second key or a Shift variant for an action that the hint bar lists
+
 ## Tests
 
 - All tests are unit tests inside `src/`, in `#[cfg(test)] mod tests` or `src/test_support/`.

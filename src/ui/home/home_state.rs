@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use super::bell::Bell;
 use super::home_view::LayoutTier;
 use super::preview_panel::PreviewPanel;
-use super::status_bar::{StatusBar, StatusNote};
+use super::status_bar::{KeyHints, StatusBar, StatusNote};
 use crate::application::ports::FoldStore;
 use crate::application::{ServiceError, SessionService, Tool};
 use crate::domain::{RepoGroup, SessionSummary};
@@ -68,6 +68,13 @@ impl HomeState {
     pub fn note(&self) -> Option<String> {
         let row = self.sessions.selected()?;
         StatusNote::new(row).text()
+    }
+
+    pub fn key_hints(&self) -> KeyHints {
+        if self.sessions.heading_selected() {
+            return KeyHints::on_heading();
+        }
+        KeyHints::on_session()
     }
 
     pub fn resize(
