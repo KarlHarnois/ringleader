@@ -169,7 +169,10 @@ impl App {
                     .open(Dialog::delete(row, &name, impact, changed));
                 self.status.show(None);
             }
-            OperationOutcome::Opened(message) => self.status.info(message),
+            OperationOutcome::Opened(message) => {
+                self.home.refresh_pull_requests_soon();
+                self.status.info(message);
+            }
             OperationOutcome::Failed(error) => self.report_failure(error),
         }
     }
@@ -553,11 +556,31 @@ mod tests {
         }
 
         fn looks_up_pull_requests_again(fixture: &ServiceFixture, app: &mut App) -> bool {
-            let before = fixture.pull_requests().calls().len();
+            let next = fixture.pull_requests().calls().len() + 1;
+            Self::looks_up_pull_requests(fixture, app, next)
+        }
+
+        fn looks_up_pull_requests(fixture: &ServiceFixture, app: &mut App, times: usize) -> bool {
             Deadline::for_background_work().wait_until(|| {
                 app.on_tick(Instant::now());
-                fixture.pull_requests().calls().len() > before
+                fixture.pull_requests().calls().len() >= times
             })
+        }
+
+        fn comes_to_show(app: &mut App, text: &str) -> bool {
+            Deadline::for_background_work().wait_until(|| {
+                app.on_tick(Instant::now());
+                Self::screen(app, 100, 28).contains(text)
+            })
+        }
+
+        fn open_pull_request_later(fixture: &ServiceFixture) {
+            let session = ServiceFixture::session("fix-auth");
+            fixture.pull_requests().add_pull_request(
+                Path::new(ServiceFixture::REPO),
+                session.branch(),
+                ServiceFixture::pull_request(142, PullRequestState::Open),
+            );
         }
 
         fn help_scrolled_past_its_end(app: &mut App, width: u16, height: u16) -> String {
@@ -1919,6 +1942,18 @@ mod tests {
             fixture.web_browser().opened(),
             [ServiceFixture::pull_request_url(142)]
         );
+    }
+
+    #[test]
+    fn a_pull_request_that_o_finds_comes_to_show_in_the_list() {
+        let fixture = AppFixture::deletable();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        assert!(AppFixture::looks_up_pull_requests(&fixture, &mut app, 1));
+        AppFixture::open_pull_request_later(&fixture);
+
+        AppFixture::perform_key(&mut app, 'o');
+
+        assert!(AppFixture::comes_to_show(&mut app, "#142"));
     }
 
     #[test]

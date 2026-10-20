@@ -93,6 +93,10 @@ impl HomeState {
         self.diffs.refresh_soon();
     }
 
+    pub fn refresh_pull_requests_soon(&mut self) {
+        self.pull_requests.refresh_soon();
+    }
+
     pub fn pause_after(&mut self, error: &ServiceError) {
         if error.is_timeout_of(Tool::Tmux) {
             self.tmux_paused_until = Some(Instant::now() + Self::TMUX_PAUSE);
