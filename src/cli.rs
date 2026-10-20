@@ -696,24 +696,27 @@ mod tests {
     }
 
     #[test]
-    fn the_hidden_launcher_subcommand_takes_a_handoff_path() {
-        let cli = Cli::try_parse_from(["ringleader", "__exec-agent", "--handoff", "/run/h.json"])
-            .unwrap();
+    fn the_finder_arguments_followed_by_a_client_name_enter_the_finder() {
+        let entry_points = RecordingEntryPoints::default();
+        let words: Vec<String> = Cli::finder_arguments()
+            .iter()
+            .map(|word| word.to_string_lossy().into_owned())
+            .chain(["client-1234".to_string()])
+            .collect();
+        let arguments: Vec<&str> = words.iter().map(String::as_str).collect();
 
-        assert_eq!(cli.exec_agent_handoff(), Some(Path::new("/run/h.json")));
+        entry_points.enter(&arguments);
+
+        assert_eq!(entry_points.entered(), ["find_session client-1234"]);
     }
 
     #[test]
-    fn the_finder_arguments_followed_by_a_client_name_parse_as_the_hidden_finder() {
-        let arguments = [OsString::from("ringleader")]
-            .into_iter()
-            .chain(Cli::finder_arguments())
-            .chain([OsString::from("client-1234")]);
+    fn the_hidden_finder_takes_no_write_lock_so_it_opens_while_the_tui_holds_one() {
+        let harness = CliHarness::new(ServiceFixture::new()).with_lock(FakeLock::held_elsewhere());
 
-        let cli = Cli::try_parse_from(arguments).unwrap();
+        let exit = harness.run(&["__find-session", "--client", "client-1234"]);
 
-        assert_eq!(cli.finder_client(), Some("client-1234"));
-        assert!(!cli.is_mutating());
+        assert_eq!(exit, CliExit::Code(0));
     }
 
     #[test]
