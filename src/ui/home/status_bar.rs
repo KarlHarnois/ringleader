@@ -297,6 +297,26 @@ mod tests {
     }
 
     #[test]
+    fn a_fifty_column_heading_bar_drops_usage_first() {
+        let status = StatusBar::new(Theme).with_hints(KeyHints::on_heading());
+
+        assert_eq!(
+            BarFixture::render(status, 50),
+            " n new   Enter fold   / find   ? help   q quit"
+        );
+    }
+
+    #[test]
+    fn a_forty_column_heading_bar_also_drops_find() {
+        let status = StatusBar::new(Theme).with_hints(KeyHints::on_heading());
+
+        assert_eq!(
+            BarFixture::render(status, 40),
+            " n new   Enter fold   ? help   q quit"
+        );
+    }
+
+    #[test]
     fn a_bar_without_a_selection_lists_only_keys_that_need_no_session() {
         let status = StatusBar::new(Theme).with_hints(KeyHints::without_selection());
 
