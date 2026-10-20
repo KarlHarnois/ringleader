@@ -26,6 +26,10 @@ impl BlockingOperation {
         }
     }
 
+    pub fn changes_sessions(&self) -> bool {
+        !matches!(self, Self::OpenPullRequest(_))
+    }
+
     pub fn run(self, service: &mut SessionService) -> OperationOutcome {
         match self {
             Self::Restart(name) => Self::restart(service, name),

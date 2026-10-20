@@ -146,8 +146,9 @@ impl App {
     }
 
     pub fn perform(&mut self, operation: BlockingOperation) {
+        let changes_sessions = operation.changes_sessions();
         let outcome = operation.run(&mut self.service);
-        if outcome.may_have_changed_sessions() {
+        if changes_sessions {
             self.observe();
         }
         match outcome {
@@ -1444,6 +1445,17 @@ mod tests {
     fn o_sends_nothing_to_tmux() {
         let fixture = AppFixture::with_pull_request();
         let mut app = AppFixture::showing(&fixture, "#142");
+        let before = fixture.multiplexer().calls();
+
+        AppFixture::perform_key(&mut app, 'o');
+
+        assert_eq!(fixture.multiplexer().calls(), before);
+    }
+
+    #[test]
+    fn a_failed_o_sends_nothing_to_tmux() {
+        let fixture = AppFixture::deletable();
+        let mut app = AppFixture::started(&fixture, 100, 28);
         let before = fixture.multiplexer().calls();
 
         AppFixture::perform_key(&mut app, 'o');

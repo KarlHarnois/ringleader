@@ -34,8 +34,4 @@ impl OperationOutcome {
             None => Self::done(message, select),
         }
     }
-
-    pub fn may_have_changed_sessions(&self) -> bool {
-        !matches!(self, Self::Opened(_))
-    }
 }
