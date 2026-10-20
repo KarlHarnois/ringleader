@@ -92,4 +92,16 @@ mod tests {
         assert_eq!(RepoGroup::of(&row), RepoGroup::Other);
         assert_eq!(RepoGroup::Other.to_string(), "other");
     }
+
+    #[test]
+    fn a_named_group_has_the_path_of_its_repo() {
+        let group = ServiceFixture::repo_group("/repos/alpha");
+
+        assert_eq!(group.path(), Some(Path::new("/repos/alpha")));
+    }
+
+    #[test]
+    fn the_other_group_has_no_path() {
+        assert_eq!(RepoGroup::Other.path(), None);
+    }
 }

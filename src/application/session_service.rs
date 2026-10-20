@@ -109,8 +109,8 @@ impl SessionService {
         self.catalog.find_repos(self.config())
     }
 
-    pub fn default_repo(&self) -> Pending<Option<Repo>> {
-        self.catalog.default_repo(self.config(), &self.entries)
+    pub fn default_repo(&self, preferred_repo: Option<PathBuf>) -> Pending<Option<Repo>> {
+        self.catalog.default_repo(self.config(), preferred_repo)
     }
 
     pub fn repo_at(&self, input: &str) -> Pending<Repo> {

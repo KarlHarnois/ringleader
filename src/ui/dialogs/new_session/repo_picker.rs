@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::style::Style;
 use ratatui::text::Line;
@@ -16,9 +18,9 @@ pub struct RepoPicker {
 }
 
 impl RepoPicker {
-    pub fn open(service: &SessionService) -> Self {
+    pub fn open(service: &SessionService, preferred_repo: Option<PathBuf>) -> Self {
         Self {
-            chosen: ChosenRepo::open(service),
+            chosen: ChosenRepo::open(service, preferred_repo),
             finder: RepoFinder::open(service),
             searching: false,
         }
@@ -135,6 +137,7 @@ mod tests {
         const SETTLE_LIMIT: Duration = Duration::from_secs(2);
         const FOUND: &'static str = "/home/example/work/api-gateway";
         const TYPED: &'static str = "/srv/tools";
+        const PREFERRED: &'static str = "/home/example/work/web-client";
 
         fn fixture() -> ServiceFixture {
             let found = Repo::discovered(
@@ -146,11 +149,19 @@ mod tests {
                     FakeRepoScanner::finding(vec![found])
                         .inside_repo(Path::new(ServiceFixture::REPO)),
                 )
-                .with_host(FakeHostProbe::default().with_directory(Path::new(Self::TYPED)))
+                .with_host(
+                    FakeHostProbe::default()
+                        .with_directory(Path::new(Self::TYPED))
+                        .with_directory(Path::new(Self::PREFERRED)),
+                )
         }
 
         fn opened(service: &SessionService) -> RepoPicker {
-            let mut picker = RepoPicker::open(service);
+            Self::opened_on(service, None)
+        }
+
+        fn opened_on(service: &SessionService, preferred_repo: Option<PathBuf>) -> RepoPicker {
+            let mut picker = RepoPicker::open(service, preferred_repo);
             Self::settle(&mut picker, |picker| {
                 !Self::text(picker).starts_with("Finding")
             });
@@ -206,12 +217,9 @@ mod tests {
 
     #[test]
     fn the_field_says_it_is_finding_the_default_until_it_resolves() {
-        let picker = RepoPicker::open(&PickerFixture::fixture().service());
+        let picker = RepoPicker::open(&PickerFixture::fixture().service(), None);
 
-        assert_eq!(
-            PickerFixture::text(&picker),
-            "Finding the repo you started in…"
-        );
+        assert_eq!(PickerFixture::text(&picker), "Finding the repo…");
     }
 
     #[test]
@@ -223,6 +231,16 @@ mod tests {
             picker.selected_repo().unwrap().path(),
             Path::new(ServiceFixture::REPO)
         );
+    }
+
+    #[test]
+    fn the_field_shows_the_preferred_repo_over_the_repo_ringleader_started_in() {
+        let preferred_repo = PathBuf::from(PickerFixture::PREFERRED);
+
+        let picker =
+            PickerFixture::opened_on(&PickerFixture::fixture().service(), Some(preferred_repo));
+
+        assert_eq!(PickerFixture::text(&picker), "web-client");
     }
 
     #[test]
