@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::time::Instant;
 
 use crossterm::event::{Event, KeyEvent, KeyEventKind};
@@ -36,8 +37,8 @@ impl Dialog {
 
     pub fn open(opening: DialogOpening, service: &SessionService) -> Self {
         match opening {
-            DialogOpening::NewSession => {
-                Self::NewSession(Box::new(NewSessionDialog::open(service)))
+            DialogOpening::NewSession(selected_repo) => {
+                Self::NewSession(Box::new(NewSessionDialog::open(service, selected_repo)))
             }
             DialogOpening::Rename(session) => {
                 Self::Rename(Box::new(RenameSessionDialog::open(*session)))
@@ -210,7 +211,7 @@ impl Dialog {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DialogOpening {
-    NewSession,
+    NewSession(Option<PathBuf>),
     Rename(Box<Session>),
     Help,
     Usage,
@@ -252,7 +253,7 @@ mod tests {
 
     #[test]
     fn the_full_tier_centers_the_dialog() {
-        let terminal = PlacementFixture::render(DialogOpening::NewSession, 100, 28);
+        let terminal = PlacementFixture::render(DialogOpening::NewSession(None), 100, 28);
 
         assert_eq!(PlacementFixture::symbol(&terminal, 12, 3), "┌");
         assert_eq!(PlacementFixture::symbol(&terminal, 13, 3), " ");
@@ -264,7 +265,7 @@ mod tests {
     #[test]
     fn the_help_stands_taller_than_the_other_dialogs() {
         let help = PlacementFixture::render(DialogOpening::Help, 100, 32);
-        let new_session = PlacementFixture::render(DialogOpening::NewSession, 100, 32);
+        let new_session = PlacementFixture::render(DialogOpening::NewSession(None), 100, 32);
 
         assert_eq!(PlacementFixture::symbol(&help, 12, 1), "┌");
         assert_eq!(PlacementFixture::symbol(&help, 12, 30), "└");
@@ -283,7 +284,7 @@ mod tests {
 
     #[test]
     fn a_compact_tier_uses_the_frame_with_a_margin_and_abbreviated_labels() {
-        let terminal = PlacementFixture::render(DialogOpening::NewSession, 60, 12);
+        let terminal = PlacementFixture::render(DialogOpening::NewSession(None), 60, 12);
 
         assert_eq!(PlacementFixture::symbol(&terminal, 1, 1), "┌");
         assert_eq!(PlacementFixture::symbol(&terminal, 2, 2), " ");

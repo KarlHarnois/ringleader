@@ -1,11 +1,10 @@
-use std::cmp::Reverse;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::application::Pending;
 use crate::application::ports::{HostProbe, RepoScanner};
 use crate::application::repo_merge::RepoMerge;
-use crate::domain::{Repo, Session};
+use crate::domain::Repo;
 
 pub struct DefaultRepo {
     scanner: Arc<dyn RepoScanner>,
@@ -26,32 +25,28 @@ impl DefaultRepo {
         }
     }
 
-    pub fn find(&self, explicit: Vec<Repo>, sessions: &[Session]) -> Pending<Option<Repo>> {
+    pub fn find(
+        &self,
+        explicit: Vec<Repo>,
+        selected_repo: Option<PathBuf>,
+    ) -> Pending<Option<Repo>> {
         let scanner = Arc::clone(&self.scanner);
         let host = Arc::clone(&self.host);
         let launch_directory = self.launch_directory.clone();
-        let recently_used = Self::repo_paths_newest_first(sessions);
         Pending::start(move || {
-            let launch_repo = scanner
-                .resolve_scope(&launch_directory)
-                .ok()
-                .and_then(|scope| scope.enclosing_repo().map(Path::to_path_buf));
-            let mut still_present = recently_used
-                .into_iter()
-                .filter(|path| host.path_exists(path));
-            let chosen = launch_repo.or_else(|| still_present.next());
+            let chosen = selected_repo
+                .filter(|path| host.path_exists(path))
+                .or_else(|| Self::launch_repo(scanner.as_ref(), &launch_directory));
             let merge = RepoMerge::new(host.as_ref());
             Ok(chosen.and_then(|top_level| merge.resolved(&top_level, &explicit).ok()))
         })
     }
 
-    fn repo_paths_newest_first(sessions: &[Session]) -> Vec<PathBuf> {
-        let mut newest_first: Vec<&Session> = sessions.iter().collect();
-        newest_first.sort_by_key(|session| Reverse(session.created_at()));
-        newest_first
-            .iter()
-            .map(|session| session.repo_path().to_path_buf())
-            .collect()
+    fn launch_repo(scanner: &dyn RepoScanner, launch_directory: &Path) -> Option<PathBuf> {
+        scanner
+            .resolve_scope(launch_directory)
+            .ok()
+            .and_then(|scope| scope.enclosing_repo().map(Path::to_path_buf))
     }
 }
 
@@ -67,11 +62,18 @@ mod tests {
 
     impl DefaultFixture {
         const WAIT_LIMIT: Duration = Duration::from_secs(2);
-        const OLDER: &'static str = "/work/older-project";
-        const NEWER: &'static str = "/work/newer-project";
+        const SELECTED: &'static str = "/work/selected-project";
 
         fn chosen(fixture: &ServiceFixture) -> Option<Repo> {
-            let pending = fixture.service().default_repo();
+            Self::chosen_for(fixture, None)
+        }
+
+        fn chosen_for_the_selection(fixture: &ServiceFixture) -> Option<Repo> {
+            Self::chosen_for(fixture, Some(PathBuf::from(Self::SELECTED)))
+        }
+
+        fn chosen_for(fixture: &ServiceFixture, selected_repo: Option<PathBuf>) -> Option<Repo> {
+            let pending = fixture.service().default_repo(selected_repo);
             let started = Instant::now();
             pending
                 .wait_unless(|| started.elapsed() > Self::WAIT_LIMIT)
@@ -85,17 +87,47 @@ mod tests {
             )
         }
 
-        fn with_two_sessions(present: &[&str]) -> ServiceFixture {
-            let host = present.iter().fold(FakeHostProbe::default(), |host, path| {
-                host.with_directory(Path::new(path))
-            });
-            ServiceFixture::new()
-                .with_sessions(&[
-                    ServiceFixture::session_at("older", Self::OLDER, 100),
-                    ServiceFixture::session_at("newer", Self::NEWER, 200),
-                ])
-                .with_host(host)
+        fn with_the_selected_repo_present(fixture: ServiceFixture) -> ServiceFixture {
+            fixture.with_host(FakeHostProbe::default().with_directory(Path::new(Self::SELECTED)))
         }
+    }
+
+    #[test]
+    fn a_selected_repo_wins_over_the_launch_repo() {
+        let fixture = DefaultFixture::with_the_selected_repo_present(
+            DefaultFixture::launched_inside_the_repo(),
+        );
+
+        let chosen = DefaultFixture::chosen_for_the_selection(&fixture).unwrap();
+
+        assert_eq!(chosen.path(), Path::new(DefaultFixture::SELECTED));
+    }
+
+    #[test]
+    fn a_selected_repo_that_is_gone_falls_back_to_the_launch_repo() {
+        let fixture = DefaultFixture::launched_inside_the_repo();
+
+        let chosen = DefaultFixture::chosen_for_the_selection(&fixture).unwrap();
+
+        assert_eq!(chosen.path(), Path::new(ServiceFixture::REPO));
+    }
+
+    #[test]
+    fn a_selected_configured_repo_chooses_its_entry() {
+        let entry = Repo::explicit(
+            RepoName::parse("custom-name").unwrap(),
+            Path::new(DefaultFixture::SELECTED),
+            None,
+        );
+        let config: Config = ServiceFixture::config().with_repos(vec![entry]);
+        let fixture = DefaultFixture::with_the_selected_repo_present(
+            ServiceFixture::new().with_config(config),
+        );
+
+        let chosen = DefaultFixture::chosen_for_the_selection(&fixture).unwrap();
+
+        assert_eq!(chosen.name().as_str(), "custom-name");
+        assert!(chosen.is_explicit());
     }
 
     #[test]
@@ -123,26 +155,7 @@ mod tests {
     }
 
     #[test]
-    fn a_launch_outside_any_repo_chooses_the_newest_session_repo() {
-        let fixture =
-            DefaultFixture::with_two_sessions(&[DefaultFixture::OLDER, DefaultFixture::NEWER]);
-
-        let chosen = DefaultFixture::chosen(&fixture).unwrap();
-
-        assert_eq!(chosen.path(), Path::new(DefaultFixture::NEWER));
-    }
-
-    #[test]
-    fn a_session_repo_that_is_gone_is_skipped() {
-        let fixture = DefaultFixture::with_two_sessions(&[DefaultFixture::OLDER]);
-
-        let chosen = DefaultFixture::chosen(&fixture).unwrap();
-
-        assert_eq!(chosen.path(), Path::new(DefaultFixture::OLDER));
-    }
-
-    #[test]
-    fn no_launch_repo_and_no_sessions_chooses_nothing() {
+    fn no_selection_and_no_launch_repo_chooses_nothing() {
         assert_eq!(DefaultFixture::chosen(&ServiceFixture::new()), None);
     }
 }
