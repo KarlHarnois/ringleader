@@ -40,7 +40,7 @@ impl HelpView {
         ("t", "open a shell in the selected session's worktree"),
         (
             "T",
-            "open a shell in the selected session's worktree in a new terminal window",
+            "open a shell in a new terminal window, in the selected session or repo",
         ),
         (
             "o gx",
@@ -380,7 +380,7 @@ mod tests {
         let rows = HelpFixture::rows(&HelpFixture::help(), HelpFixture::UNWRAPPED_WIDTH);
 
         assert!(rows.contains(
-            &"T            open a shell in the selected session's worktree in a new terminal window"
+            &"T            open a shell in a new terminal window, in the selected session or repo"
                 .to_string()
         ));
     }

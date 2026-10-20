@@ -30,8 +30,11 @@ impl SessionList {
         self.selected().map(SessionSummary::name)
     }
 
-    pub fn heading_selected(&self) -> bool {
-        matches!(self.selection, Some(ListSelection::Repo(_)))
+    pub fn selected_heading(&self) -> Option<&RepoGroup> {
+        match self.selection.as_ref()? {
+            ListSelection::Repo(group) => Some(group),
+            ListSelection::Session(_) => None,
+        }
     }
 
     pub fn visible_managed(&self) -> Vec<String> {
@@ -417,7 +420,10 @@ mod tests {
     fn a_grouped_list_starts_on_its_first_heading() {
         let list = ListFixture::showing(ListFixture::two_repos());
 
-        assert!(list.heading_selected());
+        assert_eq!(
+            list.selected_heading(),
+            Some(&ServiceFixture::repo_group("/repos/alpha"))
+        );
         assert_eq!(list.selected(), None);
     }
 
@@ -427,10 +433,10 @@ mod tests {
         list.select("b-two");
 
         list.move_selection(1);
-        let on_heading = list.heading_selected();
+        let heading = list.selected_heading().cloned();
         list.move_selection(1);
 
-        assert!(on_heading);
+        assert_eq!(heading, Some(ServiceFixture::repo_group("/repos/beta")));
         assert_eq!(list.selected_name(), Some("c-three"));
     }
 
@@ -467,10 +473,10 @@ mod tests {
             ServiceFixture::summary_in("a-one", "/repos/beta", SessionState::Waiting),
             ServiceFixture::summary_in("c-three", "/repos/beta", SessionState::Waiting),
         ]);
-        let on_heading = list.heading_selected();
+        let heading = list.selected_heading().cloned();
         list.toggle_fold();
 
-        assert!(on_heading);
+        assert_eq!(heading, Some(ServiceFixture::repo_group("/repos/beta")));
         assert_eq!(list.visible_managed(), ["b-two", "a-one", "c-three"]);
     }
 

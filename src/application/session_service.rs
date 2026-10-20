@@ -28,7 +28,8 @@ use crate::application::repos::repo_catalog::RepoCatalog;
 use crate::application::{AddRepoRequest, RepoAddition};
 use crate::application::{DeleteConfirmation, DeleteImpact};
 use crate::domain::{
-    Config, DiffStat, KeyBindings, PullRequest, Repo, Session, SessionObservation, SessionSummary,
+    Config, DiffStat, KeyBindings, PullRequest, Repo, RepoGroup, Session, SessionObservation,
+    SessionSummary,
 };
 
 pub struct SessionService {
@@ -333,6 +334,10 @@ impl SessionService {
             .entry(name)
             .ok_or_else(|| ServiceError::NotFound(format!("no managed session named {name}")))?;
         self.access.open_terminal(session)
+    }
+
+    pub fn open_repo_terminal(&self, group: &RepoGroup) -> Result<(), ServiceError> {
+        self.access.open_repo_terminal(group)
     }
 
     pub fn open_pull_request(&self, name: &str) -> Result<(), ServiceError> {

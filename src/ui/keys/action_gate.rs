@@ -2,7 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::back_key::BackKey;
 use crate::application::ports::ConfigError;
-use crate::domain::{Session, SessionState, SessionSummary};
+use crate::domain::{RepoGroup, Session, SessionState, SessionSummary};
 use crate::ui::app::AppRequest;
 use crate::ui::blocking_operation::BlockingOperation;
 use crate::ui::dialogs::DialogOpening;
@@ -10,7 +10,7 @@ use crate::ui::dialogs::DialogOpening;
 pub struct ActionGate<'a> {
     selected: Option<&'a SessionSummary>,
     config_error: Option<&'a ConfigError>,
-    heading_selected: bool,
+    heading: Option<&'a RepoGroup>,
 }
 
 impl<'a> ActionGate<'a> {
@@ -23,15 +23,15 @@ impl<'a> ActionGate<'a> {
         Self {
             selected,
             config_error,
-            heading_selected: false,
+            heading: None,
         }
     }
 
-    pub fn on_heading(config_error: Option<&'a ConfigError>) -> Self {
+    pub fn on_heading(heading: &'a RepoGroup, config_error: Option<&'a ConfigError>) -> Self {
         Self {
             selected: None,
             config_error,
-            heading_selected: true,
+            heading: Some(heading),
         }
     }
 
@@ -89,10 +89,7 @@ impl<'a> ActionGate<'a> {
         let action = match code {
             KeyCode::Enter => self.enter(),
             KeyCode::Char('t') => KeyAction::from(self.shell().map(KeyAction::Request)),
-            KeyCode::Char('T') => KeyAction::from(
-                self.terminal()
-                    .map(|name| KeyAction::OpenOnDesktop(DesktopOpening::Terminal(name))),
-            ),
+            KeyCode::Char('T') => KeyAction::from(self.terminal().map(KeyAction::OpenOnDesktop)),
             KeyCode::Char('o') => self.open_pull_request(),
             _ => return None,
         };
@@ -123,7 +120,7 @@ impl<'a> ActionGate<'a> {
     }
 
     fn enter(&self) -> KeyAction {
-        if self.heading_selected {
+        if self.heading.is_some() {
             return KeyAction::Fold;
         }
         KeyAction::from(self.attach().map(KeyAction::Request))
@@ -138,8 +135,12 @@ impl<'a> ActionGate<'a> {
             .map(AppRequest::Shell)
     }
 
-    pub fn terminal(&self) -> Result<String, String> {
+    pub fn terminal(&self) -> Result<DesktopOpening, String> {
+        if let Some(group) = self.heading {
+            return Ok(DesktopOpening::RepoTerminal(group.clone()));
+        }
         self.managed_name("T cannot open a terminal in it")
+            .map(DesktopOpening::SessionTerminal)
     }
 
     pub fn open_pull_request(&self) -> KeyAction {
@@ -249,7 +250,8 @@ pub enum KeyAction {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DesktopOpening {
-    Terminal(String),
+    SessionTerminal(String),
+    RepoTerminal(RepoGroup),
     PullRequest(String),
 }
 
@@ -291,6 +293,10 @@ mod tests {
                 "mystery",
                 ServiceFixture::waiting(&stranger).without_metadata(),
             ))
+        }
+
+        fn repo() -> RepoGroup {
+            ServiceFixture::repo_group(ServiceFixture::REPO)
         }
 
         fn config_error() -> ConfigError {
@@ -359,7 +365,8 @@ mod tests {
 
     #[test]
     fn shift_s_on_a_heading_still_asks_to_restart_every_session() {
-        let gate = ActionGate::on_heading(None);
+        let repo = GateFixture::repo();
+        let gate = ActionGate::on_heading(&repo, None);
 
         assert_eq!(
             gate.action_for(&KeyEvent::from(KeyCode::Char('S'))),
@@ -635,10 +642,11 @@ mod tests {
 
     #[test]
     fn enter_on_a_heading_folds_it() {
+        let repo = GateFixture::repo();
         let key = KeyEvent::from(KeyCode::Enter);
 
         assert_eq!(
-            ActionGate::on_heading(None).action_for(&key),
+            ActionGate::on_heading(&repo, None).action_for(&key),
             KeyAction::Fold
         );
     }
@@ -656,10 +664,11 @@ mod tests {
 
     #[test]
     fn space_folds() {
+        let repo = GateFixture::repo();
         let key = KeyEvent::from(KeyCode::Char(' '));
 
         assert_eq!(
-            ActionGate::on_heading(None).action_for(&key),
+            ActionGate::on_heading(&repo, None).action_for(&key),
             KeyAction::Fold
         );
     }
@@ -675,10 +684,11 @@ mod tests {
 
     #[test]
     fn a_heading_refuses_the_session_actions() {
-        let gate = ActionGate::on_heading(None);
+        let repo = GateFixture::repo();
+        let gate = ActionGate::on_heading(&repo, None);
         let refusal = |character| gate.action_for(&KeyEvent::from(KeyCode::Char(character)));
 
-        for character in ['d', 'R', 's', 't', 'T', 'o'] {
+        for character in ['d', 'R', 's', 't', 'o'] {
             assert_eq!(
                 refusal(character),
                 KeyAction::Refuse("No session is selected.".to_string())
@@ -728,9 +738,21 @@ mod tests {
 
             assert_eq!(
                 ActionGate::new(Some(&row), Some(&error)).action_for(&key),
-                KeyAction::OpenOnDesktop(DesktopOpening::Terminal("fix-auth".to_string()))
+                KeyAction::OpenOnDesktop(DesktopOpening::SessionTerminal("fix-auth".to_string()))
             );
         }
+    }
+
+    #[test]
+    fn capital_t_on_a_heading_opens_a_terminal_in_its_repo_even_read_only() {
+        let repo = GateFixture::repo();
+        let error = GateFixture::config_error();
+        let key = KeyEvent::from(KeyCode::Char('T'));
+
+        assert_eq!(
+            ActionGate::on_heading(&repo, Some(&error)).action_for(&key),
+            KeyAction::OpenOnDesktop(DesktopOpening::RepoTerminal(GateFixture::repo()))
+        );
     }
 
     #[test]
