@@ -83,11 +83,12 @@ impl SessionFinder {
     fn query_line(&self, width: usize, theme: &Theme) -> Line<'static> {
         let count = self.count();
         let count_room = count.chars().count() + Self::SIDE_PADDING;
-        let query_room = width.saturating_sub(count_room);
+        let query_room = width.saturating_sub(Self::SIDE_PADDING + count_room);
         let query = self.query.shown(query_room.saturating_sub(Self::COUNT_GAP));
         let padded_query = TextFit::new(&query).padded(query_room);
         let padded_count = TextFit::new(&count).padded(count_room);
         Line::from(vec![
+            Span::raw(" ".repeat(Self::SIDE_PADDING)),
             Span::raw(padded_query),
             Span::styled(padded_count, theme.dim()),
         ])
@@ -102,11 +103,15 @@ impl SessionFinder {
     }
 
     fn match_rows(&self, width: usize, rows: usize, theme: &Theme) -> Vec<Line<'static>> {
-        let name_room = width.saturating_sub(Self::SIDE_PADDING);
-        let indent = " ".repeat(Self::SIDE_PADDING);
+        let name_room = width.saturating_sub(Self::name_indent());
+        let indent = " ".repeat(Self::name_indent());
         self.matches.lines(rows, theme, |index| {
             indent.clone() + &TextFit::new(&self.names[index]).padded(name_room)
         })
+    }
+
+    fn name_indent() -> usize {
+        Self::SIDE_PADDING + Self::PROMPT.chars().count()
     }
 }
 
@@ -173,11 +178,11 @@ mod tests {
         assert_eq!(
             rows,
             [
-                "❯ █             3/3 ".to_string(),
+                " ❯ █            3/3 ".to_string(),
                 FinderFixture::rule(),
-                FinderFixture::full_width(" fix-auth"),
-                FinderFixture::full_width(" dark-mode"),
-                FinderFixture::full_width(" docs"),
+                FinderFixture::full_width("   fix-auth"),
+                FinderFixture::full_width("   dark-mode"),
+                FinderFixture::full_width("   docs"),
             ]
         );
     }
@@ -191,9 +196,9 @@ mod tests {
         assert_eq!(
             FinderFixture::rows(&finder),
             [
-                "❯ fa█           1/3 ".to_string(),
+                " ❯ fa█          1/3 ".to_string(),
                 FinderFixture::rule(),
-                FinderFixture::full_width(" fix-auth"),
+                FinderFixture::full_width("   fix-auth"),
             ]
         );
     }
@@ -204,14 +209,14 @@ mod tests {
 
         FinderFixture::type_text(&mut finder, "abcdefghijklmnopqrstuvwxyz");
 
-        assert_eq!(FinderFixture::rows(&finder)[0], "❯ opqrstuvwxyz█ 0/3 ");
+        assert_eq!(FinderFixture::rows(&finder)[0], " ❯ pqrstuvwxyz█ 0/3 ");
     }
 
     #[test]
     fn a_long_name_is_truncated_after_its_indent() {
         let finder = SessionFinder::open(vec!["a-session-name-wider-than-the-finder".to_string()]);
 
-        assert_eq!(FinderFixture::rows(&finder)[2], " a-session-name-wid…");
+        assert_eq!(FinderFixture::rows(&finder)[2], "   a-session-name-w…");
     }
 
     #[test]
@@ -261,7 +266,7 @@ mod tests {
 
         FinderFixture::type_text(&mut finder, "jk");
 
-        assert!(FinderFixture::rows(&finder)[0].starts_with("❯ jk█"));
+        assert!(FinderFixture::rows(&finder)[0].starts_with(" ❯ jk█"));
     }
 
     #[test]
