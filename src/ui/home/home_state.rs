@@ -72,7 +72,7 @@ impl HomeState {
     }
 
     pub fn key_hints(&self) -> KeyHints {
-        if self.sessions.heading_selected() {
+        if self.sessions.selected_heading().is_some() {
             return KeyHints::on_heading();
         }
         match self.sessions.selected() {

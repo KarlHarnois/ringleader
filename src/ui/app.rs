@@ -232,8 +232,8 @@ impl App {
     fn gate<'a>(home: &'a HomeState, service: &'a SessionService) -> ActionGate<'a> {
         let sessions = home.sessions();
         let config_error = service.read_only_reason();
-        if sessions.heading_selected() {
-            return ActionGate::on_heading(config_error);
+        if let Some(heading) = sessions.selected_heading() {
+            return ActionGate::on_heading(heading, config_error);
         }
         ActionGate::new(sessions.selected(), config_error)
     }
