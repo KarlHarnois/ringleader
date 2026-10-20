@@ -122,8 +122,13 @@ mod tests {
 
         fn run(fixture: &ServiceFixture, events: Vec<Event>) -> Result<(), FinderPopupError> {
             let backend = FixtureBackend::new(UiHarness::WIDTH / 2, UiHarness::HEIGHT / 2);
-            SessionFinderPopup::new(fixture.service(), Self::CLIENT)
-                .run(backend, ScriptedInput::events(events))
+            let script = ScriptedInput::events(Self::ending_dismissed(events));
+            SessionFinderPopup::new(fixture.service(), Self::CLIENT).run(backend, script)
+        }
+
+        fn ending_dismissed(mut events: Vec<Event>) -> Vec<Event> {
+            events.push(Self::control('c'));
+            events
         }
 
         fn typed(text: &str) -> Vec<Event> {
