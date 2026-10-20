@@ -14,7 +14,7 @@ pub struct ServerAudit {
 }
 
 impl ServerAudit {
-    pub const MINIMUM_TMUX: (u32, u32) = (3, 2);
+    pub const MINIMUM_TMUX: (u32, u32) = (3, 3);
 
     pub fn new(ports: &ServicePorts, paths: &DiagnosticPaths) -> Self {
         Self {
