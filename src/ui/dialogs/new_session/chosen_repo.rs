@@ -11,9 +11,9 @@ impl ChosenRepo {
     const FINDING: &'static str = "Finding the repo…";
     const NONE: &'static str = "none, type to find one";
 
-    pub fn open(service: &SessionService, selected_repo: Option<PathBuf>) -> Self {
+    pub fn open(service: &SessionService, preferred_repo: Option<PathBuf>) -> Self {
         Self {
-            state: ChoiceState::Finding(service.default_repo(selected_repo)),
+            state: ChoiceState::Finding(service.default_repo(preferred_repo)),
         }
     }
 

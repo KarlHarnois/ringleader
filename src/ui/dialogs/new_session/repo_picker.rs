@@ -18,9 +18,9 @@ pub struct RepoPicker {
 }
 
 impl RepoPicker {
-    pub fn open(service: &SessionService, selected_repo: Option<PathBuf>) -> Self {
+    pub fn open(service: &SessionService, preferred_repo: Option<PathBuf>) -> Self {
         Self {
-            chosen: ChosenRepo::open(service, selected_repo),
+            chosen: ChosenRepo::open(service, preferred_repo),
             finder: RepoFinder::open(service),
             searching: false,
         }
@@ -137,7 +137,7 @@ mod tests {
         const SETTLE_LIMIT: Duration = Duration::from_secs(2);
         const FOUND: &'static str = "/home/example/work/api-gateway";
         const TYPED: &'static str = "/srv/tools";
-        const SELECTED: &'static str = "/home/example/work/web-client";
+        const PREFERRED: &'static str = "/home/example/work/web-client";
 
         fn fixture() -> ServiceFixture {
             let found = Repo::discovered(
@@ -152,7 +152,7 @@ mod tests {
                 .with_host(
                     FakeHostProbe::default()
                         .with_directory(Path::new(Self::TYPED))
-                        .with_directory(Path::new(Self::SELECTED)),
+                        .with_directory(Path::new(Self::PREFERRED)),
                 )
         }
 
@@ -160,8 +160,8 @@ mod tests {
             Self::opened_on(service, None)
         }
 
-        fn opened_on(service: &SessionService, selected_repo: Option<PathBuf>) -> RepoPicker {
-            let mut picker = RepoPicker::open(service, selected_repo);
+        fn opened_on(service: &SessionService, preferred_repo: Option<PathBuf>) -> RepoPicker {
+            let mut picker = RepoPicker::open(service, preferred_repo);
             Self::settle(&mut picker, |picker| {
                 !Self::text(picker).starts_with("Finding")
             });
@@ -234,11 +234,11 @@ mod tests {
     }
 
     #[test]
-    fn the_field_shows_the_selected_repo_over_the_repo_ringleader_started_in() {
-        let selected_repo = PathBuf::from(PickerFixture::SELECTED);
+    fn the_field_shows_the_preferred_repo_over_the_repo_ringleader_started_in() {
+        let preferred_repo = PathBuf::from(PickerFixture::PREFERRED);
 
         let picker =
-            PickerFixture::opened_on(&PickerFixture::fixture().service(), Some(selected_repo));
+            PickerFixture::opened_on(&PickerFixture::fixture().service(), Some(preferred_repo));
 
         assert_eq!(PickerFixture::text(&picker), "web-client");
     }

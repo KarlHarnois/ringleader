@@ -37,8 +37,8 @@ impl Dialog {
 
     pub fn open(opening: DialogOpening, service: &SessionService) -> Self {
         match opening {
-            DialogOpening::NewSession(selected_repo) => {
-                Self::NewSession(Box::new(NewSessionDialog::open(service, selected_repo)))
+            DialogOpening::NewSession(preferred_repo) => {
+                Self::NewSession(Box::new(NewSessionDialog::open(service, preferred_repo)))
             }
             DialogOpening::Rename(session) => {
                 Self::Rename(Box::new(RenameSessionDialog::open(*session)))

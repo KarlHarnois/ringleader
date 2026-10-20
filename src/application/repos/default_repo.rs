@@ -28,13 +28,13 @@ impl DefaultRepo {
     pub fn find(
         &self,
         explicit: Vec<Repo>,
-        selected_repo: Option<PathBuf>,
+        preferred_repo: Option<PathBuf>,
     ) -> Pending<Option<Repo>> {
         let scanner = Arc::clone(&self.scanner);
         let host = Arc::clone(&self.host);
         let launch_directory = self.launch_directory.clone();
         Pending::start(move || {
-            let chosen = selected_repo
+            let chosen = preferred_repo
                 .filter(|path| host.path_exists(path))
                 .or_else(|| Self::launch_repo(scanner.as_ref(), &launch_directory));
             let merge = RepoMerge::new(host.as_ref());
@@ -62,18 +62,18 @@ mod tests {
 
     impl DefaultFixture {
         const WAIT_LIMIT: Duration = Duration::from_secs(2);
-        const SELECTED: &'static str = "/work/selected-project";
+        const PREFERRED: &'static str = "/work/preferred-project";
 
         fn chosen(fixture: &ServiceFixture) -> Option<Repo> {
             Self::chosen_for(fixture, None)
         }
 
-        fn chosen_for_the_selection(fixture: &ServiceFixture) -> Option<Repo> {
-            Self::chosen_for(fixture, Some(PathBuf::from(Self::SELECTED)))
+        fn chosen_for_the_preferred_repo(fixture: &ServiceFixture) -> Option<Repo> {
+            Self::chosen_for(fixture, Some(PathBuf::from(Self::PREFERRED)))
         }
 
-        fn chosen_for(fixture: &ServiceFixture, selected_repo: Option<PathBuf>) -> Option<Repo> {
-            let pending = fixture.service().default_repo(selected_repo);
+        fn chosen_for(fixture: &ServiceFixture, preferred_repo: Option<PathBuf>) -> Option<Repo> {
+            let pending = fixture.service().default_repo(preferred_repo);
             let started = Instant::now();
             pending
                 .wait_unless(|| started.elapsed() > Self::WAIT_LIMIT)
@@ -87,44 +87,44 @@ mod tests {
             )
         }
 
-        fn with_the_selected_repo_present(fixture: ServiceFixture) -> ServiceFixture {
-            fixture.with_host(FakeHostProbe::default().with_directory(Path::new(Self::SELECTED)))
+        fn with_the_preferred_repo_present(fixture: ServiceFixture) -> ServiceFixture {
+            fixture.with_host(FakeHostProbe::default().with_directory(Path::new(Self::PREFERRED)))
         }
     }
 
     #[test]
-    fn a_selected_repo_wins_over_the_launch_repo() {
-        let fixture = DefaultFixture::with_the_selected_repo_present(
+    fn a_preferred_repo_wins_over_the_launch_repo() {
+        let fixture = DefaultFixture::with_the_preferred_repo_present(
             DefaultFixture::launched_inside_the_repo(),
         );
 
-        let chosen = DefaultFixture::chosen_for_the_selection(&fixture).unwrap();
+        let chosen = DefaultFixture::chosen_for_the_preferred_repo(&fixture).unwrap();
 
-        assert_eq!(chosen.path(), Path::new(DefaultFixture::SELECTED));
+        assert_eq!(chosen.path(), Path::new(DefaultFixture::PREFERRED));
     }
 
     #[test]
-    fn a_selected_repo_that_is_gone_falls_back_to_the_launch_repo() {
+    fn a_preferred_repo_that_is_gone_falls_back_to_the_launch_repo() {
         let fixture = DefaultFixture::launched_inside_the_repo();
 
-        let chosen = DefaultFixture::chosen_for_the_selection(&fixture).unwrap();
+        let chosen = DefaultFixture::chosen_for_the_preferred_repo(&fixture).unwrap();
 
         assert_eq!(chosen.path(), Path::new(ServiceFixture::REPO));
     }
 
     #[test]
-    fn a_selected_configured_repo_chooses_its_entry() {
+    fn a_preferred_configured_repo_chooses_its_entry() {
         let entry = Repo::explicit(
             RepoName::parse("custom-name").unwrap(),
-            Path::new(DefaultFixture::SELECTED),
+            Path::new(DefaultFixture::PREFERRED),
             None,
         );
         let config: Config = ServiceFixture::config().with_repos(vec![entry]);
-        let fixture = DefaultFixture::with_the_selected_repo_present(
+        let fixture = DefaultFixture::with_the_preferred_repo_present(
             ServiceFixture::new().with_config(config),
         );
 
-        let chosen = DefaultFixture::chosen_for_the_selection(&fixture).unwrap();
+        let chosen = DefaultFixture::chosen_for_the_preferred_repo(&fixture).unwrap();
 
         assert_eq!(chosen.name().as_str(), "custom-name");
         assert!(chosen.is_explicit());
@@ -155,7 +155,7 @@ mod tests {
     }
 
     #[test]
-    fn no_selection_and_no_launch_repo_chooses_nothing() {
+    fn no_preferred_repo_and_no_launch_repo_chooses_nothing() {
         assert_eq!(DefaultFixture::chosen(&ServiceFixture::new()), None);
     }
 }

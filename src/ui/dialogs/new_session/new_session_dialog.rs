@@ -36,11 +36,11 @@ impl NewSessionDialog {
     const NAME_MISSING: &'static str = "enter a session name";
     const REPO_MISSING: &'static str = "pick a repo";
 
-    pub fn open(service: &SessionService, selected_repo: Option<PathBuf>) -> Self {
+    pub fn open(service: &SessionService, preferred_repo: Option<PathBuf>) -> Self {
         let agents = AgentPicker::new(service.config().agents(), &service.config_path());
         Self {
             name: TextField::new(FieldKind::Name),
-            repos: RepoPicker::open(service, selected_repo),
+            repos: RepoPicker::open(service, preferred_repo),
             mode: Self::starting_mode(&agents),
             agents,
             prompt: PromptField::default(),

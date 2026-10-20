@@ -74,10 +74,10 @@ impl RepoCatalog {
     pub fn default_repo(
         &self,
         config: &Config,
-        selected_repo: Option<PathBuf>,
+        preferred_repo: Option<PathBuf>,
     ) -> Pending<Option<Repo>> {
         self.default_repo
-            .find(config.repos().to_vec(), selected_repo)
+            .find(config.repos().to_vec(), preferred_repo)
     }
 
     pub fn add_repo(&self, request: AddRepoRequest, config: &Config) -> Pending<RepoAddition> {
