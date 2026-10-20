@@ -93,8 +93,8 @@ impl HomeState {
         self.diffs.refresh_soon();
     }
 
-    pub fn refresh_pull_requests_soon(&mut self) {
-        self.pull_requests.refresh_soon();
+    pub fn adopt_latest_pull_request(&mut self, name: &str, service: &SessionService) {
+        self.pull_requests.adopt_latest(name, service);
     }
 
     pub fn pause_after(&mut self, error: &ServiceError) {

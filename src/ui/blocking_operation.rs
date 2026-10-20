@@ -44,9 +44,10 @@ impl BlockingOperation {
 
     fn open_pull_request(service: &SessionService, name: &str) -> OperationOutcome {
         match service.open_pull_request(name) {
-            Ok(()) => OperationOutcome::Opened(format!(
-                "Asked the browser to open the pull request of {name}."
-            )),
+            Ok(()) => OperationOutcome::Opened {
+                name: name.to_string(),
+                message: format!("Asked the browser to open the pull request of {name}."),
+            },
             Err(error) => OperationOutcome::Failed(error),
         }
     }

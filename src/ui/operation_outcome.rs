@@ -15,7 +15,10 @@ pub enum OperationOutcome {
         impact: DeleteImpact,
         changed: bool,
     },
-    Opened(String),
+    Opened {
+        name: String,
+        message: String,
+    },
     Failed(ServiceError),
 }
 

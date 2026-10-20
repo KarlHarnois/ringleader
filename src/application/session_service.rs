@@ -337,6 +337,11 @@ impl SessionService {
         self.access.open_terminal(session)
     }
 
+    pub fn latest_pull_request(&self, name: &str) -> Option<PullRequest> {
+        let session = self.entry(name)?;
+        self.pull_request_catalog.latest(session)
+    }
+
     pub fn open_pull_request(&self, name: &str) -> Result<(), ServiceError> {
         let session = self
             .entry(name)

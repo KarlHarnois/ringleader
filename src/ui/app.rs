@@ -170,8 +170,8 @@ impl App {
                     .open(Dialog::delete(row, &name, impact, changed));
                 self.status.show(None);
             }
-            OperationOutcome::Opened(message) => {
-                self.home.refresh_pull_requests_soon();
+            OperationOutcome::Opened { name, message } => {
+                self.home.adopt_latest_pull_request(&name, &self.service);
                 self.status.info(message);
             }
             OperationOutcome::Failed(error) => self.report_failure(error),
@@ -565,13 +565,6 @@ mod tests {
             Deadline::for_background_work().wait_until(|| {
                 app.on_tick(Instant::now());
                 fixture.pull_requests().calls().len() >= times
-            })
-        }
-
-        fn comes_to_show(app: &mut App, text: &str) -> bool {
-            Deadline::for_background_work().wait_until(|| {
-                app.on_tick(Instant::now());
-                Self::screen(app, 100, 28).contains(text)
             })
         }
 
@@ -1957,15 +1950,16 @@ mod tests {
     }
 
     #[test]
-    fn a_pull_request_that_o_finds_comes_to_show_in_the_list() {
+    fn a_pull_request_that_o_finds_shows_in_the_list_on_the_next_tick() {
         let fixture = AppFixture::deletable();
         let mut app = AppFixture::started(&fixture, 100, 28);
         assert!(AppFixture::looks_up_pull_requests(&fixture, &mut app, 1));
         AppFixture::open_pull_request_later(&fixture);
 
         AppFixture::perform_key(&mut app, 'o');
+        app.on_tick(Instant::now());
 
-        assert!(AppFixture::comes_to_show(&mut app, "#142"));
+        assert!(AppFixture::screen(&app, 100, 28).contains("#142"));
     }
 
     #[test]

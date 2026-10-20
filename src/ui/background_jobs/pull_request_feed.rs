@@ -22,6 +22,12 @@ impl PullRequestFeed {
         self.refresh_requested = true;
     }
 
+    pub fn adopt_latest(&mut self, name: &str, service: &SessionService) {
+        if let Some(pull_request) = service.latest_pull_request(name) {
+            self.pull_requests.insert(name.to_string(), pull_request);
+        }
+    }
+
     pub fn keep_only(&mut self, names: &[String]) {
         self.pull_requests.retain(|name, _| names.contains(name));
         self.looked_up.retain(|name| names.contains(name));
@@ -256,6 +262,26 @@ mod tests {
         feed.tick(Instant::now(), &FeedFixture::visible(), &service);
 
         assert!(feed.pending.is_none());
+    }
+
+    #[test]
+    fn adopting_the_latest_pull_request_takes_the_catalogs_answer_without_a_lookup() {
+        let fixture = FeedFixture::with_pull_request(142);
+        let service = fixture.service();
+        service
+            .find_pull_requests(&FeedFixture::visible())
+            .wait_unless(|| false)
+            .unwrap()
+            .unwrap();
+        let mut feed = PullRequestFeed::default();
+
+        feed.adopt_latest(FeedFixture::NAME, &service);
+
+        assert_eq!(
+            feed.pull_requests().get(FeedFixture::NAME),
+            Some(&FeedFixture::open(142))
+        );
+        assert_eq!(fixture.pull_requests().calls().len(), 1);
     }
 
     #[test]
