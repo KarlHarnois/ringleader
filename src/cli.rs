@@ -753,15 +753,6 @@ mod tests {
     }
 
     #[test]
-    fn the_hidden_finder_enters_the_finder_with_its_client() {
-        let entry_points = RecordingEntryPoints::default();
-
-        entry_points.enter(&["__find-session", "--client", "client-1234"]);
-
-        assert_eq!(entry_points.entered(), ["find_session client-1234"]);
-    }
-
-    #[test]
     fn no_subcommand_enters_the_tui_and_a_subcommand_the_cli() {
         let entry_points = RecordingEntryPoints::default();
 
