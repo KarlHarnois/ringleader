@@ -9,4 +9,4 @@
 
 **Never list a text-editing key in a hint line:** every terminal user already expects those keys. A text-editing key is a key that moves the cursor in a text field or changes the field's text. A key that types a character is not a text-editing key.
 
-**Add each new text-editing key to `TextField`.**
+**Add each new text-editing key to the type that edits the field the key acts on.**
