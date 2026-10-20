@@ -1,19 +1,20 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::KeyEvent;
+
+use super::control_key::ControlKey;
 
 pub struct BackKey;
 
 impl BackKey {
-    const CODE: KeyCode = KeyCode::Char('q');
+    const KEY: ControlKey = ControlKey::new('q');
 
     pub fn matches(key: &KeyEvent) -> bool {
-        let pressed = key.kind != KeyEventKind::Release;
-        pressed && key.code == Self::CODE && key.modifiers == KeyModifiers::CONTROL
+        Self::KEY.matches(key)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crossterm::event::KeyEventState;
+    use crossterm::event::{KeyCode, KeyEventKind, KeyEventState, KeyModifiers};
 
     use super::*;
 

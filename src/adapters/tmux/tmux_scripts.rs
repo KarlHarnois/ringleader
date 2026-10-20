@@ -226,6 +226,10 @@ impl TmuxScripts {
         TmuxSequence::new().command(["attach-session", "-t", target])
     }
 
+    pub fn switch_client(client: &str, target: &str) -> TmuxSequence {
+        TmuxSequence::new().command(["switch-client", "-c", client, "-t", target])
+    }
+
     fn metadata_option(target: &str, metadata: &SessionMetadata) -> Vec<OsString> {
         let encoded = MetadataJson::encode(metadata);
         Self::words(&[

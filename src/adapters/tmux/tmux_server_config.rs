@@ -1,5 +1,6 @@
 use std::slice;
 
+use super::tmux_finder_popup::TmuxFinderPopup;
 use super::tmux_sequence::TmuxSequence;
 use super::tmux_shell_toggle::TmuxShellToggle;
 use crate::adapters::filesystem::fnv_hash::FnvHash;
@@ -7,6 +8,7 @@ use crate::domain::{HotKey, KeyBindings};
 
 pub struct TmuxServerConfig {
     key_bindings: KeyBindings,
+    finder_popup: TmuxFinderPopup,
 }
 
 impl TmuxServerConfig {
@@ -37,18 +39,23 @@ impl TmuxServerConfig {
     const PREVIOUS_SESSION: &'static str = "switch-client -p";
     const RETURN: &'static str = "detach-client";
     const EMACS_COPY_MODE: &'static str = "copy-mode";
-    const EMACS_COPY_MODE_DEFAULTS: [(&'static str, &'static str); 2] =
-        [("M-Up", "halfpage-up"), ("M-Down", "halfpage-down")];
+    const EMACS_COPY_MODE_DEFAULTS: [(&'static str, &'static str); 3] = [
+        ("M-Up", "halfpage-up"),
+        ("M-Down", "halfpage-down"),
+        ("C-k", "copy-pipe-end-of-line-and-cancel"),
+    ];
 
     pub const RETURN_KEY_OPTION: &'static str = "@ringleader_return_key";
     pub const NEXT_SESSION_KEYS_OPTION: &'static str = "@ringleader_next_session_keys";
     pub const PREVIOUS_SESSION_KEYS_OPTION: &'static str = "@ringleader_previous_session_keys";
     pub const SHELL_TOGGLE_KEYS_OPTION: &'static str = "@ringleader_shell_toggle_keys";
+    pub const FINDER_KEYS_OPTION: &'static str = "@ringleader_finder_keys";
     pub const HASH_OPTION: &'static str = "@ringleader_config";
 
-    pub fn new(key_bindings: &KeyBindings) -> Self {
+    pub fn new(key_bindings: &KeyBindings, finder_popup: &TmuxFinderPopup) -> Self {
         Self {
             key_bindings: key_bindings.clone(),
+            finder_popup: finder_popup.clone(),
         }
     }
 
@@ -78,7 +85,7 @@ impl TmuxServerConfig {
         lines
     }
 
-    fn recorded_keys(&self) -> [String; 4] {
+    fn recorded_keys(&self) -> [String; 5] {
         let bindings = &self.key_bindings;
         [
             Self::option_line(
@@ -96,6 +103,10 @@ impl TmuxServerConfig {
             Self::option_line(
                 Self::SHELL_TOGGLE_KEYS_OPTION,
                 &Self::key_list(bindings.shell_toggle_keys()),
+            ),
+            Self::option_line(
+                Self::FINDER_KEYS_OPTION,
+                &Self::key_list(bindings.finder_keys()),
             ),
         ]
     }
@@ -163,6 +174,7 @@ impl TmuxServerConfig {
                 bindings.shell_toggle_keys(),
                 &TmuxShellToggle::command(),
             ),
+            Self::bound(table, bindings.finder_keys(), &self.finder_popup.command()),
             Self::bound(table, return_key, Self::RETURN),
         ]
         .concat()
@@ -199,7 +211,7 @@ mod tests {
     impl ConfigFixture {
         fn render(key: &str) -> String {
             let bindings = KeyBindings::default().with_return_key(HotKey::parse(key).unwrap());
-            TmuxServerConfig::new(&bindings).render()
+            TmuxServerConfig::new(&bindings, &TmuxTestServer::stand_in_finder()).render()
         }
 
         fn binding(key: &str) -> String {
@@ -287,7 +299,9 @@ mod tests {
 
     #[test]
     fn the_default_render_matches_the_golden_fixture() {
-        let render = TmuxServerConfig::new(&KeyBindings::default()).render();
+        let render =
+            TmuxServerConfig::new(&KeyBindings::default(), &TmuxTestServer::stand_in_finder())
+                .render();
 
         assert_eq!(render, GOLDEN);
     }
@@ -576,7 +590,12 @@ mod tests {
         files
             .prepare(&ConfigFixture::render(KeyBindings::RETURN_KEY))
             .unwrap();
-        let tmux = TmuxCommand::new(OsStr::new("tmux"), &files, &server.environment());
+        let tmux = TmuxCommand::new(
+            OsStr::new("tmux"),
+            &files,
+            &server.environment(),
+            &TmuxTestServer::stand_in_finder(),
+        );
 
         tmux.create(
             &TmuxSequence::new().command(["new-session", "-d", "-s", "holder", "sleep", "30"]),

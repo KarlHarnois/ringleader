@@ -393,6 +393,8 @@ Confine each `unsafe` block to one adapter method.
 
 The hidden `__exec-agent` path loads no config, opens no log, and takes no lock.
 
+The hidden `__find-session` path runs in the popup that a finder key opens on the private tmux server. It takes no lock and never writes the first-run config.
+
 ### Locks
 
 **A CLI command that changes a session or a repo takes the write lock.** Every other CLI command takes no lock.
@@ -418,6 +420,7 @@ The hidden `__exec-agent` path loads no config, opens no log, and takes no lock.
 
 - If the server runs, `r` re-sources the generated config, even when the server's `@ringleader_config` hash matches the current render. A `tmux source-file` run from a pane can change the server without changing that hash.
 - Only a lock holder writes or re-sources the generated config, so only one process ever writes the generated config.
+- The finder binding names Ringleader's executable and its program paths. The config hash covers those paths, but not the shell. A config applied by another build therefore reads as stale. Two builds that share one server rebind the finder in turn.
 
 ### Private tmux server
 

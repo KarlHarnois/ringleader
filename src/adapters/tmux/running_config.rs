@@ -12,8 +12,9 @@ impl RunningConfig {
     const NEXT_SESSION_LABEL: &'static str = "ringleader-next-session-keys";
     const PREVIOUS_SESSION_LABEL: &'static str = "ringleader-previous-session-keys";
     const SHELL_TOGGLE_LABEL: &'static str = "ringleader-shell-toggle-keys";
+    const FINDER_LABEL: &'static str = "ringleader-finder-keys";
 
-    pub fn formats() -> [String; 4] {
+    pub fn formats() -> [String; 5] {
         [
             format!(
                 "{} #{{{}}} #{{{}}}",
@@ -33,6 +34,7 @@ impl RunningConfig {
                 Self::SHELL_TOGGLE_LABEL,
                 TmuxServerConfig::SHELL_TOGGLE_KEYS_OPTION,
             ),
+            Self::labeled(Self::FINDER_LABEL, TmuxServerConfig::FINDER_KEYS_OPTION),
         ]
     }
 
@@ -45,6 +47,7 @@ impl RunningConfig {
                 Self::keys(output, Self::NEXT_SESSION_LABEL),
                 Self::keys(output, Self::PREVIOUS_SESSION_LABEL),
                 Self::keys(output, Self::SHELL_TOGGLE_LABEL),
+                Self::keys(output, Self::FINDER_LABEL),
             )
         });
         Some(Self {
@@ -91,12 +94,13 @@ mod tests {
     }
 
     #[test]
-    fn the_hash_and_all_four_key_settings_are_read() {
+    fn the_hash_and_all_five_key_settings_are_read() {
         let running = RunningFixture::read(concat!(
             "ringleader-config 0123456789abcdef M-x\n",
             "ringleader-next-session-keys M-n F7\n",
             "ringleader-previous-session-keys M-p\n",
             "ringleader-shell-toggle-keys M-o F8\n",
+            "ringleader-finder-keys M-f\n",
         ));
 
         let bindings = running.key_bindings().unwrap();
@@ -114,6 +118,7 @@ mod tests {
             RunningFixture::names(bindings.shell_toggle_keys()),
             ["M-o", "F8"]
         );
+        assert_eq!(RunningFixture::names(bindings.finder_keys()), ["M-f"]);
     }
 
     #[test]
@@ -127,6 +132,18 @@ mod tests {
 
         let bindings = running.key_bindings().unwrap();
         assert!(bindings.shell_toggle_keys().is_empty());
+    }
+
+    #[test]
+    fn a_server_without_the_finder_option_reads_as_no_finder_keys() {
+        let running = RunningFixture::read(concat!(
+            "ringleader-config 0123456789abcdef C-q\n",
+            "ringleader-shell-toggle-keys M-l\n",
+            "ringleader-finder-keys \n",
+        ));
+
+        let bindings = running.key_bindings().unwrap();
+        assert!(bindings.finder_keys().is_empty());
     }
 
     #[test]

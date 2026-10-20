@@ -10,6 +10,7 @@
 - a session id
 - a window id
 - a pane id
+- a client name that tmux reported through `#{client_name}`
 
 **Never pass a bare `-t <name>`:** tmux resolves a name with no exact match by prefix. A bare `-t fix` would reach `fix-auth`.
 

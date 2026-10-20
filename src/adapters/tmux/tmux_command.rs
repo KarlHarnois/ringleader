@@ -4,6 +4,7 @@ use std::process::Command;
 
 use super::server_files::ServerFiles;
 use super::tmux_error::TmuxError;
+use super::tmux_finder_popup::TmuxFinderPopup;
 use super::tmux_output::TmuxOutput;
 use super::tmux_sequence::TmuxSequence;
 use crate::adapters::BoundedCommand;
@@ -20,16 +21,23 @@ pub struct TmuxCommand {
     environment: ProcessEnvironment,
     caller: CallerIdentity,
     bounded: BoundedCommand,
+    finder_popup: TmuxFinderPopup,
 }
 
 impl TmuxCommand {
-    pub fn new(program: &OsStr, server: &ServerFiles, environment: &ProcessEnvironment) -> Self {
+    pub fn new(
+        program: &OsStr,
+        server: &ServerFiles,
+        environment: &ProcessEnvironment,
+        finder_popup: &TmuxFinderPopup,
+    ) -> Self {
         Self {
             program: program.to_os_string(),
             server: server.clone(),
             environment: environment.outside_tmux(),
             caller: CallerIdentity::of(environment),
             bounded: BoundedCommand::new(Deadlines::standard()),
+            finder_popup: finder_popup.clone(),
         }
     }
 
@@ -50,6 +58,10 @@ impl TmuxCommand {
 
     pub fn server(&self) -> &ServerFiles {
         &self.server
+    }
+
+    pub fn finder_popup(&self) -> &TmuxFinderPopup {
+        &self.finder_popup
     }
 
     pub fn caller_pane(&self) -> Option<String> {

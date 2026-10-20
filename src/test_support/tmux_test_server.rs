@@ -16,6 +16,7 @@ use crate::adapters::host::process_environment::ProcessEnvironment;
 use crate::adapters::host::process_table::ProcessTable;
 use crate::adapters::tmux::server_files::ServerFiles;
 use crate::adapters::tmux::tmux_command::TmuxCommand;
+use crate::adapters::tmux::tmux_finder_popup::TmuxFinderPopup;
 use crate::adapters::tmux::tmux_multiplexer::TmuxMultiplexer;
 use crate::adapters::tmux::tmux_server_config::TmuxServerConfig;
 use crate::application::ports::{AgentLaunch, Multiplexer, SessionSpec};
@@ -31,6 +32,15 @@ pub struct TmuxTestServer {
 
 impl TmuxTestServer {
     pub const STAND_IN: [&'static str; 4] = ["sh", "-c", "sleep 30", "--"];
+    const STAND_IN_FINDER: [&'static str; 3] = [
+        "/nix/store/example-ringleader/bin/ringleader",
+        "__find-session",
+        "--client",
+    ];
+    const STAND_IN_PROGRAMS: [&'static str; 2] = [
+        "RINGLEADER_TMUX=/nix/store/example-tmux/bin/tmux",
+        "RINGLEADER_GIT=/nix/store/example-git/bin/git",
+    ];
     const SETTLE_LIMIT: Duration = Duration::from_secs(2);
     const POLL_INTERVAL: Duration = Duration::from_millis(20);
     const OUTER_SESSION: &'static str = "outer";
@@ -48,7 +58,14 @@ impl TmuxTestServer {
     }
 
     fn default_config() -> String {
-        TmuxServerConfig::new(&KeyBindings::default()).render()
+        TmuxServerConfig::new(&KeyBindings::default(), &Self::stand_in_finder()).render()
+    }
+
+    pub fn stand_in_finder() -> TmuxFinderPopup {
+        TmuxFinderPopup::new(
+            Self::STAND_IN_FINDER.map(OsString::from).to_vec(),
+            &Self::STAND_IN_PROGRAMS.map(OsString::from),
+        )
     }
 
     fn with_config_marked(config_text: &str, marker: ProcessMarker) -> Self {
@@ -149,8 +166,13 @@ impl TmuxTestServer {
         environment: &ProcessEnvironment,
         deadlines: Deadlines,
     ) -> TmuxCommand {
-        TmuxCommand::new(&self.program, &self.files, &self.marked(environment))
-            .with_deadlines(deadlines)
+        TmuxCommand::new(
+            &self.program,
+            &self.files,
+            &self.marked(environment),
+            &Self::stand_in_finder(),
+        )
+        .with_deadlines(deadlines)
     }
 
     fn marked(&self, environment: &ProcessEnvironment) -> ProcessEnvironment {
