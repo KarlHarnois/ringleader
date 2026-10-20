@@ -235,12 +235,27 @@ mod tests {
     struct PlacementFixture;
 
     impl PlacementFixture {
+        const CHEVRON: &'static str = "❯";
+
         fn render(opening: DialogOpening, width: u16, height: u16) -> Terminal<TestBackend> {
             let service = ServiceFixture::new().service();
-            let dialog = Dialog::open(opening, &service);
+            Self::draw(&Dialog::open(opening, &service), width, height)
+        }
+
+        fn draw(dialog: &Dialog, width: u16, height: u16) -> Terminal<TestBackend> {
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
             terminal.draw(|frame| dialog.render(frame, &Theme)).unwrap();
             terminal
+        }
+
+        fn chevron_column(terminal: &Terminal<TestBackend>) -> u16 {
+            let area = *terminal.backend().buffer().area();
+            let mut cells = (area.top()..area.bottom())
+                .flat_map(|row| (area.left()..area.right()).map(move |column| (column, row)));
+            let (column, _) = cells
+                .find(|&(column, row)| Self::symbol(terminal, column, row) == Self::CHEVRON)
+                .unwrap();
+            column
         }
 
         fn symbol(terminal: &Terminal<TestBackend>, column: u16, row: u16) -> String {
@@ -279,6 +294,18 @@ mod tests {
         assert_eq!(PlacementFixture::symbol(&terminal, 12, 4), "│");
         assert_eq!(PlacementFixture::symbol(&terminal, 13, 4), " ");
         assert_eq!(PlacementFixture::symbol(&terminal, 14, 4), "M");
+    }
+
+    #[test]
+    fn the_session_finder_chevron_lines_up_with_the_new_session_prompt_chevron() {
+        let finder =
+            PlacementFixture::draw(&Dialog::find_session(vec!["docs".to_string()]), 100, 28);
+        let new_session = PlacementFixture::render(DialogOpening::NewSession, 100, 28);
+
+        assert_eq!(
+            PlacementFixture::chevron_column(&finder),
+            PlacementFixture::chevron_column(&new_session)
+        );
     }
 
     #[test]
