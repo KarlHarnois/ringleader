@@ -41,10 +41,17 @@ impl PullRequestCatalog {
         pull_request
     }
 
-    pub fn look_up_unless_known(&self, session: &Session) {
-        if self.latest(session).is_none() {
-            self.fetch(PullRequestQuery::of_worktree(session).into_iter().collect());
+    pub fn look_up_unless_known(&self, session: &Session) -> Result<(), PullRequestError> {
+        match (self.latest(session), PullRequestQuery::of_worktree(session)) {
+            (None, Some(query)) => self.look_up(query),
+            _ => Ok(()),
         }
+    }
+
+    fn look_up(&self, query: PullRequestQuery) -> Result<(), PullRequestError> {
+        let listed = self.pull_requests.lookup(&query.repo, &[query.branch])?;
+        self.remember(query.repo, listed);
+        Ok(())
     }
 
     fn fetch(&self, queries: Vec<PullRequestQuery>) -> HashMap<String, Option<PullRequest>> {
@@ -352,7 +359,7 @@ mod tests {
             session.branch(),
             CatalogFixture::open(142),
         );
-        catalog.look_up_unless_known(&session);
+        catalog.look_up_unless_known(&session).unwrap();
 
         assert_eq!(catalog.latest(&session), Some(CatalogFixture::open(142)));
     }
@@ -363,9 +370,21 @@ mod tests {
         let fake = CatalogFixture::with_pull_request(&session, 142);
         let catalog = CatalogFixture::looked_up(fake.clone(), &session);
 
-        catalog.look_up_unless_known(&session);
+        catalog.look_up_unless_known(&session).unwrap();
 
         assert_eq!(fake.calls().len(), 1);
+    }
+
+    #[test]
+    fn a_failed_on_demand_lookup_is_an_error() {
+        let session = ServiceFixture::session("fix-auth");
+        let fake = Arc::new(FakePullRequests::new());
+        fake.fail();
+        let catalog = PullRequestCatalog::new(fake);
+
+        let looked_up = catalog.look_up_unless_known(&session);
+
+        assert!(matches!(looked_up, Err(PullRequestError::Failed { .. })));
     }
 
     #[test]
@@ -374,7 +393,7 @@ mod tests {
         let fake = Arc::new(FakePullRequests::new());
         let catalog = PullRequestCatalog::new(fake.clone());
 
-        catalog.look_up_unless_known(&session);
+        catalog.look_up_unless_known(&session).unwrap();
 
         assert!(fake.calls().is_empty());
     }

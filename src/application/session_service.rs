@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::pending::Pending;
-use super::ports::{Clock, ConfigError, ConfigSource, RegistryError, SessionRegistry};
+use super::ports::{
+    Clock, ConfigError, ConfigSource, PullRequestError, RegistryError, SessionRegistry,
+};
 use super::pull_request_catalog::PullRequestCatalog;
 use super::reconciliation::Reconciliation;
 use super::restart_report::RestartReport;
@@ -339,7 +341,9 @@ impl SessionService {
         let session = self
             .entry(name)
             .ok_or_else(|| Self::no_known_pull_request(name))?;
-        self.pull_request_catalog.look_up_unless_known(session);
+        self.pull_request_catalog
+            .look_up_unless_known(session)
+            .map_err(|error| Self::failed_pull_request_lookup(name, &error))?;
         let pull_request = self
             .pull_request_catalog
             .latest(session)
@@ -380,6 +384,12 @@ impl SessionService {
 
     fn no_known_pull_request(name: &str) -> ServiceError {
         ServiceError::NotFound(format!("no pull request is known for {name}"))
+    }
+
+    fn failed_pull_request_lookup(name: &str, error: &PullRequestError) -> ServiceError {
+        ServiceError::Failed(format!(
+            "could not look up the pull request of {name}: {error}"
+        ))
     }
 }
 

@@ -187,6 +187,12 @@ mod tests {
             ServiceFixture::new().with_sessions(&[ServiceFixture::session(Self::NAME)])
         }
 
+        fn failing_lookup() -> ServiceFixture {
+            let pull_requests = FakePullRequests::new();
+            pull_requests.fail();
+            Self::without_pull_request().with_pull_requests(pull_requests)
+        }
+
         fn refusal(fixture: &ServiceFixture) -> ServiceError {
             fixture.service().open_pull_request(Self::NAME).unwrap_err()
         }
@@ -484,6 +490,21 @@ mod tests {
 
         assert!(matches!(error, ServiceError::NotFound(_)));
         assert_eq!(error.to_string(), "no pull request is known for fix-auth");
+        assert!(fixture.web_browser().opened().is_empty());
+    }
+
+    #[test]
+    fn a_failed_lookup_says_the_pull_request_could_not_be_looked_up() {
+        let fixture = PullRequestFixture::failing_lookup();
+
+        let error = PullRequestFixture::refusal(&fixture);
+
+        assert!(matches!(error, ServiceError::Failed(_)));
+        assert!(
+            error
+                .to_string()
+                .starts_with("could not look up the pull request of fix-auth: ")
+        );
         assert!(fixture.web_browser().opened().is_empty());
     }
 
