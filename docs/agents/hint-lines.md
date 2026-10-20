@@ -15,14 +15,14 @@ Add a new editing key to `TextField` with its usual terminal meaning, never to a
 
 ## The hint bar
 
-**The hint bar is the row of keys that `KeyHints` shows at the bottom of the home screen.** The hint bar lists only keys that pass both tests:
+**The hint bar is the row of keys that `KeyHints` shows at the bottom of the home screen.** The hint bar lists `?` and `q` at every width: `?` leads to every other key, and `q` leaves. Every other key on the hint bar passes both tests:
 
 - The key's meaning is Ringleader's own.
 - A user presses the key often.
 
 Only the `?` help lists these keys:
 
-- a key that a user presses at most once per session
+- a key for an action that most sessions never need
 - a key that a user needs only after a session exits or stops
 - a key that repeats work a background job already does
 - a second key or a Shift variant for an action that the hint bar lists
