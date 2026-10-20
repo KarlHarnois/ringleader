@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use crate::application::{Pending, SessionService};
 use crate::domain::Repo;
 
@@ -6,12 +8,12 @@ pub struct ChosenRepo {
 }
 
 impl ChosenRepo {
-    const FINDING: &'static str = "Finding the repo you started in…";
+    const FINDING: &'static str = "Finding the repo…";
     const NONE: &'static str = "none, type to find one";
 
-    pub fn open(service: &SessionService) -> Self {
+    pub fn open(service: &SessionService, preferred_repo: Option<PathBuf>) -> Self {
         Self {
-            state: ChoiceState::Finding(service.default_repo()),
+            state: ChoiceState::Finding(service.default_repo(preferred_repo)),
         }
     }
 

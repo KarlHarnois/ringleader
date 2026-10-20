@@ -1,8 +1,10 @@
+use std::path::{Path, PathBuf};
+
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::back_key::BackKey;
 use crate::application::ports::ConfigError;
-use crate::domain::{Session, SessionState, SessionSummary};
+use crate::domain::{RepoGroup, Session, SessionState, SessionSummary};
 use crate::ui::app::AppRequest;
 use crate::ui::blocking_operation::BlockingOperation;
 use crate::ui::dialogs::DialogOpening;
@@ -10,7 +12,7 @@ use crate::ui::dialogs::DialogOpening;
 pub struct ActionGate<'a> {
     selected: Option<&'a SessionSummary>,
     config_error: Option<&'a ConfigError>,
-    heading_selected: bool,
+    heading: Option<&'a RepoGroup>,
 }
 
 impl<'a> ActionGate<'a> {
@@ -23,15 +25,15 @@ impl<'a> ActionGate<'a> {
         Self {
             selected,
             config_error,
-            heading_selected: false,
+            heading: None,
         }
     }
 
-    pub fn on_heading(config_error: Option<&'a ConfigError>) -> Self {
+    pub fn on_heading(heading: &'a RepoGroup, config_error: Option<&'a ConfigError>) -> Self {
         Self {
             selected: None,
             config_error,
-            heading_selected: true,
+            heading: Some(heading),
         }
     }
 
@@ -103,7 +105,7 @@ impl<'a> ActionGate<'a> {
         match code {
             KeyCode::Char('n') => KeyAction::from(
                 self.writable()
-                    .map(|()| KeyAction::Open(DialogOpening::NewSession)),
+                    .map(|()| KeyAction::Open(DialogOpening::NewSession(self.selected_repo()))),
             ),
             KeyCode::Char('R') => KeyAction::from(
                 self.rename()
@@ -123,7 +125,7 @@ impl<'a> ActionGate<'a> {
     }
 
     fn enter(&self) -> KeyAction {
-        if self.heading_selected {
+        if self.heading.is_some() {
             return KeyAction::Fold;
         }
         KeyAction::from(self.attach().map(KeyAction::Request))
@@ -232,6 +234,14 @@ impl<'a> ActionGate<'a> {
     fn selected(&self) -> Result<&'a SessionSummary, String> {
         self.selected.ok_or_else(|| Self::NO_SELECTION.to_string())
     }
+
+    fn selected_repo(&self) -> Option<PathBuf> {
+        let group = self
+            .heading
+            .cloned()
+            .or_else(|| self.selected.map(RepoGroup::of))?;
+        group.path().map(Path::to_path_buf)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -291,6 +301,10 @@ mod tests {
                 "mystery",
                 ServiceFixture::waiting(&stranger).without_metadata(),
             ))
+        }
+
+        fn heading() -> RepoGroup {
+            ServiceFixture::repo_group("/repos/alpha")
         }
 
         fn config_error() -> ConfigError {
@@ -359,7 +373,8 @@ mod tests {
 
     #[test]
     fn shift_s_on_a_heading_still_asks_to_restart_every_session() {
-        let gate = ActionGate::on_heading(None);
+        let heading = GateFixture::heading();
+        let gate = ActionGate::on_heading(&heading, None);
 
         assert_eq!(
             gate.action_for(&KeyEvent::from(KeyCode::Char('S'))),
@@ -502,7 +517,43 @@ mod tests {
 
         assert_eq!(
             ActionGate::new(None, None).action_for(&key),
-            KeyAction::Open(DialogOpening::NewSession)
+            KeyAction::Open(DialogOpening::NewSession(None))
+        );
+    }
+
+    #[test]
+    fn n_on_a_session_opens_the_dialog_in_its_repo() {
+        let row = GateFixture::row(SessionState::Waiting);
+        let key = KeyEvent::from(KeyCode::Char('n'));
+
+        assert_eq!(
+            ActionGate::new(Some(&row), None).action_for(&key),
+            KeyAction::Open(DialogOpening::NewSession(Some(PathBuf::from(
+                ServiceFixture::REPO
+            ))))
+        );
+    }
+
+    #[test]
+    fn n_on_a_repo_heading_opens_the_dialog_in_that_repo() {
+        let key = KeyEvent::from(KeyCode::Char('n'));
+
+        assert_eq!(
+            ActionGate::on_heading(&GateFixture::heading(), None).action_for(&key),
+            KeyAction::Open(DialogOpening::NewSession(Some(PathBuf::from(
+                "/repos/alpha"
+            ))))
+        );
+    }
+
+    #[test]
+    fn n_on_an_other_row_opens_the_dialog_without_a_repo() {
+        let row = GateFixture::unmanaged_row();
+        let key = KeyEvent::from(KeyCode::Char('n'));
+
+        assert_eq!(
+            ActionGate::new(Some(&row), None).action_for(&key),
+            KeyAction::Open(DialogOpening::NewSession(None))
         );
     }
 
@@ -638,7 +689,7 @@ mod tests {
         let key = KeyEvent::from(KeyCode::Enter);
 
         assert_eq!(
-            ActionGate::on_heading(None).action_for(&key),
+            ActionGate::on_heading(&GateFixture::heading(), None).action_for(&key),
             KeyAction::Fold
         );
     }
@@ -659,7 +710,7 @@ mod tests {
         let key = KeyEvent::from(KeyCode::Char(' '));
 
         assert_eq!(
-            ActionGate::on_heading(None).action_for(&key),
+            ActionGate::on_heading(&GateFixture::heading(), None).action_for(&key),
             KeyAction::Fold
         );
     }
@@ -675,7 +726,8 @@ mod tests {
 
     #[test]
     fn a_heading_refuses_the_session_actions() {
-        let gate = ActionGate::on_heading(None);
+        let heading = GateFixture::heading();
+        let gate = ActionGate::on_heading(&heading, None);
         let refusal = |character| gate.action_for(&KeyEvent::from(KeyCode::Char(character)));
 
         for character in ['d', 'R', 's', 't', 'T', 'o'] {

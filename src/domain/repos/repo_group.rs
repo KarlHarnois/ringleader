@@ -1,5 +1,5 @@
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::repo_name::RepoName;
 use crate::domain::SessionSummary;
@@ -20,6 +20,13 @@ impl RepoGroup {
                 metadata.repo_path().to_path_buf(),
             )
         })
+    }
+
+    pub fn path(&self) -> Option<&Path> {
+        match self {
+            Self::Named(_, path) => Some(path),
+            Self::Other => None,
+        }
     }
 }
 
@@ -84,5 +91,17 @@ mod tests {
 
         assert_eq!(RepoGroup::of(&row), RepoGroup::Other);
         assert_eq!(RepoGroup::Other.to_string(), "other");
+    }
+
+    #[test]
+    fn a_named_group_has_the_path_of_its_repo() {
+        let group = ServiceFixture::repo_group("/repos/alpha");
+
+        assert_eq!(group.path(), Some(Path::new("/repos/alpha")));
+    }
+
+    #[test]
+    fn the_other_group_has_no_path() {
+        assert_eq!(RepoGroup::Other.path(), None);
     }
 }
