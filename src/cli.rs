@@ -22,7 +22,7 @@ pub use entry_points::EntryPoints;
 use repo_commands::RepoCommands;
 use session_commands::SessionCommands;
 
-use crate::application::ports::Lock;
+use crate::application::ports::{Lock, LockError};
 use crate::application::{CorruptRegistry, SessionService};
 
 #[derive(Debug, Parser)]
@@ -55,6 +55,8 @@ enum CliCommand {
     Delete(DeleteArgs),
     #[command(about = "Attach to a session")]
     Attach(NameArgs),
+    #[command(about = "Type a prompt into a running session's agent and submit it")]
+    Send(SendArgs),
     #[command(about = "Rename a session and the branch made for it")]
     Rename(RenameArgs),
     #[command(about = "Restart an exited or stopped session, or with --all every one")]
@@ -118,6 +120,8 @@ struct NewArgs {
     #[arg(long, conflicts_with = "base_branch")]
     main_checkout: bool,
     #[arg(long)]
+    plan: bool,
+    #[arg(long)]
     prompt: Option<String>,
 }
 
@@ -136,6 +140,13 @@ struct NameArgs {
 }
 
 #[derive(Debug, Args)]
+struct SendArgs {
+    name: String,
+    #[arg(allow_hyphen_values = true)]
+    prompt: String,
+}
+
+#[derive(Debug, Args)]
 #[group(required = true, multiple = false)]
 struct RestartArgs {
     name: Option<String>,
@@ -150,6 +161,7 @@ struct RenameArgs {
 }
 
 impl Cli {
+    const LOCK_WAIT_NOTE: &'static str = "waiting for another Ringleader to finish a change";
     const FIND_SESSION: &'static str = "__find-session";
     const CLIENT_OPTION: &'static str = "client";
 
@@ -242,10 +254,24 @@ impl Cli {
         if !self.is_mutating() {
             return Ok(());
         }
-        lock.acquire_for_write().map_err(|error| {
-            session.output().error(&error.to_string());
-            CliExit::Code(CliExit::lock_error_code(&error))
-        })
+        let taken = match lock.try_acquire() {
+            Err(LockError::Held { .. }) => Self::wait_for_lock(lock, session),
+            attempt => attempt,
+        };
+        taken.map_err(|error| Self::lock_failure(&error, session))
+    }
+
+    fn wait_for_lock(lock: &mut dyn Lock, session: &mut CliSession) -> Result<(), LockError> {
+        session.output().note(Self::LOCK_WAIT_NOTE);
+        lock.acquire(&|| session.is_signaled())
+    }
+
+    fn lock_failure(error: &LockError, session: &mut CliSession) -> CliExit {
+        if let Err(stop) = session.stop_if_signaled() {
+            return session.finish(Err(stop));
+        }
+        session.output().error(&error.to_string());
+        CliExit::Code(CliExit::lock_error_code(error))
     }
 
     pub fn execute(
@@ -307,6 +333,7 @@ impl Cli {
     ) -> Result<u8, CommandStop> {
         match &self.command {
             Some(CliCommand::Repo { action }) => Self::dispatch_repo(action, service, session),
+            Some(CliCommand::Send(args)) => SessionCommands::new(service, session).send(args),
             Some(command) => Self::dispatch_session(command, service, session),
             None => Ok(0),
         }
@@ -326,6 +353,7 @@ impl Cli {
             CliCommand::Rename(args) => commands.rename(args),
             CliCommand::Restart(args) => commands.restart_one_or_all(args),
             CliCommand::Repo { .. }
+            | CliCommand::Send(_)
             | CliCommand::Doctor(_)
             | CliCommand::ExecAgent { .. }
             | CliCommand::FindSession { .. } => Ok(0),
@@ -460,7 +488,7 @@ mod tests {
     }
 
     #[test]
-    fn a_mutating_command_against_a_held_lock_exits_three_and_names_the_lock() {
+    fn a_lock_held_past_the_patience_exits_three_and_names_the_lock() {
         let harness = CliHarness::new(ServiceFixture::new()).with_lock(FakeLock::held_elsewhere());
 
         let exit = harness.run(&["delete", "fix-auth"]);
@@ -469,8 +497,44 @@ mod tests {
         assert!(
             harness
                 .stderr()
-                .contains("another instance is running, it holds /state/ringleader/lock")
+                .contains("another Ringleader holds /state/ringleader/lock")
         );
+    }
+
+    #[test]
+    fn a_mutating_command_waits_for_another_ringleader_to_release_the_lock() {
+        let harness =
+            CliHarness::new(ServiceFixture::new()).with_lock(FakeLock::held_until_waited());
+
+        let exit = harness.run(&["new", "--name", "Fix Auth", "--repo", "example-project"]);
+
+        assert_eq!(exit, CliExit::Code(0));
+        assert_eq!(harness.lock_acquisitions(), ["try", "wait"]);
+    }
+
+    #[test]
+    fn a_wait_for_the_lock_tells_the_user_why_the_command_pauses() {
+        let harness =
+            CliHarness::new(ServiceFixture::new()).with_lock(FakeLock::held_until_waited());
+
+        harness.run(&["delete", "fix-auth"]);
+
+        assert!(
+            harness
+                .stderr()
+                .contains("waiting for another Ringleader to finish a change")
+        );
+    }
+
+    #[test]
+    fn a_signal_ends_the_wait_for_the_lock() {
+        let harness = CliHarness::new(ServiceFixture::new()).with_lock(FakeLock::held_elsewhere());
+        harness.signals().raise(SIGINT);
+
+        let exit = harness.run(&["delete", "fix-auth"]);
+
+        assert!(matches!(exit, CliExit::Interrupted { signal: SIGINT, .. }));
+        assert!(!harness.stderr().contains("another Ringleader holds"));
     }
 
     #[test]
@@ -488,7 +552,7 @@ mod tests {
 
         harness.run(&["delete", "fix-auth"]);
 
-        assert_eq!(harness.lock_acquisitions(), ["write"]);
+        assert_eq!(harness.lock_acquisitions(), ["try"]);
     }
 
     #[test]

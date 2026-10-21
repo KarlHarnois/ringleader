@@ -9,6 +9,7 @@ pub struct AgentLaunch {
     env_assignments: Vec<(String, String)>,
     worktree: PathBuf,
     loads_envrc: bool,
+    offers_built_in_skills: bool,
 }
 
 impl AgentLaunch {
@@ -21,11 +22,24 @@ impl AgentLaunch {
             env_assignments: Vec::new(),
             worktree: worktree.to_path_buf(),
             loads_envrc: false,
+            offers_built_in_skills: false,
         }
     }
 
     pub fn for_agent(agent: &Agent, argv: Vec<String>, worktree: &Path) -> Self {
-        Self::new(argv, agent.env_names(), worktree).with_env_assignments(agent.env_assignments())
+        Self {
+            offers_built_in_skills: agent.gets_built_in_skills(),
+            ..Self::new(argv, agent.env_names(), worktree)
+                .with_env_assignments(agent.env_assignments())
+        }
+    }
+
+    #[cfg(test)]
+    pub fn offering_built_in_skills(self) -> Self {
+        Self {
+            offers_built_in_skills: true,
+            ..self
+        }
     }
 
     pub fn with_env_assignments(self, assignments: &[(String, String)]) -> Self {
@@ -76,6 +90,10 @@ impl AgentLaunch {
     pub fn loads_envrc(&self) -> bool {
         self.loads_envrc
     }
+
+    pub fn offers_built_in_skills(&self) -> bool {
+        self.offers_built_in_skills
+    }
 }
 
 #[cfg(test)]
@@ -125,5 +143,23 @@ mod tests {
             launch.env_assignments(),
             [LaunchFixture::pair("TMPDIR", "/scratch/agent")]
         );
+    }
+
+    #[test]
+    fn a_launch_for_an_agent_offers_the_built_in_skills_the_agent_gets() {
+        let agent = Agent::new("claude", "claude");
+
+        let launch = AgentLaunch::for_agent(&agent, Vec::new(), Path::new(LaunchFixture::WORKTREE));
+
+        assert!(launch.offers_built_in_skills());
+    }
+
+    #[test]
+    fn a_launch_for_an_agent_that_opts_out_offers_no_built_in_skills() {
+        let agent = Agent::new("claude", "claude").without_built_in_skills();
+
+        let launch = AgentLaunch::for_agent(&agent, Vec::new(), Path::new(LaunchFixture::WORKTREE));
+
+        assert!(!launch.offers_built_in_skills());
     }
 }
