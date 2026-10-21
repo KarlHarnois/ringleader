@@ -134,10 +134,24 @@ struct RawAgent {
     startup_input: Vec<String>,
     #[serde(default)]
     rename_input: Vec<String>,
+    #[serde(default = "RawAgent::built_in_skill_by_default")]
+    built_in_skill: bool,
 }
 
 impl RawAgent {
+    fn built_in_skill_by_default() -> bool {
+        true
+    }
+
     fn into_agent(self, home: &HomeExpansion) -> Agent {
+        let agent = self.configured_agent(home);
+        match self.built_in_skill {
+            true => agent,
+            false => agent.without_built_in_skill(),
+        }
+    }
+
+    fn configured_agent(&self, home: &HomeExpansion) -> Agent {
         Agent::new(&self.name, &home.command(&self.command))
             .with_args(&self.args)
             .with_env_names(&self.env)

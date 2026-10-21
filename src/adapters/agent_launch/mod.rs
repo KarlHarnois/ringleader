@@ -2,5 +2,7 @@ pub mod agent_handoff;
 pub mod agent_launcher;
 pub mod agent_probe;
 pub mod agent_variables;
+pub mod built_in_skill;
+pub mod built_in_skill_options;
 pub mod handoff_contents;
 pub mod launcher_command;

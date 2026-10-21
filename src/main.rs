@@ -21,6 +21,7 @@ use ratatui::backend::CrosstermBackend;
 use adapters::agent_launch::agent_handoff::AgentHandoff;
 use adapters::agent_launch::agent_launcher::{AgentLauncher, ProcessExec};
 use adapters::agent_launch::agent_probe::AgentProbe;
+use adapters::agent_launch::built_in_skill::BuiltInSkill;
 use adapters::agent_launch::launcher_command::LauncherCommand;
 use adapters::claude::claude_usage_meter::ClaudeUsageMeter;
 use adapters::config_file::toml_config_source::TomlConfigSource;
@@ -279,7 +280,11 @@ impl CompositionRoot {
         let path = cli
             .config_path()
             .map(Path::to_path_buf)
-            .or_else(|| self.environment.get("RINGLEADER_CONFIG").map(PathBuf::from))
+            .or_else(|| {
+                self.environment
+                    .get(TomlConfigSource::PATH_VARIABLE)
+                    .map(PathBuf::from)
+            })
             .unwrap_or_else(|| self.paths.config_file());
         TomlConfigSource::new(&path, &self.paths.worktree_root(), self.paths.home())
     }
@@ -305,6 +310,7 @@ impl CompositionRoot {
         let env_names = loaded.config().agent_env_union();
         let tmux = self.tmux(&env_names);
         let bounded = BoundedCommand::new(Deadlines::standard());
+        let config_path = config_source.path();
         let state = self.state_ports(config_source);
         let host = Arc::new(SystemHostProbe::new(
             &self.environment,
@@ -333,7 +339,7 @@ impl CompositionRoot {
         )));
         let tmux_ports = TmuxPorts::new(Arc::new(TmuxMultiplexer::new(
             tmux,
-            self.launcher(),
+            self.launcher(&config_path),
             self.processes.clone(),
         )));
         let context = ServiceContext::new(loaded, &self.launch_directory)
@@ -425,8 +431,12 @@ impl CompositionRoot {
             .removing_env_names(env_names)
     }
 
-    fn launcher(&self) -> LauncherCommand {
-        LauncherCommand::new(Self::launcher_prefix(), self.handoff())
+    fn launcher(&self, config_path: &Path) -> LauncherCommand {
+        let handoff = self
+            .handoff()
+            .with_built_in_skill(BuiltInSkill::new(&self.paths.plugin_root()))
+            .with_config_path(config_path);
+        LauncherCommand::new(Self::launcher_prefix(), handoff)
     }
 
     fn launcher_prefix() -> Vec<OsString> {

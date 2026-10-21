@@ -13,6 +13,7 @@ pub struct Agent {
     resume_args: Vec<String>,
     startup_input: Vec<String>,
     rename_input: Vec<String>,
+    built_in_skill: bool,
 }
 
 impl Agent {
@@ -84,6 +85,7 @@ impl Agent {
             resume_args: Vec::new(),
             startup_input: Vec::new(),
             rename_input: Vec::new(),
+            built_in_skill: true,
         }
     }
 
@@ -146,8 +148,19 @@ impl Agent {
         }
     }
 
+    pub fn without_built_in_skill(self) -> Self {
+        Self {
+            built_in_skill: false,
+            ..self
+        }
+    }
+
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    pub fn gets_built_in_skill(&self) -> bool {
+        self.built_in_skill
     }
 
     pub fn command(&self) -> &str {
@@ -292,6 +305,10 @@ mod tests {
 
         fn session() -> SessionName {
             SessionName::new("fix-auth").unwrap()
+        }
+
+        fn plain() -> Agent {
+            Agent::new("example-agent", "example-agent")
         }
 
         fn words(parts: &[&str]) -> Vec<String> {
@@ -591,5 +608,15 @@ mod tests {
         let agent = Agent::new("example-agent", "example-agent").with_env_names(&names);
 
         assert_eq!(agent.env_names(), ["API_KEY"]);
+    }
+
+    #[test]
+    fn an_agent_gets_the_built_in_skill_unless_it_opts_out() {
+        assert!(AgentFixture::plain().gets_built_in_skill());
+        assert!(
+            !AgentFixture::plain()
+                .without_built_in_skill()
+                .gets_built_in_skill()
+        );
     }
 }

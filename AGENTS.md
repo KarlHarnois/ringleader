@@ -249,6 +249,7 @@ nix flake check
 | `docs/agents/features/scratch-directories.md` | change a session's scratch directory |
 | `docs/agents/features/background-jobs.md` | change one of the TUI's background jobs |
 | `docs/agents/features/write-lock.md` | change what a process saves, or when a process takes a lock |
+| `docs/agents/skills.md` | add or change a skill, change how a launch gets the built-in skill, or change the CLI |
 | `docs/agents/features/usage.md` | change how Ringleader measures an agent's usage, or the usage view that the `u` key opens |
 
 ## Architecture
@@ -482,8 +483,5 @@ Ringleader checks a registry entry recorded on another socket only through `Proc
 - Never put architecture or the rules of this file in `README.md`.
 - Put a rule that every task needs in this file. Put a rule that only one kind of task needs in a reference file under `docs/agents/`.
 - Name each reference file in the Reference files table.
-- Put a procedure that an agent invokes on demand in a skill at `.agents/skills/<name>/SKILL.md`.
-- Link each skill from `.claude/skills/<name>` with a relative symlink: Claude Code reads a repository's skills only from `.claude/skills/`.
-- Never name a Ringleader type, path, or rule in a skill: each skill ports unchanged to other repos.
 - This repository holds no `CLAUDE.md` or `CLAUDE.local.md`: either file would hide this file from Claude Code.
 - If one of those files is ever needed, make its first line `@AGENTS.md`.

@@ -6,7 +6,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime};
 
 use super::agent_variables::AgentVariables;
+use super::built_in_skill::BuiltInSkill;
 use super::handoff_contents::HandoffContents;
+use crate::adapters::config_file::toml_config_source::TomlConfigSource;
 use crate::adapters::host::process_environment::ProcessEnvironment;
 use crate::adapters::host::process_table::ProcessTable;
 use crate::application::ports::AgentLaunch;
@@ -17,6 +19,8 @@ pub struct AgentHandoff {
     directory: PathBuf,
     environment: ProcessEnvironment,
     processes: ProcessTable,
+    skill: Option<BuiltInSkill>,
+    config_path: Option<PathBuf>,
 }
 
 impl AgentHandoff {
@@ -37,6 +41,22 @@ impl AgentHandoff {
             directory: directory.to_path_buf(),
             environment: environment.clone(),
             processes,
+            skill: None,
+            config_path: None,
+        }
+    }
+
+    pub fn with_built_in_skill(self, skill: BuiltInSkill) -> Self {
+        Self {
+            skill: Some(skill),
+            ..self
+        }
+    }
+
+    pub fn with_config_path(self, config_path: &Path) -> Self {
+        Self {
+            config_path: Some(config_path.to_path_buf()),
+            ..self
         }
     }
 
@@ -53,12 +73,50 @@ impl AgentHandoff {
         let variables = AgentVariables::new(
             &self.environment,
             launch.env_names(),
-            launch.env_assignments(),
+            &self.assignments_for(launch),
         );
         Self::warn_about_missing(variables.missing());
         let contents =
             HandoffContents::for_launch(launch, variables.inherited(), variables.explicit());
+        let contents = self.offering_skill(contents, launch);
         self.write_file(Self::LAUNCH_PREFIX, &contents)
+    }
+
+    fn assignments_for(&self, launch: &AgentLaunch) -> Vec<(String, String)> {
+        let assigns_its_own = launch
+            .env_assignments()
+            .iter()
+            .any(|(name, _)| name == TomlConfigSource::PATH_VARIABLE);
+        let config = self
+            .config_path
+            .iter()
+            .filter(|_| !assigns_its_own)
+            .map(|path| {
+                (
+                    TomlConfigSource::PATH_VARIABLE.to_string(),
+                    path.to_string_lossy().into_owned(),
+                )
+            });
+        config
+            .chain(launch.env_assignments().iter().cloned())
+            .collect()
+    }
+
+    fn offering_skill(&self, contents: HandoffContents, launch: &AgentLaunch) -> HandoffContents {
+        let skill = self
+            .skill
+            .as_ref()
+            .filter(|_| launch.offers_built_in_skill());
+        match skill.map(BuiltInSkill::publish) {
+            Some(Ok(directory)) => contents.with_skill_directory(&directory),
+            Some(Err(error)) => {
+                log::warn!(
+                    "could not publish the built-in skill, the agent starts without it: {error}"
+                );
+                contents
+            }
+            None => contents,
+        }
     }
 
     fn warn_about_missing(names: &[String]) {
@@ -196,6 +254,23 @@ mod tests {
 
         fn launch_setting(name: &str, value: &str) -> AgentLaunch {
             Self::launch(&[]).with_env_assignments(&[(name.to_string(), value.to_string())])
+        }
+
+        fn plugin_root(&self) -> PathBuf {
+            self.handoff_directory().with_file_name("plugin")
+        }
+
+        fn skilled_handoff(&self, plugin_root: &Path) -> AgentHandoff {
+            self.handoff(&[])
+                .with_built_in_skill(BuiltInSkill::new(plugin_root))
+        }
+
+        fn offering() -> AgentLaunch {
+            Self::launch(&[]).offering_built_in_skill()
+        }
+
+        fn written(handoff: &AgentHandoff, launch: &AgentLaunch) -> HandoffContents {
+            AgentHandoff::take(&handoff.write(launch).unwrap()).unwrap()
         }
 
         fn handed(&self, pairs: &[(&str, &str)], launch: &AgentLaunch) -> HandoffContents {
@@ -447,5 +522,79 @@ mod tests {
         fixture.handoff(&[]).delete_stale();
 
         assert!(!fixture.handoff_directory().exists());
+    }
+
+    #[test]
+    fn a_launch_that_offers_the_skill_names_the_published_folder() {
+        let fixture = HandoffFixture::new();
+        let handoff = fixture.skilled_handoff(&fixture.plugin_root());
+
+        let contents = HandoffFixture::written(&handoff, &HandoffFixture::offering());
+
+        assert!(
+            contents
+                .skill_directory()
+                .is_some_and(|folder| folder.is_dir())
+        );
+    }
+
+    #[test]
+    fn a_launch_that_offers_no_skill_names_no_folder() {
+        let fixture = HandoffFixture::new();
+        let handoff = fixture.skilled_handoff(&fixture.plugin_root());
+
+        let contents = HandoffFixture::written(&handoff, &HandoffFixture::launch(&[]));
+
+        assert_eq!(contents.skill_directory(), None);
+    }
+
+    #[test]
+    fn a_skill_that_cannot_be_published_leaves_the_launch_without_it() {
+        let fixture = HandoffFixture::new();
+        let blocker = fixture.handoff_directory().with_file_name("blocker");
+        fs::create_dir_all(blocker.parent().unwrap()).unwrap();
+        fs::write(&blocker, "").unwrap();
+        let handoff = fixture.skilled_handoff(&blocker.join("plugin"));
+
+        let contents = HandoffFixture::written(&handoff, &HandoffFixture::offering());
+
+        assert_eq!(contents.skill_directory(), None);
+    }
+
+    #[test]
+    fn the_agent_gets_the_config_path_of_the_ringleader_that_launches_it() {
+        let fixture = HandoffFixture::new();
+        let handoff = fixture
+            .handoff(&[])
+            .with_config_path(Path::new("/config/example.toml"));
+
+        let contents = HandoffFixture::written(&handoff, &HandoffFixture::launch(&[]));
+
+        assert_eq!(
+            contents.explicit(),
+            [HandoffFixture::pair(
+                "RINGLEADER_CONFIG",
+                "/config/example.toml"
+            )]
+        );
+    }
+
+    #[test]
+    fn a_config_path_the_agent_sets_itself_wins() {
+        let fixture = HandoffFixture::new();
+        let handoff = fixture
+            .handoff(&[])
+            .with_config_path(Path::new("/config/example.toml"));
+        let launch = HandoffFixture::launch_setting("RINGLEADER_CONFIG", "/config/own.toml");
+
+        let contents = HandoffFixture::written(&handoff, &launch);
+
+        assert_eq!(
+            contents.explicit(),
+            [HandoffFixture::pair(
+                "RINGLEADER_CONFIG",
+                "/config/own.toml"
+            )]
+        );
     }
 }

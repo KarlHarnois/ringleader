@@ -16,6 +16,7 @@ pub struct TomlConfigSource {
 }
 
 impl TomlConfigSource {
+    pub const PATH_VARIABLE: &'static str = "RINGLEADER_CONFIG";
     pub const TEMPLATE: &'static str = r#"# Absolute or ~/ paths only. Environment variables are not expanded.
 # Defaults to $XDG_DATA_HOME/ringleader/worktrees.
 # worktree_root = "~/.local/share/ringleader/worktrees"
@@ -84,6 +85,10 @@ resume_args = ["--continue"]
 # startup_input is typed at every start, rename_input after a rename.
 startup_input = ["/color"]
 rename_input = ["/rename {name}"]
+# Ringleader gives claude and opencode a skill that runs the ringleader CLI
+# from inside a session. Turn it off if your organization's Claude Code policy
+# blocks plugin loading, since claude then refuses to start.
+# built_in_skill = false
 
 [[agents]]
 name = "opencode"
@@ -615,6 +620,27 @@ mod tests {
                 .launch_argv(&session, AgentMode::Plan, ""),
             ["claude", "--name", "fix-auth", "--permission-mode", "plan"]
         );
+    }
+
+    #[test]
+    fn the_first_run_template_gives_claude_the_built_in_skill() {
+        let fixture = SourceFixture::new();
+        fixture.source().write_first_run_template().unwrap();
+
+        let config = fixture.source().load().unwrap();
+
+        assert!(config.agent("claude").unwrap().gets_built_in_skill());
+    }
+
+    #[test]
+    fn an_agent_set_to_skip_the_built_in_skill_goes_without_it() {
+        let fixture = SourceFixture::with_text(
+            "[[agents]]\nname = \"claude\"\ncommand = \"claude\"\nbuilt_in_skill = false\n",
+        );
+
+        let config = fixture.source().load().unwrap();
+
+        assert!(!config.agent("claude").unwrap().gets_built_in_skill());
     }
 
     #[test]

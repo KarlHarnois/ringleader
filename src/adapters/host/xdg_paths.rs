@@ -60,6 +60,10 @@ impl XdgPaths {
         self.data_home.join(Self::APPLICATION).join("worktrees")
     }
 
+    pub fn plugin_root(&self) -> PathBuf {
+        self.data_home.join(Self::APPLICATION).join("plugin")
+    }
+
     pub fn scratch_root(&self) -> PathBuf {
         self.cache_home.join(Self::APPLICATION).join("tmp")
     }
@@ -156,6 +160,16 @@ mod tests {
         assert_eq!(
             paths.scratch_root(),
             Path::new("/example-cache/ringleader/tmp")
+        );
+    }
+
+    #[test]
+    fn the_built_in_skill_is_published_in_the_data_directory() {
+        let paths = PathsFixture::with(&[("XDG_DATA_HOME", "/example-data")]);
+
+        assert_eq!(
+            paths.plugin_root(),
+            Path::new("/example-data/ringleader/plugin")
         );
     }
 
