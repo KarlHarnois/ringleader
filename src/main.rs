@@ -32,8 +32,11 @@ use adapters::filesystem::directory_scratch_space::DirectoryScratchSpace;
 use adapters::filesystem::file_lock::FileLock;
 use adapters::filesystem::json_fold_store::JsonFoldStore;
 use adapters::filesystem::json_session_registry::JsonSessionRegistry;
+use adapters::gh::gh_program::GhProgram;
 use adapters::gh::gh_pull_requests::GhPullRequests;
+use adapters::gh::gh_repo_pages::GhRepoPages;
 use adapters::gh::null_pull_requests::NullPullRequests;
+use adapters::gh::null_repo_pages::NullRepoPages;
 use adapters::git::git_runner::GitRunner;
 use adapters::host::app_log::AppLog;
 use adapters::host::process_environment::{ProcessEnvironment, ProgramPaths};
@@ -52,7 +55,9 @@ use adapters::tmux::tmux_finder_popup::TmuxFinderPopup;
 use adapters::tmux::tmux_multiplexer::TmuxMultiplexer;
 use adapters::web_browser::xdg_web_browser::XdgWebBrowser;
 use adapters::{BoundedCommand, Deadlines, GitWorkspace, HostDesktop, HostMounts};
-use application::ports::{ConfigSource, HostProbe, Lock, LockError, PullRequests, UsageMeter};
+use application::ports::{
+    ConfigSource, HostProbe, Lock, LockError, PullRequests, RepoPages, UsageMeter,
+};
 use application::{
     AgentPorts, CorruptRegistry, DesktopPorts, DiagnosticPaths, LoadedConfig, RepoPorts,
     ServiceContext, ServiceError, ServicePorts, SessionService, StatePorts, TmuxPorts,
@@ -292,7 +297,7 @@ impl CompositionRoot {
             self.programs.tmux(),
             self.processes.clone(),
         ));
-        let pull_requests = Self::pull_requests(&host, bounded);
+        let (pull_requests, repo_pages) = Self::github_ports(&host, bounded);
         let usage_meters = self.usage_meters(host.as_ref(), bounded);
         let directory_environment =
             DirenvDirectoryEnvironment::when_installed(host.as_ref(), &self.environment, bounded);
@@ -306,6 +311,7 @@ impl CompositionRoot {
             )),
             host,
             pull_requests,
+            repo_pages,
             directory_environment,
         )
         .with_diff_workspace(Arc::new(GitWorkspace::new(
@@ -380,11 +386,17 @@ impl CompositionRoot {
         )
     }
 
-    fn pull_requests(host: &SystemHostProbe, bounded: BoundedCommand) -> Arc<dyn PullRequests> {
-        match host.resolve_command("gh") {
-            Some(program) => Arc::new(GhPullRequests::new(program.as_os_str(), bounded)),
-            None => Arc::new(NullPullRequests),
-        }
+    fn github_ports(
+        host: &SystemHostProbe,
+        bounded: BoundedCommand,
+    ) -> (Arc<dyn PullRequests>, Arc<dyn RepoPages>) {
+        let Some(program) = host.resolve_command("gh") else {
+            return (Arc::new(NullPullRequests), Arc::new(NullRepoPages));
+        };
+        let gh = GhProgram::new(program.as_os_str());
+        let pages = Arc::new(GhRepoPages::new(gh.clone(), bounded));
+        let pull_requests = GhPullRequests::new(gh, bounded, Arc::clone(&pages));
+        (Arc::new(pull_requests), pages)
     }
 
     fn diagnostics(&self) -> DiagnosticPaths {

@@ -2,16 +2,17 @@ use crate::application::{
     CreateRequest, DeleteConfirmation, DeleteImpact, DeleteOutcome, RestartReport, ServiceError,
     SessionService, StartOutcome,
 };
+use crate::domain::RepoGroup;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BlockingOperation {
     Restart(String),
     RestartAll,
     Create(CreateRequest),
-    MeasureDelete(String),
-    Delete { name: String, seen: DeleteImpact },
+    Delete(DeleteStep),
     Rename { old: String, new: String },
     Merge(String),
+    OpenRepoPage(RepoGroup),
 }
 
 impl BlockingOperation {
@@ -20,10 +21,10 @@ impl BlockingOperation {
             Self::Restart(name) => format!("Restarting {name}…"),
             Self::RestartAll => "Restarting every exited or stopped session…".to_string(),
             Self::Create(request) => format!("Creating {}…", request.name()),
-            Self::MeasureDelete(name) => format!("Checking what deleting {name} would lose…"),
-            Self::Delete { name, .. } => format!("Deleting {name}…"),
+            Self::Delete(step) => step.busy_message(),
             Self::Rename { old, .. } => format!("Renaming {old}…"),
             Self::Merge(name) => format!("Fetching origin and merging it into {name}…"),
+            Self::OpenRepoPage(group) => format!("Looking up the GitHub page of {group}…"),
         }
     }
 
@@ -32,10 +33,20 @@ impl BlockingOperation {
             Self::Restart(name) => Self::restart(service, name),
             Self::RestartAll => Self::restart_all(service),
             Self::Create(request) => Self::create(service, &request),
-            Self::MeasureDelete(name) => Self::measure(service, name),
-            Self::Delete { name, seen } => Self::delete(service, name, seen),
+            Self::Delete(step) => step.run(service),
             Self::Rename { old, new } => Self::rename(service, &old, &new),
             Self::Merge(name) => Self::merge(service, name),
+            Self::OpenRepoPage(group) => Self::open_repo_page(service, &group),
+        }
+    }
+
+    fn open_repo_page(service: &SessionService, group: &RepoGroup) -> OperationOutcome {
+        match service.open_repo_page(group) {
+            Ok(()) => OperationOutcome::done(
+                format!("Asked the browser to open the GitHub page of {group}."),
+                None,
+            ),
+            Err(error) => OperationOutcome::Failed(error),
         }
     }
 
@@ -103,6 +114,28 @@ impl BlockingOperation {
                 Some(session.name().to_string()),
             ),
             Err(error) => OperationOutcome::Failed(error),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeleteStep {
+    Measure(String),
+    Confirmed { name: String, seen: DeleteImpact },
+}
+
+impl DeleteStep {
+    fn busy_message(&self) -> String {
+        match self {
+            Self::Measure(name) => format!("Checking what deleting {name} would lose…"),
+            Self::Confirmed { name, .. } => format!("Deleting {name}…"),
+        }
+    }
+
+    fn run(self, service: &mut SessionService) -> OperationOutcome {
+        match self {
+            Self::Measure(name) => Self::measure(service, name),
+            Self::Confirmed { name, seen } => Self::delete(service, name, seen),
         }
     }
 
@@ -238,6 +271,26 @@ mod tests {
         assert!(
             warning.starts_with("Restarted fix-auth. But the .envrc of"),
             "{warning}"
+        );
+    }
+
+    #[test]
+    fn a_first_measure_of_a_delete_reports_no_change_since_the_user_saw_it() {
+        let session = ServiceFixture::session("fix-auth");
+        let fixture = ServiceFixture::new()
+            .with_sessions(std::slice::from_ref(&session))
+            .with_workspace(ServiceFixture::workspace_for(&[&session]))
+            .with_host(ServiceFixture::host_for(&[&session]));
+
+        let outcome = BlockingOperation::Delete(DeleteStep::Measure("fix-auth".to_string()))
+            .run(&mut fixture.service());
+
+        assert!(
+            matches!(
+                outcome,
+                OperationOutcome::ConfirmDelete { changed: false, .. }
+            ),
+            "{outcome:?}"
         );
     }
 
