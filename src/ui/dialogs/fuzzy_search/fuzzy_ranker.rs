@@ -23,36 +23,38 @@ impl FuzzyRanker {
     }
 
     pub fn ranked(&mut self, query: &str, candidates: &[String]) -> Vec<usize> {
-        let found = self.matches(query, candidates);
-        found.iter().map(FuzzyMatch::index).collect()
+        let pattern = Self::pattern(query);
+        let mut buffer = Vec::new();
+        let scored = candidates
+            .iter()
+            .enumerate()
+            .filter_map(|(index, candidate)| {
+                let haystack = Utf32Str::new(candidate, &mut buffer);
+                let score = pattern.score(haystack, &mut self.matcher)?;
+                Some((score, index))
+            });
+        Self::best_first(scored.collect())
     }
 
     pub fn matches(&mut self, query: &str, candidates: &[String]) -> Vec<FuzzyMatch> {
         let pattern = Self::pattern(query);
-        let mut found: Vec<(u32, FuzzyMatch)> = candidates
+        let mut buffer = Vec::new();
+        let scored = candidates
             .iter()
             .enumerate()
-            .filter_map(|(index, candidate)| self.matched(&pattern, index, candidate))
-            .collect();
-        found.sort_by_key(|(score, _)| Reverse(*score));
-        found
-            .into_iter()
-            .map(|(_, fuzzy_match)| fuzzy_match)
-            .collect()
+            .filter_map(|(index, candidate)| {
+                let haystack = Utf32Str::new(candidate, &mut buffer);
+                let mut positions = Vec::new();
+                let score = pattern.indices(haystack, &mut self.matcher, &mut positions)?;
+                let positions = Self::sorted_unique(positions);
+                Some((score, FuzzyMatch { index, positions }))
+            });
+        Self::best_first(scored.collect())
     }
 
-    fn matched(
-        &mut self,
-        pattern: &Pattern,
-        index: usize,
-        candidate: &str,
-    ) -> Option<(u32, FuzzyMatch)> {
-        let mut buffer = Vec::new();
-        let haystack = Utf32Str::new(candidate, &mut buffer);
-        let mut positions = Vec::new();
-        let score = pattern.indices(haystack, &mut self.matcher, &mut positions)?;
-        let positions = Self::sorted_unique(positions);
-        Some((score, FuzzyMatch { index, positions }))
+    fn best_first<T>(mut scored: Vec<(u32, T)>) -> Vec<T> {
+        scored.sort_by_key(|(score, _)| Reverse(*score));
+        scored.into_iter().map(|(_, found)| found).collect()
     }
 
     fn pattern(query: &str) -> Pattern {
