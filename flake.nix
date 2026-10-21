@@ -155,7 +155,7 @@
           wrapped=$({ grep --only-matching '^export RINGLEADER_[A-Z_]*' ${nixpkgs.lib.getExe package} || true; } | cut --delimiter=' ' --fields=2 | sort)
           pinned=$(printf '%s\n' ${nixpkgs.lib.escapeShellArgs (builtins.attrNames package.pinnedTools)} | sort)
           [[ $wrapped == "$pinned" ]] || {
-            echo "The wrapper sets" ''${wrapped:-nothing} "but pinnedTools lists" $pinned". Pin each tool the wrapper names through pinnedTools: the Homebrew tap bundles only those." >&2
+            echo "The wrapper sets" ''${wrapped:-nothing} "but pinnedTools lists" ''${pinned:-nothing}". Pin each tool the wrapper names through pinnedTools: the Homebrew tap bundles only those." >&2
             exit 1
           }
           touch $out
