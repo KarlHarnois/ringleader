@@ -244,7 +244,7 @@ nix flake check
 | `docs/agents/tmux-tests.md` | write or change a test that runs tmux |
 | `docs/agents/hint-lines.md` | write or change a dialog's hint line, or add a text-editing key |
 | `docs/agents/tmux-commands.md` | write or change a tmux command that Ringleader runs or writes into the generated config |
-| `docs/agents/homebrew.md` | change `pinnedTools` or the package's wrapper in `flake.nix`, or release a version |
+| `docs/agents/homebrew.md` | change `pinnedTools` in `flake.nix`, or release a version |
 | `docs/agents/features/pull.md` | change the pull that the `p` key starts |
 | `docs/agents/features/direnv.md` | change how create or restart launches an agent, or which variables the agent gets |
 | `docs/agents/features/agent-hooks.md` | change how `AgentHooks` types into an agent, or the check that an agent is at its prompt |

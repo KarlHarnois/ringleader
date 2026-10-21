@@ -149,6 +149,18 @@
           touch $out
         '';
 
+      pinnedToolsWrapper =
+        pkgs: package:
+        pkgs.runCommand "pinned-tools-wrapper" { } ''
+          wrapped=$(grep --only-matching '^export RINGLEADER_[A-Z_]*' ${nixpkgs.lib.getExe package} | cut --delimiter=' ' --fields=2 | sort)
+          pinned=$(printf '%s\n' ${nixpkgs.lib.escapeShellArgs (builtins.attrNames package.pinnedTools)} | sort)
+          [[ $wrapped == "$pinned" ]] || {
+            echo "The wrapper sets" $wrapped "but pinnedTools lists" $pinned". Pin each tool the wrapper names through pinnedTools: the Homebrew tap bundles only those." >&2
+            exit 1
+          }
+          touch $out
+        '';
+
       agentDocs =
         pkgs:
         pkgs.runCommand "agent-docs" { } ''
@@ -274,6 +286,9 @@
         default = self.packages.${system}.default;
         readme-version-badge = readmeVersionBadge nixpkgs.legacyPackages.${system};
         agent-docs = agentDocs nixpkgs.legacyPackages.${system};
+        pinned-tools-wrapper =
+          pinnedToolsWrapper nixpkgs.legacyPackages.${system}
+            self.packages.${system}.default;
         dev-shell-tools = devShellTools nixpkgs.legacyPackages.${system} self.devShells.${system}.default;
       });
     };

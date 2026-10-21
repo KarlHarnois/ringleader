@@ -1,11 +1,10 @@
 # Homebrew
 
-**Every rule in this file binds each change to `pinnedTools` or to the package's wrapper in `flake.nix`, and each release.** The `KarlHarnois/homebrew-tap` repository holds the Homebrew formula. The formula bundles its own build of each tool in `pinnedTools`, at the version the flake pins.
+**Every rule in this file binds each change to `pinnedTools` in `flake.nix`, and each release.** The `KarlHarnois/homebrew-tap` repository holds the Homebrew formula. The formula bundles its own build of each tool in `pinnedTools`, at the version the flake pins.
 
 ## Pinned tools
 
-- Pin each tool that the package's wrapper names through `pinnedTools`. Never write a `--set-default` into `postInstall` by hand: the formula bundles only the tools in `pinnedTools`.
-- Keep the name `pinnedTools` and its shape, a wrapper variable mapped to a package. The tap's CI compares `packages.<system>.default.pinnedTools` at each release tag with the formula's bundled tools.
+**Keep the name `pinnedTools` and its shape, a wrapper variable mapped to a package.** The tap's CI compares `packages.<system>.default.pinnedTools` at each release tag with the formula's bundled tools.
 
 ## Releases
 
