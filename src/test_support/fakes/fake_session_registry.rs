@@ -45,6 +45,10 @@ impl FakeSessionRegistry {
         self.state.lock().unwrap().load_error = Some(error);
     }
 
+    pub fn mend_loads(&self) {
+        self.state.lock().unwrap().load_error = None;
+    }
+
     pub fn sessions(&self) -> Vec<Session> {
         self.state.lock().unwrap().sessions.clone()
     }

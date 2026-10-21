@@ -35,6 +35,7 @@ use crate::domain::{
 pub struct SessionService {
     config: LoadedConfig,
     entries: Vec<Session>,
+    rereads_failing: bool,
     registry: Arc<dyn SessionRegistry>,
     config_source: Arc<dyn ConfigSource>,
     monitor: SessionMonitor,
@@ -62,6 +63,7 @@ impl SessionService {
             paths: context.diagnostics().clone(),
             config: context.into_config(),
             entries: Vec::new(),
+            rereads_failing: false,
             registry: ports.state().registry(),
             config_source: ports.state().config_source(),
         }
@@ -192,9 +194,8 @@ impl SessionService {
     }
 
     pub fn observe_with(&mut self, observations: Vec<SessionObservation>) -> Vec<SessionSummary> {
-        if let Err(error) = self.refresh_entries() {
-            log::warn!("could not reread the registry, showing the sessions read before: {error}");
-        }
+        let reread = self.refresh_entries();
+        self.log_reread_change(reread);
         self.reconcile_with(observations).into_summaries()
     }
 
@@ -381,6 +382,22 @@ impl SessionService {
         Ok(self.reconcile_with(observations))
     }
 
+    fn log_reread_change(&mut self, reread: Result<(), RegistryError>) {
+        match (reread, self.rereads_failing) {
+            (Err(error), false) => {
+                log::warn!(
+                    "could not reread the registry, showing the sessions read before: {error}"
+                );
+                self.rereads_failing = true;
+            }
+            (Ok(()), true) => {
+                log::info!("reread the registry again");
+                self.rereads_failing = false;
+            }
+            _ => {}
+        }
+    }
+
     fn refresh_entries(&mut self) -> Result<(), RegistryError> {
         self.entries = self.registry.load()?;
         Ok(())
@@ -413,7 +430,7 @@ mod tests {
     use crate::application::ports::Multiplexer;
     use crate::domain::{Agent, AgentUsage};
     use crate::test_support::{
-        Deadline, FakeMultiplexer, FakeSessionRegistry, FakeUsageMeter, ServiceFixture,
+        Deadline, FakeMultiplexer, FakeSessionRegistry, FakeUsageMeter, LogCapture, ServiceFixture,
     };
 
     #[test]
@@ -531,6 +548,47 @@ mod tests {
         let rows = service.observe_with(listing);
 
         assert!(rows.iter().any(|row| row.session().is_some()));
+    }
+
+    #[test]
+    fn a_registry_that_stays_unreadable_is_logged_once() {
+        let log = LogCapture::installed();
+        let fixture = OtherRingleaderFixture::renamable();
+        let mut service = fixture.service();
+        let listing = fixture.multiplexer().observe_all().unwrap();
+        fixture.registry().break_loads(RegistryError::Corrupt {
+            path: PathBuf::from("/state/ringleader/sessions.json"),
+            detail: "unreadable on every poll".to_string(),
+        });
+
+        service.observe_with(listing.clone());
+        service.observe_with(listing);
+
+        assert_eq!(log.count_containing("unreadable on every poll"), 1);
+    }
+
+    #[test]
+    fn a_registry_that_turns_unreadable_again_is_logged_again() {
+        let log = LogCapture::installed();
+        let fixture = OtherRingleaderFixture::renamable();
+        let mut service = fixture.service();
+        let listing = fixture.multiplexer().observe_all().unwrap();
+        let unreadable = RegistryError::Corrupt {
+            path: PathBuf::from("/state/ringleader/sessions.json"),
+            detail: "unreadable twice with a good read between".to_string(),
+        };
+        fixture.registry().break_loads(unreadable.clone());
+        service.observe_with(listing.clone());
+        fixture.registry().mend_loads();
+        service.observe_with(listing.clone());
+        fixture.registry().break_loads(unreadable);
+
+        service.observe_with(listing);
+
+        assert_eq!(
+            log.count_containing("unreadable twice with a good read between"),
+            2
+        );
     }
 
     #[test]
