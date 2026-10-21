@@ -60,6 +60,14 @@ impl XdgPaths {
         self.data_home.join(Self::APPLICATION).join("worktrees")
     }
 
+    pub fn shim_root(&self) -> PathBuf {
+        self.runtime_application_directory().join("bin")
+    }
+
+    pub fn plugin_root(&self) -> PathBuf {
+        self.data_home.join(Self::APPLICATION).join("plugin")
+    }
+
     pub fn scratch_root(&self) -> PathBuf {
         self.cache_home.join(Self::APPLICATION).join("tmp")
     }
@@ -156,6 +164,26 @@ mod tests {
         assert_eq!(
             paths.scratch_root(),
             Path::new("/example-cache/ringleader/tmp")
+        );
+    }
+
+    #[test]
+    fn the_ringleader_links_live_in_the_runtime_directory() {
+        let paths = PathsFixture::with(&[("XDG_RUNTIME_DIR", "/run/user/1000")]);
+
+        assert_eq!(
+            paths.shim_root(),
+            Path::new("/run/user/1000/ringleader/bin")
+        );
+    }
+
+    #[test]
+    fn the_built_in_skills_are_published_in_the_data_directory() {
+        let paths = PathsFixture::with(&[("XDG_DATA_HOME", "/example-data")]);
+
+        assert_eq!(
+            paths.plugin_root(),
+            Path::new("/example-data/ringleader/plugin")
         );
     }
 

@@ -5,12 +5,13 @@ use super::list_report::ListReport;
 use super::repo_argument::RepoArgument;
 use super::{
     CliExit, CliSession, CommandStop, DeleteArgs, ListArgs, NewArgs, RenameArgs, RestartArgs,
+    SendArgs,
 };
 use crate::application::{
-    CreateRequest, DeleteConfirmation, DeleteImpact, RestartReport, ServiceError, SessionService,
-    StartOutcome,
+    CreateRequest, DeleteConfirmation, DeleteImpact, DeleteOutcome, RestartReport, ServiceError,
+    SessionService, StartOutcome,
 };
-use crate::domain::{BaseBranch, Checkout, Repo};
+use crate::domain::{AgentMode, BaseBranch, Checkout, Repo};
 
 pub struct SessionCommands<'a> {
     service: &'a mut SessionService,
@@ -25,7 +26,7 @@ impl<'a> SessionCommands<'a> {
     }
 
     pub fn list(&mut self, args: &ListArgs) -> Result<u8, CommandStop> {
-        let rows = self.service.observe(false)?;
+        let rows = self.service.observe()?;
         let names: Vec<String> = rows
             .iter()
             .filter(|row| row.session().is_some())
@@ -49,7 +50,7 @@ impl<'a> SessionCommands<'a> {
     }
 
     pub fn create(&mut self, args: &NewArgs) -> Result<u8, CommandStop> {
-        self.service.observe(true)?;
+        self.service.observe_and_record()?;
         let repo = RepoArgument::new(&args.repo).resolve(self.service, self.session)?;
         let request = Self::create_request(args, repo);
         self.session.stop_if_signaled()?;
@@ -68,6 +69,7 @@ impl<'a> SessionCommands<'a> {
     fn create_request(args: &NewArgs, repo: Repo) -> CreateRequest {
         let mut request = CreateRequest::new(&args.name, repo)
             .with_checkout(Self::checkout(args))
+            .with_mode(Self::mode(args))
             .with_prompt(args.prompt.as_deref().unwrap_or(""));
         if let Some(agent) = &args.agent {
             request = request.with_agent(agent);
@@ -76,6 +78,14 @@ impl<'a> SessionCommands<'a> {
             request = request.with_base_branch(base);
         }
         request
+    }
+
+    fn mode(args: &NewArgs) -> AgentMode {
+        if args.plan {
+            AgentMode::Plan
+        } else {
+            AgentMode::Build
+        }
     }
 
     fn checkout(args: &NewArgs) -> Checkout {
@@ -87,34 +97,44 @@ impl<'a> SessionCommands<'a> {
     }
 
     pub fn delete(&mut self, args: &DeleteArgs) -> Result<u8, CommandStop> {
-        self.service.observe(true)?;
-        let confirmation = if args.force {
-            DeleteConfirmation::force()
-        } else {
-            DeleteConfirmation::confirmed(DeleteImpact::default())
-        };
-        let confirmation = if args.forget {
-            confirmation.forgetting()
-        } else {
-            confirmation
-        };
+        self.service.observe_and_record()?;
+        let confirmation = Self::delete_confirmation(args);
         self.session.stop_if_signaled()?;
         let report = DeleteReport::new(&args.name);
         match self.service.delete_session(&args.name, &confirmation) {
             Ok(outcome) => {
-                for warning in report.warnings(&outcome) {
-                    self.session.output().note(&warning);
-                }
-                self.session.output().line(&report.success(&outcome));
+                self.report_deleted(&report, &outcome);
                 Ok(0)
             }
             Err(ServiceError::GuardsChanged { impact, .. }) => {
-                for line in report.refusal(&impact) {
-                    self.session.output().note(&line);
-                }
+                self.report_refusal(&report, &impact);
                 Ok(CliExit::CONFLICT)
             }
             Err(error) => Err(error.into()),
+        }
+    }
+
+    fn delete_confirmation(args: &DeleteArgs) -> DeleteConfirmation {
+        let confirmation = match args.force {
+            true => DeleteConfirmation::force(),
+            false => DeleteConfirmation::confirmed(DeleteImpact::default()),
+        };
+        match args.forget {
+            true => confirmation.forgetting(),
+            false => confirmation,
+        }
+    }
+
+    fn report_deleted(&mut self, report: &DeleteReport, outcome: &DeleteOutcome) {
+        for warning in report.warnings(outcome) {
+            self.session.output().note(&warning);
+        }
+        self.session.output().line(&report.success(outcome));
+    }
+
+    fn report_refusal(&mut self, report: &DeleteReport, impact: &DeleteImpact) {
+        for line in report.refusal(impact) {
+            self.session.output().note(&line);
         }
     }
 
@@ -123,8 +143,16 @@ impl<'a> SessionCommands<'a> {
         Ok(0)
     }
 
+    pub fn send(&mut self, args: &SendArgs) -> Result<u8, CommandStop> {
+        self.service.send_prompt(&args.name, &args.prompt)?;
+        self.session
+            .output()
+            .line(&format!("sent the prompt to {}", args.name));
+        Ok(0)
+    }
+
     pub fn rename(&mut self, args: &RenameArgs) -> Result<u8, CommandStop> {
-        self.service.observe(true)?;
+        self.service.observe_and_record()?;
         self.session.stop_if_signaled()?;
         let renamed = self.service.rename_session(&args.old, &args.new)?;
         self.session
@@ -141,7 +169,7 @@ impl<'a> SessionCommands<'a> {
     }
 
     pub fn restart(&mut self, name: &str) -> Result<u8, CommandStop> {
-        self.service.observe(true)?;
+        self.service.observe_and_record()?;
         self.session.stop_if_signaled()?;
         let outcome = self.service.restart_session(name)?;
         self.report_restart(name, &outcome);
@@ -149,7 +177,7 @@ impl<'a> SessionCommands<'a> {
     }
 
     pub fn restart_all(&mut self) -> Result<u8, CommandStop> {
-        self.service.observe(true)?;
+        self.service.observe_and_record()?;
         self.session.stop_if_signaled()?;
         let session = &*self.session;
         let report = self.service.restart_all(|| session.is_signaled())?;
@@ -195,7 +223,9 @@ mod tests {
 
     use signal_hook::consts::{SIGHUP, SIGINT};
 
-    use crate::application::ports::{AttachTarget, ConfigError, DirtyState, RegistryError};
+    use crate::application::ports::{
+        AttachTarget, ConfigError, DirtyState, MultiplexerError, RegistryError,
+    };
     use crate::cli::CliExit;
     use crate::domain::{Repo, RepoName, Session};
     use crate::test_support::{
@@ -259,6 +289,114 @@ mod tests {
                 detail: "expected `=`".to_string(),
             }
         }
+    }
+
+    #[test]
+    fn send_submits_the_prompt_to_the_agent_of_a_waiting_session() {
+        let harness = CliHarness::new(CommandFixture::live());
+
+        let exit = harness.run(&["send", "fix-auth", "review the diff\nthen commit"]);
+
+        assert_eq!(exit, CliExit::Code(0));
+        assert_eq!(
+            harness
+                .fixture()
+                .multiplexer()
+                .submitted_when_ready("ringleader-fix-auth"),
+            ["review the diff\nthen commit"]
+        );
+        assert!(harness.stdout().contains("sent the prompt to fix-auth"));
+    }
+
+    #[test]
+    fn send_to_an_unknown_session_exits_two() {
+        let harness = CliHarness::new(ServiceFixture::new());
+
+        let exit = harness.run(&["send", "fix-auth", "review the diff"]);
+
+        assert_eq!(exit, CliExit::Code(CliExit::NOT_FOUND));
+    }
+
+    #[test]
+    fn send_to_a_stopped_session_exits_three_and_submits_nothing() {
+        let harness = CliHarness::new(CommandFixture::stopped(&["fix-auth"], &["fix-auth"]));
+
+        let exit = harness.run(&["send", "fix-auth", "review the diff"]);
+
+        assert_eq!(exit, CliExit::Code(CliExit::CONFLICT));
+        assert!(
+            harness
+                .stderr()
+                .contains("restart it before sending it a prompt")
+        );
+        assert!(
+            harness
+                .fixture()
+                .multiplexer()
+                .submitted_when_ready("ringleader-fix-auth")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn send_of_a_blank_prompt_exits_one_and_submits_nothing() {
+        let harness = CliHarness::new(CommandFixture::live());
+
+        let exit = harness.run(&["send", "fix-auth", "  \n "]);
+
+        assert_eq!(exit, CliExit::Code(CliExit::FAILURE));
+        assert!(
+            harness
+                .fixture()
+                .multiplexer()
+                .submitted_when_ready("ringleader-fix-auth")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn send_to_an_agent_that_never_reaches_its_prompt_exits_three_and_names_the_draft() {
+        let session = CommandFixture::session();
+        let multiplexer = FakeMultiplexer::new()
+            .with_live(ServiceFixture::waiting(&session))
+            .failing(
+                "submit_when_ready",
+                MultiplexerError::AgentNotReady {
+                    tmux_name: session.tmux_name().to_string(),
+                },
+            );
+        let harness = CliHarness::new(
+            ServiceFixture::new()
+                .with_sessions(std::slice::from_ref(&session))
+                .with_multiplexer(multiplexer),
+        );
+
+        let exit = harness.run(&["send", "fix-auth", "review the diff"]);
+
+        assert_eq!(exit, CliExit::Code(CliExit::CONFLICT));
+        assert!(
+            harness
+                .stderr()
+                .contains("send or clear its draft, or leave copy mode before sending")
+        );
+    }
+
+    #[test]
+    fn send_takes_no_lock() {
+        let harness = CliHarness::new(CommandFixture::live());
+
+        harness.run(&["send", "fix-auth", "review the diff"]);
+
+        assert!(harness.lock_acquisitions().is_empty());
+    }
+
+    #[test]
+    fn send_accepts_a_prompt_that_starts_with_a_dash() {
+        let harness = CliHarness::new(CommandFixture::live());
+
+        let exit = harness.run(&["send", "fix-auth", "--help me find the bug"]);
+
+        assert_eq!(exit, CliExit::Code(0));
     }
 
     #[test]
@@ -492,6 +630,61 @@ mod tests {
         ]);
 
         assert_eq!(exit, CliExit::Code(1));
+        assert!(
+            harness
+                .fixture()
+                .workspace()
+                .state_changing_calls()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn new_with_plan_launches_the_agent_with_its_plan_args() {
+        let harness = CliHarness::new(ServiceFixture::new());
+
+        let exit = harness.run(&[
+            "new",
+            "--name",
+            "fix-auth",
+            "--repo",
+            "example-project",
+            "--plan",
+        ]);
+
+        let launch = harness.fixture().multiplexer().launches().pop().unwrap();
+        assert_eq!(exit, CliExit::Code(0));
+        assert_eq!(launch.argv(), ["claude", "--permission-mode", "plan"]);
+    }
+
+    #[test]
+    fn new_without_plan_launches_the_agent_in_build_mode() {
+        let harness = CliHarness::new(ServiceFixture::new());
+
+        harness.run(&["new", "--name", "fix-auth", "--repo", "example-project"]);
+
+        let launch = harness.fixture().multiplexer().launches().pop().unwrap();
+        assert_eq!(launch.argv(), ["claude"]);
+    }
+
+    #[test]
+    fn new_with_plan_for_an_agent_without_plan_args_exits_one_before_git() {
+        let agent = crate::domain::Agent::new("claude", "claude");
+        let fixture =
+            ServiceFixture::new().with_config(ServiceFixture::config().with_agents(vec![agent]));
+        let harness = CliHarness::new(fixture);
+
+        let exit = harness.run(&[
+            "new",
+            "--name",
+            "fix-auth",
+            "--repo",
+            "example-project",
+            "--plan",
+        ]);
+
+        assert_eq!(exit, CliExit::Code(1));
+        assert!(harness.stderr().contains("it has no plan_args"));
         assert!(
             harness
                 .fixture()
@@ -752,7 +945,7 @@ mod tests {
 
         harness.run(&["restart", "--all"]);
 
-        assert_eq!(harness.lock_acquisitions(), ["write"]);
+        assert_eq!(harness.lock_acquisitions(), ["try"]);
     }
 
     #[test]
