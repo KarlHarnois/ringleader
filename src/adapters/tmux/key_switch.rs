@@ -220,6 +220,7 @@ mod tests {
             missing_program.as_os_str(),
             &files,
             &ProcessEnvironment::default(),
+            &TmuxTestServer::stand_in_finder(),
         );
         let bindings = KeyBindings::default();
 

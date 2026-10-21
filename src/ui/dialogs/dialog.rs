@@ -33,7 +33,7 @@ pub enum Dialog {
 impl Dialog {
     const WIDTH: u16 = 76;
     const HEIGHT: u16 = 22;
-    const HELP_HEIGHT: u16 = 35;
+    const HELP_HEIGHT: u16 = 36;
 
     pub fn open(opening: DialogOpening, service: &SessionService) -> Self {
         match opening {
@@ -135,7 +135,15 @@ impl Dialog {
     }
 
     pub fn render(&self, frame: &mut Frame, theme: &Theme) {
-        let (area, labels) = Self::placement(frame.area(), self.preferred_height());
+        let placement = Self::placement(frame.area(), self.preferred_height());
+        self.render_at(frame, placement, theme);
+    }
+
+    pub fn fill(&self, frame: &mut Frame, theme: &Theme) {
+        self.render_at(frame, (frame.area(), DialogLabels::full()), theme);
+    }
+
+    fn render_at(&self, frame: &mut Frame, (area, labels): (Rect, DialogLabels), theme: &Theme) {
         let block = Block::default()
             .borders(Borders::ALL)
             .title(self.title())
@@ -280,6 +288,18 @@ mod tests {
         assert_eq!(PlacementFixture::symbol(&terminal, 12, 4), "│");
         assert_eq!(PlacementFixture::symbol(&terminal, 13, 4), " ");
         assert_eq!(PlacementFixture::symbol(&terminal, 14, 4), "M");
+    }
+
+    #[test]
+    fn a_filling_finder_draws_its_border_and_title_from_the_frame_corner() {
+        let dialog = Dialog::find_session(vec!["fix-auth".to_string()]);
+        let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
+
+        terminal.draw(|frame| dialog.fill(frame, &Theme)).unwrap();
+
+        assert_eq!(PlacementFixture::symbol(&terminal, 0, 0), "┌");
+        assert_eq!(PlacementFixture::symbol(&terminal, 2, 0), "F");
+        assert_eq!(PlacementFixture::symbol(&terminal, 39, 11), "┘");
     }
 
     #[test]

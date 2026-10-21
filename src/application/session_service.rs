@@ -324,6 +324,11 @@ impl SessionService {
         self.access.attach(reconciliation.row(name)?)
     }
 
+    pub fn switch_client(&mut self, name: &str, client: &str) -> Result<(), ServiceError> {
+        let reconciliation = self.reconcile()?;
+        self.access.switch_client(reconciliation.row(name)?, client)
+    }
+
     pub fn open_shell(&mut self, name: &str) -> Result<ShellOutcome, ServiceError> {
         let reconciliation = self.reconcile()?;
         self.access.open_shell(reconciliation.row(name)?)
@@ -558,7 +563,7 @@ mod tests {
             fixture
                 .multiplexer()
                 .calls()
-                .contains(&"apply_config C-q M-n M-k M-Up M-l".to_string())
+                .contains(&"apply_config C-q M-n M-k M-Up M-l C-k".to_string())
         );
     }
 
@@ -572,7 +577,7 @@ mod tests {
             fixture
                 .multiplexer()
                 .calls()
-                .contains(&"apply_config C-q M-j M-Down M-k M-Up M-l".to_string())
+                .contains(&"apply_config C-q M-j M-Down M-k M-Up M-l C-k".to_string())
         );
     }
 

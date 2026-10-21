@@ -35,16 +35,31 @@ impl SessionAccess {
     }
 
     pub fn attach(&self, row: &SessionSummary) -> Result<(), ServiceError> {
-        if row.state() == SessionState::Stopped {
-            return Err(ServiceError::Conflict(format!(
-                "session {} is stopped, restart it first",
-                row.name()
-            )));
-        }
+        Self::refuse_stopped(row)?;
         self.refuse_own_pane()?;
-        self.multiplexer
-            .attach(&AttachTarget::Agent(row.tmux_name().to_string()))?;
+        self.multiplexer.attach(&Self::agent_of(row))?;
         Ok(())
+    }
+
+    pub fn switch_client(&self, row: &SessionSummary, client: &str) -> Result<(), ServiceError> {
+        Self::refuse_stopped(row)?;
+        self.multiplexer
+            .switch_client(client, &Self::agent_of(row))?;
+        Ok(())
+    }
+
+    fn refuse_stopped(row: &SessionSummary) -> Result<(), ServiceError> {
+        if row.state() != SessionState::Stopped {
+            return Ok(());
+        }
+        Err(ServiceError::Conflict(format!(
+            "session {} is stopped, restart it first",
+            row.name()
+        )))
+    }
+
+    fn agent_of(row: &SessionSummary) -> AttachTarget {
+        AttachTarget::Agent(row.tmux_name().to_string())
     }
 
     pub fn open_shell(&self, row: &SessionSummary) -> Result<ShellOutcome, ServiceError> {
@@ -274,6 +289,57 @@ mod tests {
         let error = fixture.service().attach("fix-auth").unwrap_err();
 
         assert!(error.to_string().contains("stopped"));
+    }
+
+    #[test]
+    fn switching_a_client_targets_the_agent_pane_of_the_session() {
+        let fixture = AttachFixture::live();
+
+        fixture
+            .service()
+            .switch_client("fix-auth", "client-1234")
+            .unwrap();
+
+        assert_eq!(
+            fixture.multiplexer().switched(),
+            [(
+                "client-1234".to_string(),
+                AttachTarget::Agent("ringleader-fix-auth".to_string())
+            )]
+        );
+    }
+
+    #[test]
+    fn switching_a_client_from_a_pane_of_the_own_server_is_allowed() {
+        let session = ServiceFixture::session("fix-auth");
+        let fixture = ServiceFixture::new()
+            .with_sessions(std::slice::from_ref(&session))
+            .with_multiplexer(
+                FakeMultiplexer::new()
+                    .with_live(ServiceFixture::waiting(&session))
+                    .called_from_own_pane(),
+            );
+
+        fixture
+            .service()
+            .switch_client("fix-auth", "client-1234")
+            .unwrap();
+
+        assert_eq!(fixture.multiplexer().switched().len(), 1);
+    }
+
+    #[test]
+    fn switching_a_client_refuses_a_stopped_session_as_attach_does() {
+        let fixture = ServiceFixture::new().with_sessions(&[ServiceFixture::session("fix-auth")]);
+
+        let switching = fixture
+            .service()
+            .switch_client("fix-auth", "client-1234")
+            .unwrap_err();
+        let attaching = fixture.service().attach("fix-auth").unwrap_err();
+
+        assert_eq!(switching.to_string(), attaching.to_string());
+        assert!(fixture.multiplexer().switched().is_empty());
     }
 
     #[test]
