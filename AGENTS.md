@@ -391,7 +391,7 @@ Confine each `unsafe` block to one adapter method.
 
 ### Entry points
 
-The hidden `__exec-agent` path loads no config, opens no log, and takes no lock.
+The hidden `__exec-agent` path loads no config. It opens no log. It takes no lock.
 
 The hidden `__find-session` path runs in the popup that a key in `finder_keys` opens on the private tmux server. It takes no lock. It writes no first-run config.
 
