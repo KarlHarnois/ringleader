@@ -588,7 +588,7 @@ mod tests {
     }
 
     #[test]
-    fn observe_without_persist_writes_nothing() {
+    fn an_observation_that_records_nothing_writes_nothing() {
         let session = ServiceFixture::session("fix-auth");
         let fixture = ServiceFixture::new()
             .with_multiplexer(FakeMultiplexer::new().with_live(ServiceFixture::waiting(&session)));
@@ -647,7 +647,7 @@ mod tests {
     }
 
     #[test]
-    fn a_take_over_shows_the_new_name_without_writing_when_not_persisting() {
+    fn a_take_over_shows_the_new_name_without_writing_when_not_recording() {
         let entry = ServiceFixture::session("fix-auth");
         let renamed = RekeyFixture::renamed(&entry, "ringleader-fix-login", "fix-login");
         let fixture = ServiceFixture::new()
