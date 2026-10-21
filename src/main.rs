@@ -6,9 +6,11 @@ mod domain;
 mod test_support;
 mod ui;
 
+use std::convert;
 use std::ffi::OsString;
 use std::fs;
 use std::io::{self, Write};
+use std::iter::once;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -46,6 +48,7 @@ use adapters::sqlite::sqlite_opencode_database::SqliteOpencodeDatabase;
 use adapters::terminal_emulator::system_terminal_emulator::SystemTerminalEmulator;
 use adapters::tmux::server_files::ServerFiles;
 use adapters::tmux::tmux_command::TmuxCommand;
+use adapters::tmux::tmux_finder_popup::TmuxFinderPopup;
 use adapters::tmux::tmux_multiplexer::TmuxMultiplexer;
 use adapters::web_browser::xdg_web_browser::XdgWebBrowser;
 use adapters::{BoundedCommand, Deadlines, GitWorkspace, HostDesktop, HostMounts};
@@ -54,8 +57,11 @@ use application::{
     AgentPorts, CorruptRegistry, DesktopPorts, DiagnosticPaths, LoadedConfig, RepoPorts,
     ServiceContext, ServiceError, ServicePorts, SessionService, StatePorts, TmuxPorts,
 };
-use cli::{Cli, CliExit, CliOutput, CliSession};
-use ui::{App, CrosstermInput, CrosstermScreenMode, EventLoop, TerminalGuard};
+use cli::{Cli, CliExit, CliOutput, CliSession, EntryPoints};
+use ui::{
+    App, CrosstermInput, CrosstermScreenMode, EventLoop, FinderPopupError, SessionFinderPopup,
+    TerminalGuard,
+};
 
 fn main() -> ExitCode {
     CompositionRoot::capture().run()
@@ -67,6 +73,7 @@ struct CompositionRoot {
     paths: XdgPaths,
     server: ServerFiles,
     launch_directory: PathBuf,
+    executable: PathBuf,
     processes: ProcessTable,
 }
 
@@ -83,6 +90,7 @@ impl CompositionRoot {
             server: Self::server_files(&paths),
             paths,
             launch_directory: std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")),
+            executable: std::env::current_exe().unwrap_or_else(|_| PathBuf::from("ringleader")),
             environment,
             programs,
             processes: ProcessTable::new(),
@@ -94,22 +102,8 @@ impl CompositionRoot {
     }
 
     fn run(self) -> ExitCode {
-        let cli = match Cli::parse_arguments(std::env::args_os()) {
-            Ok(cli) => cli,
-            Err(code) => return code,
-        };
-        if let Some(handoff) = cli.exec_agent_handoff() {
-            return self.exec_agent(handoff);
-        }
-        if let Some(problem) = self.diagnostics().socket_problem()
-            && !cli.is_doctor()
-        {
-            return Self::fail(&problem);
-        }
-        if cli.runs_tui() {
-            return self.run_tui(&cli);
-        }
-        self.run_cli(&cli)
+        Cli::parse_arguments(std::env::args_os())
+            .map_or_else(convert::identity, |cli| cli.enter(&self))
     }
 
     fn run_cli(&self, cli: &Cli) -> ExitCode {
@@ -172,7 +166,7 @@ impl CompositionRoot {
 
     fn exec_agent(&self, handoff: &Path) -> ExitCode {
         let reentry = LauncherCommand::new(
-            Self::launcher_prefix(),
+            self.launcher_prefix(),
             AgentHandoff::beside(handoff, &self.environment, self.processes.clone()),
         );
         let mut launcher = AgentLauncher::new(&self.environment, Box::new(ProcessExec), reentry);
@@ -408,17 +402,37 @@ impl CompositionRoot {
     }
 
     fn tmux(&self, env_names: &[String]) -> TmuxCommand {
-        TmuxCommand::new(self.programs.tmux(), &self.server, &self.environment)
-            .removing_env_names(env_names)
+        TmuxCommand::new(
+            self.programs.tmux(),
+            &self.server,
+            &self.environment,
+            &self.finder_popup(),
+        )
+        .removing_env_names(env_names)
     }
 
     fn launcher(&self) -> LauncherCommand {
-        LauncherCommand::new(Self::launcher_prefix(), self.handoff())
+        LauncherCommand::new(self.launcher_prefix(), self.handoff())
     }
 
-    fn launcher_prefix() -> Vec<OsString> {
-        let executable = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("ringleader"));
-        vec![executable.into_os_string(), OsString::from("__exec-agent")]
+    fn launcher_prefix(&self) -> Vec<OsString> {
+        vec![
+            self.executable.clone().into_os_string(),
+            OsString::from("__exec-agent"),
+        ]
+    }
+
+    fn finder_popup(&self) -> TmuxFinderPopup {
+        let finder_prefix = once(self.executable.clone().into_os_string())
+            .chain(Cli::finder_arguments())
+            .collect();
+        TmuxFinderPopup::new(finder_prefix, &self.programs.assignments())
+    }
+
+    fn show_finder(popup: SessionFinderPopup) -> Result<(), FinderPopupError> {
+        let screen = TerminalGuard::enter(Box::new(CrosstermScreenMode))?;
+        screen.state().install_panic_hook();
+        popup.run(CrosstermBackend::new(io::stdout()), CrosstermInput)
     }
 
     fn handoff(&self) -> AgentHandoff {
@@ -442,6 +456,39 @@ impl CompositionRoot {
     fn fail(message: &str) -> ExitCode {
         let _ = writeln!(io::stderr(), "ringleader: {message}");
         ExitCode::from(CliExit::FAILURE)
+    }
+}
+
+impl EntryPoints for CompositionRoot {
+    fn launch_agent(&self, handoff: &Path) -> ExitCode {
+        self.exec_agent(handoff)
+    }
+
+    fn socket_problem(&self) -> Option<String> {
+        self.diagnostics().socket_problem()
+    }
+
+    fn refuse_to_start(&self, problem: &str) -> ExitCode {
+        Self::fail(problem)
+    }
+
+    fn find_session(&self, cli: &Cli, client: &str) -> ExitCode {
+        let _log = self.start_log(cli);
+        let config_source = self.config_source(cli);
+        let loaded = Self::load(&config_source);
+        let popup = SessionFinderPopup::new(self.service(config_source, loaded), client);
+        Self::show_finder(popup).map_or_else(
+            |error| Self::fail(&error.to_string()),
+            |()| ExitCode::SUCCESS,
+        )
+    }
+
+    fn open_tui(&self, cli: &Cli) -> ExitCode {
+        self.run_tui(cli)
+    }
+
+    fn run_command(&self, cli: &Cli) -> ExitCode {
+        self.run_cli(cli)
     }
 }
 

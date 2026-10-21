@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use super::delete_report::DeleteReport;
 use super::list_report::ListReport;
 use super::repo_argument::RepoArgument;
-use super::{CliExit, CliSession, CommandStop, DeleteArgs, ListArgs, NewArgs, RenameArgs};
+use super::{
+    CliExit, CliSession, CommandStop, DeleteArgs, ListArgs, NewArgs, RenameArgs, RestartArgs,
+};
 use crate::application::{
     CreateRequest, DeleteConfirmation, DeleteImpact, RestartReport, ServiceError, SessionService,
     StartOutcome,
@@ -129,6 +131,13 @@ impl<'a> SessionCommands<'a> {
             .output()
             .line(&format!("renamed {} to {}", args.old, renamed.name()));
         Ok(0)
+    }
+
+    pub fn restart_one_or_all(&mut self, args: &RestartArgs) -> Result<u8, CommandStop> {
+        match &args.name {
+            Some(name) => self.restart(name),
+            None => self.restart_all(),
+        }
     }
 
     pub fn restart(&mut self, name: &str) -> Result<u8, CommandStop> {

@@ -7,6 +7,7 @@ pub mod tmux_agent_input;
 pub mod tmux_command;
 pub mod tmux_command_line;
 pub mod tmux_error;
+pub mod tmux_finder_popup;
 pub mod tmux_launch;
 pub mod tmux_listing;
 pub mod tmux_multiplexer;

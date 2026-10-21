@@ -4,7 +4,7 @@ use std::sync::Arc;
 use super::ports::{AttachTarget, HostProbe, Multiplexer, TerminalEmulator, WebBrowser};
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
-use crate::domain::{PullRequest, Session, SessionState, SessionSummary};
+use crate::domain::{PullRequest, RepoGroup, Session, SessionState, SessionSummary};
 
 pub struct SessionAccess {
     multiplexer: Arc<dyn Multiplexer>,
@@ -35,16 +35,31 @@ impl SessionAccess {
     }
 
     pub fn attach(&self, row: &SessionSummary) -> Result<(), ServiceError> {
-        if row.state() == SessionState::Stopped {
-            return Err(ServiceError::Conflict(format!(
-                "session {} is stopped, restart it first",
-                row.name()
-            )));
-        }
+        Self::refuse_stopped(row)?;
         self.refuse_own_pane()?;
-        self.multiplexer
-            .attach(&AttachTarget::Agent(row.tmux_name().to_string()))?;
+        self.multiplexer.attach(&Self::agent_of(row))?;
         Ok(())
+    }
+
+    pub fn switch_client(&self, row: &SessionSummary, client: &str) -> Result<(), ServiceError> {
+        Self::refuse_stopped(row)?;
+        self.multiplexer
+            .switch_client(client, &Self::agent_of(row))?;
+        Ok(())
+    }
+
+    fn refuse_stopped(row: &SessionSummary) -> Result<(), ServiceError> {
+        if row.state() != SessionState::Stopped {
+            return Ok(());
+        }
+        Err(ServiceError::Conflict(format!(
+            "session {} is stopped, restart it first",
+            row.name()
+        )))
+    }
+
+    fn agent_of(row: &SessionSummary) -> AttachTarget {
+        AttachTarget::Agent(row.tmux_name().to_string())
     }
 
     pub fn open_shell(&self, row: &SessionSummary) -> Result<ShellOutcome, ServiceError> {
@@ -76,19 +91,41 @@ impl SessionAccess {
         Ok(())
     }
 
+    pub fn open_repo_terminal(&self, group: &RepoGroup) -> Result<(), ServiceError> {
+        let main_checkout = group.path().ok_or_else(|| {
+            ServiceError::Invalid(format!(
+                "the sessions under {group} belong to no repo, so there is no main checkout to open"
+            ))
+        })?;
+        self.check_main_checkout(main_checkout)?;
+        self.terminal_emulator.open_window(main_checkout)?;
+        Ok(())
+    }
+
     pub fn open_pull_request(&self, pull_request: &PullRequest) -> Result<(), ServiceError> {
         self.web_browser.open(pull_request.url())?;
         Ok(())
     }
 
     fn check_worktree(&self, session: &Session) -> Result<(), ServiceError> {
-        if self.host.path_exists(session.worktree_path()) {
+        let worktree = session.worktree_path();
+        let missing = format!(
+            "worktree {} is missing, run ringleader doctor",
+            worktree.display()
+        );
+        self.check_present(worktree, missing)
+    }
+
+    fn check_main_checkout(&self, main_checkout: &Path) -> Result<(), ServiceError> {
+        let missing = format!("main checkout {} is missing", main_checkout.display());
+        self.check_present(main_checkout, missing)
+    }
+
+    fn check_present(&self, directory: &Path, missing: String) -> Result<(), ServiceError> {
+        if self.host.path_exists(directory) {
             return Ok(());
         }
-        Err(ServiceError::Invalid(format!(
-            "worktree {} is missing, run ringleader doctor",
-            session.worktree_path().display()
-        )))
+        Err(ServiceError::Invalid(missing))
     }
 }
 
@@ -205,6 +242,10 @@ mod tests {
                     FakeMultiplexer::new().with_live(ServiceFixture::waiting(&session)),
                 )
         }
+
+        fn repo() -> RepoGroup {
+            ServiceFixture::repo_group(ServiceFixture::REPO)
+        }
     }
 
     #[test]
@@ -248,6 +289,57 @@ mod tests {
         let error = fixture.service().attach("fix-auth").unwrap_err();
 
         assert!(error.to_string().contains("stopped"));
+    }
+
+    #[test]
+    fn switching_a_client_targets_the_agent_pane_of_the_session() {
+        let fixture = AttachFixture::live();
+
+        fixture
+            .service()
+            .switch_client("fix-auth", "client-1234")
+            .unwrap();
+
+        assert_eq!(
+            fixture.multiplexer().switched(),
+            [(
+                "client-1234".to_string(),
+                AttachTarget::Agent("ringleader-fix-auth".to_string())
+            )]
+        );
+    }
+
+    #[test]
+    fn switching_a_client_from_a_pane_of_the_own_server_is_allowed() {
+        let session = ServiceFixture::session("fix-auth");
+        let fixture = ServiceFixture::new()
+            .with_sessions(std::slice::from_ref(&session))
+            .with_multiplexer(
+                FakeMultiplexer::new()
+                    .with_live(ServiceFixture::waiting(&session))
+                    .called_from_own_pane(),
+            );
+
+        fixture
+            .service()
+            .switch_client("fix-auth", "client-1234")
+            .unwrap();
+
+        assert_eq!(fixture.multiplexer().switched().len(), 1);
+    }
+
+    #[test]
+    fn switching_a_client_refuses_a_stopped_session_as_attach_does() {
+        let fixture = ServiceFixture::new().with_sessions(&[ServiceFixture::session("fix-auth")]);
+
+        let switching = fixture
+            .service()
+            .switch_client("fix-auth", "client-1234")
+            .unwrap_err();
+        let attaching = fixture.service().attach("fix-auth").unwrap_err();
+
+        assert_eq!(switching.to_string(), attaching.to_string());
+        assert!(fixture.multiplexer().switched().is_empty());
     }
 
     #[test]
@@ -431,6 +523,65 @@ mod tests {
         let error = fixture.service().open_terminal("fix-auth").unwrap_err();
 
         assert_eq!(error.to_string(), missing.to_string());
+    }
+
+    #[test]
+    fn a_repo_terminal_opens_in_the_main_checkout() {
+        let fixture = ServiceFixture::new();
+
+        fixture
+            .service()
+            .open_repo_terminal(&TerminalFixture::repo())
+            .unwrap();
+
+        assert_eq!(
+            fixture.terminal_emulator().opened(),
+            [PathBuf::from(ServiceFixture::REPO)]
+        );
+    }
+
+    #[test]
+    fn a_repo_terminal_sends_nothing_to_tmux_and_changes_nothing() {
+        let fixture = TerminalFixture::live();
+
+        fixture
+            .service()
+            .open_repo_terminal(&TerminalFixture::repo())
+            .unwrap();
+
+        assert!(fixture.multiplexer().calls().is_empty());
+        assert!(fixture.workspace().calls().is_empty());
+        assert_eq!(fixture.registry().save_count(), 0);
+    }
+
+    #[test]
+    fn a_missing_main_checkout_opens_no_terminal() {
+        let fixture = ServiceFixture::new();
+        let vanished = ServiceFixture::repo_group("/repos/vanished");
+
+        let error = fixture.service().open_repo_terminal(&vanished).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "main checkout /repos/vanished is missing"
+        );
+        assert!(fixture.terminal_emulator().opened().is_empty());
+    }
+
+    #[test]
+    fn sessions_outside_any_repo_have_no_main_checkout_to_open() {
+        let fixture = ServiceFixture::new();
+
+        let error = fixture
+            .service()
+            .open_repo_terminal(&RepoGroup::Other)
+            .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "the sessions under other belong to no repo, so there is no main checkout to open"
+        );
+        assert!(fixture.terminal_emulator().opened().is_empty());
     }
 
     #[test]

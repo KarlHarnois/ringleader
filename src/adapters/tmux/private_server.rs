@@ -180,7 +180,7 @@ impl<'a> PrivateServer<'a> {
     }
 
     fn render_for(&self, key_bindings: &KeyBindings) -> TmuxServerConfig {
-        TmuxServerConfig::new(key_bindings)
+        TmuxServerConfig::new(key_bindings, self.tmux.finder_popup())
     }
 
     fn write_render(&self, render: &TmuxServerConfig) -> Result<(), MultiplexerError> {
@@ -219,17 +219,22 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     use super::*;
+    use crate::adapters::tmux::server_files::ServerFiles;
     use crate::domain::HotKey;
     use crate::test_support::TmuxTestServer;
 
     const BEFORE_SHELL_TOGGLE: &str =
         include_str!("../../../tests/fixtures/tmux-server-before-shell-toggle.conf");
+    const BEFORE_FINDER: &str =
+        include_str!("../../../tests/fixtures/tmux-server-before-finder.conf");
 
     struct ServerFixture;
 
     impl ServerFixture {
         const TABLES: [&'static str; 3] = ["root", "copy-mode", "copy-mode-vi"];
         const SHELL_TOGGLE_MARKER: &'static str = "@ringleader_meta";
+        const FINDER_MARKER: &'static str = "display-popup";
+        const NEWER_EXECUTABLE: &'static str = "/nix/store/example-newer/bin/ringleader";
 
         fn alt_x() -> KeyBindings {
             KeyBindings::default().with_return_key(HotKey::parse("M-x").unwrap())
@@ -284,6 +289,16 @@ mod tests {
             Self::keys_bound_where(server, table, |line| {
                 line.contains(Self::SHELL_TOGGLE_MARKER)
             })
+        }
+
+        fn finder_keys_in(server: &TmuxTestServer, table: &str) -> Vec<String> {
+            Self::keys_bound_where(server, table, |line| line.contains(Self::FINDER_MARKER))
+        }
+
+        fn command_running(server: &TmuxTestServer, executable: &str) -> TmuxCommand {
+            let files = ServerFiles::new(server.socket(), server.config());
+            let finder = TmuxTestServer::stand_in_finder_at(executable);
+            TmuxCommand::new(server.program(), &files, &server.environment(), &finder)
         }
 
         fn keys_bound_where(
@@ -629,7 +644,9 @@ mod tests {
     fn a_return_key_parse_now_refuses_is_still_unbound_when_the_key_changes() {
         let recorded = HotKey::recorded("M-BSpace").unwrap();
         let older = KeyBindings::default().with_return_key(recorded);
-        let server = TmuxTestServer::with_config(&TmuxServerConfig::new(&older).render());
+        let server = TmuxTestServer::with_config(
+            &TmuxServerConfig::new(&older, &TmuxTestServer::stand_in_finder()).render(),
+        );
         server.start_session("holder");
         let tmux = server.command();
 
@@ -677,7 +694,8 @@ mod tests {
         assert!(written.contains("bind-key -T root 'M-x' detach-client"));
         assert_eq!(
             ServerFixture::option(&server, "@ringleader_config"),
-            TmuxServerConfig::new(&ServerFixture::alt_x()).hash()
+            TmuxServerConfig::new(&ServerFixture::alt_x(), &TmuxTestServer::stand_in_finder())
+                .hash()
         );
     }
 
@@ -732,7 +750,7 @@ mod tests {
 
         assert_eq!(
             ServerFixture::option(&server, "@ringleader_config"),
-            TmuxServerConfig::new(&changed).hash()
+            TmuxServerConfig::new(&changed, &TmuxTestServer::stand_in_finder()).hash()
         );
         assert_eq!(
             ServerFixture::option(&server, "@ringleader_next_session_keys"),
@@ -802,5 +820,98 @@ mod tests {
                 "{table}"
             );
         }
+    }
+
+    #[test]
+    fn applying_a_changed_finder_key_moves_the_finder_in_every_table() {
+        let server = TmuxTestServer::with_session("holder");
+        let tmux = server.command();
+        let changed = KeyBindings::default().with_finder_keys(HotKey::parse_valid(["M-f"]));
+
+        PrivateServer::new(&tmux, server.process_table())
+            .apply(&changed)
+            .unwrap();
+
+        for table in ServerFixture::TABLES {
+            assert_eq!(
+                ServerFixture::finder_keys_in(&server, table),
+                ["M-f"],
+                "{table}"
+            );
+        }
+        assert_eq!(
+            ServerFixture::option(&server, "@ringleader_finder_keys"),
+            "M-f"
+        );
+    }
+
+    #[test]
+    fn applying_no_finder_keys_leaves_no_finder_in_any_table() {
+        let server = TmuxTestServer::with_session("holder");
+        let tmux = server.command();
+        let without_finder = KeyBindings::default().with_finder_keys(Vec::new());
+
+        PrivateServer::new(&tmux, server.process_table())
+            .apply(&without_finder)
+            .unwrap();
+
+        for table in ServerFixture::TABLES {
+            assert!(
+                ServerFixture::finder_keys_in(&server, table).is_empty(),
+                "{table}"
+            );
+        }
+    }
+
+    #[test]
+    fn dropping_ctrl_k_gives_emacs_copy_mode_its_copy_to_the_end_of_the_line_back() {
+        let server = TmuxTestServer::with_session("holder");
+        let tmux = server.command();
+        let without_finder = KeyBindings::default().with_finder_keys(Vec::new());
+
+        PrivateServer::new(&tmux, server.process_table())
+            .apply(&without_finder)
+            .unwrap();
+
+        assert_eq!(
+            ServerFixture::keys_running(
+                &server,
+                "copy-mode",
+                "send-keys -X copy-pipe-end-of-line-and-cancel"
+            ),
+            ["C-k"]
+        );
+    }
+
+    #[test]
+    fn a_server_started_before_the_finder_gains_it_when_the_config_is_reapplied() {
+        let server = TmuxTestServer::with_config(BEFORE_FINDER);
+        server.start_session("holder");
+        let tmux = server.command();
+
+        PrivateServer::new(&tmux, server.process_table())
+            .apply(&KeyBindings::default())
+            .unwrap();
+
+        for table in ServerFixture::TABLES {
+            assert_eq!(
+                ServerFixture::finder_keys_in(&server, table),
+                ["C-k"],
+                "{table}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_config_applied_by_another_executable_is_stale_so_the_finder_follows_upgrades() {
+        let server = TmuxTestServer::with_session("holder");
+        let newer = ServerFixture::command_running(&server, ServerFixture::NEWER_EXECUTABLE);
+
+        let running = PrivateServer::new(&newer, server.process_table())
+            .config(&KeyBindings::default())
+            .unwrap()
+            .unwrap();
+
+        assert!(!running.is_current());
     }
 }

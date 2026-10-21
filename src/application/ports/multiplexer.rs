@@ -15,6 +15,7 @@ pub trait Multiplexer: Send + Sync {
     fn caller_in_other_tmux(&self) -> bool;
     fn observe_all(&self) -> Result<Vec<SessionObservation>, MultiplexerError>;
     fn attach(&self, target: &AttachTarget) -> Result<(), MultiplexerError>;
+    fn switch_client(&self, client: &str, target: &AttachTarget) -> Result<(), MultiplexerError>;
     fn capture_pane(&self, tmux_name: &str) -> Result<String, MultiplexerError>;
     fn rename_session(
         &self,
