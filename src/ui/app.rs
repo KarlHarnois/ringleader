@@ -420,8 +420,8 @@ mod tests {
     use ratatui::style::Color;
 
     use crate::application::ports::{
-        ConfigError, MergeOutcome, MultiplexerError, RegistryError, SessionRegistry,
-        TerminalEmulatorError, UnmergedCommits, WebBrowserError,
+        ConfigError, MergeOutcome, MultiplexerError, RegistryError, TerminalEmulatorError,
+        UnmergedCommits, WebBrowserError,
     };
     use crate::application::{CreateRequest, DeleteImpact};
     use crate::domain::{
@@ -717,21 +717,6 @@ mod tests {
                 Box::new(FakeFoldStore::default()),
                 Instant::now(),
             )
-        }
-
-        fn save_elsewhere(fixture: &ServiceFixture, name: &str) {
-            let mut sessions = fixture.registry().sessions();
-            sessions.push(ServiceFixture::session(name));
-            fixture.registry().save(&sessions).unwrap();
-        }
-
-        fn registered(fixture: &ServiceFixture) -> Vec<String> {
-            fixture
-                .registry()
-                .sessions()
-                .iter()
-                .map(|session| session.name().to_string())
-                .collect()
         }
 
         fn lock_state_during(
@@ -2426,7 +2411,9 @@ mod tests {
         let start = Instant::now();
         let mut app = AppFixture::started(&fixture, 100, 28);
 
-        AppFixture::save_elsewhere(&fixture, "fix-auth");
+        fixture
+            .registry()
+            .save_from_elsewhere(ServiceFixture::session("fix-auth"));
         app.on_tick(start + Duration::from_secs(2));
         UiHarness::settle(&mut app);
 
@@ -2438,14 +2425,16 @@ mod tests {
     fn a_create_keeps_a_stopped_session_another_ringleader_saved_meanwhile() {
         let fixture = ServiceFixture::new();
         let mut app = AppFixture::started(&fixture, 100, 28);
-        AppFixture::save_elsewhere(&fixture, "dark-mode");
+        fixture
+            .registry()
+            .save_from_elsewhere(ServiceFixture::session("dark-mode"));
 
         app.perform(BlockingOperation::Create(CreateRequest::new(
             "fix-auth",
             ServiceFixture::repo(),
         )));
 
-        assert_eq!(AppFixture::registered(&fixture), ["dark-mode", "fix-auth"]);
+        assert_eq!(fixture.registry().names(), ["dark-mode", "fix-auth"]);
     }
 
     #[test]
@@ -2462,7 +2451,7 @@ mod tests {
         let delete = app.handle_event(&UiHarness::key(KeyCode::Enter));
         AppFixture::perform(&mut app, delete);
 
-        assert_eq!(AppFixture::registered(&fixture), ["fix-login"]);
+        assert_eq!(fixture.registry().names(), ["fix-login"]);
     }
 
     #[test]
@@ -2511,7 +2500,7 @@ mod tests {
             ServiceFixture::repo(),
         )));
 
-        assert!(AppFixture::registered(&fixture).is_empty());
+        assert!(fixture.registry().names().is_empty());
     }
 
     #[test]

@@ -481,21 +481,6 @@ mod tests {
                 )
         }
 
-        fn save_stopped(fixture: &ServiceFixture, name: &str) {
-            let mut sessions = fixture.registry().sessions();
-            sessions.push(ServiceFixture::session(name));
-            fixture.registry().save(&sessions).unwrap();
-        }
-
-        fn registered(fixture: &ServiceFixture) -> Vec<String> {
-            fixture
-                .registry()
-                .sessions()
-                .iter()
-                .map(|session| session.name().to_string())
-                .collect()
-        }
-
         fn corrupt() -> RegistryError {
             RegistryError::Corrupt {
                 path: PathBuf::from("/state/ringleader/sessions.json"),
@@ -508,16 +493,15 @@ mod tests {
     fn a_create_keeps_a_stopped_session_another_ringleader_saved_meanwhile() {
         let fixture = ServiceFixture::new();
         let mut service = fixture.service();
-        OtherRingleaderFixture::save_stopped(&fixture, "dark-mode");
+        fixture
+            .registry()
+            .save_from_elsewhere(ServiceFixture::session("dark-mode"));
 
         service
             .create_session(&CreateRequest::new("fix-auth", ServiceFixture::repo()))
             .unwrap();
 
-        assert_eq!(
-            OtherRingleaderFixture::registered(&fixture),
-            ["dark-mode", "fix-auth"]
-        );
+        assert_eq!(fixture.registry().names(), ["dark-mode", "fix-auth"]);
     }
 
     #[test]
@@ -532,7 +516,7 @@ mod tests {
 
         service.observe_with(listed_before);
 
-        assert_eq!(OtherRingleaderFixture::registered(&fixture), ["fix-login"]);
+        assert_eq!(fixture.registry().names(), ["fix-login"]);
     }
 
     #[test]
