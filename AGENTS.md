@@ -87,7 +87,7 @@ Ringleader stays minimal in what it shows, what it asks for, and what it documen
 
 ### Break freely before 1.0
 
-Before 1.0, every downstream setup pins Ringleader in its `flake.lock`.
+Before 1.0, every downstream setup pins Ringleader: a Nix setup in its `flake.lock`, a Homebrew install at the formula's release.
 
 - If the design changes, change the code and tests outright.
 - Never add a deprecation path, a compatibility shim, or a flag that keeps old behavior.
@@ -204,7 +204,7 @@ Create each fixture repo with `git init -b <branch>`. Never rely on `init.defaul
 
 ### This repository
 
-- The private GitHub repository exists and is the `origin` remote. Never create another repository. Never add another remote.
+- The GitHub repository exists and is the `origin` remote. Never create another repository. Never add another remote.
 - **Keep this repository consumer-agnostic.** Never reference or assume a specific downstream setup, local directory layout, or personal configuration.
 - Give examples and fixtures generic names, such as `example-project`.
 - Capitalize the name Ringleader in human-facing prose.
@@ -244,6 +244,7 @@ nix flake check
 | `docs/agents/tmux-tests.md` | write or change a test that runs tmux |
 | `docs/agents/hint-lines.md` | write or change a dialog's hint line, or add a text-editing key |
 | `docs/agents/tmux-commands.md` | write or change a tmux command that Ringleader runs or writes into the generated config |
+| `docs/agents/homebrew.md` | change `pinnedTools` or the package's wrapper in `flake.nix`, or release a version |
 | `docs/agents/features/pull.md` | change the pull that the `p` key starts |
 | `docs/agents/features/direnv.md` | change how create or restart launches an agent, or which variables the agent gets |
 | `docs/agents/features/agent-hooks.md` | change how `AgentHooks` types into an agent, or the check that an agent is at its prompt |

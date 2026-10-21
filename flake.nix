@@ -128,6 +128,17 @@
 
       crateVersion = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).package.version;
 
+      pinnedTools = pkgs: {
+        RINGLEADER_TMUX = pkgs.tmux;
+        RINGLEADER_GIT = pkgs.gitMinimal;
+      };
+
+      pinnedToolDefaults =
+        tools:
+        nixpkgs.lib.concatMapAttrsStringSep " " (
+          variable: tool: "--set-default ${variable} ${nixpkgs.lib.getExe tool}"
+        ) tools;
+
       readmeVersionBadge =
         pkgs:
         pkgs.runCommand "readme-version-badge" { } ''
@@ -185,33 +196,34 @@
         '';
     in
     {
-      packages = forEachSystem (pkgs: {
-        default = pkgs.rustPlatform.buildRustPackage {
-          pname = "ringleader";
-          version = crateVersion;
-          src = self;
-          cargoLock.lockFile = ./Cargo.lock;
-          nativeBuildInputs = [ pkgs.makeWrapper ];
-          doCheck = true;
-          __darwinAllowLocalNetworking = true;
-          nativeCheckInputs = [
-            pkgs.gitMinimal
-            pkgs.tmux
-            pkgs.direnv
-          ];
-          postInstall = ''
-            wrapProgram $out/bin/ringleader \
-              --set-default RINGLEADER_TMUX ${pkgs.tmux}/bin/tmux \
-              --set-default RINGLEADER_GIT ${pkgs.gitMinimal}/bin/git
-          '';
-          meta = {
-            description = "A tmux session manager for Claude and opencode";
-            license = pkgs.lib.licenses.mit;
-            mainProgram = "ringleader";
-            platforms = supportedSystems;
+      packages = forEachSystem (
+        pkgs:
+        let
+          tools = pinnedTools pkgs;
+        in
+        {
+          default = pkgs.rustPlatform.buildRustPackage {
+            pname = "ringleader";
+            version = crateVersion;
+            src = self;
+            cargoLock.lockFile = ./Cargo.lock;
+            nativeBuildInputs = [ pkgs.makeWrapper ];
+            doCheck = true;
+            __darwinAllowLocalNetworking = true;
+            nativeCheckInputs = builtins.attrValues tools ++ [ pkgs.direnv ];
+            postInstall = ''
+              wrapProgram $out/bin/ringleader ${pinnedToolDefaults tools}
+            '';
+            passthru.pinnedTools = tools;
+            meta = {
+              description = "A tmux session manager for Claude and opencode";
+              license = pkgs.lib.licenses.mit;
+              mainProgram = "ringleader";
+              platforms = supportedSystems;
+            };
           };
-        };
-      });
+        }
+      );
 
       apps = forEachSystemWithMetricsTools (
         pkgs: tools: {

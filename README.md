@@ -4,6 +4,7 @@
 [![Version](https://img.shields.io/badge/version-0.1.0-orange)](Cargo.toml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Nix flake](https://img.shields.io/badge/nix-flake-5277C3?logo=nixos&logoColor=white)](#install)
+[![Homebrew](https://img.shields.io/badge/homebrew-tap-FBB040?logo=homebrew&logoColor=white)](#install)
 
 ```text
     ____  _____   __________    _________    ____  __________
@@ -19,6 +20,12 @@ Ringleader runs on Linux and Apple Silicon macOS.
 
 ## Install
 
+**Install Ringleader with [Homebrew](https://brew.sh) on Apple Silicon macOS:**
+
+```sh
+brew install KarlHarnois/tap/ringleader
+```
+
 **Install Ringleader with [Nix](https://nixos.org/download/):**
 
 ```sh
@@ -26,6 +33,8 @@ nix profile add github:KarlHarnois/ringleader
 ```
 
 **If your Nix is older than 2.30, run `nix profile install` instead of `nix profile add`.**
+
+Both installs bring Ringleader's own tmux and git, and leave yours untouched.
 
 ## First run
 
