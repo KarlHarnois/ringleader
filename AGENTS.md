@@ -248,6 +248,7 @@ nix flake check
 | `docs/agents/features/agent-hooks.md` | change how `AgentHooks` types into an agent, or the check that an agent is at its prompt |
 | `docs/agents/features/scratch-directories.md` | change a session's scratch directory |
 | `docs/agents/features/background-jobs.md` | change one of the TUI's background jobs |
+| `docs/agents/features/write-lock.md` | change what a process saves, or when a process takes a lock |
 | `docs/agents/features/usage.md` | change how Ringleader measures an agent's usage, or the usage view that the `u` key opens |
 
 ## Architecture
@@ -309,7 +310,7 @@ nix flake check
 | #58 | The core's messages spell out tool command lines. |
 | #59 | Port errors carry tool details, and two TUI types branch on those details. |
 | #60 | `ActionGate` decides which actions each session state allows. |
-| #61 | `CompositionRoot::run_tui` calls the TUI's startup use cases. |
+| #61 | `CompositionRoot::run` checks the socket before either driving adapter starts. |
 | #70 | The core encodes tmux's config quoting and socket limits. |
 | #71 | `Doctor` repeats the config writability check that the adapter owns. |
 | #72 | The core reasons about whether a worktree's `.git` is a file or a directory. |
@@ -413,7 +414,7 @@ The hidden `__exec-agent` path loads no config, opens no log, and takes no lock.
 
 ### Locks
 
-**A CLI command that changes a session or a repo takes the write lock.** Every other CLI command takes no lock.
+**A change to a session, a repo, or the generated config runs under the write lock.** No other command takes the write lock.
 
 ### Sessions and branches
 
@@ -435,7 +436,7 @@ The hidden `__exec-agent` path loads no config, opens no log, and takes no lock.
 **Key bindings come only from the generated config of the private tmux server.** `create_session` writes the generated config.
 
 - If the server runs, `r` re-sources the generated config, even when the server's `@ringleader_config` hash matches the current render. A `tmux source-file` run from a pane can change the server without changing that hash.
-- Only a lock holder writes or re-sources the generated config, so only one process ever writes the generated config.
+- Only the write lock's holder writes or re-sources the generated config.
 
 ### Private tmux server
 

@@ -23,7 +23,7 @@ impl<'a> SessionCommands<'a> {
     }
 
     pub fn list(&mut self, args: &ListArgs) -> Result<u8, CommandStop> {
-        let rows = self.service.observe(false)?;
+        let rows = self.service.observe()?;
         let names: Vec<String> = rows
             .iter()
             .filter(|row| row.session().is_some())
@@ -47,7 +47,7 @@ impl<'a> SessionCommands<'a> {
     }
 
     pub fn create(&mut self, args: &NewArgs) -> Result<u8, CommandStop> {
-        self.service.observe(true)?;
+        self.service.observe_and_record()?;
         let repo = RepoArgument::new(&args.repo).resolve(self.service, self.session)?;
         let request = Self::create_request(args, repo);
         self.session.stop_if_signaled()?;
@@ -85,7 +85,7 @@ impl<'a> SessionCommands<'a> {
     }
 
     pub fn delete(&mut self, args: &DeleteArgs) -> Result<u8, CommandStop> {
-        self.service.observe(true)?;
+        self.service.observe_and_record()?;
         let confirmation = if args.force {
             DeleteConfirmation::force()
         } else {
@@ -122,7 +122,7 @@ impl<'a> SessionCommands<'a> {
     }
 
     pub fn rename(&mut self, args: &RenameArgs) -> Result<u8, CommandStop> {
-        self.service.observe(true)?;
+        self.service.observe_and_record()?;
         self.session.stop_if_signaled()?;
         let renamed = self.service.rename_session(&args.old, &args.new)?;
         self.session
@@ -132,7 +132,7 @@ impl<'a> SessionCommands<'a> {
     }
 
     pub fn restart(&mut self, name: &str) -> Result<u8, CommandStop> {
-        self.service.observe(true)?;
+        self.service.observe_and_record()?;
         self.session.stop_if_signaled()?;
         let outcome = self.service.restart_session(name)?;
         self.report_restart(name, &outcome);
@@ -140,7 +140,7 @@ impl<'a> SessionCommands<'a> {
     }
 
     pub fn restart_all(&mut self) -> Result<u8, CommandStop> {
-        self.service.observe(true)?;
+        self.service.observe_and_record()?;
         self.session.stop_if_signaled()?;
         let session = &*self.session;
         let report = self.service.restart_all(|| session.is_signaled())?;
@@ -743,7 +743,7 @@ mod tests {
 
         harness.run(&["restart", "--all"]);
 
-        assert_eq!(harness.lock_acquisitions(), ["write"]);
+        assert_eq!(harness.lock_acquisitions(), ["try"]);
     }
 
     #[test]

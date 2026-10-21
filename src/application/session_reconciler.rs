@@ -274,7 +274,7 @@ mod tests {
         const FOREIGN_BRANCH: &str = "feature/mystery";
 
         fn observe(fixture: &ServiceFixture) -> Vec<SessionSummary> {
-            fixture.service().observe(true).unwrap()
+            fixture.service().observe_and_record().unwrap()
         }
 
         fn only_row(fixture: &ServiceFixture) -> SessionSummary {
@@ -548,7 +548,7 @@ mod tests {
         let mut service = fixture.service();
 
         let names: Vec<String> = service
-            .observe(false)
+            .observe()
             .unwrap()
             .iter()
             .map(|row| row.name().to_string())
@@ -593,7 +593,7 @@ mod tests {
         let fixture = ServiceFixture::new()
             .with_multiplexer(FakeMultiplexer::new().with_live(ServiceFixture::waiting(&session)));
 
-        fixture.service().observe(false).unwrap();
+        fixture.service().observe().unwrap();
 
         assert_eq!(fixture.registry().save_count(), 0);
     }
@@ -654,7 +654,7 @@ mod tests {
             .with_sessions(std::slice::from_ref(&entry))
             .with_multiplexer(FakeMultiplexer::new().with_live(renamed));
 
-        let rows = fixture.service().observe(false).unwrap();
+        let rows = fixture.service().observe().unwrap();
 
         assert_eq!(rows[0].name(), "fix-login");
         assert_eq!(rows[0].session().unwrap().branch(), "fix-login");
@@ -742,7 +742,7 @@ mod tests {
         let refused = service.rename_session("fix-auth", "other").unwrap_err();
 
         fixture.multiplexer().end_session("ringleader-fix-auth");
-        let rows = service.observe(true).unwrap();
+        let rows = service.observe_and_record().unwrap();
 
         assert!(
             refused

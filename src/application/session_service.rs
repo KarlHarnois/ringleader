@@ -175,25 +175,27 @@ impl SessionService {
         Ok(())
     }
 
-    pub fn observe(&mut self, persist: bool) -> Result<Vec<SessionSummary>, ServiceError> {
-        let observations = self.monitor.observe_all()?;
-        self.observe_with(observations, persist)
+    pub fn observe(&mut self) -> Result<Vec<SessionSummary>, ServiceError> {
+        Ok(self.reconcile()?.into_summaries())
+    }
+
+    pub fn observe_and_record(&mut self) -> Result<Vec<SessionSummary>, ServiceError> {
+        let reconciliation = self.reconcile()?;
+        if reconciliation.changed() && self.read_only_reason().is_none() {
+            self.registry.save(reconciliation.entries())?;
+        }
+        Ok(reconciliation.into_summaries())
     }
 
     pub fn start_observing(&self) -> Pending<Vec<SessionObservation>> {
         self.monitor.start_observing()
     }
 
-    pub fn observe_with(
-        &mut self,
-        observations: Vec<SessionObservation>,
-        persist: bool,
-    ) -> Result<Vec<SessionSummary>, ServiceError> {
-        let reconciliation = self.reconcile_with(observations);
-        if persist && reconciliation.changed() {
-            self.registry.save(reconciliation.entries())?;
+    pub fn observe_with(&mut self, observations: Vec<SessionObservation>) -> Vec<SessionSummary> {
+        if let Err(error) = self.refresh_entries() {
+            log::warn!("could not reread the registry, showing the sessions read before: {error}");
         }
-        Ok(reconciliation.into_summaries())
+        self.reconcile_with(observations).into_summaries()
     }
 
     pub fn diff_stats(&self, names: &[String]) -> Vec<(String, Result<DiffStat, ServiceError>)> {
@@ -363,8 +365,14 @@ impl SessionService {
     }
 
     fn reconcile(&mut self) -> Result<Reconciliation, ServiceError> {
+        self.refresh_entries()?;
         let observations = self.monitor.observe_all()?;
         Ok(self.reconcile_with(observations))
+    }
+
+    fn refresh_entries(&mut self) -> Result<(), RegistryError> {
+        self.entries = self.registry.load()?;
+        Ok(())
     }
 
     fn reconcile_with(&mut self, observations: Vec<SessionObservation>) -> Reconciliation {
@@ -391,6 +399,7 @@ pub enum CorruptRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::application::ports::Multiplexer;
     use crate::domain::{Agent, AgentUsage};
     use crate::test_support::{
         Deadline, FakeMultiplexer, FakeSessionRegistry, FakeUsageMeter, ServiceFixture,
@@ -445,6 +454,119 @@ mod tests {
         service.reload().unwrap();
 
         assert_eq!(service.last_usage(), None);
+    }
+
+    struct OtherRingleaderFixture;
+
+    impl OtherRingleaderFixture {
+        fn renamable() -> ServiceFixture {
+            let session = ServiceFixture::session("fix-auth");
+            ServiceFixture::new()
+                .with_sessions(std::slice::from_ref(&session))
+                .with_workspace(ServiceFixture::workspace_for(&[&session]))
+                .with_host(ServiceFixture::host_for(&[&session]))
+                .with_multiplexer(
+                    FakeMultiplexer::new().with_live(ServiceFixture::waiting(&session)),
+                )
+        }
+
+        fn save_stopped(fixture: &ServiceFixture, name: &str) {
+            let mut sessions = fixture.registry().sessions();
+            sessions.push(ServiceFixture::session(name));
+            fixture.registry().save(&sessions).unwrap();
+        }
+
+        fn registered(fixture: &ServiceFixture) -> Vec<String> {
+            fixture
+                .registry()
+                .sessions()
+                .iter()
+                .map(|session| session.name().to_string())
+                .collect()
+        }
+
+        fn corrupt() -> RegistryError {
+            RegistryError::Corrupt {
+                path: PathBuf::from("/state/ringleader/sessions.json"),
+                detail: "expected value".to_string(),
+            }
+        }
+    }
+
+    #[test]
+    fn a_create_keeps_a_stopped_session_another_ringleader_saved_meanwhile() {
+        let fixture = ServiceFixture::new();
+        let mut service = fixture.service();
+        OtherRingleaderFixture::save_stopped(&fixture, "dark-mode");
+
+        service
+            .create_session(&CreateRequest::new("fix-auth", ServiceFixture::repo()))
+            .unwrap();
+
+        assert_eq!(
+            OtherRingleaderFixture::registered(&fixture),
+            ["dark-mode", "fix-auth"]
+        );
+    }
+
+    #[test]
+    fn a_listing_taken_before_another_ringleader_renamed_a_session_keeps_the_rename() {
+        let fixture = OtherRingleaderFixture::renamable();
+        let mut service = fixture.service();
+        let listed_before = fixture.multiplexer().observe_all().unwrap();
+        fixture
+            .service()
+            .rename_session("fix-auth", "fix-login")
+            .unwrap();
+
+        service.observe_with(listed_before);
+
+        assert_eq!(OtherRingleaderFixture::registered(&fixture), ["fix-login"]);
+    }
+
+    #[test]
+    fn a_registry_that_cannot_be_reread_keeps_the_sessions_read_before_in_view() {
+        let fixture = OtherRingleaderFixture::renamable();
+        let mut service = fixture.service();
+        let listing = fixture.multiplexer().observe_all().unwrap();
+        fixture
+            .registry()
+            .break_loads(OtherRingleaderFixture::corrupt());
+
+        let rows = service.observe_with(listing);
+
+        assert!(rows.iter().any(|row| row.session().is_some()));
+    }
+
+    #[test]
+    fn a_change_refuses_while_the_registry_cannot_be_reread() {
+        let fixture = OtherRingleaderFixture::renamable();
+        let mut service = fixture.service();
+        fixture
+            .registry()
+            .break_loads(OtherRingleaderFixture::corrupt());
+
+        let refusal = service.rename_session("fix-auth", "fix-login");
+
+        assert!(refusal.is_err());
+        assert_eq!(fixture.registry().save_count(), 0);
+    }
+
+    #[test]
+    fn a_recording_observation_on_a_broken_config_saves_nothing() {
+        let adoptable = ServiceFixture::session("fix-auth");
+        let fixture = ServiceFixture::new()
+            .with_broken_config(ConfigError::Parse {
+                path: PathBuf::from("/config/ringleader/config.toml"),
+                detail: "expected `=`".to_string(),
+            })
+            .with_multiplexer(
+                FakeMultiplexer::new().with_live(ServiceFixture::waiting(&adoptable)),
+            );
+
+        fixture.service().observe_and_record().unwrap();
+
+        assert_eq!(fixture.registry().save_count(), 0);
     }
 
     #[test]

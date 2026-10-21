@@ -51,8 +51,8 @@ use adapters::web_browser::xdg_web_browser::XdgWebBrowser;
 use adapters::{BoundedCommand, Deadlines, GitWorkspace, HostDesktop, HostMounts};
 use application::ports::{ConfigSource, HostProbe, Lock, LockError, PullRequests, UsageMeter};
 use application::{
-    AgentPorts, CorruptRegistry, DesktopPorts, DiagnosticPaths, LoadedConfig, RepoPorts,
-    ServiceContext, ServiceError, ServicePorts, SessionService, StatePorts, TmuxPorts,
+    AgentPorts, DesktopPorts, DiagnosticPaths, LoadedConfig, RepoPorts, ServiceContext,
+    ServiceError, ServicePorts, SessionService, StatePorts, TmuxPorts,
 };
 use cli::{Cli, CliExit, CliOutput, CliSession};
 use ui::{App, CrosstermInput, CrosstermScreenMode, EventLoop, TerminalGuard};
@@ -181,21 +181,50 @@ impl CompositionRoot {
 
     fn run_tui(&self, cli: &Cli) -> ExitCode {
         let state_directory = self.paths.state_directory();
-        if let Err(error) = fs::create_dir_all(&state_directory) {
-            return Self::fail(&format!(
+        let ran = Self::create_state_directory(&state_directory)
+            .and_then(|()| self.run_tui_in(cli, &state_directory));
+        ran.err().unwrap_or(ExitCode::SUCCESS)
+    }
+
+    fn create_state_directory(state_directory: &Path) -> Result<(), ExitCode> {
+        fs::create_dir_all(state_directory).map_err(|error| {
+            Self::fail(&format!(
                 "cannot create {}: {error}",
                 state_directory.display()
-            ));
-        }
+            ))
+        })
+    }
+
+    fn run_tui_in(&self, cli: &Cli, state_directory: &Path) -> Result<(), ExitCode> {
         let log = self.start_log(cli);
         self.handoff().delete_stale();
-        let mut lock = FileLock::new(&state_directory.join("lock"));
-        if let Err(error) = lock.acquire_lifetime() {
-            return Self::lock_failure(&error);
-        }
-        if let Ok(log) = &log {
+        let mut instance = Self::held_tui_lock(state_directory)?;
+        Self::truncate_log(&log);
+        self.started_app(cli, state_directory, log.err())
+            .and_then(Self::run_app)
+            .map(|(app, signals)| Self::wait_for_startup_input(app, signals, &mut instance))
+    }
+
+    fn held_tui_lock(state_directory: &Path) -> Result<FileLock, ExitCode> {
+        let mut instance = FileLock::new(&state_directory.join("tui.lock"));
+        instance
+            .try_acquire()
+            .map(|()| instance)
+            .map_err(|error| Self::lock_failure(&error))
+    }
+
+    fn truncate_log(log: &Result<AppLog, String>) {
+        if let Ok(log) = log {
             log.truncate_if_large();
         }
+    }
+
+    fn started_app(
+        &self,
+        cli: &Cli,
+        state_directory: &Path,
+        log_problem: Option<String>,
+    ) -> Result<App, ExitCode> {
         let config_source = self.config_source(cli);
         let template_warning = Self::write_template_if_missing(&config_source);
         let loaded = Self::load(&config_source);
@@ -203,49 +232,33 @@ impl CompositionRoot {
             .error()
             .map(|error| format!("config error, running read-only: {error}"))
             .or(template_warning);
-        let mut service = self.service(config_source, loaded);
-        let socket_recovery = service.restore_server_socket();
-        let pane_warning = match service.refuse_own_pane() {
-            Ok(()) => None,
-            Err(error @ ServiceError::Conflict(_)) => return Self::refuse(&error),
-            Err(error) => Some(error.to_string()),
-        };
-        let registry_warning = match service.load_registry(CorruptRegistry::MoveAside) {
-            Ok(warning) => warning,
-            Err(error) => return Self::fail(&error.to_string()),
-        };
-        let config_warning = service.reapply_server_config().err().map(|error| {
-            format!("could not update the config of Ringleader's tmux server: {error}")
-        });
-        let warnings: Vec<String> = [
-            log.err(),
-            registry_warning,
-            startup_message,
-            socket_recovery.as_ref().err().map(ToString::to_string),
-            pane_warning,
-            config_warning,
-        ]
-        .into_iter()
-        .flatten()
-        .collect();
-        let folds = JsonFoldStore::new(&state_directory.join("folds.json"));
         let mut app = App::new(
-            service,
+            self.service(config_source, loaded),
+            Box::new(FileLock::new(&state_directory.join("lock"))),
             Box::new(io::stdout()),
-            Box::new(folds),
+            Box::new(JsonFoldStore::new(&state_directory.join("folds.json"))),
             Instant::now(),
-        )
-        .with_startup_messages(&warnings, socket_recovery.ok().flatten());
-        let signals = match SignalHookInterrupts::register() {
-            Ok(signals) => signals,
-            Err(error) => return Self::fail(&error.to_string()),
-        };
-        if let Err(error) = Self::run_event_loop(&mut app, signals.clone()) {
-            return Self::fail(&error.to_string());
-        }
+        );
+        let process_warnings = [log_problem, startup_message]
+            .into_iter()
+            .flatten()
+            .collect();
+        app.start_up(process_warnings)
+            .map(|()| app)
+            .map_err(|error| Self::refuse(&error))
+    }
+
+    fn run_app(mut app: App) -> Result<(App, SignalHookInterrupts), ExitCode> {
+        let signals =
+            SignalHookInterrupts::register().map_err(|error| Self::fail(&error.to_string()))?;
+        Self::run_event_loop(&mut app, signals.clone())
+            .map(|()| (app, signals))
+            .map_err(|error| Self::fail(&error.to_string()))
+    }
+
+    fn wait_for_startup_input(app: App, signals: SignalHookInterrupts, instance: &mut FileLock) {
         let mut session = CliSession::new(CliOutput::standard(), Box::new(signals));
-        session.wait_for_startup_input(&app.into_service(), &mut lock);
-        ExitCode::SUCCESS
+        session.wait_for_startup_input(&app.into_service(), instance);
     }
 
     fn run_event_loop(app: &mut App, signals: SignalHookInterrupts) -> io::Result<()> {
