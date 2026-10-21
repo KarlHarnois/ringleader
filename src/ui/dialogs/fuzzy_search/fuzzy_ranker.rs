@@ -23,27 +23,36 @@ impl FuzzyRanker {
     }
 
     pub fn ranked(&mut self, query: &str, candidates: &[String]) -> Vec<usize> {
-        let pattern = Self::pattern(query);
-        let mut buffer = Vec::new();
-        let mut scored: Vec<(usize, u32)> = candidates
-            .iter()
-            .enumerate()
-            .filter_map(|(index, candidate)| {
-                let haystack = Utf32Str::new(candidate, &mut buffer);
-                let score = pattern.score(haystack, &mut self.matcher)?;
-                Some((index, score))
-            })
-            .collect();
-        scored.sort_by_key(|(_, score)| Reverse(*score));
-        scored.into_iter().map(|(index, _)| index).collect()
+        let found = self.matches(query, candidates);
+        found.iter().map(FuzzyMatch::index).collect()
     }
 
-    pub fn matched_positions(&mut self, query: &str, candidate: &str) -> Option<Vec<usize>> {
+    pub fn matches(&mut self, query: &str, candidates: &[String]) -> Vec<FuzzyMatch> {
+        let pattern = Self::pattern(query);
+        let mut found: Vec<(u32, FuzzyMatch)> = candidates
+            .iter()
+            .enumerate()
+            .filter_map(|(index, candidate)| self.matched(&pattern, index, candidate))
+            .collect();
+        found.sort_by_key(|(score, _)| Reverse(*score));
+        found
+            .into_iter()
+            .map(|(_, fuzzy_match)| fuzzy_match)
+            .collect()
+    }
+
+    fn matched(
+        &mut self,
+        pattern: &Pattern,
+        index: usize,
+        candidate: &str,
+    ) -> Option<(u32, FuzzyMatch)> {
         let mut buffer = Vec::new();
         let haystack = Utf32Str::new(candidate, &mut buffer);
         let mut positions = Vec::new();
-        Self::pattern(query).indices(haystack, &mut self.matcher, &mut positions)?;
-        Some(Self::sorted_unique(positions))
+        let score = pattern.indices(haystack, &mut self.matcher, &mut positions)?;
+        let positions = Self::sorted_unique(positions);
+        Some((score, FuzzyMatch { index, positions }))
     }
 
     fn pattern(query: &str) -> Pattern {
@@ -57,6 +66,21 @@ impl FuzzyRanker {
             .into_iter()
             .filter_map(|position| usize::try_from(position).ok())
             .collect()
+    }
+}
+
+pub struct FuzzyMatch {
+    index: usize,
+    positions: Vec<usize>,
+}
+
+impl FuzzyMatch {
+    pub fn index(&self) -> usize {
+        self.index
+    }
+
+    pub fn positions(&self) -> &[usize] {
+        &self.positions
     }
 }
 
@@ -77,7 +101,10 @@ mod tests {
         }
 
         fn matched_positions(query: &str, candidate: &str) -> Option<Vec<usize>> {
-            FuzzyRanker::for_names().matched_positions(query, candidate)
+            let found = FuzzyRanker::for_names().matches(query, &[candidate.to_string()]);
+            found
+                .first()
+                .map(|fuzzy_match| fuzzy_match.positions().to_vec())
         }
     }
 

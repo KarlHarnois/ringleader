@@ -8,7 +8,7 @@ use super::session_candidate::SessionCandidate;
 use super::text_field::FieldKind;
 use crate::domain::SessionSummary;
 use crate::ui::app::AppRequest;
-use crate::ui::dialogs::fuzzy_search::fuzzy_ranker::FuzzyRanker;
+use crate::ui::dialogs::fuzzy_search::fuzzy_ranker::{FuzzyMatch, FuzzyRanker};
 use crate::ui::dialogs::fuzzy_search::match_list::MatchList;
 use crate::ui::dialogs::fuzzy_search::search_query::SearchQuery;
 use crate::ui::table::session_tree::SessionTree;
@@ -93,16 +93,19 @@ impl SessionFinder {
     }
 
     fn rank(&mut self) {
-        self.mark_matches();
         let shown = self.shown_candidates();
-        let ranked = self.ranker.ranked(self.query.value(), &shown);
-        self.matches.replace(ranked);
+        let found = self.ranker.matches(self.query.value(), &shown);
+        self.mark_matches(&found);
+        self.matches
+            .replace(found.iter().map(FuzzyMatch::index).collect());
     }
 
-    fn mark_matches(&mut self) {
-        let query = self.query.value();
+    fn mark_matches(&mut self, found: &[FuzzyMatch]) {
         for candidate in &mut self.candidates {
-            candidate.mark_matches(query, &mut self.ranker);
+            candidate.mark(&[]);
+        }
+        for fuzzy_match in found {
+            self.candidates[fuzzy_match.index()].mark(fuzzy_match.positions());
         }
     }
 

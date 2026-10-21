@@ -2,7 +2,6 @@ use ratatui::style::Style;
 use ratatui::text::Span;
 
 use crate::domain::{RepoGroup, SessionSummary};
-use crate::ui::dialogs::fuzzy_search::fuzzy_ranker::FuzzyRanker;
 use crate::ui::text_fit::TextFit;
 use crate::ui::theme::Theme;
 
@@ -42,9 +41,8 @@ impl SessionCandidate {
         format!("{}{}", self.repo_prefix, self.name)
     }
 
-    pub fn mark_matches(&mut self, query: &str, ranker: &mut FuzzyRanker) {
-        let positions = ranker.matched_positions(query, &self.shown());
-        self.matched = positions.unwrap_or_default();
+    pub fn mark(&mut self, positions: &[usize]) {
+        self.matched = positions.to_vec();
     }
 
     pub fn spans(&self, width: usize, theme: &Theme) -> Vec<Span<'static>> {
@@ -83,6 +81,7 @@ mod tests {
     use super::*;
     use crate::domain::{SessionState, UnmanagedSession};
     use crate::test_support::ServiceFixture;
+    use crate::ui::dialogs::fuzzy_search::fuzzy_ranker::{FuzzyMatch, FuzzyRanker};
 
     struct CandidateFixture;
 
@@ -97,7 +96,8 @@ mod tests {
 
         fn matching(name: &str, query: &str) -> SessionCandidate {
             let mut candidate = Self::prefixed(name);
-            candidate.mark_matches(query, &mut FuzzyRanker::for_names());
+            let found = FuzzyRanker::for_names().matches(query, &[candidate.shown()]);
+            candidate.mark(found.first().map_or(&[], FuzzyMatch::positions));
             candidate
         }
 
