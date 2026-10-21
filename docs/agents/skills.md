@@ -19,6 +19,7 @@
 **The built-in skill is the skill in `skills/`, which the binary embeds and each launch hands to its agent.**
 
 - If a change makes a statement in the built-in skill false, update the skill in the same commit.
+- List each skill under `skills/` in the Skills section of `README.md`.
 - Never write the built-in skill into a worktree, a repo, or an agent's own config directory.
 - Pass `--plugin-dir` to claude right after the program, on every launch. Claude never restores the flag when it resumes a conversation.
 - Merge the skill folder into the `OPENCODE_CONFIG_CONTENT` that opencode already gets. Never replace the variable: the user's value carries the user's own settings.

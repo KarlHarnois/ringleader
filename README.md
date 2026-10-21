@@ -13,7 +13,7 @@
 /_/ |_/___/_/ |_/\____/_____/_____/_/  |_/_____/_____/_/ |_|
 ```
 
-Ringleader is a tmux session manager for Claude Code and opencode. Each session runs an agent in its own git worktree and branch, or in the repo's main checkout. Ringleader's TUI lists the sessions grouped by repo and shows how each one is doing. A built-in skill lets each Claude Code or opencode agent start, prompt, and manage other sessions through the CLI.
+Ringleader is a tmux session manager for Claude Code and opencode. Each session runs an agent in its own git worktree and branch, or in the repo's main checkout. Ringleader's TUI lists the sessions grouped by repo and shows how each one is doing.
 
 Ringleader runs on Linux and Apple Silicon macOS.
 
@@ -68,3 +68,13 @@ Conflicts with existing state include these:
 - a delete that would lose work
 - a held lock
 - a `send` to a stopped session, or to an agent away from its prompt
+
+## Skills
+
+Ringleader gives each Claude Code and opencode session these skills:
+
+| Skill | What it does |
+|---|---|
+| `managing-ringleader-sessions` | starts and prompts other sessions, and manages them through the CLI |
+
+Claude Code lists each skill as `/ringleader:<skill>`.
