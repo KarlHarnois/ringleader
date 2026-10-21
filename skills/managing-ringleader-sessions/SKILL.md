@@ -17,8 +17,8 @@ description: Hand a task to a new Ringleader session, send a prompt to another s
 
 **Run these steps before any action that needs the current session's agent, repo, or name.**
 
-1. Run `git rev-parse --show-toplevel`. Its output is the current worktree.
-2. Run `ringleader list --json`. The current session is the entry whose `worktree` equals the current worktree.
+1. Run `git rev-parse --show-toplevel`. Its output is the current worktree, with symlinks resolved.
+2. Run `ringleader list --json`. The current session is the entry whose `worktree`, passed through `realpath`, equals the current worktree. Compare the resolved paths, since a `worktree` value can still contain a symlink.
 3. Run `git worktree list --porcelain`. The path after the first `worktree` is the main checkout.
 
 If no entry matches, this agent runs outside Ringleader. Ask the user which agent and repo to use, and wait for the answer.
