@@ -157,14 +157,27 @@ impl App {
     }
 
     pub fn perform(&mut self, operation: BlockingOperation) {
-        let outcome = match self.under_write_lock(|app| app.perform_under_lock(operation)) {
+        let outcome = match operation.changes_state() {
+            true => self.perform_change(operation),
+            false => self.perform_check(operation),
+        };
+        self.show_outcome(outcome);
+    }
+
+    fn perform_change(&mut self, operation: BlockingOperation) -> OperationOutcome {
+        match self.under_write_lock(|app| app.perform_under_lock(operation)) {
             Ok(outcome) => outcome,
             Err(error) => {
                 self.observe();
                 OperationOutcome::Failed(error.into())
             }
-        };
-        self.show_outcome(outcome);
+        }
+    }
+
+    fn perform_check(&mut self, operation: BlockingOperation) -> OperationOutcome {
+        let outcome = operation.run(&mut self.service);
+        self.observe();
+        outcome
     }
 
     fn show_outcome(&mut self, outcome: OperationOutcome) {
@@ -2465,6 +2478,21 @@ mod tests {
 
         assert_eq!(*held_during_restart.lock().unwrap(), [true]);
         assert!(!lock.is_held());
+    }
+
+    #[test]
+    fn a_delete_measure_runs_while_another_ringleader_holds_the_lock() {
+        let fixture = AppFixture::deletable();
+        let lock = FakeLock::held_elsewhere();
+        let mut app = UiHarness::app_with_lock(&fixture, &lock);
+        app.resize(100, 28);
+        UiHarness::settle(&mut app);
+
+        let measure = app.handle_event(&UiHarness::character('d'));
+        AppFixture::perform(&mut app, measure);
+
+        assert!(app.dialogs.is_open());
+        assert!(!lock.acquisitions().contains(&"wait"));
     }
 
     #[test]

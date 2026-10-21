@@ -15,6 +15,10 @@ pub enum BlockingOperation {
 }
 
 impl BlockingOperation {
+    pub fn changes_state(&self) -> bool {
+        !matches!(self, Self::MeasureDelete(_))
+    }
+
     pub fn busy_message(&self) -> String {
         match self {
             Self::Restart(name) => format!("Restarting {name}…"),
