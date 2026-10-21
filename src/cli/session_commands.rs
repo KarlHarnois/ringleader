@@ -8,7 +8,7 @@ use crate::application::{
     CreateRequest, DeleteConfirmation, DeleteImpact, RestartReport, ServiceError, SessionService,
     StartOutcome,
 };
-use crate::domain::{BaseBranch, Checkout, Repo};
+use crate::domain::{AgentMode, BaseBranch, Checkout, Repo};
 
 pub struct SessionCommands<'a> {
     service: &'a mut SessionService,
@@ -66,6 +66,7 @@ impl<'a> SessionCommands<'a> {
     fn create_request(args: &NewArgs, repo: Repo) -> CreateRequest {
         let mut request = CreateRequest::new(&args.name, repo)
             .with_checkout(Self::checkout(args))
+            .with_mode(Self::mode(args))
             .with_prompt(args.prompt.as_deref().unwrap_or(""));
         if let Some(agent) = &args.agent {
             request = request.with_agent(agent);
@@ -74,6 +75,14 @@ impl<'a> SessionCommands<'a> {
             request = request.with_base_branch(base);
         }
         request
+    }
+
+    fn mode(args: &NewArgs) -> AgentMode {
+        if args.plan {
+            AgentMode::Plan
+        } else {
+            AgentMode::Build
+        }
     }
 
     fn checkout(args: &NewArgs) -> Checkout {
@@ -483,6 +492,61 @@ mod tests {
         ]);
 
         assert_eq!(exit, CliExit::Code(1));
+        assert!(
+            harness
+                .fixture()
+                .workspace()
+                .state_changing_calls()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn new_with_plan_launches_the_agent_with_its_plan_args() {
+        let harness = CliHarness::new(ServiceFixture::new());
+
+        let exit = harness.run(&[
+            "new",
+            "--name",
+            "fix-auth",
+            "--repo",
+            "example-project",
+            "--plan",
+        ]);
+
+        let launch = harness.fixture().multiplexer().launches().pop().unwrap();
+        assert_eq!(exit, CliExit::Code(0));
+        assert_eq!(launch.argv(), ["claude", "--permission-mode", "plan"]);
+    }
+
+    #[test]
+    fn new_without_plan_launches_the_agent_in_build_mode() {
+        let harness = CliHarness::new(ServiceFixture::new());
+
+        harness.run(&["new", "--name", "fix-auth", "--repo", "example-project"]);
+
+        let launch = harness.fixture().multiplexer().launches().pop().unwrap();
+        assert_eq!(launch.argv(), ["claude"]);
+    }
+
+    #[test]
+    fn new_with_plan_for_an_agent_without_plan_args_exits_one_before_git() {
+        let agent = crate::domain::Agent::new("claude", "claude");
+        let fixture =
+            ServiceFixture::new().with_config(ServiceFixture::config().with_agents(vec![agent]));
+        let harness = CliHarness::new(fixture);
+
+        let exit = harness.run(&[
+            "new",
+            "--name",
+            "fix-auth",
+            "--repo",
+            "example-project",
+            "--plan",
+        ]);
+
+        assert_eq!(exit, CliExit::Code(1));
+        assert!(harness.stderr().contains("it has no plan_args"));
         assert!(
             harness
                 .fixture()

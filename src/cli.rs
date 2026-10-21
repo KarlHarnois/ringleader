@@ -111,6 +111,8 @@ struct NewArgs {
     #[arg(long, conflicts_with = "base_branch")]
     main_checkout: bool,
     #[arg(long)]
+    plan: bool,
+    #[arg(long)]
     prompt: Option<String>,
 }
 

@@ -38,7 +38,7 @@ Sessions run on Ringleader's own tmux server. The server ignores your tmux confi
 ```
 ringleader
 ringleader list [--json]
-ringleader new --name <n> --repo <r> [--agent <a>] [--base-branch <b> | --main-checkout] [--prompt <text>]
+ringleader new --name <n> --repo <r> [--agent <a>] [--base-branch <b> | --main-checkout] [--plan] [--prompt <text>]
 ringleader delete <name> [--force] [--forget]
 ringleader attach <name>
 ringleader rename <old> <new>
