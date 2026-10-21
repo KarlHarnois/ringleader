@@ -46,14 +46,21 @@ impl MatchList {
         let visible = self.matches.iter().enumerate().skip(first).take(rows);
         visible
             .map(|(position, &index)| {
-                let style = if position == self.cursor {
-                    theme.selected()
+                let line = shown(index).into();
+                if position == self.cursor {
+                    Self::selected_line(line, theme)
                 } else {
-                    theme.base()
-                };
-                shown(index).into().patch_style(style)
+                    line.patch_style(theme.base())
+                }
             })
             .collect()
+    }
+
+    fn selected_line(mut line: Line<'static>, theme: &Theme) -> Line<'static> {
+        for span in &mut line.spans {
+            span.style = theme.on_selection(span.style);
+        }
+        line.patch_style(theme.selected())
     }
 
     fn cursor_offset(key: &KeyEvent) -> Option<isize> {
@@ -85,6 +92,10 @@ mod tests {
 
         fn press(list: &mut MatchList, code: KeyCode, modifiers: KeyModifiers) -> bool {
             list.move_cursor(&KeyEvent::new(code, modifiers))
+        }
+
+        fn faint(index: usize) -> Line<'static> {
+            Line::from(Span::styled(index.to_string(), Theme.dim()))
         }
 
         fn press_times(list: &mut MatchList, code: KeyCode, times: usize) {
@@ -169,6 +180,24 @@ mod tests {
 
         assert_eq!(lines[0].style, Theme.selected());
         assert_eq!(lines[0].spans[0].style, Theme.emphasis());
+    }
+
+    #[test]
+    fn the_selected_row_drops_faint_text_because_faint_fades_into_the_reversed_bar() {
+        let list = ListFixture::holding(&[4]);
+
+        let lines = list.lines(1, &Theme, ListFixture::faint);
+
+        assert_eq!(lines[0].spans[0].style, Theme.base());
+    }
+
+    #[test]
+    fn an_unselected_row_keeps_its_faint_text() {
+        let list = ListFixture::holding(&[4, 2]);
+
+        let lines = list.lines(2, &Theme, ListFixture::faint);
+
+        assert_eq!(lines[1].spans[0].style, Theme.dim());
     }
 
     #[test]

@@ -60,11 +60,11 @@ impl SessionCandidate {
 
     fn style_at(&self, position: usize, theme: &Theme) -> Style {
         if self.matched.contains(&position) {
-            theme.emphasis()
+            theme.matched()
         } else if position < self.prefix_width() {
             theme.dim()
         } else {
-            theme.base()
+            theme.emphasis()
         }
     }
 
@@ -136,23 +136,26 @@ mod tests {
     }
 
     #[test]
-    fn matched_letters_are_bold() {
+    fn the_session_name_is_bold() {
+        let candidate = CandidateFixture::prefixed("docs");
+
+        let bold = CandidateFixture::text_in(&candidate, Theme.emphasis());
+
+        assert_eq!(bold.trim_end(), "docs");
+    }
+
+    #[test]
+    fn matched_letters_are_bold_and_underlined() {
         let candidate = CandidateFixture::matching("fix-auth", "fa");
 
-        assert_eq!(
-            CandidateFixture::text_in(&candidate, Theme.emphasis()),
-            "fa"
-        );
+        assert_eq!(CandidateFixture::text_in(&candidate, Theme.matched()), "fa");
     }
 
     #[test]
     fn a_matched_repo_letter_drops_dim_because_bold_and_faint_cancel_in_some_terminals() {
         let candidate = CandidateFixture::matching("docs", "ph");
 
-        assert_eq!(
-            CandidateFixture::text_in(&candidate, Theme.emphasis()),
-            "ph"
-        );
+        assert_eq!(CandidateFixture::text_in(&candidate, Theme.matched()), "ph");
         assert_eq!(CandidateFixture::text_in(&candidate, Theme.dim()), "ala/");
     }
 }

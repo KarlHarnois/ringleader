@@ -318,17 +318,21 @@ mod tests {
     }
 
     #[test]
-    fn the_selected_finder_row_stays_reversed_under_bold_matches_and_a_dim_repo() {
+    fn the_selected_finder_row_is_reversed_with_nothing_faint_on_it() {
         let terminal = PlacementFixture::fill_finder("ph");
 
         assert_eq!(PlacementFixture::symbol(&terminal, 4, 3), "p");
         assert_eq!(
             PlacementFixture::modifier(&terminal, 4, 3),
-            Modifier::REVERSED | Modifier::BOLD
+            Modifier::REVERSED | Modifier::BOLD | Modifier::UNDERLINED
         );
         assert_eq!(
             PlacementFixture::modifier(&terminal, 2, 3),
-            Modifier::REVERSED | Modifier::DIM
+            Modifier::REVERSED
+        );
+        assert_eq!(
+            PlacementFixture::modifier(&terminal, 8, 3),
+            Modifier::REVERSED | Modifier::BOLD
         );
     }
 
