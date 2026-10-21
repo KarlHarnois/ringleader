@@ -441,7 +441,7 @@ mod tests {
 
         fn record_with_skill(&self, argv: &[&str]) -> RecordingExec {
             let argv = argv.iter().map(|word| word.to_string()).collect();
-            let launch = AgentLaunch::new(argv, &[], &self.worktree()).offering_built_in_skill();
+            let launch = AgentLaunch::new(argv, &[], &self.worktree()).offering_built_in_skills();
             let handoff = AgentHandoff::new(
                 &self.handoff_directory(),
                 &Self::creating_snapshot(),

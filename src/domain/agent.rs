@@ -13,7 +13,7 @@ pub struct Agent {
     resume_args: Vec<String>,
     startup_input: Vec<String>,
     rename_input: Vec<String>,
-    built_in_skill: bool,
+    built_in_skills: bool,
 }
 
 impl Agent {
@@ -85,7 +85,7 @@ impl Agent {
             resume_args: Vec::new(),
             startup_input: Vec::new(),
             rename_input: Vec::new(),
-            built_in_skill: true,
+            built_in_skills: true,
         }
     }
 
@@ -148,9 +148,9 @@ impl Agent {
         }
     }
 
-    pub fn without_built_in_skill(self) -> Self {
+    pub fn without_built_in_skills(self) -> Self {
         Self {
-            built_in_skill: false,
+            built_in_skills: false,
             ..self
         }
     }
@@ -159,8 +159,8 @@ impl Agent {
         &self.name
     }
 
-    pub fn gets_built_in_skill(&self) -> bool {
-        self.built_in_skill
+    pub fn gets_built_in_skills(&self) -> bool {
+        self.built_in_skills
     }
 
     pub fn command(&self) -> &str {
@@ -611,12 +611,12 @@ mod tests {
     }
 
     #[test]
-    fn an_agent_gets_the_built_in_skill_unless_it_opts_out() {
-        assert!(AgentFixture::plain().gets_built_in_skill());
+    fn an_agent_gets_the_built_in_skills_unless_it_opts_out() {
+        assert!(AgentFixture::plain().gets_built_in_skills());
         assert!(
             !AgentFixture::plain()
-                .without_built_in_skill()
-                .gets_built_in_skill()
+                .without_built_in_skills()
+                .gets_built_in_skills()
         );
     }
 }

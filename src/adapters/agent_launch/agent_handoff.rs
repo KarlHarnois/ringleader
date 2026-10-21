@@ -130,7 +130,7 @@ impl AgentHandoff {
         let skill = self
             .skill
             .as_ref()
-            .filter(|_| launch.offers_built_in_skill());
+            .filter(|_| launch.offers_built_in_skills());
         match skill.map(BuiltInSkill::publish) {
             Some(Ok(directory)) => contents.with_skill_directory(&directory),
             Some(Err(error)) => {
@@ -291,7 +291,7 @@ mod tests {
         }
 
         fn offering() -> AgentLaunch {
-            Self::launch(&[]).offering_built_in_skill()
+            Self::launch(&[]).offering_built_in_skills()
         }
 
         fn written(handoff: &AgentHandoff, launch: &AgentLaunch) -> HandoffContents {

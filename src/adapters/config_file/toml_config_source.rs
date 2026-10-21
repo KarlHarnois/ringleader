@@ -92,10 +92,11 @@ resume_args = ["--continue"]
 # startup_input is typed at every start, rename_input after a rename.
 startup_input = ["/color"]
 rename_input = ["/rename {name}"]
-# Ringleader gives claude and opencode a skill that runs the ringleader CLI
-# from inside a session. Turn it off if your organization's Claude Code policy
-# blocks plugin loading, since claude then refuses to start.
-# built_in_skill = false
+# Ringleader gives claude and opencode its built-in skills, such as one that
+# runs the ringleader CLI from inside a session. built_in_skills = false turns
+# all of them off, for an organization whose Claude Code policy blocks plugin
+# loading, since claude then refuses to start.
+# built_in_skills = false
 
 [[agents]]
 name = "opencode"
@@ -692,24 +693,24 @@ mod tests {
     }
 
     #[test]
-    fn the_first_run_template_gives_claude_the_built_in_skill() {
+    fn the_first_run_template_gives_claude_the_built_in_skills() {
         let fixture = SourceFixture::new();
         fixture.source().write_first_run_template().unwrap();
 
         let config = fixture.source().load().unwrap();
 
-        assert!(config.agent("claude").unwrap().gets_built_in_skill());
+        assert!(config.agent("claude").unwrap().gets_built_in_skills());
     }
 
     #[test]
-    fn an_agent_set_to_skip_the_built_in_skill_goes_without_it() {
+    fn an_agent_set_to_skip_the_built_in_skills_goes_without_them() {
         let fixture = SourceFixture::with_text(
-            "[[agents]]\nname = \"claude\"\ncommand = \"claude\"\nbuilt_in_skill = false\n",
+            "[[agents]]\nname = \"claude\"\ncommand = \"claude\"\nbuilt_in_skills = false\n",
         );
 
         let config = fixture.source().load().unwrap();
 
-        assert!(!config.agent("claude").unwrap().gets_built_in_skill());
+        assert!(!config.agent("claude").unwrap().gets_built_in_skills());
     }
 
     #[test]

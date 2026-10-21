@@ -178,7 +178,7 @@ mod tests {
     }
 
     #[test]
-    fn the_built_in_skill_is_published_in_the_data_directory() {
+    fn the_built_in_skills_are_published_in_the_data_directory() {
         let paths = PathsFixture::with(&[("XDG_DATA_HOME", "/example-data")]);
 
         assert_eq!(
