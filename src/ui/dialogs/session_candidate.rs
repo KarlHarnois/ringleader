@@ -46,18 +46,21 @@ impl SessionCandidate {
     }
 
     pub fn spans(&self, width: usize, theme: &Theme) -> Vec<Span<'static>> {
-        let fitted = TextFit::new(&self.shown()).padded(width);
-        let styled: Vec<(char, Style)> = fitted
+        let shown = self.shown();
+        let fit = TextFit::new(&shown);
+        let kept = fit.kept_length(width);
+        let styled: Vec<(char, Style)> = fit
+            .padded(width)
             .chars()
             .enumerate()
-            .map(|(position, character)| (character, self.style_at(position, theme)))
+            .map(|(position, character)| (character, self.style_at(position, kept, theme)))
             .collect();
         let runs = styled.chunk_by(|first, second| first.1 == second.1);
         runs.map(Self::span).collect()
     }
 
-    fn style_at(&self, position: usize, theme: &Theme) -> Style {
-        if self.matched.contains(&position) {
+    fn style_at(&self, position: usize, kept: usize, theme: &Theme) -> Style {
+        if position < kept && self.matched.contains(&position) {
             theme.matched()
         } else if position < self.prefix_width() {
             theme.dim()
@@ -149,6 +152,13 @@ mod tests {
         let candidate = CandidateFixture::matching("fix-auth", "fa");
 
         assert_eq!(CandidateFixture::text_in(&candidate, Theme.matched()), "fa");
+    }
+
+    #[test]
+    fn a_match_cut_off_by_the_width_leaves_the_ellipsis_plain() {
+        let candidate = CandidateFixture::matching("abcdefghijklmnopqrstuvwxyz", "n");
+
+        assert_eq!(CandidateFixture::text_in(&candidate, Theme.matched()), "");
     }
 
     #[test]

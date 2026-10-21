@@ -20,8 +20,16 @@ impl<'a> TextFit<'a> {
         if self.length() <= width {
             return self.text.to_string();
         }
-        let kept: String = self.text.chars().take(width.saturating_sub(1)).collect();
+        let kept: String = self.text.chars().take(self.kept_length(width)).collect();
         format!("{kept}{}", Self::ELLIPSIS)
+    }
+
+    pub fn kept_length(&self, width: usize) -> usize {
+        if self.length() <= width {
+            self.length()
+        } else {
+            width.saturating_sub(1)
+        }
     }
 
     pub fn left_truncated(&self, width: usize) -> String {
