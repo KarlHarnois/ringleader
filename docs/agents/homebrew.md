@@ -10,7 +10,7 @@
 
 **A release is a tag `v<version>` on a commit of `master`.** The formula installs only a release.
 
-1. Bump the version in `Cargo.toml` and in the README version badge.
+1. Bump the version in `Cargo.toml`, in `Cargo.lock`, and in the README version badge. The formula builds with `cargo install --locked`, which rejects a `Cargo.lock` that names another version.
 2. After the project owner merges that change, ask the project owner to push the tag `v<version>` on the merge commit.
 3. In the tap, open a PR that sets the formula's URL and sha256 to the new tag. In the same PR, set each bundled tool to the version that `pinnedTools` pins at the tag.
 4. If the tap's CI fails, fix the formula and push again. If the same check fails three times, stop and show its output to the project owner.
