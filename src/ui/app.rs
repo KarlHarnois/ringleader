@@ -104,7 +104,7 @@ impl App {
     }
 
     pub fn observe(&mut self) {
-        if self.if_write_lock_free(Self::observe_and_record).is_none() {
+        if self.if_write_lock_free(Self::observe_and_record).is_err() {
             let outcome = self.home.observe(&mut self.service);
             self.status.failure(outcome);
         }
@@ -266,8 +266,9 @@ impl App {
     }
 
     fn reload(&mut self) {
-        if let Err(error) = self.under_write_lock(Self::reload_under_lock) {
-            self.status.error(error.to_string());
+        if let Err(error) = self.if_write_lock_free(Self::reload_under_lock) {
+            self.status
+                .error(format!("{}: {error}", Self::RELOAD_FAILED));
         }
     }
 
@@ -382,11 +383,11 @@ impl App {
         Ok(done)
     }
 
-    fn if_write_lock_free<T>(&mut self, work: impl FnOnce(&mut Self) -> T) -> Option<T> {
-        self.write_lock.try_acquire().ok()?;
+    fn if_write_lock_free<T>(&mut self, work: impl FnOnce(&mut Self) -> T) -> Result<T, LockError> {
+        self.write_lock.try_acquire()?;
         let done = work(self);
         self.write_lock.release();
-        Some(done)
+        Ok(done)
     }
 
     fn never_interrupted() -> bool {
@@ -1440,6 +1441,22 @@ mod tests {
         assert!(
             AppFixture::status_line(&app, 200).starts_with(" config error, running read-only:")
         );
+    }
+
+    #[test]
+    fn r_while_another_ringleader_holds_the_lock_says_so_without_waiting() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let lock = FakeLock::held_elsewhere();
+        let mut app = UiHarness::app_with_lock(&fixture, &lock);
+        app.resize(100, 28);
+
+        AppFixture::press(&mut app, 'r');
+
+        assert!(
+            AppFixture::status_line(&app, 200)
+                .contains("reload failed, kept the previous config: another Ringleader holds")
+        );
+        assert_eq!(lock.acquisitions(), ["try"]);
     }
 
     #[test]
