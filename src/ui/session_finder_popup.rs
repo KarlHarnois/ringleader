@@ -48,7 +48,7 @@ impl SessionFinderPopup {
     fn session_names(&mut self) -> Result<Vec<String>, ServiceError> {
         self.service.load_registry(CorruptRegistry::Report)?;
         let mut sessions = SessionList::default();
-        sessions.show(self.service.observe(false)?);
+        sessions.show(self.service.observe()?);
         Ok(sessions.names())
     }
 

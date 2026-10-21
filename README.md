@@ -47,9 +47,10 @@ Sessions run on Ringleader's own tmux server. The server ignores your tmux confi
 ```
 ringleader
 ringleader list [--json]
-ringleader new --name <n> --repo <r> [--agent <a>] [--base-branch <b> | --main-checkout] [--prompt <text>]
+ringleader new --name <n> --repo <r> [--agent <a>] [--base-branch <b> | --main-checkout] [--plan] [--prompt <text>]
 ringleader delete <name> [--force] [--forget]
 ringleader attach <name>
+ringleader send <name> <prompt>
 ringleader rename <old> <new>
 ringleader restart (<name> | --all)
 ringleader repo add <path> [--name <n>] [--base-branch <b>]
@@ -75,3 +76,14 @@ Conflicts with existing state include these:
 - a running session
 - a delete that would lose work
 - a held lock
+- a `send` to a stopped session, or to an agent away from its prompt
+
+## Skills
+
+Unless an agent's config turns them off, each Claude Code and opencode session gets these skills:
+
+| Skill | What it does |
+|---|---|
+| `managing-ringleader-sessions` | starts and prompts other sessions, and manages them through the CLI |
+
+Claude Code lists each skill as `/ringleader:<skill>`.

@@ -2,7 +2,7 @@
 
 **Every rule in this file binds each change to one of these:**
 
-- how `AgentHooks` types into an agent
+- how Ringleader types or pastes text into an agent
 - the check that an agent is at its prompt
 
 **Send each line's Enter apart from the line's text.** An agent reads text and an Enter that arrive together as a paste. The agent then keeps the Enter in its draft and never submits the line.
