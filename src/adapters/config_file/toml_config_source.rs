@@ -28,7 +28,8 @@ return_key = "C-q"
 # Inside your own tmux, they must not be bound in its root table, and its
 # escape-time must be low, such as 10, or Esc followed by j, k, or an arrow
 # switches sessions. A removed key that tmux binds in copy mode, other than
-# M-Up and M-Down, stays unbound there until Ringleader's tmux server restarts.
+# M-Up, M-Down, and C-k, stays unbound there until Ringleader's tmux server
+# restarts.
 next_session_keys = ["M-j", "M-Down"]
 previous_session_keys = ["M-k", "M-Up"]
 # Keys that switch between a session's agent and its shell, the one t opens,
@@ -37,6 +38,12 @@ previous_session_keys = ["M-k", "M-Up"]
 # and in copy mode, so a removed M-l stays unbound in emacs copy mode until
 # Ringleader's tmux server restarts.
 shell_toggle_keys = ["M-l"]
+# Keys that open the session finder over a session while you are attached.
+# Enter switches to the session you pick, and Esc keeps you where you were.
+# [] turns the finder off, and a missing list keeps this default. C-k takes
+# Ctrl-K, which deletes to the end of the line, away from agents and shells.
+# Inside your own tmux, they must not be bound in its root table.
+finder_keys = ["C-k"]
 state_poll_ms = 1000
 preview_refresh_ms = 750
 diff_refresh_ms = 3000
@@ -355,6 +362,25 @@ mod tests {
     }
 
     #[test]
+    fn the_finder_keys_in_a_file_reach_the_config() {
+        let fixture = SourceFixture::with_text("finder_keys = [\"M-f\", \"F9\"]\n");
+
+        let config = fixture.source().load().unwrap();
+
+        let finder = config.key_bindings().finder_keys();
+        assert_eq!(SourceFixture::names(finder), ["M-f", "F9"]);
+    }
+
+    #[test]
+    fn an_empty_finder_list_in_a_file_binds_no_finder_key() {
+        let fixture = SourceFixture::with_text("finder_keys = []\n");
+
+        let config = fixture.source().load().unwrap();
+
+        assert!(config.key_bindings().finder_keys().is_empty());
+    }
+
+    #[test]
     fn an_older_config_whose_return_key_is_a_default_session_key_still_loads() {
         let fixture = SourceFixture::with_text("return_key = \"M-k\"\n");
 
@@ -596,6 +622,15 @@ mod tests {
         let written = TomlConfigSource::TEMPLATE
             .lines()
             .any(|line| line == r#"shell_toggle_keys = ["M-l"]"#);
+
+        assert!(written);
+    }
+
+    #[test]
+    fn the_first_run_template_writes_the_default_finder_keys() {
+        let written = TomlConfigSource::TEMPLATE
+            .lines()
+            .any(|line| line == r#"finder_keys = ["C-k"]"#);
 
         assert!(written);
     }

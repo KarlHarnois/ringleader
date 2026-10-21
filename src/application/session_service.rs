@@ -28,7 +28,8 @@ use crate::application::repos::repo_catalog::RepoCatalog;
 use crate::application::{AddRepoRequest, RepoAddition};
 use crate::application::{DeleteConfirmation, DeleteImpact};
 use crate::domain::{
-    Config, DiffStat, KeyBindings, PullRequest, Repo, Session, SessionObservation, SessionSummary,
+    Config, DiffStat, KeyBindings, PullRequest, Repo, RepoGroup, Session, SessionObservation,
+    SessionSummary,
 };
 
 pub struct SessionService {
@@ -323,6 +324,11 @@ impl SessionService {
         self.access.attach(reconciliation.row(name)?)
     }
 
+    pub fn switch_client(&mut self, name: &str, client: &str) -> Result<(), ServiceError> {
+        let reconciliation = self.reconcile()?;
+        self.access.switch_client(reconciliation.row(name)?, client)
+    }
+
     pub fn open_shell(&mut self, name: &str) -> Result<ShellOutcome, ServiceError> {
         let reconciliation = self.reconcile()?;
         self.access.open_shell(reconciliation.row(name)?)
@@ -333,6 +339,10 @@ impl SessionService {
             .entry(name)
             .ok_or_else(|| ServiceError::NotFound(format!("no managed session named {name}")))?;
         self.access.open_terminal(session)
+    }
+
+    pub fn open_repo_terminal(&self, group: &RepoGroup) -> Result<(), ServiceError> {
+        self.access.open_repo_terminal(group)
     }
 
     pub fn open_pull_request(&self, name: &str) -> Result<(), ServiceError> {
@@ -553,7 +563,7 @@ mod tests {
             fixture
                 .multiplexer()
                 .calls()
-                .contains(&"apply_config C-q M-n M-k M-Up M-l".to_string())
+                .contains(&"apply_config C-q M-n M-k M-Up M-l C-k".to_string())
         );
     }
 
@@ -567,7 +577,7 @@ mod tests {
             fixture
                 .multiplexer()
                 .calls()
-                .contains(&"apply_config C-q M-j M-Down M-k M-Up M-l".to_string())
+                .contains(&"apply_config C-q M-j M-Down M-k M-Up M-l C-k".to_string())
         );
     }
 

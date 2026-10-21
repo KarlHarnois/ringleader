@@ -159,6 +159,19 @@ impl ProgramPaths {
     pub fn git(&self) -> &OsStr {
         &self.git
     }
+
+    pub fn assignments(&self) -> [OsString; 2] {
+        [
+            Self::assignment(ProcessEnvironment::TMUX_PROGRAM, &self.tmux),
+            Self::assignment(ProcessEnvironment::GIT_PROGRAM, &self.git),
+        ]
+    }
+
+    fn assignment(variable: &str, program: &OsStr) -> OsString {
+        let mut assignment = OsString::from(format!("{variable}="));
+        assignment.push(program);
+        assignment
+    }
 }
 
 #[cfg(test)]
@@ -191,6 +204,24 @@ mod tests {
         assert_eq!(paths.git(), "/nix/store/example-git/bin/git");
         assert!(!remaining.contains("RINGLEADER_TMUX"));
         assert!(!remaining.contains("RINGLEADER_GIT"));
+    }
+
+    #[test]
+    fn the_program_paths_assign_the_variables_they_were_split_from() {
+        let environment = EnvironmentFixture::with(&[
+            ("RINGLEADER_TMUX", "/nix/store/example-tmux/bin/tmux"),
+            ("RINGLEADER_GIT", "/nix/store/example-git/bin/git"),
+        ]);
+
+        let (paths, _) = environment.split_program_paths();
+
+        assert_eq!(
+            paths.assignments(),
+            [
+                "RINGLEADER_TMUX=/nix/store/example-tmux/bin/tmux",
+                "RINGLEADER_GIT=/nix/store/example-git/bin/git",
+            ]
+        );
     }
 
     #[test]
