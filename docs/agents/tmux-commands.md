@@ -1,6 +1,6 @@
 # tmux commands
 
-**Every rule in this file binds each tmux command that Ringleader runs or binds.**
+**Every rule in this file binds each tmux command that Ringleader runs or writes into the generated config.**
 
 ## Targets
 
@@ -12,12 +12,12 @@
 - a pane id
 - a client name that tmux reported through `#{client_name}`
 
-**Never pass a bare `-t <name>`:** tmux resolves a name with no exact match by prefix. A bare `-t fix` would reach `fix-auth`.
+**Never pass a bare `-t <name>`:** tmux resolves a name with no exact match by prefix.
 
 - If a session's name starts with `$`, target the session by its id. tmux reads `=$0:` as the session whose id is `$0`.
 
 ## Start directories
 
-**Every `new-session`, `new-window`, and `respawn-window` passes `-c` with the worktree.** Without `-c`, tmux starts the pane in the caller's directory and still exits 0.
+**Every `new-session`, `new-window`, and `respawn-pane` passes `-c` with the worktree.** Without `-c`, tmux starts the pane in the caller's directory and still exits 0.
 
-- A binding in the generated config passes `-c '#{session_path}'`. Ringleader renders the config before any session exists, and `create_session` starts each session in its worktree.
+- If a binding in the generated config runs one of those commands, the binding passes `-c '#{session_path}'`. Ringleader renders the config before any session exists, and `create_session` starts each session in its worktree.

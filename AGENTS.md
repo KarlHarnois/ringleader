@@ -243,7 +243,7 @@ nix flake check
 | `docs/agents/platform-code.md` | change a file or a re-export that a `target_os` cfg attribute limits, or write such an attribute |
 | `docs/agents/tmux-tests.md` | write or change a test that runs tmux |
 | `docs/agents/hint-lines.md` | write or change a dialog's hint line, or add a text-editing key |
-| `docs/agents/tmux-commands.md` | write or change a tmux command that Ringleader runs or binds |
+| `docs/agents/tmux-commands.md` | write or change a tmux command that Ringleader runs or writes into the generated config |
 | `docs/agents/features/pull.md` | change the pull that the `p` key starts |
 | `docs/agents/features/direnv.md` | change how create or restart launches an agent, or which variables the agent gets |
 | `docs/agents/features/agent-hooks.md` | change how `AgentHooks` types into an agent, or the check that an agent is at its prompt |
@@ -393,7 +393,7 @@ Confine each `unsafe` block to one adapter method.
 
 The hidden `__exec-agent` path loads no config, opens no log, and takes no lock.
 
-The hidden `__find-session` path runs in the popup that a finder key opens on the private tmux server. It takes no lock and never writes the first-run config.
+The hidden `__find-session` path runs in the popup that a key in `finder_keys` opens on the private tmux server. It takes no lock. It writes no first-run config.
 
 ### Locks
 
@@ -420,7 +420,7 @@ The hidden `__find-session` path runs in the popup that a finder key opens on th
 
 - If the server runs, `r` re-sources the generated config, even when the server's `@ringleader_config` hash matches the current render. A `tmux source-file` run from a pane can change the server without changing that hash.
 - Only a lock holder writes or re-sources the generated config, so only one process ever writes the generated config.
-- The finder binding names Ringleader's executable and its program paths, so the config hash covers those paths. A config applied by another build therefore reads as stale. Two builds that share one server rebind the finder in turn.
+- The binding of each `finder_keys` key names the paths of Ringleader's executable and its tmux and git programs. The config hash covers those paths. A config that another build applied therefore reads as stale. Two builds that share one private tmux server rebind each `finder_keys` key in turn.
 
 ### Private tmux server
 
