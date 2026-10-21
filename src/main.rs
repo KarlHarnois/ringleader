@@ -281,11 +281,8 @@ impl CompositionRoot {
                     .map(PathBuf::from)
             })
             .unwrap_or_else(|| self.paths.config_file());
-        TomlConfigSource::new(
-            &self.launch_directory.join(path),
-            &self.paths.worktree_root(),
-            self.paths.home(),
-        )
+        TomlConfigSource::new(&path, &self.paths.worktree_root(), self.paths.home())
+            .resolved_from(&self.launch_directory)
     }
 
     fn write_template_if_missing(source: &TomlConfigSource) -> Option<String> {

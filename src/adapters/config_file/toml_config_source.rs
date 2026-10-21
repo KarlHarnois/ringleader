@@ -115,6 +115,13 @@ resume_args = ["--continue"]
         }
     }
 
+    pub fn resolved_from(self, launch_directory: &Path) -> Self {
+        Self {
+            path: launch_directory.join(&self.path),
+            ..self
+        }
+    }
+
     pub fn defaults(&self) -> Config {
         Config::defaults(&self.default_worktree_root)
     }
@@ -296,6 +303,33 @@ mod tests {
         fn names(keys: &[HotKey]) -> Vec<String> {
             keys.iter().map(HotKey::to_string).collect()
         }
+    }
+
+    #[test]
+    fn a_relative_config_path_resolves_from_the_launch_directory() {
+        let source = TomlConfigSource::new(
+            Path::new("configs/ringleader.toml"),
+            Path::new("/data/ringleader/worktrees"),
+            None,
+        )
+        .resolved_from(Path::new("/home/example/code"));
+
+        assert_eq!(
+            source.path(),
+            Path::new("/home/example/code/configs/ringleader.toml")
+        );
+    }
+
+    #[test]
+    fn an_absolute_config_path_stays_as_given() {
+        let source = TomlConfigSource::new(
+            Path::new("/config/ringleader.toml"),
+            Path::new("/data/ringleader/worktrees"),
+            None,
+        )
+        .resolved_from(Path::new("/home/example/code"));
+
+        assert_eq!(source.path(), Path::new("/config/ringleader.toml"));
     }
 
     #[test]
