@@ -1,3 +1,4 @@
+pub mod agent_readiness;
 pub mod branch_availability;
 pub mod branch_ownership;
 pub mod busy_worktree;

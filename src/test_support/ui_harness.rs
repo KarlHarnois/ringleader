@@ -10,7 +10,8 @@ use ratatui::buffer::Cell;
 use ratatui::layout::{Position, Size};
 
 use super::{
-    Deadline, FakeFoldStore, FakeInterrupts, FakeMultiplexer, RecordingScreenMode, ServiceFixture,
+    Deadline, FakeFoldStore, FakeInterrupts, FakeLock, FakeMultiplexer, RecordingScreenMode,
+    ServiceFixture,
 };
 use crate::application::EphemeralShell;
 use crate::domain::RepoGroup;
@@ -70,11 +71,19 @@ impl UiHarness {
     }
 
     pub fn app_with_folds(fixture: &ServiceFixture, folds: &FakeFoldStore) -> App {
-        let folds = Box::new(folds.clone());
+        Self::assembled(fixture, folds, &FakeLock::free())
+    }
+
+    pub fn app_with_lock(fixture: &ServiceFixture, lock: &FakeLock) -> App {
+        Self::assembled(fixture, &FakeFoldStore::default(), lock)
+    }
+
+    fn assembled(fixture: &ServiceFixture, folds: &FakeFoldStore, lock: &FakeLock) -> App {
         App::new(
             fixture.service(),
+            Box::new(lock.clone()),
             Box::new(io::sink()),
-            folds,
+            Box::new(folds.clone()),
             Instant::now(),
         )
     }

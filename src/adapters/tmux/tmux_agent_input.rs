@@ -1,11 +1,11 @@
 use std::thread;
 use std::time::{Duration, Instant};
 
-use unicode_width::UnicodeWidthChar;
-
+use super::agent_cursor::AgentCursor;
 use super::tmux_command::TmuxCommand;
 use super::tmux_error::TmuxError;
 use super::tmux_launch::TmuxLaunch;
+use super::tmux_output::TmuxOutput;
 use super::tmux_scripts::TmuxScripts;
 use super::tmux_sequence::TmuxSequence;
 use crate::application::ports::MultiplexerError;
@@ -23,6 +23,7 @@ impl<'a> TmuxAgentInput<'a> {
     const LINE_SETTLE: Duration = Duration::from_millis(300);
     const SUBMIT_PAUSE: Duration = Duration::from_millis(300);
     const NEXT_LINE_PATIENCE: Duration = Duration::from_secs(2);
+    const PROMPT_BUFFER_PREFIX: &'static str = "ringleader-prompt-";
 
     pub fn new(tmux: &'a TmuxCommand, patience: Duration) -> Self {
         Self { tmux, patience }
@@ -38,6 +39,12 @@ impl<'a> TmuxAgentInput<'a> {
             self.type_at_prompt(pane, line, Self::NEXT_LINE_PATIENCE)?;
         }
         Ok(())
+    }
+
+    pub fn paste_when_ready(&self, pane: &str, text: &str) -> Result<(), InputError> {
+        self.wait_for_prompt(pane, self.patience)?;
+        self.paste(pane, text)?;
+        Ok(self.submit(pane)?)
     }
 
     pub fn is_ready(&self, pane: &str) -> Result<bool, TmuxError> {
@@ -57,7 +64,7 @@ impl<'a> TmuxAgentInput<'a> {
             if self.is_at_prompt(pane, &cursor)? {
                 return Ok(());
             }
-            if cursor.pane_dead || Instant::now() >= deadline {
+            if cursor.is_dead() || Instant::now() >= deadline {
                 return Err(InputError::NotReady);
             }
             thread::sleep(Self::POLL_INTERVAL);
@@ -85,7 +92,7 @@ impl<'a> TmuxAgentInput<'a> {
     fn cursor_row(&self, pane: &str, cursor: &AgentCursor) -> Result<String, TmuxError> {
         let output = self
             .tmux
-            .query(&TmuxScripts::capture_row(pane, cursor.row))?;
+            .query(&TmuxScripts::capture_row(pane, cursor.row()))?;
         if !output.succeeded() {
             return Err(TmuxError::failed("capture-pane", &output));
         }
@@ -95,16 +102,31 @@ impl<'a> TmuxAgentInput<'a> {
 
     fn type_line(&self, pane: &str, line: &str) -> Result<(), TmuxError> {
         self.send(&TmuxScripts::type_text(pane, line))?;
+        self.submit(pane)
+    }
+
+    fn paste(&self, pane: &str, text: &str) -> Result<(), TmuxError> {
+        let buffer = format!("{}{}", Self::PROMPT_BUFFER_PREFIX, std::process::id());
+        let paste = TmuxScripts::paste_from_input(pane, &buffer);
+        let output = self.tmux.change_with_input(&paste, text.as_bytes())?;
+        Self::confirmed(&output, "paste-buffer")
+    }
+
+    fn submit(&self, pane: &str) -> Result<(), TmuxError> {
         thread::sleep(Self::SUBMIT_PAUSE);
         self.send(&TmuxScripts::press_enter(pane))
     }
 
     fn send(&self, keys: &TmuxSequence) -> Result<(), TmuxError> {
         let output = self.tmux.change(keys)?;
+        Self::confirmed(&output, "send-keys")
+    }
+
+    fn confirmed(output: &TmuxOutput, subcommand: &str) -> Result<(), TmuxError> {
         if output.has(TmuxLaunch::DONE_LABEL) {
             return Ok(());
         }
-        Err(TmuxError::failed("send-keys", &output))
+        Err(TmuxError::failed(subcommand, output))
     }
 }
 
@@ -131,58 +153,6 @@ impl From<TmuxError> for InputError {
     }
 }
 
-struct AgentCursor {
-    pane_dead: bool,
-    in_mode: bool,
-    shown: bool,
-    column: usize,
-    row: usize,
-}
-
-impl AgentCursor {
-    const ON: &'static str = "1";
-
-    fn parse(values: &str) -> Option<Self> {
-        let [pane_dead, in_mode, shown, column, row] = values.split(' ').collect::<Vec<_>>()[..]
-        else {
-            return None;
-        };
-        Some(Self {
-            pane_dead: pane_dead == Self::ON,
-            in_mode: in_mode == Self::ON,
-            shown: shown == Self::ON,
-            column: column.parse().ok()?,
-            row: row.parse().ok()?,
-        })
-    }
-
-    fn takes_keys(&self) -> bool {
-        !self.pane_dead && !self.in_mode && self.shown
-    }
-
-    fn follows_a_bare_prompt_marker(&self, row: &str) -> bool {
-        let before_cursor = self.cells_before_cursor(row);
-        let marker = before_cursor.trim();
-        !marker.is_empty()
-            && !marker.chars().any(char::is_alphanumeric)
-            && before_cursor.ends_with(char::is_whitespace)
-    }
-
-    fn cells_before_cursor(&self, row: &str) -> String {
-        let mut before_cursor = String::new();
-        let mut cells = 0;
-        for character in row.chars() {
-            cells += character.width().unwrap_or_default();
-            if cells > self.column {
-                return before_cursor;
-            }
-            before_cursor.push(character);
-        }
-        let trimmed_blanks = " ".repeat(self.column - cells);
-        before_cursor + &trimmed_blanks
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -200,6 +170,11 @@ mod tests {
         const PASTE_AWARE: &'static str = "stty raw -echo; printf '> '; while :; do \
             read_bytes=$(dd bs=4096 count=1 2>/dev/null | od -An -tx1 | tr -d ' \\n'); \
             [ \"$read_bytes\" = 0d ] && printf '[submitted]'; done";
+        const BRACKETED_PASTE_AWARE: &'static str = "stty raw -echo; printf '\\033[?2004h> '; while :; do \
+            read_bytes=$(dd bs=4096 count=1 2>/dev/null | od -An -tx1 | tr -d ' \\n'); \
+            printf '[%s]' \"$read_bytes\"; done";
+        const BRACKETED_TWO_LINES: &'static str = "[1b5b3230307e68690a796f1b5b3230317e]";
+        const LONE_ENTER: &'static str = "[0d]";
         const REDRAWS_PROMPT: &'static str =
             "printf '> '; while read -r line; do printf 'got %s\\n> ' \"$line\"; done";
         const DIALOG_AFTER_A_LINE: &'static str =
@@ -234,6 +209,16 @@ mod tests {
             let lines: Vec<String> = lines.iter().map(|line| line.to_string()).collect();
             let pane = self.server.pane_of(Self::TARGET);
             TmuxAgentInput::new(&tmux, patience).type_when_ready(&pane, &lines)
+        }
+
+        fn paste(&self, text: &str, patience: Duration) -> Result<(), InputError> {
+            let tmux = self.server.command();
+            let pane = self.server.pane_of(Self::TARGET);
+            TmuxAgentInput::new(&tmux, patience).paste_when_ready(&pane, text)
+        }
+
+        fn buffers(&self) -> String {
+            self.server.text(&["list-buffers"])
         }
 
         fn enter_copy_mode(&self) {
@@ -280,6 +265,59 @@ mod tests {
 
         assert_eq!(typed, Ok(()));
         assert!(fixture.shows("[submitted]"));
+    }
+
+    #[test]
+    fn a_pasted_prompt_arrives_as_one_bracketed_paste_that_keeps_its_line_breaks() {
+        let fixture = InputFixture::running(InputFixture::BRACKETED_PASTE_AWARE);
+
+        let pasted = fixture.paste("hi\nyo", InputFixture::LONG_PATIENCE);
+
+        assert_eq!(pasted, Ok(()));
+        assert!(fixture.shows(InputFixture::BRACKETED_TWO_LINES));
+    }
+
+    #[test]
+    fn a_pasted_prompt_is_submitted_by_an_enter_that_arrives_on_its_own() {
+        let fixture = InputFixture::running(InputFixture::BRACKETED_PASTE_AWARE);
+
+        fixture
+            .paste("hi\nyo", InputFixture::LONG_PATIENCE)
+            .unwrap();
+
+        assert!(fixture.shows(InputFixture::LONE_ENTER));
+    }
+
+    #[test]
+    fn tmux_syntax_in_a_pasted_prompt_arrives_verbatim() {
+        let fixture = InputFixture::running(InputFixture::AT_PROMPT);
+
+        fixture
+            .paste("-x #{pane_id} ;", InputFixture::LONG_PATIENCE)
+            .unwrap();
+
+        assert!(fixture.shows("-x #{pane_id} ;"));
+    }
+
+    #[test]
+    fn a_paste_leaves_no_tmux_buffer_behind() {
+        let fixture = InputFixture::running(InputFixture::AT_PROMPT);
+
+        fixture
+            .paste("hello demo", InputFixture::LONG_PATIENCE)
+            .unwrap();
+
+        assert_eq!(fixture.buffers(), "");
+    }
+
+    #[test]
+    fn a_draft_keeps_a_prompt_from_being_pasted() {
+        let fixture = InputFixture::running(InputFixture::DRAFT);
+
+        let pasted = fixture.paste("hello demo", InputFixture::SHORT_PATIENCE);
+
+        assert_eq!(pasted, Err(InputError::NotReady));
+        assert!(!fixture.screen().contains("hello demo"));
     }
 
     #[test]
