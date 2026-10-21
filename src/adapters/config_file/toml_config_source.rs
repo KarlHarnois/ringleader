@@ -16,6 +16,7 @@ pub struct TomlConfigSource {
 }
 
 impl TomlConfigSource {
+    pub const PATH_VARIABLE: &'static str = "RINGLEADER_CONFIG";
     pub const TEMPLATE: &'static str = r#"# Absolute or ~/ paths only. Environment variables are not expanded.
 # Defaults to $XDG_DATA_HOME/ringleader/worktrees.
 # worktree_root = "~/.local/share/ringleader/worktrees"
@@ -91,6 +92,11 @@ resume_args = ["--continue"]
 # startup_input is typed at every start, rename_input after a rename.
 startup_input = ["/color"]
 rename_input = ["/rename {name}"]
+# Ringleader gives claude and opencode its built-in skills, such as one that
+# runs the ringleader CLI from inside a session. built_in_skills = false turns
+# all of them off, for an organization whose Claude Code policy blocks plugin
+# loading, since claude then refuses to start.
+# built_in_skills = false
 
 [[agents]]
 name = "opencode"
@@ -107,6 +113,13 @@ resume_args = ["--continue"]
             path: path.to_path_buf(),
             default_worktree_root: default_worktree_root.to_path_buf(),
             home: home.map(Path::to_path_buf),
+        }
+    }
+
+    pub fn resolved_from(self, launch_directory: &Path) -> Self {
+        Self {
+            path: launch_directory.join(&self.path),
+            ..self
         }
     }
 
@@ -291,6 +304,33 @@ mod tests {
         fn names(keys: &[HotKey]) -> Vec<String> {
             keys.iter().map(HotKey::to_string).collect()
         }
+    }
+
+    #[test]
+    fn a_relative_config_path_resolves_from_the_launch_directory() {
+        let source = TomlConfigSource::new(
+            Path::new("configs/ringleader.toml"),
+            Path::new("/data/ringleader/worktrees"),
+            None,
+        )
+        .resolved_from(Path::new("/home/example/code"));
+
+        assert_eq!(
+            source.path(),
+            Path::new("/home/example/code/configs/ringleader.toml")
+        );
+    }
+
+    #[test]
+    fn an_absolute_config_path_stays_as_given() {
+        let source = TomlConfigSource::new(
+            Path::new("/config/ringleader.toml"),
+            Path::new("/data/ringleader/worktrees"),
+            None,
+        )
+        .resolved_from(Path::new("/home/example/code"));
+
+        assert_eq!(source.path(), Path::new("/config/ringleader.toml"));
     }
 
     #[test]
@@ -650,6 +690,27 @@ mod tests {
                 .launch_argv(&session, AgentMode::Plan, ""),
             ["claude", "--name", "fix-auth", "--permission-mode", "plan"]
         );
+    }
+
+    #[test]
+    fn the_first_run_template_gives_claude_the_built_in_skills() {
+        let fixture = SourceFixture::new();
+        fixture.source().write_first_run_template().unwrap();
+
+        let config = fixture.source().load().unwrap();
+
+        assert!(config.agent("claude").unwrap().gets_built_in_skills());
+    }
+
+    #[test]
+    fn an_agent_set_to_skip_the_built_in_skills_goes_without_them() {
+        let fixture = SourceFixture::with_text(
+            "[[agents]]\nname = \"claude\"\ncommand = \"claude\"\nbuilt_in_skills = false\n",
+        );
+
+        let config = fixture.source().load().unwrap();
+
+        assert!(!config.agent("claude").unwrap().gets_built_in_skills());
     }
 
     #[test]

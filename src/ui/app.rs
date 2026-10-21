@@ -7,8 +7,10 @@ use ratatui::Frame;
 use super::blocking_operation::{BlockingOperation, OperationOutcome};
 use super::dialogs::{Dialog, DialogSlot, DialogStep};
 use super::theme::Theme;
-use crate::application::ports::FoldStore;
-use crate::application::{EphemeralShell, ServiceError, SessionService, ShellOutcome};
+use crate::application::ports::{FoldStore, Lock, LockError};
+use crate::application::{
+    CorruptRegistry, EphemeralShell, ServiceError, SessionService, ShellOutcome,
+};
 use crate::domain::RepoGroup;
 use crate::ui::home::bell::Bell;
 use crate::ui::home::home_state::HomeState;
@@ -20,6 +22,7 @@ use crate::ui::keys::key_sequence::KeySequence;
 
 pub struct App {
     service: SessionService,
+    write_lock: Box<dyn Lock>,
     home: HomeState,
     key_sequence: KeySequence,
     dialogs: DialogSlot,
@@ -34,12 +37,14 @@ impl App {
 
     pub fn new(
         service: SessionService,
+        write_lock: Box<dyn Lock>,
         bell_sink: Box<dyn Write>,
         folds: Box<dyn FoldStore>,
         now: Instant,
     ) -> Self {
         Self {
             service,
+            write_lock,
             home: HomeState::new(now, Bell::new(bell_sink), folds),
             key_sequence: KeySequence::default(),
             dialogs: DialogSlot::default(),
@@ -49,14 +54,18 @@ impl App {
         }
     }
 
-    pub fn with_startup_messages(mut self, warnings: &[String], note: Option<String>) -> Self {
-        if warnings.is_empty() {
-            self.status.show(note.map(StatusMessage::Info));
-            return self;
-        }
-        let reported: Vec<String> = warnings.iter().cloned().chain(note).collect();
-        self.status.error(reported.join("; "));
-        self
+    pub fn start_up(&mut self, process_warnings: Vec<String>) -> Result<(), ServiceError> {
+        let socket_recovery = self.service.restore_server_socket();
+        let pane_warning = self.own_pane_warning()?;
+        let state_warnings = self.under_write_lock(Self::recover_state)??;
+        let warnings: Vec<String> = process_warnings
+            .into_iter()
+            .chain(socket_recovery.as_ref().err().map(ToString::to_string))
+            .chain(pane_warning)
+            .chain(state_warnings)
+            .collect();
+        self.show_startup_messages(&warnings, socket_recovery.ok().flatten());
+        Ok(())
     }
 
     pub fn handle_event(&mut self, event: &Event) -> AppRequest {
@@ -95,8 +104,10 @@ impl App {
     }
 
     pub fn observe(&mut self) {
-        let outcome = self.home.observe(&mut self.service);
-        self.status.failure(outcome);
+        if self.if_write_lock_free(Self::observe_and_record).is_err() {
+            let outcome = self.home.observe(&mut self.service);
+            self.status.failure(outcome);
+        }
     }
 
     pub fn refresh_usage(&self) {
@@ -146,8 +157,30 @@ impl App {
     }
 
     pub fn perform(&mut self, operation: BlockingOperation) {
+        let outcome = match operation.changes_state() {
+            true => self.perform_change(operation),
+            false => self.perform_check(operation),
+        };
+        self.show_outcome(outcome);
+    }
+
+    fn perform_change(&mut self, operation: BlockingOperation) -> OperationOutcome {
+        match self.under_write_lock(|app| app.perform_under_lock(operation)) {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                self.observe();
+                OperationOutcome::Failed(error.into())
+            }
+        }
+    }
+
+    fn perform_check(&mut self, operation: BlockingOperation) -> OperationOutcome {
         let outcome = operation.run(&mut self.service);
         self.observe();
+        outcome
+    }
+
+    fn show_outcome(&mut self, outcome: OperationOutcome) {
         match outcome {
             OperationOutcome::Done { message, select } => {
                 self.settle(select);
@@ -246,10 +279,17 @@ impl App {
     }
 
     fn reload(&mut self) {
+        if let Err(error) = self.if_write_lock_free(Self::reload_under_lock) {
+            self.status
+                .error(format!("{}: {error}", Self::RELOAD_FAILED));
+        }
+    }
+
+    fn reload_under_lock(&mut self) {
         let outcome = self.service.reload();
         let restored = self.service.restore_server_socket();
         self.home.refresh_now();
-        self.observe();
+        self.observe_and_record();
         let reloaded = match &restored {
             Ok(Some(note)) => format!("{} Also {note}.", Self::RELOADED),
             _ => Self::RELOADED.to_string(),
@@ -306,6 +346,66 @@ impl App {
             Err(error) => self.status.error(error),
         }
     }
+
+    fn own_pane_warning(&self) -> Result<Option<String>, ServiceError> {
+        match self.service.refuse_own_pane() {
+            Ok(()) => Ok(None),
+            Err(error @ ServiceError::Conflict(_)) => Err(error),
+            Err(error) => Ok(Some(error.to_string())),
+        }
+    }
+
+    fn show_startup_messages(&mut self, warnings: &[String], note: Option<String>) {
+        if warnings.is_empty() {
+            self.status.show(note.map(StatusMessage::Info));
+            return;
+        }
+        let reported: Vec<String> = warnings.iter().cloned().chain(note).collect();
+        self.status.error(reported.join("; "));
+    }
+
+    fn recover_state(&mut self) -> Result<Vec<String>, ServiceError> {
+        let registry_warning = self.service.load_registry(CorruptRegistry::MoveAside)?;
+        let config_warning = self.service.reapply_server_config().err().map(|error| {
+            format!("could not update the config of Ringleader's tmux server: {error}")
+        });
+        Ok([registry_warning, config_warning]
+            .into_iter()
+            .flatten()
+            .collect())
+    }
+
+    fn perform_under_lock(&mut self, operation: BlockingOperation) -> OperationOutcome {
+        let outcome = match self.service.reload() {
+            Ok(()) => operation.run(&mut self.service),
+            Err(error) => OperationOutcome::Failed(error),
+        };
+        self.observe_and_record();
+        outcome
+    }
+
+    fn observe_and_record(&mut self) {
+        let outcome = self.home.observe_and_record(&mut self.service);
+        self.status.failure(outcome);
+    }
+
+    fn under_write_lock<T>(&mut self, work: impl FnOnce(&mut Self) -> T) -> Result<T, LockError> {
+        self.write_lock.acquire(&Self::never_interrupted)?;
+        let done = work(self);
+        self.write_lock.release();
+        Ok(done)
+    }
+
+    fn if_write_lock_free<T>(&mut self, work: impl FnOnce(&mut Self) -> T) -> Result<T, LockError> {
+        self.write_lock.try_acquire()?;
+        let done = work(self);
+        self.write_lock.release();
+        Ok(done)
+    }
+
+    fn never_interrupted() -> bool {
+        false
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -322,7 +422,7 @@ pub enum AppRequest {
 mod tests {
     use std::collections::HashSet;
     use std::path::{Path, PathBuf};
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
 
     use crossterm::event::KeyCode;
@@ -332,19 +432,19 @@ mod tests {
     use super::*;
     use ratatui::style::Color;
 
-    use crate::application::DeleteImpact;
     use crate::application::ports::{
-        ConfigError, MergeOutcome, MultiplexerError, TerminalEmulatorError, UnmergedCommits,
-        WebBrowserError,
+        ConfigError, MergeOutcome, MultiplexerError, RegistryError, TerminalEmulatorError,
+        UnmergedCommits, WebBrowserError,
     };
+    use crate::application::{CreateRequest, DeleteImpact};
     use crate::domain::{
         AgentUsage, Config, ConfigDraft, DiffStat, LimitWindow, PullRequestState, Session,
-        UsageLimit, UsageRow,
+        SessionState, UsageLimit, UsageRow,
     };
     use crate::test_support::{
-        CapturedWriter, Deadline, FakeFoldStore, FakeMultiplexer, FakePullRequests, FakeRepoPages,
-        FakeTerminalEmulator, FakeUsageMeter, FakeWebBrowser, HeldCalls, LogCapture,
-        ServiceFixture, UiHarness,
+        CapturedWriter, Deadline, FakeFoldStore, FakeLock, FakeMultiplexer, FakePullRequests,
+        FakeRepoPages, FakeSessionRegistry, FakeTerminalEmulator, FakeUsageMeter, FakeWebBrowser,
+        HeldCalls, LogCapture, ServiceFixture, UiHarness,
     };
     use crate::ui::blocking_operation::DeleteStep;
 
@@ -355,6 +455,7 @@ mod tests {
         const SPINNER_FRAMES: &'static str = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
         const LOG_FILE_OUTSIDE_THE_STATE_DIRECTORY: &'static str = "/logs/ringleader/app.log";
         const DOCS_PAGE: &'static str = "https://github.example.com/example-org/alpha";
+        const RESTORED_SOCKET: &'static str = "recreated the socket";
 
         fn two_waiting_sessions() -> ServiceFixture {
             Self::waiting_sessions(&[
@@ -440,6 +541,7 @@ mod tests {
             let folds = Box::new(FakeFoldStore::default());
             let mut app = App::new(
                 fixture.service(),
+                Box::new(FakeLock::free()),
                 Box::new(bell.clone()),
                 folds,
                 Instant::now(),
@@ -619,6 +721,50 @@ mod tests {
                         .with_live(ServiceFixture::waiting(&session))
                         .with_live(ServiceFixture::waiting(&stranger).without_metadata()),
                 )
+        }
+
+        fn with_lost_socket() -> ServiceFixture {
+            Self::two_waiting_sessions().with_multiplexer(FakeMultiplexer::new().with_lost_socket())
+        }
+
+        fn adoptable() -> ServiceFixture {
+            let adoptable = ServiceFixture::session("fix-auth");
+            ServiceFixture::new().with_multiplexer(
+                FakeMultiplexer::new().with_live(ServiceFixture::waiting(&adoptable)),
+            )
+        }
+
+        fn with_corrupt_registry() -> ServiceFixture {
+            ServiceFixture::new().with_registry(FakeSessionRegistry::empty().failing_load(
+                RegistryError::Corrupt {
+                    path: PathBuf::from("/state/ringleader/sessions.json"),
+                    detail: "expected value".to_string(),
+                },
+            ))
+        }
+
+        fn unloaded(fixture: &ServiceFixture, lock: &FakeLock) -> App {
+            App::new(
+                fixture.unloaded_service(),
+                Box::new(lock.clone()),
+                Box::new(io::sink()),
+                Box::new(FakeFoldStore::default()),
+                Instant::now(),
+            )
+        }
+
+        fn lock_state_during(
+            fixture: &ServiceFixture,
+            lock: &FakeLock,
+            operation: &'static str,
+        ) -> Arc<Mutex<Vec<bool>>> {
+            let seen = Arc::new(Mutex::new(Vec::new()));
+            let recorded = Arc::clone(&seen);
+            let watched = lock.clone();
+            fixture.multiplexer().add_call_hook(operation, move || {
+                recorded.lock().unwrap().push(watched.is_held());
+            });
+            seen
         }
 
         fn deletable() -> ServiceFixture {
@@ -1317,6 +1463,22 @@ mod tests {
     }
 
     #[test]
+    fn r_while_another_ringleader_holds_the_lock_says_so_without_waiting() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let lock = FakeLock::held_elsewhere();
+        let mut app = UiHarness::app_with_lock(&fixture, &lock);
+        app.resize(100, 28);
+
+        AppFixture::press(&mut app, 'r');
+
+        assert!(
+            AppFixture::status_line(&app, 200)
+                .contains("reload failed, kept the previous config: another Ringleader holds")
+        );
+        assert_eq!(lock.acquisitions(), ["try"]);
+    }
+
+    #[test]
     fn r_recreates_a_lost_server_socket_and_says_so() {
         let fixture =
             ServiceFixture::new().with_multiplexer(FakeMultiplexer::new().with_lost_socket());
@@ -1839,7 +2001,7 @@ mod tests {
     }
 
     #[test]
-    fn an_unmeasurable_worktree_says_forget_needs_the_tui_to_quit() {
+    fn an_unmeasurable_worktree_points_to_forget_from_another_terminal() {
         let session = ServiceFixture::session("fix-auth");
         let fixture = AppFixture::deletable().with_workspace(
             ServiceFixture::workspace_for(&[&session])
@@ -1852,9 +2014,9 @@ mod tests {
 
         let status = AppFixture::status_line(&app, 400);
         assert!(status.contains("git cannot measure the worktree"));
-        assert!(
-            status.contains("ringleader delete fix-auth --forget needs this TUI to quit first")
-        );
+        assert!(status.contains(
+            "to forget it, run ringleader delete fix-auth --forget from another terminal"
+        ));
     }
 
     #[test]
@@ -1962,7 +2124,8 @@ mod tests {
         let fixture = ServiceFixture::new()
             .with_sessions(&sessions)
             .with_multiplexer(multiplexer);
-        let mut app = UiHarness::app(&fixture).with_startup_messages(&["word ".repeat(40)], None);
+        let mut app = UiHarness::app(&fixture);
+        app.start_up(vec!["word ".repeat(40)]).unwrap();
         app.resize(100, 8);
 
         UiHarness::settle(&mut app);
@@ -2157,31 +2320,40 @@ mod tests {
 
     #[test]
     fn a_startup_note_without_warnings_shows_as_information() {
-        let fixture = AppFixture::two_waiting_sessions();
+        let fixture = AppFixture::with_lost_socket();
+        let mut app = AppFixture::started(&fixture, 100, 28);
 
-        let app = AppFixture::started(&fixture, 100, 28)
-            .with_startup_messages(&[], Some("recreated the socket".to_string()));
+        app.start_up(Vec::new()).unwrap();
 
-        assert_eq!(
+        assert!(matches!(
             app.status.message(),
-            Some(&StatusMessage::Info("recreated the socket".to_string()))
-        );
+            Some(StatusMessage::Info(note)) if note.starts_with(AppFixture::RESTORED_SOCKET)
+        ));
     }
 
     #[test]
     fn a_startup_note_follows_the_warnings_it_comes_with() {
-        let fixture = AppFixture::two_waiting_sessions();
-        let warnings = ["the config failed".to_string()];
+        let fixture = AppFixture::with_lost_socket();
+        let mut app = AppFixture::started(&fixture, 100, 28);
 
-        let app = AppFixture::started(&fixture, 100, 28)
-            .with_startup_messages(&warnings, Some("recreated the socket".to_string()));
+        app.start_up(vec!["the config failed".to_string()]).unwrap();
 
-        assert_eq!(
+        assert!(matches!(
             app.status.message(),
-            Some(&StatusMessage::Error(
-                "the config failed; recreated the socket".to_string()
-            ))
-        );
+            Some(StatusMessage::Error(message))
+                if message.starts_with(&format!("the config failed; {}", AppFixture::RESTORED_SOCKET))
+        ));
+    }
+
+    #[test]
+    fn starting_up_in_a_pane_of_the_own_server_is_refused() {
+        let fixture =
+            ServiceFixture::new().with_multiplexer(FakeMultiplexer::new().called_from_own_pane());
+        let mut app = UiHarness::app(&fixture);
+
+        let refusal = app.start_up(Vec::new()).unwrap_err();
+
+        assert!(matches!(refusal, ServiceError::Conflict(_)));
     }
 
     #[test]
@@ -2276,8 +2448,8 @@ mod tests {
     #[test]
     fn a_key_press_clears_a_shown_message() {
         let fixture = AppFixture::two_waiting_sessions();
-        let mut app = AppFixture::started(&fixture, 100, 28)
-            .with_startup_messages(&["the config failed".to_string()], None);
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        app.start_up(vec!["the config failed".to_string()]).unwrap();
 
         AppFixture::press(&mut app, 'j');
 
@@ -2304,16 +2476,202 @@ mod tests {
     }
 
     #[test]
-    fn a_tui_on_a_valid_config_persists_an_adoption() {
-        let adoptable = ServiceFixture::session("fix-auth");
-        let fixture = ServiceFixture::new().with_multiplexer(
-            FakeMultiplexer::new().with_live(ServiceFixture::waiting(&adoptable)),
-        );
+    fn an_observation_on_the_tui_thread_records_an_adoption() {
+        let fixture = AppFixture::adoptable();
+        let mut app = UiHarness::app(&fixture);
+
+        app.observe();
+
+        assert_eq!(fixture.registry().save_count(), 1);
+    }
+
+    #[test]
+    fn a_background_observation_never_saves() {
+        let fixture = AppFixture::adoptable();
         let mut app = UiHarness::app(&fixture);
 
         app.on_tick(Instant::now());
         UiHarness::settle(&mut app);
 
-        assert_eq!(fixture.registry().save_count(), 1);
+        assert_eq!(fixture.registry().save_count(), 0);
+    }
+
+    #[test]
+    fn an_observation_records_nothing_while_another_ringleader_holds_the_lock() {
+        let fixture = AppFixture::adoptable();
+        let mut app = UiHarness::app_with_lock(&fixture, &FakeLock::held_elsewhere());
+
+        app.observe();
+
+        assert_eq!(fixture.registry().save_count(), 0);
+        assert_eq!(app.home.sessions().names(), ["fix-auth"]);
+    }
+
+    #[test]
+    fn a_stopped_session_another_ringleader_saved_shows_after_the_next_observation() {
+        let fixture = ServiceFixture::new();
+        let start = Instant::now();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        fixture
+            .registry()
+            .save_from_elsewhere(ServiceFixture::session("fix-auth"));
+        app.on_tick(start + Duration::from_secs(2));
+        UiHarness::settle(&mut app);
+
+        let row = app.home.sessions().row("fix-auth");
+        assert!(row.is_some_and(|row| row.state() == SessionState::Stopped));
+    }
+
+    #[test]
+    fn a_create_keeps_a_stopped_session_another_ringleader_saved_meanwhile() {
+        let fixture = ServiceFixture::new();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        fixture
+            .registry()
+            .save_from_elsewhere(ServiceFixture::session("dark-mode"));
+
+        app.perform(BlockingOperation::Create(CreateRequest::new(
+            "fix-auth",
+            ServiceFixture::repo(),
+        )));
+
+        assert_eq!(fixture.registry().names(), ["dark-mode", "fix-auth"]);
+    }
+
+    #[test]
+    fn a_delete_confirmed_after_another_ringleader_renamed_the_session_deletes_nothing() {
+        let fixture = AppFixture::deletable();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        let measure = app.handle_event(&UiHarness::character('d'));
+        AppFixture::perform(&mut app, measure);
+
+        fixture
+            .service()
+            .rename_session("fix-auth", "fix-login")
+            .unwrap();
+        let delete = app.handle_event(&UiHarness::key(KeyCode::Enter));
+        AppFixture::perform(&mut app, delete);
+
+        assert_eq!(fixture.registry().names(), ["fix-login"]);
+    }
+
+    #[test]
+    fn a_blocking_operation_runs_while_the_write_lock_is_held() {
+        let fixture = UiHarness::exited_session_fixture("fix-auth");
+        let lock = FakeLock::free();
+        let held_during_restart = AppFixture::lock_state_during(&fixture, &lock, "respawn_agent");
+        let mut app = UiHarness::app_with_lock(&fixture, &lock);
+
+        app.perform(BlockingOperation::Restart("fix-auth".to_string()));
+
+        assert_eq!(*held_during_restart.lock().unwrap(), [true]);
+        assert!(!lock.is_held());
+    }
+
+    #[test]
+    fn a_delete_measure_runs_while_another_ringleader_holds_the_lock() {
+        let fixture = AppFixture::deletable();
+        let lock = FakeLock::held_elsewhere();
+        let mut app = UiHarness::app_with_lock(&fixture, &lock);
+        app.resize(100, 28);
+        UiHarness::settle(&mut app);
+
+        let measure = app.handle_event(&UiHarness::character('d'));
+        AppFixture::perform(&mut app, measure);
+
+        assert!(app.dialogs.is_open());
+        assert!(!lock.acquisitions().contains(&"wait"));
+    }
+
+    #[test]
+    fn o_on_a_repo_heading_opens_its_github_page_while_another_ringleader_holds_the_lock() {
+        let fixture = AppFixture::docs_on_github();
+        let lock = FakeLock::held_elsewhere();
+        let mut app = UiHarness::app_with_lock(&fixture, &lock);
+        app.resize(100, 28);
+        UiHarness::settle(&mut app);
+
+        AppFixture::press_and_perform(&mut app, 'o');
+
+        assert_eq!(fixture.web_browser().opened(), [AppFixture::DOCS_PAGE]);
+        assert!(!lock.acquisitions().contains(&"wait"));
+    }
+
+    #[test]
+    fn a_blocking_operation_reports_a_lock_another_ringleader_keeps() {
+        let fixture = UiHarness::exited_session_fixture("fix-auth");
+        let mut app = UiHarness::app_with_lock(&fixture, &FakeLock::held_elsewhere());
+
+        app.perform(BlockingOperation::Restart("fix-auth".to_string()));
+
+        assert!(
+            AppFixture::status_line(&app, 200)
+                .contains("another Ringleader holds /state/ringleader/lock")
+        );
+        assert!(
+            !fixture
+                .multiplexer()
+                .calls()
+                .iter()
+                .any(|call| call.starts_with("respawn_agent"))
+        );
+    }
+
+    #[test]
+    fn a_blocking_operation_uses_the_config_saved_since_the_tui_started() {
+        let fixture = ServiceFixture::new();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        fixture
+            .config_source()
+            .replace(ServiceFixture::config().with_agents(Vec::new()));
+
+        app.perform(BlockingOperation::Create(CreateRequest::new(
+            "fix-auth",
+            ServiceFixture::repo(),
+        )));
+
+        assert!(fixture.registry().names().is_empty());
+    }
+
+    #[test]
+    fn starting_up_moves_a_corrupt_registry_aside_under_the_write_lock() {
+        let fixture = AppFixture::with_corrupt_registry();
+        let lock = FakeLock::free();
+        let mut app = AppFixture::unloaded(&fixture, &lock);
+
+        app.start_up(Vec::new()).unwrap();
+
+        assert!(AppFixture::status_line(&app, 400).contains("corrupt-1"));
+        assert_eq!(lock.acquisitions(), ["wait"]);
+        assert!(!lock.is_held());
+    }
+
+    #[test]
+    fn starting_up_refuses_while_another_ringleader_keeps_the_lock() {
+        let fixture = AppFixture::with_corrupt_registry();
+        let mut app = AppFixture::unloaded(&fixture, &FakeLock::held_elsewhere());
+
+        let refusal = app.start_up(Vec::new()).unwrap_err();
+
+        assert!(matches!(refusal, ServiceError::Conflict(_)));
+        assert!(!fixture.registry().was_moved_aside());
+    }
+
+    #[test]
+    fn starting_up_reports_a_server_config_it_could_not_update() {
+        let fixture = ServiceFixture::new().with_multiplexer(
+            FakeMultiplexer::new()
+                .with_drifted_config("C-q")
+                .failing("apply_config", AppFixture::tmux_timeout()),
+        );
+        let mut app = UiHarness::app(&fixture);
+
+        app.start_up(Vec::new()).unwrap();
+
+        assert!(
+            AppFixture::status_line(&app, 400)
+                .contains("could not update the config of Ringleader's tmux server")
+        );
     }
 }

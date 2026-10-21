@@ -1,7 +1,11 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use super::ports::{AttachTarget, HostProbe, Multiplexer, RepoPages, TerminalEmulator, WebBrowser};
+use super::checks::agent_readiness::AgentReadiness;
+use super::ports::{
+    AttachTarget, HostProbe, Multiplexer, MultiplexerError, RepoPages, TerminalEmulator, WebBrowser,
+};
+use super::reconciliation::ManagedRow;
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
 use crate::domain::{PullRequest, RepoGroup, Session, SessionState, SessionSummary};
@@ -16,6 +20,8 @@ pub struct SessionAccess {
 }
 
 impl SessionAccess {
+    const SENDING: &'static str = "sending";
+
     pub fn new(ports: &ServicePorts, shell: &str) -> Self {
         Self {
             multiplexer: ports.tmux().multiplexer(),
@@ -48,6 +54,21 @@ impl SessionAccess {
         self.multiplexer
             .switch_client(client, &Self::agent_of(row))?;
         Ok(())
+    }
+
+    pub fn send_prompt(&self, row: &ManagedRow, prompt: &str) -> Result<(), ServiceError> {
+        Self::refuse_blank(prompt)?;
+        Self::refuse_unless_agent_runs(row)?;
+        let session = row.session();
+        match self
+            .multiplexer
+            .submit_when_ready(session.tmux_name(), prompt)
+        {
+            Err(MultiplexerError::AgentNotReady { .. }) => {
+                Err(AgentReadiness::not_at_prompt(session.name(), Self::SENDING))
+            }
+            submitted => Ok(submitted?),
+        }
     }
 
     fn refuse_stopped(row: &SessionSummary) -> Result<(), ServiceError> {
@@ -111,6 +132,26 @@ impl SessionAccess {
     pub fn open_pull_request(&self, pull_request: &PullRequest) -> Result<(), ServiceError> {
         self.web_browser.open(pull_request.url())?;
         Ok(())
+    }
+
+    fn refuse_blank(prompt: &str) -> Result<(), ServiceError> {
+        if prompt.trim().is_empty() {
+            return Err(ServiceError::Invalid(
+                "the prompt is empty, pass the text the agent should read".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn refuse_unless_agent_runs(row: &ManagedRow) -> Result<(), ServiceError> {
+        if row.state().runs_agent() {
+            return Ok(());
+        }
+        Err(ServiceError::Conflict(format!(
+            "session {} is {}, restart it before sending it a prompt",
+            row.session().name(),
+            row.state().label()
+        )))
     }
 
     fn check_worktree(&self, session: &Session) -> Result<(), ServiceError> {

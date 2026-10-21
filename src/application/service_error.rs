@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 use super::ports::{
-    ConfigError, HostProbeError, MultiplexerError, RegistryError, RepoPageError,
+    ConfigError, HostProbeError, LockError, MultiplexerError, RegistryError, RepoPageError,
     TerminalEmulatorError, WebBrowserError, WorkspaceError,
 };
 use crate::application::DeleteImpact;
@@ -85,6 +85,16 @@ impl From<MultiplexerError> for ServiceError {
 impl From<RegistryError> for ServiceError {
     fn from(error: RegistryError) -> Self {
         ServiceError::Failed(error.to_string())
+    }
+}
+
+impl From<LockError> for ServiceError {
+    fn from(error: LockError) -> Self {
+        let message = error.to_string();
+        match error {
+            LockError::Held { .. } => ServiceError::Conflict(message),
+            LockError::Io { .. } => ServiceError::Failed(message),
+        }
     }
 }
 
