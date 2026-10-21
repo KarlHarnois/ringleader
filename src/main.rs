@@ -740,6 +740,8 @@ mod tests {
             "Color::from_u32",
             "Color::from_hsl",
             "Color::from_hsluv",
+            "Color::from",
+            "Color::from_str",
         ]);
 
         assert_eq!(uses, BTreeSet::new());
