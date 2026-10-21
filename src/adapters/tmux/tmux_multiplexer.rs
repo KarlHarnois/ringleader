@@ -161,13 +161,17 @@ impl TmuxMultiplexer {
     }
 
     fn attach_command(&self, target: &AttachTarget) -> Result<Command, MultiplexerError> {
-        let resolved = match target {
-            AttachTarget::Agent(tmux_name) => self.shown_pane(tmux_name)?,
-            AttachTarget::Shell(window) => window.clone(),
-        };
+        let resolved = self.resolved(target)?;
         Ok(self
             .tmux
             .foreground(&TmuxScripts::attach_session(&resolved)))
+    }
+
+    fn resolved(&self, target: &AttachTarget) -> Result<String, MultiplexerError> {
+        match target {
+            AttachTarget::Agent(tmux_name) => self.shown_pane(tmux_name),
+            AttachTarget::Shell(window) => Ok(window.clone()),
+        }
     }
 
     fn shown_pane(&self, tmux_name: &str) -> Result<String, MultiplexerError> {
@@ -310,6 +314,17 @@ impl Multiplexer for TmuxMultiplexer {
     fn attach(&self, target: &AttachTarget) -> Result<(), MultiplexerError> {
         let attach = self.attach_command(target)?;
         self.attach_in_foreground(attach)
+    }
+
+    fn switch_client(&self, client: &str, target: &AttachTarget) -> Result<(), MultiplexerError> {
+        let resolved = self.resolved(target)?;
+        let output = self
+            .tmux
+            .change(&TmuxScripts::switch_client(client, &resolved))?;
+        match output.succeeded() {
+            true => Ok(()),
+            false => Err(TmuxError::failed("switch-client", &output).into()),
+        }
     }
 
     fn capture_pane(&self, tmux_name: &str) -> Result<String, MultiplexerError> {
@@ -1335,6 +1350,62 @@ mod tests {
         let client = fixture.server.control_client(&agent);
 
         assert_eq!(fixture.server.client_pane(&client), agent);
+    }
+
+    #[test]
+    fn switching_a_client_shows_the_agent_pane_of_the_other_session() {
+        let fixture = MultiplexerFixture::new();
+        fixture.create("fix-auth").unwrap();
+        fixture.create("dark-mode").unwrap();
+        let agent = fixture.tagged_panes("ringleader-dark-mode").pop().unwrap();
+        let client = fixture.server.control_client("=ringleader-fix-auth:");
+        let name = fixture.server.client_name(&client);
+
+        fixture
+            .server
+            .multiplexer()
+            .switch_client(
+                &name,
+                &AttachTarget::Agent("ringleader-dark-mode".to_string()),
+            )
+            .unwrap();
+
+        assert_eq!(fixture.server.client_pane(&client), agent);
+    }
+
+    #[test]
+    fn switching_a_client_to_a_shell_window_shows_that_window() {
+        let fixture = MultiplexerFixture::new();
+        fixture.create("fix-auth").unwrap();
+        fixture.create("dark-mode").unwrap();
+        let shell = fixture
+            .server
+            .multiplexer()
+            .ensure_shell_window("ringleader-dark-mode", &fixture.worktree("dark-mode"), "sh")
+            .unwrap();
+        let client = fixture.server.control_client("=ringleader-fix-auth:");
+        let name = fixture.server.client_name(&client);
+
+        fixture
+            .server
+            .multiplexer()
+            .switch_client(&name, &AttachTarget::Shell(shell.clone()))
+            .unwrap();
+
+        let window = fixture.server.text(&["list-clients", "-F", "#{window_id}"]);
+        assert_eq!(window, shell);
+    }
+
+    #[test]
+    fn switching_a_client_that_is_gone_fails() {
+        let fixture = MultiplexerFixture::with_holder();
+
+        let switched = fixture
+            .server
+            .multiplexer()
+            .switch_client("client-0", &AttachTarget::Agent("holder".to_string()));
+
+        assert!(switched.is_err());
     }
 
     #[test]

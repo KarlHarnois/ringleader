@@ -86,6 +86,7 @@ impl<'a> ConfigChecks<'a> {
                 KeyBindings::SHELL_TOGGLE_SETTING,
                 draft.raw_shell_toggle_keys(),
             ))
+            .chain(listed(KeyBindings::FINDER_SETTING, draft.raw_finder_keys()))
             .collect()
     }
 
@@ -507,6 +508,85 @@ mod tests {
 
         let next = config.key_bindings().next_session_keys();
         assert_eq!(next, HotKey::parse_valid(["M-Down"]));
+    }
+
+    #[test]
+    fn finder_keys_no_keystroke_reaches_fail_with_their_setting_named() {
+        for key in ["", "C-", "'", "C-}", "S-x", "C-m"] {
+            let draft = ChecksFixture::draft().finder_keys(&[key]);
+
+            ChecksFixture::fails_on(draft, "finder_keys");
+        }
+    }
+
+    #[test]
+    fn a_finder_key_listed_twice_is_named_as_listed_twice() {
+        let draft = ChecksFixture::draft().finder_keys(&["C-k", "F9", "C-k"]);
+
+        let failures = ChecksFixture::failures(&draft);
+
+        assert_eq!(failures, ["finder_keys: `C-k` is listed twice"]);
+    }
+
+    #[test]
+    fn a_finder_key_bound_by_another_key_setting_fails_naming_both_settings() {
+        let written = ChecksFixture::draft()
+            .return_key("C-q")
+            .next_session_keys(&["M-j"])
+            .shell_toggle_keys(&["M-l"]);
+        for (key, other_setting) in [
+            ("C-q", "return_key"),
+            ("M-j", "next_session_keys"),
+            ("M-l", "shell_toggle_keys"),
+        ] {
+            let draft = written.clone().finder_keys(&[key]);
+
+            let failures = ChecksFixture::failures(&draft);
+
+            assert_eq!(
+                failures,
+                [format!(
+                    "finder_keys: `{key}` is already bound in {other_setting}, and each key can do only one thing"
+                )]
+            );
+        }
+    }
+
+    #[test]
+    fn a_missing_finder_list_keeps_ctrl_k() {
+        let config = Config::new(&ChecksFixture::draft()).unwrap();
+
+        let finder = config.key_bindings().finder_keys();
+        assert_eq!(finder, HotKey::parse_valid(["C-k"]));
+    }
+
+    #[test]
+    fn an_empty_finder_list_binds_no_finder_key() {
+        let none: [&str; 0] = [];
+        let draft = ChecksFixture::draft().finder_keys(&none);
+
+        let config = Config::new(&draft).unwrap();
+
+        assert!(config.key_bindings().finder_keys().is_empty());
+    }
+
+    #[test]
+    fn every_listed_finder_key_is_kept() {
+        let draft = ChecksFixture::draft().finder_keys(&["M-f", "F9"]);
+
+        let config = Config::new(&draft).unwrap();
+
+        let finder = config.key_bindings().finder_keys();
+        assert_eq!(finder, HotKey::parse_valid(["M-f", "F9"]));
+    }
+
+    #[test]
+    fn a_return_key_written_as_ctrl_k_takes_it_out_of_the_default_finder_list() {
+        let draft = ChecksFixture::draft().return_key("C-k");
+
+        let config = Config::new(&draft).unwrap();
+
+        assert!(config.key_bindings().finder_keys().is_empty());
     }
 
     #[test]

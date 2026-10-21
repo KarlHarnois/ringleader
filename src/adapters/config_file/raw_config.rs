@@ -13,6 +13,7 @@ pub struct RawConfig {
     next_session_keys: Option<Vec<String>>,
     previous_session_keys: Option<Vec<String>>,
     shell_toggle_keys: Option<Vec<String>>,
+    finder_keys: Option<Vec<String>>,
     state_poll_ms: Option<u64>,
     preview_refresh_ms: Option<u64>,
     diff_refresh_ms: Option<u64>,
@@ -60,6 +61,9 @@ impl RawConfig {
         }
         if let Some(keys) = &self.shell_toggle_keys {
             draft = draft.shell_toggle_keys(keys);
+        }
+        if let Some(keys) = &self.finder_keys {
+            draft = draft.finder_keys(keys);
         }
         draft
     }

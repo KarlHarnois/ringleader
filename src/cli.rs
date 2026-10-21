@@ -2,6 +2,7 @@ mod cli_exit;
 mod cli_output;
 mod cli_session;
 mod delete_report;
+mod entry_points;
 mod list_report;
 mod repo_argument;
 mod repo_commands;
@@ -17,6 +18,7 @@ pub use cli_exit::CliExit;
 pub use cli_output::CliOutput;
 pub use cli_session::CliSession;
 use cli_session::CommandStop;
+pub use entry_points::EntryPoints;
 use repo_commands::RepoCommands;
 use session_commands::SessionCommands;
 
@@ -70,6 +72,11 @@ enum CliCommand {
     ExecAgent {
         #[arg(long, value_name = "PATH")]
         handoff: PathBuf,
+    },
+    #[command(name = Cli::FIND_SESSION, hide = true)]
+    FindSession {
+        #[arg(long = Cli::CLIENT_OPTION, value_name = "CLIENT")]
+        client: String,
     },
 }
 
@@ -155,6 +162,8 @@ struct RenameArgs {
 
 impl Cli {
     const LOCK_WAIT_NOTE: &'static str = "waiting for another Ringleader to finish a change";
+    const FIND_SESSION: &'static str = "__find-session";
+    const CLIENT_OPTION: &'static str = "client";
 
     pub fn parse_arguments<I, A>(arguments: I) -> Result<Self, ExitCode>
     where
@@ -167,6 +176,31 @@ impl Cli {
         })
     }
 
+    pub fn finder_arguments() -> [OsString; 2] {
+        [
+            OsString::from(Self::FIND_SESSION),
+            OsString::from(format!("--{}", Self::CLIENT_OPTION)),
+        ]
+    }
+
+    pub fn enter(&self, entry_points: &dyn EntryPoints) -> ExitCode {
+        if let Some(handoff) = self.exec_agent_handoff() {
+            return entry_points.launch_agent(handoff);
+        }
+        if let Some(problem) = entry_points.socket_problem()
+            && !self.is_doctor()
+        {
+            return entry_points.refuse_to_start(&problem);
+        }
+        if let Some(client) = self.finder_client() {
+            return entry_points.find_session(self, client);
+        }
+        if self.runs_tui() {
+            return entry_points.open_tui(self);
+        }
+        entry_points.run_command(self)
+    }
+
     pub fn config_path(&self) -> Option<&Path> {
         self.config.as_deref()
     }
@@ -175,18 +209,25 @@ impl Cli {
         self.log_level.as_deref()
     }
 
-    pub fn exec_agent_handoff(&self) -> Option<&Path> {
+    fn exec_agent_handoff(&self) -> Option<&Path> {
         match &self.command {
             Some(CliCommand::ExecAgent { handoff }) => Some(handoff),
             _ => None,
         }
     }
 
-    pub fn runs_tui(&self) -> bool {
+    fn finder_client(&self) -> Option<&str> {
+        match &self.command {
+            Some(CliCommand::FindSession { client }) => Some(client),
+            _ => None,
+        }
+    }
+
+    fn runs_tui(&self) -> bool {
         self.command.is_none()
     }
 
-    pub fn is_doctor(&self) -> bool {
+    fn is_doctor(&self) -> bool {
         matches!(self.command, Some(CliCommand::Doctor(_)))
     }
 
@@ -290,27 +331,45 @@ impl Cli {
         service: &mut SessionService,
         session: &mut CliSession,
     ) -> Result<u8, CommandStop> {
-        let mut commands = SessionCommands::new(service, session);
         match &self.command {
-            Some(CliCommand::List(args)) => commands.list(args),
-            Some(CliCommand::New(args)) => commands.create(args),
-            Some(CliCommand::Delete(args)) => commands.delete(args),
-            Some(CliCommand::Attach(args)) => commands.attach(&args.name),
-            Some(CliCommand::Send(args)) => commands.send(args),
-            Some(CliCommand::Rename(args)) => commands.rename(args),
-            Some(CliCommand::Restart(args)) => match &args.name {
-                Some(name) => commands.restart(name),
-                None => commands.restart_all(),
-            },
-            Some(CliCommand::Repo { action }) => {
-                let mut repos = RepoCommands::new(service, session);
-                match action {
-                    RepoAction::Add(args) => repos.add(args),
-                    RepoAction::Remove(args) => repos.remove(&args.name),
-                    RepoAction::List => repos.list(),
-                }
-            }
-            Some(CliCommand::Doctor(_) | CliCommand::ExecAgent { .. }) | None => Ok(0),
+            Some(CliCommand::Repo { action }) => Self::dispatch_repo(action, service, session),
+            Some(CliCommand::Send(args)) => SessionCommands::new(service, session).send(args),
+            Some(command) => Self::dispatch_session(command, service, session),
+            None => Ok(0),
+        }
+    }
+
+    fn dispatch_session(
+        command: &CliCommand,
+        service: &mut SessionService,
+        session: &mut CliSession,
+    ) -> Result<u8, CommandStop> {
+        let mut commands = SessionCommands::new(service, session);
+        match command {
+            CliCommand::List(args) => commands.list(args),
+            CliCommand::New(args) => commands.create(args),
+            CliCommand::Delete(args) => commands.delete(args),
+            CliCommand::Attach(args) => commands.attach(&args.name),
+            CliCommand::Rename(args) => commands.rename(args),
+            CliCommand::Restart(args) => commands.restart_one_or_all(args),
+            CliCommand::Repo { .. }
+            | CliCommand::Send(_)
+            | CliCommand::Doctor(_)
+            | CliCommand::ExecAgent { .. }
+            | CliCommand::FindSession { .. } => Ok(0),
+        }
+    }
+
+    fn dispatch_repo(
+        action: &RepoAction,
+        service: &mut SessionService,
+        session: &mut CliSession,
+    ) -> Result<u8, CommandStop> {
+        let mut repos = RepoCommands::new(service, session);
+        match action {
+            RepoAction::Add(args) => repos.add(args),
+            RepoAction::Remove(args) => repos.remove(&args.name),
+            RepoAction::List => repos.list(),
         }
     }
 
@@ -370,6 +429,61 @@ mod tests {
                     .iter()
                     .any(|call| call.starts_with("type_when_ready"))
             })
+        }
+    }
+
+    #[derive(Default)]
+    struct RecordingEntryPoints {
+        socket_problem: Option<String>,
+        entered: Mutex<Vec<String>>,
+    }
+
+    impl RecordingEntryPoints {
+        fn with_socket_problem() -> Self {
+            Self {
+                socket_problem: Some("the socket is gone".to_string()),
+                ..Self::default()
+            }
+        }
+
+        fn enter(&self, arguments: &[&str]) {
+            let cli = Cli::try_parse_from(["ringleader"].iter().chain(arguments)).unwrap();
+            cli.enter(self);
+        }
+
+        fn entered(&self) -> Vec<String> {
+            self.entered.lock().unwrap().clone()
+        }
+
+        fn record(&self, entry: String) -> ExitCode {
+            self.entered.lock().unwrap().push(entry);
+            ExitCode::SUCCESS
+        }
+    }
+
+    impl EntryPoints for RecordingEntryPoints {
+        fn launch_agent(&self, handoff: &Path) -> ExitCode {
+            self.record(format!("launch_agent {}", handoff.display()))
+        }
+
+        fn socket_problem(&self) -> Option<String> {
+            self.socket_problem.clone()
+        }
+
+        fn refuse_to_start(&self, problem: &str) -> ExitCode {
+            self.record(format!("refuse_to_start {problem}"))
+        }
+
+        fn find_session(&self, _cli: &Cli, client: &str) -> ExitCode {
+            self.record(format!("find_session {client}"))
+        }
+
+        fn open_tui(&self, _cli: &Cli) -> ExitCode {
+            self.record("open_tui".to_string())
+        }
+
+        fn run_command(&self, _cli: &Cli) -> ExitCode {
+            self.record("run_command".to_string())
         }
     }
 
@@ -646,11 +760,70 @@ mod tests {
     }
 
     #[test]
-    fn the_hidden_launcher_subcommand_takes_a_handoff_path() {
-        let cli = Cli::try_parse_from(["ringleader", "__exec-agent", "--handoff", "/run/h.json"])
-            .unwrap();
+    fn the_finder_arguments_followed_by_a_client_name_enter_the_finder() {
+        let entry_points = RecordingEntryPoints::default();
+        let words: Vec<String> = Cli::finder_arguments()
+            .iter()
+            .map(|word| word.to_string_lossy().into_owned())
+            .chain(["client-1234".to_string()])
+            .collect();
+        let arguments: Vec<&str> = words.iter().map(String::as_str).collect();
 
-        assert_eq!(cli.exec_agent_handoff(), Some(Path::new("/run/h.json")));
+        entry_points.enter(&arguments);
+
+        assert_eq!(entry_points.entered(), ["find_session client-1234"]);
+    }
+
+    #[test]
+    fn a_run_that_another_entry_point_takes_runs_no_command() {
+        for arguments in [
+            ["__find-session", "--client", "client-1234"].as_slice(),
+            &[],
+        ] {
+            let harness = CliHarness::new(ServiceFixture::new());
+
+            let exit = harness.run(arguments);
+
+            assert_eq!(exit, CliExit::Code(0), "{arguments:?}");
+            assert_eq!(harness.stdout(), "", "{arguments:?}");
+        }
+    }
+
+    #[test]
+    fn the_hidden_launcher_enters_before_the_socket_check() {
+        let entry_points = RecordingEntryPoints::with_socket_problem();
+
+        entry_points.enter(&["__exec-agent", "--handoff", "/run/h.json"]);
+
+        assert_eq!(entry_points.entered(), ["launch_agent /run/h.json"]);
+    }
+
+    #[test]
+    fn a_socket_problem_refuses_every_entry_but_doctor() {
+        let entry_points = RecordingEntryPoints::with_socket_problem();
+
+        entry_points.enter(&[]);
+        entry_points.enter(&["__find-session", "--client", "client-1234"]);
+        entry_points.enter(&["doctor"]);
+
+        assert_eq!(
+            entry_points.entered(),
+            [
+                "refuse_to_start the socket is gone",
+                "refuse_to_start the socket is gone",
+                "run_command"
+            ]
+        );
+    }
+
+    #[test]
+    fn no_subcommand_enters_the_tui_and_a_subcommand_the_cli() {
+        let entry_points = RecordingEntryPoints::default();
+
+        entry_points.enter(&[]);
+        entry_points.enter(&["list"]);
+
+        assert_eq!(entry_points.entered(), ["open_tui", "run_command"]);
     }
 
     #[test]

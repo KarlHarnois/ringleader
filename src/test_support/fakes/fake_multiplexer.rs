@@ -38,6 +38,7 @@ struct MultiplexerState {
     failures: HashMap<&'static str, MultiplexerError>,
     failed_create_still_creates: bool,
     attached: Vec<AttachTarget>,
+    switched: Vec<(String, AttachTarget)>,
     calls: Vec<String>,
     client_version: String,
     server: Option<ServerState>,
@@ -81,6 +82,7 @@ impl FakeMultiplexer {
                 failures: HashMap::new(),
                 failed_create_still_creates: false,
                 attached: Vec::new(),
+                switched: Vec::new(),
                 calls: Vec::new(),
                 client_version: "3.6a".to_string(),
                 server: Some(ServerState::new("3.6a", 1)),
@@ -287,6 +289,10 @@ impl FakeMultiplexer {
         self.edit(|state| state.attached.clone())
     }
 
+    pub fn switched(&self) -> Vec<(String, AttachTarget)> {
+        self.edit(|state| state.switched.clone())
+    }
+
     fn edit<T>(&self, change: impl FnOnce(&mut MultiplexerState) -> T) -> T {
         change(&mut self.state.lock().unwrap())
     }
@@ -414,6 +420,12 @@ impl Multiplexer for FakeMultiplexer {
     fn attach(&self, target: &AttachTarget) -> Result<(), MultiplexerError> {
         self.call("attach", &format!("{target:?}"))?;
         self.edit(|state| state.attached.push(target.clone()));
+        Ok(())
+    }
+
+    fn switch_client(&self, client: &str, target: &AttachTarget) -> Result<(), MultiplexerError> {
+        self.call("switch_client", &format!("{client} {target:?}"))?;
+        self.edit(|state| state.switched.push((client.to_string(), target.clone())));
         Ok(())
     }
 

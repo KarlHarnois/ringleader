@@ -69,6 +69,7 @@ impl HelpView {
         "switch to the previous session by name while attached";
     const SHELL_TOGGLE_ACTION: &'static str =
         "switch between the agent and the shell while attached";
+    const FINDER_ACTION: &'static str = "find a session by name and switch to it while attached";
     const FIRST_SPINNER_TICK: u64 = 0;
     const PULL_REQUEST_SYMBOL: &'static str = "#n";
     const CLOSE_HINT: &'static str = "? Esc q close";
@@ -103,6 +104,7 @@ impl HelpView {
                 Self::shown(key_bindings.shell_toggle_keys()),
                 Self::SHELL_TOGGLE_ACTION,
             ),
+            (Self::shown(key_bindings.finder_keys()), Self::FINDER_ACTION),
         ];
         rows.into_iter()
             .filter(|(keys, _)| !keys.is_empty())
@@ -229,8 +231,8 @@ mod tests {
         const SHORT_WIDTH: usize = 56;
         const SHORT_HEIGHT: usize = 8;
         const PAST_THE_END: usize = 50;
-        const ROWS_ABOVE_THE_SMALLEST_FULL_SIZE: u16 = 13;
-        const TALL_NARROW_SIZE: (u16, u16) = (79, 37);
+        const ROWS_ABOVE_THE_SMALLEST_FULL_SIZE: u16 = 14;
+        const TALL_NARROW_SIZE: (u16, u16) = (79, 38);
         const TMUX_CONFIG_ROW: &'static str = "tmux config  ~/.local/state/ringleader/tmux.conf";
 
         fn help() -> HelpView {
@@ -532,6 +534,24 @@ mod tests {
         let text = HelpFixture::text(&HelpFixture::help_for(&bindings));
 
         assert!(!text.contains("the agent and the shell"));
+    }
+
+    #[test]
+    fn the_help_lists_the_default_finder_key_for_attached_sessions() {
+        let rows = HelpFixture::rows(&HelpFixture::help(), HelpFixture::UNWRAPPED_WIDTH);
+
+        assert!(rows.contains(
+            &"Ctrl-K       find a session by name and switch to it while attached".to_string()
+        ));
+    }
+
+    #[test]
+    fn no_finder_keys_have_no_attached_finder_row() {
+        let bindings = KeyBindings::default().with_finder_keys(Vec::new());
+
+        let text = HelpFixture::text(&HelpFixture::help_for(&bindings));
+
+        assert!(!text.contains("switch to it while attached"));
     }
 
     #[test]

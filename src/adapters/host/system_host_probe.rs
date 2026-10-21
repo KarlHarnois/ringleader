@@ -348,11 +348,13 @@ mod tests {
                 .envs([marker.variable()])
                 .status()
                 .unwrap();
-            ProbeFixture::probe_on(marker.table())
-                .processes_in(directory, &[])
-                .into_iter()
-                .next()
-                .expect("the nohup child runs in the directory")
+            let probe = ProbeFixture::probe_on(marker.table());
+            let mut orphan = None;
+            Deadline::for_background_work().wait_until(|| {
+                orphan = probe.processes_in(directory, &[]).into_iter().next();
+                orphan.is_some()
+            });
+            orphan.expect("the nohup child runs in the directory")
         }
     }
 

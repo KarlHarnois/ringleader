@@ -8,6 +8,7 @@ pub struct KeyBindings {
     next_session_keys: Vec<HotKey>,
     previous_session_keys: Vec<HotKey>,
     shell_toggle_keys: Vec<HotKey>,
+    finder_keys: Vec<HotKey>,
 }
 
 impl KeyBindings {
@@ -15,22 +16,26 @@ impl KeyBindings {
     pub const NEXT_SESSION_KEYS: [&'static str; 2] = ["M-j", "M-Down"];
     pub const PREVIOUS_SESSION_KEYS: [&'static str; 2] = ["M-k", "M-Up"];
     pub const SHELL_TOGGLE_KEYS: [&'static str; 1] = ["M-l"];
+    pub const FINDER_KEYS: [&'static str; 1] = ["C-k"];
     pub const RETURN_KEY_SETTING: &'static str = "return_key";
     pub const NEXT_SESSION_SETTING: &'static str = "next_session_keys";
     pub const PREVIOUS_SESSION_SETTING: &'static str = "previous_session_keys";
     pub const SHELL_TOGGLE_SETTING: &'static str = "shell_toggle_keys";
+    pub const FINDER_SETTING: &'static str = "finder_keys";
 
     pub fn new(
         return_key: HotKey,
         next_session_keys: Vec<HotKey>,
         previous_session_keys: Vec<HotKey>,
         shell_toggle_keys: Vec<HotKey>,
+        finder_keys: Vec<HotKey>,
     ) -> Self {
         Self {
             return_key,
             next_session_keys,
             previous_session_keys,
             shell_toggle_keys,
+            finder_keys,
         }
     }
 
@@ -38,6 +43,14 @@ impl KeyBindings {
     pub fn with_shell_toggle_keys(self, shell_toggle_keys: Vec<HotKey>) -> Self {
         Self {
             shell_toggle_keys,
+            ..self
+        }
+    }
+
+    #[cfg(test)]
+    pub fn with_finder_keys(self, finder_keys: Vec<HotKey>) -> Self {
+        Self {
+            finder_keys,
             ..self
         }
     }
@@ -79,6 +92,10 @@ impl KeyBindings {
         &self.shell_toggle_keys
     }
 
+    pub fn finder_keys(&self) -> &[HotKey] {
+        &self.finder_keys
+    }
+
     pub fn all(&self) -> impl Iterator<Item = &HotKey> {
         self.by_setting().into_iter().map(|(_, key)| key)
     }
@@ -97,6 +114,7 @@ impl KeyBindings {
                 Self::SHELL_TOGGLE_SETTING,
                 &self.shell_toggle_keys,
             ))
+            .chain(Self::named(Self::FINDER_SETTING, &self.finder_keys))
             .collect()
     }
 
@@ -119,6 +137,7 @@ impl Default for KeyBindings {
             HotKey::parse_valid(Self::NEXT_SESSION_KEYS),
             HotKey::parse_valid(Self::PREVIOUS_SESSION_KEYS),
             HotKey::parse_valid(Self::SHELL_TOGGLE_KEYS),
+            HotKey::parse_valid(Self::FINDER_KEYS),
         )
     }
 }
@@ -169,6 +188,7 @@ mod tests {
                 ("previous_session_keys", "M-k".to_string()),
                 ("previous_session_keys", "M-Up".to_string()),
                 ("shell_toggle_keys", "M-l".to_string()),
+                ("finder_keys", "C-k".to_string()),
             ]
         );
     }
@@ -181,5 +201,12 @@ mod tests {
             BindingsFixture::names(defaults.shell_toggle_keys()),
             ["M-l"]
         );
+    }
+
+    #[test]
+    fn the_default_finder_key_is_ctrl_k_as_in_the_tui() {
+        let defaults = KeyBindings::default();
+
+        assert_eq!(BindingsFixture::names(defaults.finder_keys()), ["C-k"]);
     }
 }
