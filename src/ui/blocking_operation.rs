@@ -15,6 +15,10 @@ pub enum BlockingOperation {
 }
 
 impl BlockingOperation {
+    pub fn changes_state(&self) -> bool {
+        !matches!(self, Self::MeasureDelete(_))
+    }
+
     pub fn busy_message(&self) -> String {
         match self {
             Self::Restart(name) => format!("Restarting {name}…"),
@@ -113,9 +117,11 @@ impl BlockingOperation {
                 impact,
                 changed: false,
             },
-            Err(error @ ServiceError::Unmeasurable(_)) => OperationOutcome::Failed(error.adding_context(&format!(
-                "ringleader delete {name} --forget needs this TUI to quit first, since the TUI holds the lock"
-            ))),
+            Err(error @ ServiceError::Unmeasurable(_)) => {
+                OperationOutcome::Failed(error.adding_context(&format!(
+                    "to forget it, run ringleader delete {name} --forget from another terminal"
+                )))
+            }
             Err(error) => OperationOutcome::Failed(error),
         }
     }

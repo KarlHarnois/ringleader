@@ -45,8 +45,26 @@ impl FakeSessionRegistry {
         self.state.lock().unwrap().load_error = Some(error);
     }
 
+    pub fn mend_loads(&self) {
+        self.state.lock().unwrap().load_error = None;
+    }
+
     pub fn sessions(&self) -> Vec<Session> {
         self.state.lock().unwrap().sessions.clone()
+    }
+
+    pub fn save_from_elsewhere(&self, session: Session) {
+        self.state.lock().unwrap().sessions.push(session);
+    }
+
+    pub fn names(&self) -> Vec<String> {
+        self.state
+            .lock()
+            .unwrap()
+            .sessions
+            .iter()
+            .map(|session| session.name().to_string())
+            .collect()
     }
 
     pub fn save_count(&self) -> usize {

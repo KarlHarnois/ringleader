@@ -246,9 +246,11 @@ nix flake check
 | `docs/agents/tmux-commands.md` | write or change a tmux command that Ringleader runs or writes into the generated config |
 | `docs/agents/features/pull.md` | change the pull that the `p` key starts |
 | `docs/agents/features/direnv.md` | change how create or restart launches an agent, or which variables the agent gets |
-| `docs/agents/features/agent-hooks.md` | change how `AgentHooks` types into an agent, or the check that an agent is at its prompt |
+| `docs/agents/features/agent-hooks.md` | change how Ringleader types or pastes into an agent, or the check that an agent is at its prompt |
 | `docs/agents/features/scratch-directories.md` | change a session's scratch directory |
 | `docs/agents/features/background-jobs.md` | change one of the TUI's background jobs |
+| `docs/agents/features/write-lock.md` | change what a process saves, or when a process takes a lock |
+| `docs/agents/skills.md` | add or change a skill, change how a launch gets the built-in skills, or change the CLI |
 | `docs/agents/features/usage.md` | change how Ringleader measures an agent's usage, or the usage view that the `u` key opens |
 
 ## Architecture
@@ -310,7 +312,7 @@ nix flake check
 | #58 | The core's messages spell out tool command lines. |
 | #59 | Port errors carry tool details, and two TUI types branch on those details. |
 | #60 | `ActionGate` decides which actions each session state allows. |
-| #61 | `CompositionRoot::run_tui` calls the TUI's startup use cases. |
+| #61 | `CompositionRoot::run` checks the socket before either driving adapter starts. |
 | #70 | The core encodes tmux's config quoting and socket limits. |
 | #71 | `Doctor` repeats the config writability check that the adapter owns. |
 | #72 | The core reasons about whether a worktree's `.git` is a file or a directory. |
@@ -397,7 +399,7 @@ The hidden `__find-session` path runs in the popup that a key in `finder_keys` o
 
 ### Locks
 
-**A CLI command that changes a session or a repo takes the write lock.** Every other CLI command takes no lock.
+**A change to a session, a repo, or the generated config runs under the write lock.** No other command takes the write lock.
 
 ### Sessions and branches
 
@@ -419,7 +421,7 @@ The hidden `__find-session` path runs in the popup that a key in `finder_keys` o
 **Key bindings come only from the generated config of the private tmux server.** `create_session` writes the generated config.
 
 - If the server runs, `r` re-sources the generated config, even when the server's `@ringleader_config` hash matches the current render. A `tmux source-file` run from a pane can change the server without changing that hash.
-- Only a lock holder writes or re-sources the generated config, so only one process ever writes the generated config.
+- Only the write lock's holder writes or re-sources the generated config.
 - The binding of each `finder_keys` key names the paths of Ringleader's executable and its tmux and git programs. The config hash covers those paths. A config that another build applied therefore reads as stale. Two builds that share one private tmux server rebind each `finder_keys` key in turn.
 
 ### Private tmux server
@@ -463,11 +465,9 @@ Ringleader checks a registry entry recorded on another socket only through `Proc
   - first run
   - the CLI synopsis
   - the exit codes
+  - the built-in skills
 - Never put architecture or the rules of this file in `README.md`.
 - Put a rule that every task needs in this file. Put a rule that only one kind of task needs in a reference file under `docs/agents/`.
 - Name each reference file in the Reference files table.
-- Put a procedure that an agent invokes on demand in a skill at `.agents/skills/<name>/SKILL.md`.
-- Link each skill from `.claude/skills/<name>` with a relative symlink: Claude Code reads a repository's skills only from `.claude/skills/`.
-- Never name a Ringleader type, path, or rule in a skill: each skill ports unchanged to other repos.
 - This repository holds no `CLAUDE.md` or `CLAUDE.local.md`: either file would hide this file from Claude Code.
 - If one of those files is ever needed, make its first line `@AGENTS.md`.

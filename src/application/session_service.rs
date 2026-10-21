@@ -35,6 +35,7 @@ use crate::domain::{
 pub struct SessionService {
     config: LoadedConfig,
     entries: Vec<Session>,
+    rereads_failing: bool,
     registry: Arc<dyn SessionRegistry>,
     config_source: Arc<dyn ConfigSource>,
     monitor: SessionMonitor,
@@ -62,6 +63,7 @@ impl SessionService {
             paths: context.diagnostics().clone(),
             config: context.into_config(),
             entries: Vec::new(),
+            rereads_failing: false,
             registry: ports.state().registry(),
             config_source: ports.state().config_source(),
         }
@@ -175,25 +177,26 @@ impl SessionService {
         Ok(())
     }
 
-    pub fn observe(&mut self, persist: bool) -> Result<Vec<SessionSummary>, ServiceError> {
-        let observations = self.monitor.observe_all()?;
-        self.observe_with(observations, persist)
+    pub fn observe(&mut self) -> Result<Vec<SessionSummary>, ServiceError> {
+        Ok(self.reconcile()?.into_summaries())
+    }
+
+    pub fn observe_and_record(&mut self) -> Result<Vec<SessionSummary>, ServiceError> {
+        let reconciliation = self.reconcile()?;
+        if reconciliation.changed() && self.read_only_reason().is_none() {
+            self.registry.save(reconciliation.entries())?;
+        }
+        Ok(reconciliation.into_summaries())
     }
 
     pub fn start_observing(&self) -> Pending<Vec<SessionObservation>> {
         self.monitor.start_observing()
     }
 
-    pub fn observe_with(
-        &mut self,
-        observations: Vec<SessionObservation>,
-        persist: bool,
-    ) -> Result<Vec<SessionSummary>, ServiceError> {
-        let reconciliation = self.reconcile_with(observations);
-        if persist && reconciliation.changed() {
-            self.registry.save(reconciliation.entries())?;
-        }
-        Ok(reconciliation.into_summaries())
+    pub fn observe_with(&mut self, observations: Vec<SessionObservation>) -> Vec<SessionSummary> {
+        let reread = self.refresh_entries();
+        self.log_reread_change(reread);
+        self.reconcile_with(observations).into_summaries()
     }
 
     pub fn diff_stats(&self, names: &[String]) -> Vec<(String, Result<DiffStat, ServiceError>)> {
@@ -329,6 +332,12 @@ impl SessionService {
         self.access.switch_client(reconciliation.row(name)?, client)
     }
 
+    pub fn send_prompt(&mut self, name: &str, prompt: &str) -> Result<(), ServiceError> {
+        let reconciliation = self.reconcile()?;
+        self.access
+            .send_prompt(&reconciliation.managed(name)?, prompt)
+    }
+
     pub fn open_shell(&mut self, name: &str) -> Result<ShellOutcome, ServiceError> {
         let reconciliation = self.reconcile()?;
         self.access.open_shell(reconciliation.row(name)?)
@@ -368,8 +377,30 @@ impl SessionService {
     }
 
     fn reconcile(&mut self) -> Result<Reconciliation, ServiceError> {
+        self.refresh_entries()?;
         let observations = self.monitor.observe_all()?;
         Ok(self.reconcile_with(observations))
+    }
+
+    fn log_reread_change(&mut self, reread: Result<(), RegistryError>) {
+        match (reread, self.rereads_failing) {
+            (Err(error), false) => {
+                log::warn!(
+                    "could not reread the registry, showing the sessions read before: {error}"
+                );
+                self.rereads_failing = true;
+            }
+            (Ok(()), true) => {
+                log::info!("reread the registry again");
+                self.rereads_failing = false;
+            }
+            _ => {}
+        }
+    }
+
+    fn refresh_entries(&mut self) -> Result<(), RegistryError> {
+        self.entries = self.registry.load()?;
+        Ok(())
     }
 
     fn reconcile_with(&mut self, observations: Vec<SessionObservation>) -> Reconciliation {
@@ -396,9 +427,10 @@ pub enum CorruptRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::application::ports::Multiplexer;
     use crate::domain::{Agent, AgentUsage};
     use crate::test_support::{
-        Deadline, FakeMultiplexer, FakeSessionRegistry, FakeUsageMeter, ServiceFixture,
+        Deadline, FakeMultiplexer, FakeSessionRegistry, FakeUsageMeter, LogCapture, ServiceFixture,
     };
 
     #[test]
@@ -450,6 +482,144 @@ mod tests {
         service.reload().unwrap();
 
         assert_eq!(service.last_usage(), None);
+    }
+
+    struct OtherRingleaderFixture;
+
+    impl OtherRingleaderFixture {
+        fn renamable() -> ServiceFixture {
+            let session = ServiceFixture::session("fix-auth");
+            ServiceFixture::new()
+                .with_sessions(std::slice::from_ref(&session))
+                .with_workspace(ServiceFixture::workspace_for(&[&session]))
+                .with_host(ServiceFixture::host_for(&[&session]))
+                .with_multiplexer(
+                    FakeMultiplexer::new().with_live(ServiceFixture::waiting(&session)),
+                )
+        }
+
+        fn corrupt() -> RegistryError {
+            RegistryError::Corrupt {
+                path: PathBuf::from("/state/ringleader/sessions.json"),
+                detail: "expected value".to_string(),
+            }
+        }
+    }
+
+    #[test]
+    fn a_create_keeps_a_stopped_session_another_ringleader_saved_meanwhile() {
+        let fixture = ServiceFixture::new();
+        let mut service = fixture.service();
+        fixture
+            .registry()
+            .save_from_elsewhere(ServiceFixture::session("dark-mode"));
+
+        service
+            .create_session(&CreateRequest::new("fix-auth", ServiceFixture::repo()))
+            .unwrap();
+
+        assert_eq!(fixture.registry().names(), ["dark-mode", "fix-auth"]);
+    }
+
+    #[test]
+    fn a_listing_taken_before_another_ringleader_renamed_a_session_keeps_the_rename() {
+        let fixture = OtherRingleaderFixture::renamable();
+        let mut service = fixture.service();
+        let listed_before = fixture.multiplexer().observe_all().unwrap();
+        fixture
+            .service()
+            .rename_session("fix-auth", "fix-login")
+            .unwrap();
+
+        service.observe_with(listed_before);
+
+        assert_eq!(fixture.registry().names(), ["fix-login"]);
+    }
+
+    #[test]
+    fn a_registry_that_cannot_be_reread_keeps_the_sessions_read_before_in_view() {
+        let fixture = OtherRingleaderFixture::renamable();
+        let mut service = fixture.service();
+        let listing = fixture.multiplexer().observe_all().unwrap();
+        fixture
+            .registry()
+            .break_loads(OtherRingleaderFixture::corrupt());
+
+        let rows = service.observe_with(listing);
+
+        assert!(rows.iter().any(|row| row.session().is_some()));
+    }
+
+    #[test]
+    fn a_registry_that_stays_unreadable_is_logged_once() {
+        let log = LogCapture::installed();
+        let fixture = OtherRingleaderFixture::renamable();
+        let mut service = fixture.service();
+        let listing = fixture.multiplexer().observe_all().unwrap();
+        fixture.registry().break_loads(RegistryError::Corrupt {
+            path: PathBuf::from("/state/ringleader/sessions.json"),
+            detail: "unreadable on every poll".to_string(),
+        });
+
+        service.observe_with(listing.clone());
+        service.observe_with(listing);
+
+        assert_eq!(log.count_containing("unreadable on every poll"), 1);
+    }
+
+    #[test]
+    fn a_registry_that_turns_unreadable_again_is_logged_again() {
+        let log = LogCapture::installed();
+        let fixture = OtherRingleaderFixture::renamable();
+        let mut service = fixture.service();
+        let listing = fixture.multiplexer().observe_all().unwrap();
+        let unreadable = RegistryError::Corrupt {
+            path: PathBuf::from("/state/ringleader/sessions.json"),
+            detail: "unreadable twice with a good read between".to_string(),
+        };
+        fixture.registry().break_loads(unreadable.clone());
+        service.observe_with(listing.clone());
+        fixture.registry().mend_loads();
+        service.observe_with(listing.clone());
+        fixture.registry().break_loads(unreadable);
+
+        service.observe_with(listing);
+
+        assert_eq!(
+            log.count_containing("unreadable twice with a good read between"),
+            2
+        );
+    }
+
+    #[test]
+    fn a_change_refuses_while_the_registry_cannot_be_reread() {
+        let fixture = OtherRingleaderFixture::renamable();
+        let mut service = fixture.service();
+        fixture
+            .registry()
+            .break_loads(OtherRingleaderFixture::corrupt());
+
+        let refusal = service.rename_session("fix-auth", "fix-login");
+
+        assert!(refusal.is_err());
+        assert_eq!(fixture.registry().save_count(), 0);
+    }
+
+    #[test]
+    fn a_recording_observation_on_a_broken_config_saves_nothing() {
+        let adoptable = ServiceFixture::session("fix-auth");
+        let fixture = ServiceFixture::new()
+            .with_broken_config(ConfigError::Parse {
+                path: PathBuf::from("/config/ringleader/config.toml"),
+                detail: "expected `=`".to_string(),
+            })
+            .with_multiplexer(
+                FakeMultiplexer::new().with_live(ServiceFixture::waiting(&adoptable)),
+            );
+
+        fixture.service().observe_and_record().unwrap();
+
+        assert_eq!(fixture.registry().save_count(), 0);
     }
 
     #[test]

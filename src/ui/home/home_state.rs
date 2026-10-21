@@ -139,16 +139,11 @@ impl HomeState {
     }
 
     pub fn observe(&mut self, service: &mut SessionService) -> Result<(), ServiceError> {
-        self.observations.supersede(Instant::now(), service);
-        if self.is_tmux_paused() {
-            return Ok(());
-        }
-        let persist = Self::persists_observations(service);
-        let rows = service
-            .observe(persist)
-            .inspect_err(|error| self.pause_after(error))?;
-        self.show(rows, service);
-        Ok(())
+        self.observe_through(service, SessionService::observe)
+    }
+
+    pub fn observe_and_record(&mut self, service: &mut SessionService) -> Result<(), ServiceError> {
+        self.observe_through(service, SessionService::observe_and_record)
     }
 
     pub fn returned_from(&mut self, name: &str) {
@@ -234,10 +229,23 @@ impl HomeState {
         let Some(finished) = self.observations.collect() else {
             return Ok(());
         };
-        let persist = Self::persists_observations(service);
         let rows = finished
-            .and_then(|observations| service.observe_with(observations, persist))
+            .map(|observations| service.observe_with(observations))
             .inspect_err(|error| self.pause_after(error))?;
+        self.show(rows, service);
+        Ok(())
+    }
+
+    fn observe_through(
+        &mut self,
+        service: &mut SessionService,
+        observe: fn(&mut SessionService) -> Result<Vec<SessionSummary>, ServiceError>,
+    ) -> Result<(), ServiceError> {
+        self.observations.supersede(Instant::now(), service);
+        if self.is_tmux_paused() {
+            return Ok(());
+        }
+        let rows = observe(service).inspect_err(|error| self.pause_after(error))?;
         self.show(rows, service);
         Ok(())
     }
@@ -273,10 +281,6 @@ impl HomeState {
         if !self.is_tmux_paused() {
             self.preview.refresh(service, self.sessions.selected());
         }
-    }
-
-    fn persists_observations(service: &SessionService) -> bool {
-        service.read_only_reason().is_none()
     }
 
     fn fit_rows(&mut self, status: &StatusBar) {
