@@ -8,8 +8,8 @@ use super::{
     SendArgs,
 };
 use crate::application::{
-    CreateRequest, DeleteConfirmation, DeleteImpact, RestartReport, ServiceError, SessionService,
-    StartOutcome,
+    CreateRequest, DeleteConfirmation, DeleteImpact, DeleteOutcome, RestartReport, ServiceError,
+    SessionService, StartOutcome,
 };
 use crate::domain::{AgentMode, BaseBranch, Checkout, Repo};
 
@@ -98,33 +98,43 @@ impl<'a> SessionCommands<'a> {
 
     pub fn delete(&mut self, args: &DeleteArgs) -> Result<u8, CommandStop> {
         self.service.observe_and_record()?;
-        let confirmation = if args.force {
-            DeleteConfirmation::force()
-        } else {
-            DeleteConfirmation::confirmed(DeleteImpact::default())
-        };
-        let confirmation = if args.forget {
-            confirmation.forgetting()
-        } else {
-            confirmation
-        };
+        let confirmation = Self::delete_confirmation(args);
         self.session.stop_if_signaled()?;
         let report = DeleteReport::new(&args.name);
         match self.service.delete_session(&args.name, &confirmation) {
             Ok(outcome) => {
-                for warning in report.warnings(&outcome) {
-                    self.session.output().note(&warning);
-                }
-                self.session.output().line(&report.success(&outcome));
+                self.report_deleted(&report, &outcome);
                 Ok(0)
             }
             Err(ServiceError::GuardsChanged { impact, .. }) => {
-                for line in report.refusal(&impact) {
-                    self.session.output().note(&line);
-                }
+                self.report_refusal(&report, &impact);
                 Ok(CliExit::CONFLICT)
             }
             Err(error) => Err(error.into()),
+        }
+    }
+
+    fn delete_confirmation(args: &DeleteArgs) -> DeleteConfirmation {
+        let confirmation = match args.force {
+            true => DeleteConfirmation::force(),
+            false => DeleteConfirmation::confirmed(DeleteImpact::default()),
+        };
+        match args.forget {
+            true => confirmation.forgetting(),
+            false => confirmation,
+        }
+    }
+
+    fn report_deleted(&mut self, report: &DeleteReport, outcome: &DeleteOutcome) {
+        for warning in report.warnings(outcome) {
+            self.session.output().note(&warning);
+        }
+        self.session.output().line(&report.success(outcome));
+    }
+
+    fn report_refusal(&mut self, report: &DeleteReport, impact: &DeleteImpact) {
+        for line in report.refusal(impact) {
+            self.session.output().note(&line);
         }
     }
 
