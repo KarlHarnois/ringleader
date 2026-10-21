@@ -36,11 +36,11 @@ impl MatchList {
         self.matches.is_empty()
     }
 
-    pub fn lines(
+    pub fn lines<T: Into<Line<'static>>>(
         &self,
         rows: usize,
         theme: &Theme,
-        shown: impl Fn(usize) -> String,
+        shown: impl Fn(usize) -> T,
     ) -> Vec<Line<'static>> {
         let first = (self.cursor + 1).saturating_sub(rows);
         let visible = self.matches.iter().enumerate().skip(first).take(rows);
@@ -51,7 +51,7 @@ impl MatchList {
                 } else {
                     theme.base()
                 };
-                Line::styled(shown(index), style)
+                shown(index).into().patch_style(style)
             })
             .collect()
     }
@@ -70,6 +70,8 @@ impl MatchList {
 
 #[cfg(test)]
 mod tests {
+    use ratatui::text::Span;
+
     use super::*;
 
     struct ListFixture;
@@ -155,6 +157,18 @@ mod tests {
 
         assert_eq!(lines[0].style, Theme.base());
         assert_eq!(lines[1].style, Theme.selected());
+    }
+
+    #[test]
+    fn a_rows_own_span_styles_survive_the_highlight() {
+        let list = ListFixture::holding(&[4]);
+
+        let lines = list.lines(1, &Theme, |index| {
+            Line::from(Span::styled(index.to_string(), Theme.emphasis()))
+        });
+
+        assert_eq!(lines[0].style, Theme.selected());
+        assert_eq!(lines[0].spans[0].style, Theme.emphasis());
     }
 
     #[test]
