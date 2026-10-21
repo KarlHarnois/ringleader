@@ -15,6 +15,8 @@ pub struct HandoffContents {
     envrc: EnvrcStep,
     #[serde(default)]
     skill_directory: Option<Vec<u8>>,
+    #[serde(default)]
+    shim_directory: Option<Vec<u8>>,
 }
 
 impl HandoffContents {
@@ -34,12 +36,20 @@ impl HandoffContents {
             worktree: launch.worktree().as_os_str().as_bytes().to_vec(),
             envrc: EnvrcStep::for_launch(launch),
             skill_directory: None,
+            shim_directory: None,
         }
     }
 
     pub fn with_skill_directory(self, directory: &Path) -> Self {
         Self {
             skill_directory: Some(directory.as_os_str().as_bytes().to_vec()),
+            ..self
+        }
+    }
+
+    pub fn with_shim_directory(self, directory: &Path) -> Self {
+        Self {
+            shim_directory: Some(directory.as_os_str().as_bytes().to_vec()),
             ..self
         }
     }
@@ -76,9 +86,15 @@ impl HandoffContents {
     }
 
     pub fn skill_directory(&self) -> Option<PathBuf> {
-        self.skill_directory
-            .as_ref()
-            .map(|directory| PathBuf::from(OsStr::from_bytes(directory)))
+        Self::directory(self.skill_directory.as_ref())
+    }
+
+    pub fn shim_directory(&self) -> Option<PathBuf> {
+        Self::directory(self.shim_directory.as_ref())
+    }
+
+    fn directory(stored: Option<&Vec<u8>>) -> Option<PathBuf> {
+        stored.map(|directory| PathBuf::from(OsStr::from_bytes(directory)))
     }
 
     fn stored(variables: &[(OsString, OsString)]) -> Vec<(Vec<u8>, Vec<u8>)> {
@@ -192,6 +208,20 @@ mod tests {
         assert_eq!(
             read.skill_directory(),
             Some(PathBuf::from("/data/ringleader/plugin/0123"))
+        );
+    }
+
+    #[test]
+    fn a_shim_directory_survives_the_trip_through_the_handoff_file() {
+        let contents = ContentsFixture::contents(&ContentsFixture::launch())
+            .with_shim_directory(Path::new("/run/ringleader/bin/0123"));
+
+        let text = serde_json::to_string(&contents).unwrap();
+        let read: HandoffContents = serde_json::from_str(&text).unwrap();
+
+        assert_eq!(
+            read.shim_directory(),
+            Some(PathBuf::from("/run/ringleader/bin/0123"))
         );
     }
 }

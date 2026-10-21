@@ -8,6 +8,7 @@ use std::time::{Duration, SystemTime};
 use super::agent_variables::AgentVariables;
 use super::built_in_skill::BuiltInSkill;
 use super::handoff_contents::HandoffContents;
+use super::ringleader_shim::RingleaderShim;
 use crate::adapters::config_file::toml_config_source::TomlConfigSource;
 use crate::adapters::host::process_environment::ProcessEnvironment;
 use crate::adapters::host::process_table::ProcessTable;
@@ -20,6 +21,7 @@ pub struct AgentHandoff {
     environment: ProcessEnvironment,
     processes: ProcessTable,
     skill: Option<BuiltInSkill>,
+    shim: Option<RingleaderShim>,
     config_path: Option<PathBuf>,
 }
 
@@ -42,7 +44,15 @@ impl AgentHandoff {
             environment: environment.clone(),
             processes,
             skill: None,
+            shim: None,
             config_path: None,
+        }
+    }
+
+    pub fn with_shim(self, shim: RingleaderShim) -> Self {
+        Self {
+            shim: Some(shim),
+            ..self
         }
     }
 
@@ -79,6 +89,7 @@ impl AgentHandoff {
         let contents =
             HandoffContents::for_launch(launch, variables.inherited(), variables.explicit());
         let contents = self.offering_skill(contents, launch);
+        let contents = self.offering_shim(contents);
         self.write_file(Self::LAUNCH_PREFIX, &contents)
     }
 
@@ -100,6 +111,19 @@ impl AgentHandoff {
         config
             .chain(launch.env_assignments().iter().cloned())
             .collect()
+    }
+
+    fn offering_shim(&self, contents: HandoffContents) -> HandoffContents {
+        match self.shim.as_ref().map(RingleaderShim::publish) {
+            Some(Ok(folder)) => contents.with_shim_directory(&folder),
+            Some(Err(error)) => {
+                log::warn!(
+                    "could not link ringleader for the agent, it keeps the PATH it inherits: {error}"
+                );
+                contents
+            }
+            None => contents,
+        }
     }
 
     fn offering_skill(&self, contents: HandoffContents, launch: &AgentLaunch) -> HandoffContents {
@@ -211,6 +235,7 @@ mod tests {
     use std::fs::File;
 
     use super::*;
+    use crate::adapters::agent_launch::ringleader_shim::RingleaderShim;
     use crate::test_support::ProcessMarker;
 
     struct HandoffFixture {
@@ -596,5 +621,40 @@ mod tests {
                 "/config/own.toml"
             )]
         );
+    }
+
+    #[test]
+    fn a_handoff_names_the_folder_that_links_the_launching_ringleader() {
+        let fixture = HandoffFixture::new();
+        let shim = RingleaderShim::new(
+            &fixture.handoff_directory().with_file_name("bin"),
+            Path::new("/builds/example/ringleader"),
+        );
+        let handoff = fixture.handoff(&[]).with_shim(shim);
+
+        let contents = HandoffFixture::written(&handoff, &HandoffFixture::launch(&[]));
+
+        let folder = contents.shim_directory().unwrap();
+        assert_eq!(
+            fs::read_link(folder.join("ringleader")).unwrap(),
+            Path::new("/builds/example/ringleader")
+        );
+    }
+
+    #[test]
+    fn a_shim_that_cannot_be_linked_leaves_the_launch_without_it() {
+        let fixture = HandoffFixture::new();
+        let blocker = fixture.handoff_directory().with_file_name("blocker");
+        fs::create_dir_all(blocker.parent().unwrap()).unwrap();
+        fs::write(&blocker, "").unwrap();
+        let shim = RingleaderShim::new(
+            &blocker.join("bin"),
+            Path::new("/builds/example/ringleader"),
+        );
+        let handoff = fixture.handoff(&[]).with_shim(shim);
+
+        let contents = HandoffFixture::written(&handoff, &HandoffFixture::launch(&[]));
+
+        assert_eq!(contents.shim_directory(), None);
     }
 }

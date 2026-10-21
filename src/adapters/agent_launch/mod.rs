@@ -6,3 +6,4 @@ pub mod built_in_skill;
 pub mod built_in_skill_options;
 pub mod handoff_contents;
 pub mod launcher_command;
+pub mod ringleader_shim;

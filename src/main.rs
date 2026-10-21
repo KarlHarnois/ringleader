@@ -25,6 +25,7 @@ use adapters::agent_launch::agent_launcher::{AgentLauncher, ProcessExec};
 use adapters::agent_launch::agent_probe::AgentProbe;
 use adapters::agent_launch::built_in_skill::BuiltInSkill;
 use adapters::agent_launch::launcher_command::LauncherCommand;
+use adapters::agent_launch::ringleader_shim::RingleaderShim;
 use adapters::claude::claude_usage_meter::ClaudeUsageMeter;
 use adapters::config_file::toml_config_source::TomlConfigSource;
 use adapters::direnv::direnv_directory_environment::DirenvDirectoryEnvironment;
@@ -434,6 +435,10 @@ impl CompositionRoot {
         let handoff = self
             .handoff()
             .with_built_in_skill(BuiltInSkill::new(&self.paths.plugin_root()))
+            .with_shim(RingleaderShim::new(
+                &self.paths.shim_root(),
+                &self.executable,
+            ))
             .with_config_path(config_path);
         LauncherCommand::new(self.launcher_prefix(), handoff)
     }

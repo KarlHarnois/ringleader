@@ -10,6 +10,7 @@ use super::agent_handoff::AgentHandoff;
 use super::built_in_skill_options::BuiltInSkillOptions;
 use super::handoff_contents::{EnvrcStep, HandoffContents};
 use super::launcher_command::{LauncherCommand, PreparedLaunch};
+use super::ringleader_shim::RingleaderShim;
 use crate::adapters::host::process_environment::ProcessEnvironment;
 use crate::domain::Agent;
 
@@ -125,6 +126,9 @@ impl AgentLauncher {
             let options = BuiltInSkillOptions::new(&directory);
             environment = options.environment(&argv, environment);
             argv = options.argv(argv);
+        }
+        if let Some(folder) = contents.shim_directory() {
+            environment = RingleaderShim::on_path(&folder, environment);
         }
         let mut command = Command::new(&argv[0]);
         command.args(&argv[1..]);
@@ -464,6 +468,41 @@ mod tests {
 
         fn inside_envrc(&self) -> CapturingExec {
             self.inside_envrc_from(&Self::creating_snapshot())
+        }
+
+        fn shim(&self) -> RingleaderShim {
+            RingleaderShim::new(
+                &self.directory.path().join("bin"),
+                Path::new("/builds/example/ringleader"),
+            )
+        }
+
+        fn shim_folder(&self) -> String {
+            self.shim()
+                .publish()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+        }
+
+        fn inside_envrc_with_shim(&self) -> CapturingExec {
+            let first = AgentHandoff::new(
+                &self.handoff_directory(),
+                &Self::creating_snapshot(),
+                ProcessMarker::new().table(),
+            )
+            .with_shim(self.shim())
+            .write(&Self::envrc_launch(&self.worktree()))
+            .unwrap();
+            let contents = AgentHandoff::take(&first).unwrap().inside_envrc();
+            let envrc = Self::envrc_snapshot();
+            let handoff = AgentHandoff::beside(&first, &envrc, ProcessMarker::new().table())
+                .write_relay(&contents)
+                .unwrap();
+            let seam = CapturingExec::default();
+            Self::launcher(&envrc, Box::new(seam.clone()), &handoff, &Self::REENTRY)
+                .launch(&handoff);
+            seam
         }
 
         fn inside_envrc_from(&self, creating: &ProcessEnvironment) -> CapturingExec {
@@ -814,6 +853,46 @@ mod tests {
                 .join("managing-ringleader-sessions")
                 .join("SKILL.md")
                 .is_file()
+        );
+    }
+
+    #[test]
+    fn the_ringleader_that_launched_the_agent_comes_first_on_its_path() {
+        let fixture = LauncherFixture::new();
+        let launch = LauncherFixture::agent_launch(&fixture.worktree());
+        let handoff = AgentHandoff::new(
+            &fixture.handoff_directory(),
+            &LauncherFixture::creating_snapshot(),
+            ProcessMarker::new().table(),
+        )
+        .with_shim(fixture.shim())
+        .write(&launch)
+        .unwrap();
+        let seam = RecordingExec::default();
+        let pane = LauncherFixture::pane_snapshot(None);
+        LauncherFixture::launcher(
+            &pane,
+            Box::new(seam.clone()),
+            &handoff,
+            &LauncherFixture::REENTRY,
+        )
+        .launch(&handoff);
+
+        assert_eq!(
+            seam.variable("PATH").unwrap(),
+            OsString::from(format!("{}:/creator/bin", fixture.shim_folder()))
+        );
+    }
+
+    #[test]
+    fn the_ringleader_that_launched_the_agent_stays_first_after_the_envrc_loads() {
+        let fixture = LauncherFixture::new();
+
+        let seam = fixture.inside_envrc_with_shim();
+
+        assert_eq!(
+            seam.environment()["PATH"],
+            format!("{}:/devshell/bin:/creator/bin", fixture.shim_folder())
         );
     }
 }
