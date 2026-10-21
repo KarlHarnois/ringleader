@@ -734,7 +734,13 @@ mod tests {
     fn no_layer_fixes_a_color_so_the_terminal_theme_decides_every_color() {
         let layers = ["domain", "application", "adapters", "ui", "cli"];
 
-        let uses = LayerImports::of(&layers).uses_of(&["Color::Rgb", "Color::Indexed"]);
+        let uses = LayerImports::of(&layers).uses_of(&[
+            "Color::Rgb",
+            "Color::Indexed",
+            "Color::from_u32",
+            "Color::from_hsl",
+            "Color::from_hsluv",
+        ]);
 
         assert_eq!(uses, BTreeSet::new());
     }
