@@ -40,7 +40,7 @@ impl HelpView {
         ("t", "open a shell in the selected session's worktree"),
         (
             "T",
-            "open a shell in the selected session's worktree in a new terminal window",
+            "open a terminal window in the selected session's worktree, or the selected repo's main checkout",
         ),
         (
             "o gx",
@@ -226,7 +226,7 @@ mod tests {
     impl HelpFixture {
         const HOME: &'static str = "/home/example";
         const WIDE_WIDTH: usize = 70;
-        const UNWRAPPED_WIDTH: usize = 100;
+        const UNWRAPPED_WIDTH: usize = 110;
         const EVERY_ROW_HEIGHT: usize = 200;
         const SHORT_WIDTH: usize = 56;
         const SHORT_HEIGHT: usize = 8;
@@ -382,7 +382,7 @@ mod tests {
         let rows = HelpFixture::rows(&HelpFixture::help(), HelpFixture::UNWRAPPED_WIDTH);
 
         assert!(rows.contains(
-            &"T            open a shell in the selected session's worktree in a new terminal window"
+            &"T            open a terminal window in the selected session's worktree, or the selected repo's main checkout"
                 .to_string()
         ));
     }
