@@ -245,7 +245,7 @@ nix flake check
 | `docs/agents/hint-lines.md` | write or change a dialog's hint line, or add a text-editing key |
 | `docs/agents/features/pull.md` | change the pull that the `p` key starts |
 | `docs/agents/features/direnv.md` | change how create or restart launches an agent, or which variables the agent gets |
-| `docs/agents/features/agent-hooks.md` | change how `AgentHooks` types into an agent, or the check that an agent is at its prompt |
+| `docs/agents/features/agent-hooks.md` | change how Ringleader types or pastes into an agent, or the check that an agent is at its prompt |
 | `docs/agents/features/scratch-directories.md` | change a session's scratch directory |
 | `docs/agents/features/background-jobs.md` | change one of the TUI's background jobs |
 | `docs/agents/features/write-lock.md` | change what a process saves, or when a process takes a lock |

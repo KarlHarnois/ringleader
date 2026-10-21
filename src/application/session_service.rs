@@ -326,6 +326,12 @@ impl SessionService {
         self.access.attach(reconciliation.row(name)?)
     }
 
+    pub fn send_prompt(&mut self, name: &str, prompt: &str) -> Result<(), ServiceError> {
+        let reconciliation = self.reconcile()?;
+        self.access
+            .send_prompt(&reconciliation.managed(name)?, prompt)
+    }
+
     pub fn open_shell(&mut self, name: &str) -> Result<ShellOutcome, ServiceError> {
         let reconciliation = self.reconcile()?;
         self.access.open_shell(reconciliation.row(name)?)

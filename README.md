@@ -41,6 +41,7 @@ ringleader list [--json]
 ringleader new --name <n> --repo <r> [--agent <a>] [--base-branch <b> | --main-checkout] [--plan] [--prompt <text>]
 ringleader delete <name> [--force] [--forget]
 ringleader attach <name>
+ringleader send <name> <prompt>
 ringleader rename <old> <new>
 ringleader restart (<name> | --all)
 ringleader repo add <path> [--name <n>] [--base-branch <b>]
@@ -66,3 +67,4 @@ Conflicts with existing state include these:
 - a running session
 - a delete that would lose work
 - a held lock
+- a `send` to a stopped session, or to an agent away from its prompt

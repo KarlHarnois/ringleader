@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use super::delete_report::DeleteReport;
 use super::list_report::ListReport;
 use super::repo_argument::RepoArgument;
-use super::{CliExit, CliSession, CommandStop, DeleteArgs, ListArgs, NewArgs, RenameArgs};
+use super::{
+    CliExit, CliSession, CommandStop, DeleteArgs, ListArgs, NewArgs, RenameArgs, SendArgs,
+};
 use crate::application::{
     CreateRequest, DeleteConfirmation, DeleteImpact, RestartReport, ServiceError, SessionService,
     StartOutcome,
@@ -130,6 +132,14 @@ impl<'a> SessionCommands<'a> {
         Ok(0)
     }
 
+    pub fn send(&mut self, args: &SendArgs) -> Result<u8, CommandStop> {
+        self.service.send_prompt(&args.name, &args.prompt)?;
+        self.session
+            .output()
+            .line(&format!("sent the prompt to {}", args.name));
+        Ok(0)
+    }
+
     pub fn rename(&mut self, args: &RenameArgs) -> Result<u8, CommandStop> {
         self.service.observe_and_record()?;
         self.session.stop_if_signaled()?;
@@ -195,7 +205,9 @@ mod tests {
 
     use signal_hook::consts::{SIGHUP, SIGINT};
 
-    use crate::application::ports::{AttachTarget, ConfigError, DirtyState, RegistryError};
+    use crate::application::ports::{
+        AttachTarget, ConfigError, DirtyState, MultiplexerError, RegistryError,
+    };
     use crate::cli::CliExit;
     use crate::domain::{Repo, RepoName, Session};
     use crate::test_support::{
@@ -259,6 +271,114 @@ mod tests {
                 detail: "expected `=`".to_string(),
             }
         }
+    }
+
+    #[test]
+    fn send_submits_the_prompt_to_the_agent_of_a_waiting_session() {
+        let harness = CliHarness::new(CommandFixture::live());
+
+        let exit = harness.run(&["send", "fix-auth", "review the diff\nthen commit"]);
+
+        assert_eq!(exit, CliExit::Code(0));
+        assert_eq!(
+            harness
+                .fixture()
+                .multiplexer()
+                .submitted_when_ready("ringleader-fix-auth"),
+            ["review the diff\nthen commit"]
+        );
+        assert!(harness.stdout().contains("sent the prompt to fix-auth"));
+    }
+
+    #[test]
+    fn send_to_an_unknown_session_exits_two() {
+        let harness = CliHarness::new(ServiceFixture::new());
+
+        let exit = harness.run(&["send", "fix-auth", "review the diff"]);
+
+        assert_eq!(exit, CliExit::Code(CliExit::NOT_FOUND));
+    }
+
+    #[test]
+    fn send_to_a_stopped_session_exits_three_and_submits_nothing() {
+        let harness = CliHarness::new(CommandFixture::stopped(&["fix-auth"], &["fix-auth"]));
+
+        let exit = harness.run(&["send", "fix-auth", "review the diff"]);
+
+        assert_eq!(exit, CliExit::Code(CliExit::CONFLICT));
+        assert!(
+            harness
+                .stderr()
+                .contains("restart it before sending it a prompt")
+        );
+        assert!(
+            harness
+                .fixture()
+                .multiplexer()
+                .submitted_when_ready("ringleader-fix-auth")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn send_of_a_blank_prompt_exits_one_and_submits_nothing() {
+        let harness = CliHarness::new(CommandFixture::live());
+
+        let exit = harness.run(&["send", "fix-auth", "  \n "]);
+
+        assert_eq!(exit, CliExit::Code(CliExit::FAILURE));
+        assert!(
+            harness
+                .fixture()
+                .multiplexer()
+                .submitted_when_ready("ringleader-fix-auth")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn send_to_an_agent_that_never_reaches_its_prompt_exits_three_and_names_the_draft() {
+        let session = CommandFixture::session();
+        let multiplexer = FakeMultiplexer::new()
+            .with_live(ServiceFixture::waiting(&session))
+            .failing(
+                "submit_when_ready",
+                MultiplexerError::AgentNotReady {
+                    tmux_name: session.tmux_name().to_string(),
+                },
+            );
+        let harness = CliHarness::new(
+            ServiceFixture::new()
+                .with_sessions(std::slice::from_ref(&session))
+                .with_multiplexer(multiplexer),
+        );
+
+        let exit = harness.run(&["send", "fix-auth", "review the diff"]);
+
+        assert_eq!(exit, CliExit::Code(CliExit::CONFLICT));
+        assert!(
+            harness
+                .stderr()
+                .contains("send or clear its draft, or leave copy mode before sending")
+        );
+    }
+
+    #[test]
+    fn send_takes_no_lock() {
+        let harness = CliHarness::new(CommandFixture::live());
+
+        harness.run(&["send", "fix-auth", "review the diff"]);
+
+        assert!(harness.lock_acquisitions().is_empty());
+    }
+
+    #[test]
+    fn send_accepts_a_prompt_that_starts_with_a_dash() {
+        let harness = CliHarness::new(CommandFixture::live());
+
+        let exit = harness.run(&["send", "fix-auth", "--help me find the bug"]);
+
+        assert_eq!(exit, CliExit::Code(0));
     }
 
     #[test]

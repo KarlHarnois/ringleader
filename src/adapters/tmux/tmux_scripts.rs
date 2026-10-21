@@ -203,6 +203,13 @@ impl TmuxScripts {
             .command(["display-message", "-p", "-t", pane, TmuxLaunch::DONE_LABEL])
     }
 
+    pub fn paste_from_input(pane: &str, buffer: &str) -> TmuxSequence {
+        TmuxSequence::new()
+            .command(["load-buffer", "-b", buffer, "-"])
+            .command(["paste-buffer", "-d", "-p", "-r", "-b", buffer, "-t", pane])
+            .command(["display-message", "-p", "-t", pane, TmuxLaunch::DONE_LABEL])
+    }
+
     pub fn press_enter(pane: &str) -> TmuxSequence {
         TmuxSequence::new()
             .command(["send-keys", "-t", pane, "Enter"])

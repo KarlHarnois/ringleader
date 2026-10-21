@@ -4,7 +4,7 @@ use std::process::Command;
 use std::time::Duration;
 
 use super::private_server::PrivateServer;
-use super::tmux_agent_input::TmuxAgentInput;
+use super::tmux_agent_input::{InputError, TmuxAgentInput};
 use super::tmux_command::TmuxCommand;
 use super::tmux_error::TmuxError;
 use super::tmux_launch::{Launched, TmuxLaunch};
@@ -124,9 +124,19 @@ impl TmuxMultiplexer {
         lines: &[String],
         patience: Duration,
     ) -> Result<(), MultiplexerError> {
+        self.reach_agent(tmux_name, patience, |input, pane| {
+            input.type_when_ready(pane, lines)
+        })
+    }
+
+    fn reach_agent(
+        &self,
+        tmux_name: &str,
+        patience: Duration,
+        deliver: impl FnOnce(&TmuxAgentInput, &str) -> Result<(), InputError>,
+    ) -> Result<(), MultiplexerError> {
         let pane = self.required_agent_pane(tmux_name)?;
-        TmuxAgentInput::new(&self.tmux, patience)
-            .type_when_ready(&pane, lines)
+        deliver(&TmuxAgentInput::new(&self.tmux, patience), &pane)
             .map_err(|error| error.in_session(tmux_name))
     }
 
@@ -332,6 +342,12 @@ impl Multiplexer for TmuxMultiplexer {
 
     fn type_if_ready(&self, tmux_name: &str, lines: &[String]) -> Result<(), MultiplexerError> {
         self.type_into_agent(tmux_name, lines, Duration::ZERO)
+    }
+
+    fn submit_when_ready(&self, tmux_name: &str, prompt: &str) -> Result<(), MultiplexerError> {
+        self.reach_agent(tmux_name, Self::STARTUP_PATIENCE, |input, pane| {
+            input.paste_when_ready(pane, prompt)
+        })
     }
 
     fn agent_at_prompt(&self, tmux_name: &str) -> Result<bool, MultiplexerError> {
@@ -1480,6 +1496,34 @@ mod tests {
                 .is_ok_and(|text| text.contains("hello fix-auth"))
         });
         assert!(typed);
+    }
+
+    #[test]
+    fn a_submitted_prompt_reaches_the_agent_pane_at_its_prompt() {
+        let fixture = MultiplexerFixture::with_holder();
+        let multiplexer = TmuxMultiplexer::new(
+            fixture.server.command(),
+            fixture.server.launcher(
+                ["sh", "-c", "printf '> '; exec cat", "--"]
+                    .map(OsString::from)
+                    .to_vec(),
+            ),
+            fixture.server.process_table(),
+        );
+        multiplexer
+            .create_session(&fixture.spec("fix-auth"))
+            .unwrap();
+
+        multiplexer
+            .submit_when_ready("ringleader-fix-auth", "review fix-auth")
+            .unwrap();
+
+        let submitted = fixture.server.wait_for(|| {
+            multiplexer
+                .capture_pane("ringleader-fix-auth")
+                .is_ok_and(|text| text.contains("review fix-auth"))
+        });
+        assert!(submitted);
     }
 
     #[test]

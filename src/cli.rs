@@ -53,6 +53,8 @@ enum CliCommand {
     Delete(DeleteArgs),
     #[command(about = "Attach to a session")]
     Attach(NameArgs),
+    #[command(about = "Type a prompt into a running session's agent and submit it")]
+    Send(SendArgs),
     #[command(about = "Rename a session and the branch made for it")]
     Rename(RenameArgs),
     #[command(about = "Restart an exited or stopped session, or with --all every one")]
@@ -128,6 +130,13 @@ struct DeleteArgs {
 #[derive(Debug, Args)]
 struct NameArgs {
     name: String,
+}
+
+#[derive(Debug, Args)]
+struct SendArgs {
+    name: String,
+    #[arg(allow_hyphen_values = true)]
+    prompt: String,
 }
 
 #[derive(Debug, Args)]
@@ -287,6 +296,7 @@ impl Cli {
             Some(CliCommand::New(args)) => commands.create(args),
             Some(CliCommand::Delete(args)) => commands.delete(args),
             Some(CliCommand::Attach(args)) => commands.attach(&args.name),
+            Some(CliCommand::Send(args)) => commands.send(args),
             Some(CliCommand::Rename(args)) => commands.rename(args),
             Some(CliCommand::Restart(args)) => match &args.name {
                 Some(name) => commands.restart(name),

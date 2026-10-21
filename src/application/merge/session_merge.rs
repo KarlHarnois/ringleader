@@ -4,6 +4,7 @@ use super::merge_report::{ConflictHandoff, MergeReport, UpstreamMerge};
 use super::upstream_resolver::UpstreamResolver;
 use crate::application::ServiceError;
 use crate::application::ServicePorts;
+use crate::application::checks::agent_readiness::AgentReadiness;
 use crate::application::checks::worktree_inspection::WorktreeInspection;
 use crate::application::monitor::session_monitor::SessionMonitor;
 use crate::application::ports::{HostProbe, MergeOutcome, Multiplexer, Workspace, WorkspaceError};
@@ -173,13 +174,7 @@ impl SessionMerge {
     }
 
     fn refuse_unless_at_prompt(&self, session: &Session) -> Result<(), ServiceError> {
-        if self.multiplexer.agent_at_prompt(session.tmux_name())? {
-            return Ok(());
-        }
-        Err(ServiceError::Conflict(format!(
-            "the agent of session {} is not at its prompt, answer its dialog, send or clear its draft, or leave copy mode before merging",
-            session.name()
-        )))
+        AgentReadiness::new(self.multiplexer.as_ref()).refuse_unless_at_prompt(session, "merging")
     }
 
     fn refuse_unclean_worktree(&self, session: &Session) -> Result<(), ServiceError> {
