@@ -71,7 +71,7 @@ Conflicts with existing state include these:
 
 ## Skills
 
-Ringleader gives each Claude Code and opencode session these skills:
+Unless an agent's config turns them off, each Claude Code and opencode session gets these skills:
 
 | Skill | What it does |
 |---|---|

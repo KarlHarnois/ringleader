@@ -250,7 +250,7 @@ nix flake check
 | `docs/agents/features/scratch-directories.md` | change a session's scratch directory |
 | `docs/agents/features/background-jobs.md` | change one of the TUI's background jobs |
 | `docs/agents/features/write-lock.md` | change what a process saves, or when a process takes a lock |
-| `docs/agents/skills.md` | add or change a skill, change how a launch gets the built-in skill, or change the CLI |
+| `docs/agents/skills.md` | add or change a skill, change how a launch gets the built-in skills, or change the CLI |
 | `docs/agents/features/usage.md` | change how Ringleader measures an agent's usage, or the usage view that the `u` key opens |
 
 ## Architecture
