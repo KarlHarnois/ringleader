@@ -1,5 +1,5 @@
 {
-  description = "Ringleader, a tmux session manager for Claude and opencode";
+  description = "Ringleader, a tmux session manager for coding agents";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
@@ -205,7 +205,7 @@
               --set-default RINGLEADER_GIT ${pkgs.gitMinimal}/bin/git
           '';
           meta = {
-            description = "A tmux session manager for Claude and opencode";
+            description = "A tmux session manager for coding agents";
             license = pkgs.lib.licenses.mit;
             mainProgram = "ringleader";
             platforms = supportedSystems;
