@@ -14,6 +14,11 @@ impl Theme {
         self.base().add_modifier(Modifier::REVERSED)
     }
 
+    pub fn on_selection(&self, mut style: Style) -> Style {
+        style.add_modifier.remove(Modifier::DIM);
+        style
+    }
+
     pub fn selected_text(&self) -> Style {
         self.base().add_modifier(Modifier::UNDERLINED)
     }
@@ -24,6 +29,10 @@ impl Theme {
 
     pub fn emphasis(&self) -> Style {
         self.base().add_modifier(Modifier::BOLD)
+    }
+
+    pub fn matched(&self) -> Style {
+        self.emphasis().add_modifier(Modifier::UNDERLINED)
     }
 
     pub fn error(&self) -> Style {

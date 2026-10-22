@@ -1,0 +1,171 @@
+use ratatui::style::Style;
+use ratatui::text::Span;
+
+use crate::domain::{RepoGroup, SessionSummary};
+use crate::ui::text_fit::TextFit;
+use crate::ui::theme::Theme;
+
+pub struct SessionCandidate {
+    repo_prefix: String,
+    name: String,
+    matched: Vec<usize>,
+}
+
+impl SessionCandidate {
+    const REPO_SEPARATOR: char = '/';
+
+    pub fn prefixed(row: &SessionSummary) -> Self {
+        let repo_prefix = match RepoGroup::of(row) {
+            RepoGroup::Named(repo, _) => format!("{repo}{}", Self::REPO_SEPARATOR),
+            RepoGroup::Other => String::new(),
+        };
+        Self {
+            repo_prefix,
+            ..Self::bare(row)
+        }
+    }
+
+    pub fn bare(row: &SessionSummary) -> Self {
+        Self {
+            repo_prefix: String::new(),
+            name: row.name().to_string(),
+            matched: Vec::new(),
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn shown(&self) -> String {
+        format!("{}{}", self.repo_prefix, self.name)
+    }
+
+    pub fn mark(&mut self, positions: &[usize]) {
+        self.matched = positions.to_vec();
+    }
+
+    pub fn spans(&self, width: usize, theme: &Theme) -> Vec<Span<'static>> {
+        let shown = self.shown();
+        let fit = TextFit::new(&shown);
+        let kept = fit.kept_length(width);
+        let styled: Vec<(char, Style)> = fit
+            .padded(width)
+            .chars()
+            .enumerate()
+            .map(|(position, character)| (character, self.style_at(position, kept, theme)))
+            .collect();
+        let runs = styled.chunk_by(|first, second| first.1 == second.1);
+        runs.map(Self::span).collect()
+    }
+
+    fn style_at(&self, position: usize, kept: usize, theme: &Theme) -> Style {
+        if position < kept && self.matched.contains(&position) {
+            theme.matched()
+        } else if position < self.prefix_width() {
+            theme.dim()
+        } else {
+            theme.emphasis()
+        }
+    }
+
+    fn prefix_width(&self) -> usize {
+        self.repo_prefix.chars().count()
+    }
+
+    fn span(run: &[(char, Style)]) -> Span<'static> {
+        let text: String = run.iter().map(|(character, _)| character).collect();
+        Span::styled(text, run[0].1)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{SessionState, UnmanagedSession};
+    use crate::test_support::ServiceFixture;
+    use crate::ui::dialogs::fuzzy_search::fuzzy_ranker::{FuzzyMatch, FuzzyRanker};
+
+    struct CandidateFixture;
+
+    impl CandidateFixture {
+        const WIDTH: usize = 20;
+        const REPO: &'static str = "/repos/alpha";
+
+        fn prefixed(name: &str) -> SessionCandidate {
+            let row = ServiceFixture::summary_in(name, Self::REPO, SessionState::Waiting);
+            SessionCandidate::prefixed(&row)
+        }
+
+        fn matching(name: &str, query: &str) -> SessionCandidate {
+            let mut candidate = Self::prefixed(name);
+            let found = FuzzyRanker::for_names().matches(query, &[candidate.shown()]);
+            candidate.mark(found.first().map_or(&[], FuzzyMatch::positions));
+            candidate
+        }
+
+        fn outside_any_repo(label: &str) -> SessionCandidate {
+            let stranger = ServiceFixture::session(label);
+            let observation = ServiceFixture::waiting(&stranger).without_metadata();
+            let row = SessionSummary::unmanaged(UnmanagedSession::new(label, observation));
+            SessionCandidate::prefixed(&row)
+        }
+
+        fn text_in(candidate: &SessionCandidate, style: Style) -> String {
+            let spans = candidate.spans(Self::WIDTH, &Theme);
+            let styled = spans.iter().filter(|span| span.style == style);
+            styled.map(|span| span.content.as_ref()).collect()
+        }
+    }
+
+    #[test]
+    fn a_session_in_a_repo_shows_its_repo_before_its_name() {
+        assert_eq!(CandidateFixture::prefixed("docs").shown(), "alpha/docs");
+    }
+
+    #[test]
+    fn a_session_outside_any_repo_shows_no_prefix() {
+        assert_eq!(
+            CandidateFixture::outside_any_repo("scratch").shown(),
+            "scratch"
+        );
+    }
+
+    #[test]
+    fn the_repo_prefix_is_dim() {
+        let candidate = CandidateFixture::prefixed("docs");
+
+        assert_eq!(CandidateFixture::text_in(&candidate, Theme.dim()), "alpha/");
+    }
+
+    #[test]
+    fn the_session_name_is_bold() {
+        let candidate = CandidateFixture::prefixed("docs");
+
+        let bold = CandidateFixture::text_in(&candidate, Theme.emphasis());
+
+        assert_eq!(bold.trim_end(), "docs");
+    }
+
+    #[test]
+    fn matched_letters_are_bold_and_underlined() {
+        let candidate = CandidateFixture::matching("fix-auth", "fa");
+
+        assert_eq!(CandidateFixture::text_in(&candidate, Theme.matched()), "fa");
+    }
+
+    #[test]
+    fn a_match_cut_off_by_the_width_leaves_the_ellipsis_plain() {
+        let candidate = CandidateFixture::matching("abcdefghijklmnopqrstuvwxyz", "n");
+
+        assert_eq!(CandidateFixture::text_in(&candidate, Theme.matched()), "");
+    }
+
+    #[test]
+    fn a_matched_repo_letter_drops_dim_because_bold_and_faint_cancel_in_some_terminals() {
+        let candidate = CandidateFixture::matching("docs", "ph");
+
+        assert_eq!(CandidateFixture::text_in(&candidate, Theme.matched()), "ph");
+        assert_eq!(CandidateFixture::text_in(&candidate, Theme.dim()), "ala/");
+    }
+}
