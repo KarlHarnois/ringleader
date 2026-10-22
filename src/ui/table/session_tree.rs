@@ -13,12 +13,16 @@ pub struct SessionTree<'a> {
 
 impl<'a> SessionTree<'a> {
     pub fn new(rows: &'a [SessionSummary], folded: &HashSet<RepoGroup>) -> Self {
-        let groups: Vec<&'a [SessionSummary]> = rows.chunk_by(Self::share_a_group).collect();
-        let lines = match groups.len() {
-            0 | 1 => Self::flat_lines(rows),
-            _ => Self::grouped_lines(groups, folded),
+        let lines = if Self::groups_by_repo(rows) {
+            Self::grouped_lines(rows, folded)
+        } else {
+            Self::flat_lines(rows)
         };
         Self { rows, lines }
+    }
+
+    pub fn groups_by_repo(rows: &[SessionSummary]) -> bool {
+        rows.chunk_by(Self::share_a_group).nth(1).is_some()
     }
 
     pub fn sort(rows: &mut [SessionSummary]) {
@@ -76,11 +80,8 @@ impl<'a> SessionTree<'a> {
         rows.iter().map(flat).collect()
     }
 
-    fn grouped_lines(
-        groups: Vec<&'a [SessionSummary]>,
-        folded: &HashSet<RepoGroup>,
-    ) -> Vec<TreeLine<'a>> {
-        let numbered = groups.into_iter().zip(1..);
+    fn grouped_lines(rows: &'a [SessionSummary], folded: &HashSet<RepoGroup>) -> Vec<TreeLine<'a>> {
+        let numbered = rows.chunk_by(Self::share_a_group).zip(1..);
         let headings =
             numbered.map(|(rows, number)| RepoHeading::new(number, rows).folded_among(folded));
         headings.flat_map(Self::group_lines).collect()

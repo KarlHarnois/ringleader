@@ -62,8 +62,8 @@ impl Dialog {
         }))
     }
 
-    pub fn find_session(names: Vec<String>) -> Self {
-        Self::FindSession(Box::new(SessionFinder::open(names)))
+    pub fn find_session(rows: &[SessionSummary]) -> Self {
+        Self::FindSession(Box::new(SessionFinder::open(rows)))
     }
 
     fn help(service: &SessionService) -> Self {
@@ -237,8 +237,10 @@ pub enum DialogStep {
 mod tests {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
+    use ratatui::style::Modifier;
 
     use super::*;
+    use crate::domain::SessionState;
     use crate::test_support::ServiceFixture;
 
     struct PlacementFixture;
@@ -252,10 +254,26 @@ mod tests {
             terminal
         }
 
+        fn fill_finder(query: &str) -> Terminal<TestBackend> {
+            let mut dialog = Dialog::find_session(&[
+                ServiceFixture::summary_in("docs", "/repos/alpha", SessionState::Waiting),
+                ServiceFixture::summary_in("fix-auth", "/repos/beta", SessionState::Waiting),
+            ]);
+            let typed = Event::Paste(query.to_string());
+            dialog.handle_event(&typed, &ServiceFixture::new().service());
+            let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
+            terminal.draw(|frame| dialog.fill(frame, &Theme)).unwrap();
+            terminal
+        }
+
         fn symbol(terminal: &Terminal<TestBackend>, column: u16, row: u16) -> String {
             terminal.backend().buffer()[(column, row)]
                 .symbol()
                 .to_string()
+        }
+
+        fn modifier(terminal: &Terminal<TestBackend>, column: u16, row: u16) -> Modifier {
+            terminal.backend().buffer()[(column, row)].modifier
         }
     }
 
@@ -292,14 +310,30 @@ mod tests {
 
     #[test]
     fn a_filling_finder_draws_its_border_and_title_from_the_frame_corner() {
-        let dialog = Dialog::find_session(vec!["fix-auth".to_string()]);
-        let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
-
-        terminal.draw(|frame| dialog.fill(frame, &Theme)).unwrap();
+        let terminal = PlacementFixture::fill_finder("");
 
         assert_eq!(PlacementFixture::symbol(&terminal, 0, 0), "┌");
         assert_eq!(PlacementFixture::symbol(&terminal, 2, 0), "F");
         assert_eq!(PlacementFixture::symbol(&terminal, 39, 11), "┘");
+    }
+
+    #[test]
+    fn the_selected_finder_row_is_reversed_with_nothing_faint_on_it() {
+        let terminal = PlacementFixture::fill_finder("ph");
+
+        assert_eq!(PlacementFixture::symbol(&terminal, 4, 3), "p");
+        assert_eq!(
+            PlacementFixture::modifier(&terminal, 4, 3),
+            Modifier::REVERSED | Modifier::BOLD | Modifier::UNDERLINED
+        );
+        assert_eq!(
+            PlacementFixture::modifier(&terminal, 2, 3),
+            Modifier::REVERSED
+        );
+        assert_eq!(
+            PlacementFixture::modifier(&terminal, 8, 3),
+            Modifier::REVERSED | Modifier::BOLD
+        );
     }
 
     #[test]

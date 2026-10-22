@@ -242,8 +242,8 @@ impl App {
                 self.dialogs.open(Dialog::open(opening, &self.service));
             }
             KeyAction::FindSession => {
-                let names = self.home.sessions().names();
-                self.dialogs.open(Dialog::find_session(names));
+                let finder = Dialog::find_session(self.home.sessions().rows());
+                self.dialogs.open(finder);
             }
             KeyAction::Reload => self.reload(),
             KeyAction::OpenOnDesktop(opening) => self.open_on_desktop(opening),

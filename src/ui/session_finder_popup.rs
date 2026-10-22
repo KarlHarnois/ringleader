@@ -38,18 +38,18 @@ impl SessionFinderPopup {
         I: InputSource,
     {
         let mut terminal = Terminal::new(backend).map_err(io::Error::other)?;
-        let mut finder = Dialog::find_session(self.session_names()?);
+        let mut finder = Dialog::find_session(self.load_sessions()?.rows());
         match self.choose(&mut terminal, &mut input, &mut finder)? {
             Choice::Session(name) => Ok(self.service.switch_client(&name, &self.client)?),
             Choice::Dismissed => Ok(()),
         }
     }
 
-    fn session_names(&mut self) -> Result<Vec<String>, ServiceError> {
+    fn load_sessions(&mut self) -> Result<SessionList, ServiceError> {
         self.service.load_registry(CorruptRegistry::Report)?;
         let mut sessions = SessionList::default();
         sessions.show(self.service.observe()?);
-        Ok(sessions.names())
+        Ok(sessions)
     }
 
     fn choose<B, I>(
@@ -183,6 +183,20 @@ mod tests {
     fn a_typed_query_picks_the_session_it_matches() {
         let fixture = UiHarness::two_repos();
         let mut events = PopupFixture::typed("fix");
+        events.push(PopupFixture::enter());
+
+        PopupFixture::run(&fixture, events).unwrap();
+
+        assert_eq!(
+            fixture.multiplexer().switched(),
+            PopupFixture::switched_to("fix-auth")
+        );
+    }
+
+    #[test]
+    fn a_typed_repo_name_picks_a_session_in_that_repo() {
+        let fixture = UiHarness::two_repos();
+        let mut events = PopupFixture::typed("example");
         events.push(PopupFixture::enter());
 
         PopupFixture::run(&fixture, events).unwrap();
