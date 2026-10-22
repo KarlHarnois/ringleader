@@ -11,6 +11,7 @@ pub mod lock;
 pub mod merge_outcome;
 pub mod multiplexer;
 pub mod pull_requests;
+pub mod repo_pages;
 pub mod repo_scanner;
 pub mod scratch_space;
 pub mod session_registry;
@@ -35,6 +36,7 @@ pub use multiplexer::{
     AttachTarget, Multiplexer, MultiplexerError, ServerConfig, ServerState, SessionSpec,
 };
 pub use pull_requests::{PullRequestError, PullRequests};
+pub use repo_pages::{RepoPageError, RepoPages};
 pub use repo_scanner::{RepoScanner, ScanError, ScanOutcome};
 pub use scratch_space::{ScratchSpace, ScratchSpaceError};
 pub use session_registry::{RegistryError, SessionRegistry};

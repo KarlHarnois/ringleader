@@ -1,18 +1,23 @@
+use std::iter::once;
+
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::text::{Line, Span};
 
 use super::dialog::DialogStep;
+use super::session_candidate::SessionCandidate;
 use super::text_field::FieldKind;
+use crate::domain::SessionSummary;
 use crate::ui::app::AppRequest;
-use crate::ui::dialogs::fuzzy_search::fuzzy_ranker::FuzzyRanker;
+use crate::ui::dialogs::fuzzy_search::fuzzy_ranker::{FuzzyMatch, FuzzyRanker};
 use crate::ui::dialogs::fuzzy_search::match_list::MatchList;
 use crate::ui::dialogs::fuzzy_search::search_query::SearchQuery;
+use crate::ui::table::session_tree::SessionTree;
 use crate::ui::text_fit::TextFit;
 use crate::ui::theme::Theme;
 
 pub struct SessionFinder {
     query: SearchQuery,
-    names: Vec<String>,
+    candidates: Vec<SessionCandidate>,
     ranker: FuzzyRanker,
     matches: MatchList,
 }
@@ -24,10 +29,10 @@ impl SessionFinder {
     const COUNT_GAP: usize = 1;
     const SIDE_PADDING: usize = 1;
 
-    pub fn open(names: Vec<String>) -> Self {
+    pub fn open(rows: &[SessionSummary]) -> Self {
         let mut finder = Self {
             query: SearchQuery::new(FieldKind::Name, Self::PROMPT),
-            names,
+            candidates: Self::candidates(rows),
             ranker: FuzzyRanker::for_names(),
             matches: MatchList::default(),
         };
@@ -59,9 +64,21 @@ impl SessionFinder {
         lines
     }
 
+    fn candidates(rows: &[SessionSummary]) -> Vec<SessionCandidate> {
+        let candidate = if SessionTree::groups_by_repo(rows) {
+            SessionCandidate::prefixed
+        } else {
+            SessionCandidate::bare
+        };
+        rows.iter().map(candidate).collect()
+    }
+
     fn attach(&self) -> DialogStep {
         match self.matches.selected() {
-            Some(index) => DialogStep::CloseWith(AppRequest::Attach(self.names[index].clone())),
+            Some(index) => {
+                let name = self.candidates[index].name().to_string();
+                DialogStep::CloseWith(AppRequest::Attach(name))
+            }
             None => DialogStep::Stay,
         }
     }
@@ -76,8 +93,27 @@ impl SessionFinder {
     }
 
     fn rank(&mut self) {
-        let ranked = self.ranker.ranked(self.query.value(), &self.names);
-        self.matches.replace(ranked);
+        let shown = self.shown_candidates();
+        let found = self.ranker.matches(self.query.value(), &shown);
+        self.mark_matches(&found);
+        self.matches
+            .replace(found.iter().map(FuzzyMatch::index).collect());
+    }
+
+    fn mark_matches(&mut self, found: &[FuzzyMatch]) {
+        for candidate in &mut self.candidates {
+            candidate.mark(&[]);
+        }
+        for fuzzy_match in found {
+            self.candidates[fuzzy_match.index()].mark(fuzzy_match.positions());
+        }
+    }
+
+    fn shown_candidates(&self) -> Vec<String> {
+        self.candidates
+            .iter()
+            .map(SessionCandidate::shown)
+            .collect()
     }
 
     fn query_line(&self, width: usize, theme: &Theme) -> Line<'static> {
@@ -98,14 +134,17 @@ impl SessionFinder {
     }
 
     fn count(&self) -> String {
-        format!("{}/{}", self.matches.len(), self.names.len())
+        format!("{}/{}", self.matches.len(), self.candidates.len())
     }
 
     fn match_rows(&self, width: usize, rows: usize, theme: &Theme) -> Vec<Line<'static>> {
         let name_room = width.saturating_sub(Self::SIDE_PADDING);
         let indent = " ".repeat(Self::SIDE_PADDING);
         self.matches.lines(rows, theme, |index| {
-            indent.clone() + &TextFit::new(&self.names[index]).padded(name_room)
+            let spans = self.candidates[index].spans(name_room, theme);
+            once(Span::raw(indent.clone()))
+                .chain(spans)
+                .collect::<Line>()
         })
     }
 }
@@ -115,20 +154,40 @@ mod tests {
     use crossterm::event::KeyModifiers;
 
     use super::*;
+    use crate::domain::SessionState;
+    use crate::test_support::ServiceFixture;
 
     struct FinderFixture;
 
     impl FinderFixture {
         const WIDTH: usize = 20;
         const HEIGHT: usize = 8;
-
-        fn names() -> Vec<String> {
-            let names = ["fix-auth", "dark-mode", "docs"];
-            names.iter().map(|name| name.to_string()).collect()
-        }
+        const FIRST_MATCH: usize = 2;
+        const ALPHA: &'static str = "/repos/alpha";
+        const BETA: &'static str = "/repos/beta";
 
         fn finder() -> SessionFinder {
-            SessionFinder::open(Self::names())
+            let names = ["fix-auth", "dark-mode", "docs"];
+            let rows: Vec<SessionSummary> = names
+                .iter()
+                .map(|name| Self::row(name, Self::ALPHA))
+                .collect();
+            SessionFinder::open(&rows)
+        }
+
+        fn two_repo_finder() -> SessionFinder {
+            SessionFinder::open(&[
+                Self::row("docs", Self::ALPHA),
+                Self::row("fix-auth", Self::BETA),
+            ])
+        }
+
+        fn row(name: &str, repo: &str) -> SessionSummary {
+            ServiceFixture::summary_in(name, repo, SessionState::Waiting)
+        }
+
+        fn matches(finder: &SessionFinder) -> Vec<String> {
+            Self::rows(finder).split_off(Self::FIRST_MATCH)
         }
 
         fn press(finder: &mut SessionFinder, code: KeyCode, modifiers: KeyModifiers) -> DialogStep {
@@ -209,9 +268,10 @@ mod tests {
 
     #[test]
     fn a_long_name_is_truncated_after_its_indent() {
-        let finder = SessionFinder::open(vec!["a-session-name-wider-than-the-finder".to_string()]);
+        let row = FinderFixture::row("a-session-name-wider-than-the-finder", FinderFixture::ALPHA);
+        let finder = SessionFinder::open(&[row]);
 
-        assert_eq!(FinderFixture::rows(&finder)[2], " a-session-name-wid…");
+        assert_eq!(FinderFixture::matches(&finder), [" a-session-name-wid…"]);
     }
 
     #[test]
@@ -269,6 +329,68 @@ mod tests {
         let mut finder = FinderFixture::finder();
 
         finder.paste("docs");
+
+        assert_eq!(
+            FinderFixture::enter(&mut finder),
+            FinderFixture::attach("docs")
+        );
+    }
+
+    #[test]
+    fn sessions_in_several_repos_show_their_repo_before_their_name() {
+        assert_eq!(
+            FinderFixture::matches(&FinderFixture::two_repo_finder()),
+            [
+                FinderFixture::full_width(" alpha/docs"),
+                FinderFixture::full_width(" beta/fix-auth"),
+            ]
+        );
+    }
+
+    #[test]
+    fn sessions_in_one_repo_show_bare_names_like_the_flat_session_list() {
+        let finder = SessionFinder::open(&[
+            FinderFixture::row("docs", FinderFixture::BETA),
+            FinderFixture::row("fix-auth", FinderFixture::BETA),
+        ]);
+
+        assert_eq!(
+            FinderFixture::matches(&finder),
+            [
+                FinderFixture::full_width(" docs"),
+                FinderFixture::full_width(" fix-auth"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_query_matches_the_repo_and_the_name_at_once() {
+        let mut finder = SessionFinder::open(&[
+            FinderFixture::row("docs", FinderFixture::ALPHA),
+            FinderFixture::row("fix-docs", FinderFixture::ALPHA),
+            FinderFixture::row("fix-auth", FinderFixture::BETA),
+        ]);
+
+        FinderFixture::type_text(&mut finder, "alpha fix");
+
+        assert_eq!(
+            FinderFixture::matches(&finder),
+            [FinderFixture::full_width(" alpha/fix-docs")]
+        );
+    }
+
+    #[test]
+    fn a_query_ignores_the_repo_when_the_rows_hide_it() {
+        let mut finder = FinderFixture::finder();
+
+        FinderFixture::type_text(&mut finder, "alpha");
+
+        assert!(FinderFixture::matches(&finder).is_empty());
+    }
+
+    #[test]
+    fn enter_attaches_by_the_bare_session_name() {
+        let mut finder = FinderFixture::two_repo_finder();
 
         assert_eq!(
             FinderFixture::enter(&mut finder),

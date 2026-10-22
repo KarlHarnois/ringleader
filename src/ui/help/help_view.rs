@@ -44,7 +44,7 @@ impl HelpView {
         ),
         (
             "o gx",
-            "open the selected session's pull request in the browser",
+            "open the selected session's pull request, or the selected repo's GitHub page, in the browser",
         ),
         ("s", "restart an exited or stopped session"),
         ("S", "restart every exited or stopped session"),
@@ -231,8 +231,8 @@ mod tests {
         const SHORT_WIDTH: usize = 56;
         const SHORT_HEIGHT: usize = 8;
         const PAST_THE_END: usize = 50;
-        const ROWS_ABOVE_THE_SMALLEST_FULL_SIZE: u16 = 14;
-        const TALL_NARROW_SIZE: (u16, u16) = (79, 38);
+        const ROWS_ABOVE_THE_SMALLEST_FULL_SIZE: u16 = 15;
+        const TALL_NARROW_SIZE: (u16, u16) = (79, 39);
         const TMUX_CONFIG_ROW: &'static str = "tmux config  ~/.local/state/ringleader/tmux.conf";
 
         fn help() -> HelpView {
@@ -392,7 +392,8 @@ mod tests {
         let rows = HelpFixture::rows(&HelpFixture::help(), HelpFixture::UNWRAPPED_WIDTH);
 
         assert!(rows.contains(
-            &"o gx         open the selected session's pull request in the browser".to_string()
+            &"o gx         open the selected session's pull request, or the selected repo's GitHub page, in the browser"
+                .to_string()
         ));
     }
 

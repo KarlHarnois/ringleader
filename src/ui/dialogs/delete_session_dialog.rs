@@ -6,7 +6,7 @@ use super::dialog_labels::DialogLabels;
 use crate::application::DeleteImpact;
 use crate::domain::SessionSummary;
 use crate::ui::app::AppRequest;
-use crate::ui::blocking_operation::BlockingOperation;
+use crate::ui::blocking_operation::{BlockingOperation, DeleteStep};
 use crate::ui::text_fit::TextFit;
 use crate::ui::theme::Theme;
 
@@ -108,10 +108,12 @@ impl DeleteSessionDialog {
             self.armed = true;
             return DialogStep::Stay;
         }
-        DialogStep::Request(AppRequest::Block(BlockingOperation::Delete {
-            name: self.name.clone(),
-            seen: self.impact.clone(),
-        }))
+        DialogStep::Request(AppRequest::Block(BlockingOperation::Delete(
+            DeleteStep::Confirmed {
+                name: self.name.clone(),
+                seen: self.impact.clone(),
+            },
+        )))
     }
 }
 
@@ -172,10 +174,12 @@ mod tests {
         }
 
         fn delete_request(impact: DeleteImpact) -> DialogStep {
-            DialogStep::Request(AppRequest::Block(BlockingOperation::Delete {
-                name: "fix-auth".to_string(),
-                seen: impact,
-            }))
+            DialogStep::Request(AppRequest::Block(BlockingOperation::Delete(
+                DeleteStep::Confirmed {
+                    name: "fix-auth".to_string(),
+                    seen: impact,
+                },
+            )))
         }
     }
 

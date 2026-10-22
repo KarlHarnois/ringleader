@@ -241,8 +241,8 @@ impl App {
                 self.dialogs.open(Dialog::open(opening, &self.service));
             }
             KeyAction::FindSession => {
-                let names = self.home.sessions().names();
-                self.dialogs.open(Dialog::find_session(names));
+                let finder = Dialog::find_session(self.home.sessions().rows());
+                self.dialogs.open(finder);
             }
             KeyAction::Reload => self.reload(),
             KeyAction::OpenOnDesktop(opening) => self.open_on_desktop(opening),
@@ -443,9 +443,10 @@ mod tests {
     };
     use crate::test_support::{
         CapturedWriter, Deadline, FakeFoldStore, FakeLock, FakeMultiplexer, FakePullRequests,
-        FakeSessionRegistry, FakeTerminalEmulator, FakeUsageMeter, FakeWebBrowser, HeldCalls,
-        LogCapture, ServiceFixture, UiHarness,
+        FakeRepoPages, FakeSessionRegistry, FakeTerminalEmulator, FakeUsageMeter, FakeWebBrowser,
+        HeldCalls, LogCapture, ServiceFixture, UiHarness,
     };
+    use crate::ui::blocking_operation::DeleteStep;
 
     struct AppFixture;
 
@@ -453,6 +454,7 @@ mod tests {
         const HELP_PAST_THE_END: usize = 50;
         const SPINNER_FRAMES: &'static str = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
         const LOG_FILE_OUTSIDE_THE_STATE_DIRECTORY: &'static str = "/logs/ringleader/app.log";
+        const DOCS_PAGE: &'static str = "https://github.example.com/example-org/alpha";
         const RESTORED_SOCKET: &'static str = "recreated the socket";
 
         fn two_waiting_sessions() -> ServiceFixture {
@@ -688,6 +690,25 @@ mod tests {
                 app.on_tick(Instant::now());
                 !Self::screen(app, 100, 28).contains("Finding the repo")
             });
+        }
+
+        fn two_repos_with_the_docs_checkout() -> ServiceFixture {
+            let docs_repo = UiHarness::docs_repo_group();
+            let main_checkout = docs_repo.path().unwrap();
+            UiHarness::two_repos()
+                .with_host(ServiceFixture::host_for(&[]).with_directory(main_checkout))
+        }
+
+        fn docs_on_github() -> ServiceFixture {
+            let docs_repo = UiHarness::docs_repo_group();
+            let pages =
+                FakeRepoPages::default().with_page(docs_repo.path().unwrap(), Self::DOCS_PAGE);
+            Self::two_repos_with_the_docs_checkout().with_repo_pages(pages)
+        }
+
+        fn press_and_perform(app: &mut App, character: char) {
+            let request = app.handle_event(&UiHarness::character(character));
+            Self::perform(app, request);
         }
 
         fn beside_a_stranger() -> ServiceFixture {
@@ -1681,6 +1702,74 @@ mod tests {
     }
 
     #[test]
+    fn o_on_a_repo_heading_looks_up_its_github_page_behind_a_busy_message() {
+        let fixture = AppFixture::docs_on_github();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        let request = app.handle_event(&UiHarness::character('o'));
+
+        assert_eq!(
+            request,
+            AppRequest::Block(BlockingOperation::OpenRepoPage(UiHarness::docs_repo_group()))
+        );
+        assert_eq!(
+            AppFixture::status_line(&app, 100),
+            " Looking up the GitHub page of alpha…"
+        );
+    }
+
+    #[test]
+    fn o_on_a_repo_heading_opens_its_github_page() {
+        let fixture = AppFixture::docs_on_github();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press_and_perform(&mut app, 'o');
+
+        assert_eq!(fixture.web_browser().opened(), [AppFixture::DOCS_PAGE]);
+        assert_eq!(
+            app.status.message(),
+            Some(&StatusMessage::Info(
+                "Asked the browser to open the GitHub page of alpha.".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn o_on_a_repo_heading_without_a_github_page_says_so() {
+        let fixture = AppFixture::two_repos_with_the_docs_checkout();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press_and_perform(&mut app, 'o');
+
+        assert_eq!(
+            app.status.message(),
+            Some(&StatusMessage::Error(
+                "no GitHub page is known for alpha".to_string()
+            ))
+        );
+        assert!(fixture.web_browser().opened().is_empty());
+    }
+
+    #[test]
+    fn o_on_the_other_heading_says_it_has_no_github_page() {
+        let fixture = AppFixture::beside_a_stranger();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, 'G');
+        AppFixture::press(&mut app, 'k');
+
+        AppFixture::press_and_perform(&mut app, 'o');
+
+        assert_eq!(
+            app.status.message(),
+            Some(&StatusMessage::Error(
+                "the sessions under other belong to no repo, so there is no GitHub page to open"
+                    .to_string()
+            ))
+        );
+        assert!(fixture.web_browser().opened().is_empty());
+    }
+
+    #[test]
     fn n_then_ctrl_s_creates_the_session_selects_it_and_closes_the_dialog() {
         let fixture = AppFixture::two_waiting_sessions();
         let mut app = AppFixture::started(&fixture, 100, 28);
@@ -1856,10 +1945,10 @@ mod tests {
             .with_host(ServiceFixture::host_for(&[&session]).with_tmux_server_on(recorded));
         let mut app = AppFixture::started(&fixture, 100, 28);
 
-        app.perform(BlockingOperation::Delete {
+        app.perform(BlockingOperation::Delete(DeleteStep::Confirmed {
             name: "fix-auth".to_string(),
             seen: DeleteImpact::default(),
-        });
+        }));
 
         assert!(matches!(
             app.status.message(),
@@ -2492,6 +2581,20 @@ mod tests {
         AppFixture::perform(&mut app, measure);
 
         assert!(app.dialogs.is_open());
+        assert!(!lock.acquisitions().contains(&"wait"));
+    }
+
+    #[test]
+    fn o_on_a_repo_heading_opens_its_github_page_while_another_ringleader_holds_the_lock() {
+        let fixture = AppFixture::docs_on_github();
+        let lock = FakeLock::held_elsewhere();
+        let mut app = UiHarness::app_with_lock(&fixture, &lock);
+        app.resize(100, 28);
+        UiHarness::settle(&mut app);
+
+        AppFixture::press_and_perform(&mut app, 'o');
+
+        assert_eq!(fixture.web_browser().opened(), [AppFixture::DOCS_PAGE]);
         assert!(!lock.acquisitions().contains(&"wait"));
     }
 

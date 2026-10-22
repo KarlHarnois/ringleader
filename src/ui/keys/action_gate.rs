@@ -6,7 +6,7 @@ use super::back_key::BackKey;
 use crate::application::ports::ConfigError;
 use crate::domain::{RepoGroup, Session, SessionState, SessionSummary};
 use crate::ui::app::AppRequest;
-use crate::ui::blocking_operation::BlockingOperation;
+use crate::ui::blocking_operation::{BlockingOperation, DeleteStep};
 use crate::ui::dialogs::DialogOpening;
 
 pub struct ActionGate<'a> {
@@ -92,7 +92,7 @@ impl<'a> ActionGate<'a> {
             KeyCode::Enter => self.enter(),
             KeyCode::Char('t') => KeyAction::from(self.shell().map(KeyAction::Request)),
             KeyCode::Char('T') => KeyAction::from(self.terminal().map(KeyAction::OpenOnDesktop)),
-            KeyCode::Char('o') => self.open_pull_request(),
+            KeyCode::Char('o') => self.open_in_browser(),
             _ => return None,
         };
         Some(action)
@@ -145,7 +145,11 @@ impl<'a> ActionGate<'a> {
             .map(DesktopOpening::SessionTerminal)
     }
 
-    pub fn open_pull_request(&self) -> KeyAction {
+    pub fn open_in_browser(&self) -> KeyAction {
+        if let Some(group) = self.heading {
+            let operation = BlockingOperation::OpenRepoPage(group.clone());
+            return KeyAction::Request(AppRequest::Block(operation));
+        }
         let name = self.selected().map(|row| row.name().to_string());
         KeyAction::from(
             name.map(|name| KeyAction::OpenOnDesktop(DesktopOpening::PullRequest(name))),
@@ -168,7 +172,7 @@ impl<'a> ActionGate<'a> {
         if row.state() == SessionState::Unmanaged {
             return Err(format!("{name} is unmanaged, so it cannot be deleted."));
         }
-        let operation = BlockingOperation::MeasureDelete(name.to_string());
+        let operation = BlockingOperation::Delete(DeleteStep::Measure(name.to_string()));
         Ok(AppRequest::Block(operation))
     }
 
@@ -632,8 +636,8 @@ mod tests {
 
         assert_eq!(
             ActionGate::new(Some(&row), None).action_for(&key),
-            KeyAction::Request(AppRequest::Block(BlockingOperation::MeasureDelete(
-                "fix-auth".to_string()
+            KeyAction::Request(AppRequest::Block(BlockingOperation::Delete(
+                DeleteStep::Measure("fix-auth".to_string())
             )))
         );
     }
@@ -732,7 +736,7 @@ mod tests {
         let gate = ActionGate::on_heading(&heading, None);
         let refusal = |character| gate.action_for(&KeyEvent::from(KeyCode::Char(character)));
 
-        for character in ['d', 'R', 's', 't', 'o'] {
+        for character in ['d', 'R', 's', 't'] {
             assert_eq!(
                 refusal(character),
                 KeyAction::Refuse("No session is selected.".to_string())
@@ -750,7 +754,7 @@ mod tests {
         assert_eq!(gate.restart(), refusal);
         assert_eq!(gate.terminal(), Err("No session is selected.".to_string()));
         assert_eq!(
-            gate.open_pull_request(),
+            gate.open_in_browser(),
             KeyAction::Refuse("No session is selected.".to_string())
         );
     }
@@ -796,6 +800,20 @@ mod tests {
         assert_eq!(
             ActionGate::on_heading(&heading, Some(&error)).action_for(&key),
             KeyAction::OpenOnDesktop(DesktopOpening::RepoTerminal(GateFixture::heading()))
+        );
+    }
+
+    #[test]
+    fn o_on_a_heading_looks_up_its_repo_page_behind_a_busy_message_even_read_only() {
+        let heading = GateFixture::heading();
+        let error = GateFixture::config_error();
+        let key = KeyEvent::from(KeyCode::Char('o'));
+
+        assert_eq!(
+            ActionGate::on_heading(&heading, Some(&error)).action_for(&key),
+            KeyAction::Request(AppRequest::Block(BlockingOperation::OpenRepoPage(
+                GateFixture::heading()
+            )))
         );
     }
 
