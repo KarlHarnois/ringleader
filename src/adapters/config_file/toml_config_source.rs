@@ -107,7 +107,8 @@ plan_args = ["--agent", "plan"]
 resume_args = ["--continue"]
 
 # Gemini CLI works too. It reads skills only from its own config or the
-# worktree, so Ringleader leaves its built-in skills off.
+# worktree, so Ringleader leaves its built-in skills off. If you authenticate
+# with an API key rather than Google sign-in, add env = ["GEMINI_API_KEY"].
 # [[agents]]
 # name = "gemini"
 # command = "gemini"
