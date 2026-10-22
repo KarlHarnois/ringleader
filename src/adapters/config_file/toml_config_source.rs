@@ -315,6 +315,16 @@ mod tests {
         fn names(keys: &[HotKey]) -> Vec<String> {
             keys.iter().map(HotKey::to_string).collect()
         }
+
+        fn gemini_example() -> String {
+            TomlConfigSource::TEMPLATE
+                .lines()
+                .skip_while(|line| *line != r#"# [[agents]]"#)
+                .take_while(|line| !line.is_empty())
+                .map(|line| line.strip_prefix("# ").unwrap_or(line))
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
     }
 
     #[test]
@@ -364,7 +374,7 @@ mod tests {
         let config = fixture.source().load().unwrap();
 
         let agents: Vec<&str> = config.agents().iter().map(Agent::name).collect();
-        assert_eq!(agents, ["claude", "opencode", "gemini"]);
+        assert_eq!(agents, ["claude", "opencode"]);
         assert_eq!(config.repos()[0].name().as_str(), "example-project");
         assert_eq!(config.session_size().width(), 160);
     }
@@ -771,7 +781,7 @@ mod tests {
 
     #[test]
     fn the_gemini_agent_takes_the_prompt_as_a_positional_argument() {
-        let fixture = SourceFixture::with_text(FIXTURE);
+        let fixture = SourceFixture::with_text(&SourceFixture::gemini_example());
         let config = fixture.source().load().unwrap();
         let session = SessionName::new("fix-auth").unwrap();
 
@@ -787,7 +797,7 @@ mod tests {
 
     #[test]
     fn the_gemini_agent_starts_in_its_read_only_plan_mode() {
-        let fixture = SourceFixture::with_text(FIXTURE);
+        let fixture = SourceFixture::with_text(&SourceFixture::gemini_example());
         let config = fixture.source().load().unwrap();
         let session = SessionName::new("fix-auth").unwrap();
 
@@ -802,7 +812,7 @@ mod tests {
 
     #[test]
     fn the_gemini_agent_resumes_the_latest_session() {
-        let fixture = SourceFixture::with_text(FIXTURE);
+        let fixture = SourceFixture::with_text(&SourceFixture::gemini_example());
         let config = fixture.source().load().unwrap();
         let session = SessionName::new("fix-auth").unwrap();
 
@@ -814,19 +824,10 @@ mod tests {
 
     #[test]
     fn the_gemini_agent_gets_no_built_in_skills() {
-        let fixture = SourceFixture::with_text(FIXTURE);
+        let fixture = SourceFixture::with_text(&SourceFixture::gemini_example());
         let config = fixture.source().load().unwrap();
 
         assert!(!config.agent("gemini").unwrap().gets_built_in_skills());
-    }
-
-    #[test]
-    fn the_first_run_template_offers_a_commented_gemini_agent() {
-        let offered = TomlConfigSource::TEMPLATE
-            .lines()
-            .any(|line| line == r#"# name = "gemini""#);
-
-        assert!(offered);
     }
 
     #[test]
