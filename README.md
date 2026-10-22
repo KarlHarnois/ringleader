@@ -13,7 +13,7 @@
 /_/ |_/___/_/ |_/\____/_____/_____/_/  |_/_____/_____/_/ |_|
 ```
 
-Ringleader is a tmux session manager for Claude Code and opencode. Each session runs an agent in its own git worktree and branch, or in the repo's main checkout. Ringleader's TUI lists the sessions grouped by repo and shows how each one is doing.
+Ringleader is a tmux session manager for coding agents. Each session runs an agent in its own git worktree and branch, or in the repo's main checkout. Ringleader's TUI lists the sessions grouped by repo and shows how each one is doing.
 
 Ringleader runs on Linux and Apple Silicon macOS.
 
@@ -29,7 +29,7 @@ nix profile add github:KarlHarnois/ringleader
 
 ## First run
 
-**Run `ringleader` in a directory that holds your repos.** The command opens the TUI. If no config exists, the command writes a commented config with Claude Code and opencode as agents.
+**Run `ringleader` in a directory that holds your repos.** The command opens the TUI. If no config exists, the command writes a commented config with Claude Code and opencode as agents, plus a commented Gemini CLI example.
 
 Sessions run on Ringleader's own tmux server. The server ignores your tmux config, and its sessions do not show in your `tmux ls`. Ctrl-Q detaches you from a session and returns you to the TUI or the shell you attached from.
 

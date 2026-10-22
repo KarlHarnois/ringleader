@@ -26,3 +26,11 @@ name = "opencode"
 command = "opencode"
 env = ["OPENAI_API_KEY"]
 prompt_args = ["--prompt={prompt}"]
+
+[[agents]]
+name = "gemini"
+command = "gemini"
+prompt_args = ["{prompt}"]
+plan_args = ["--approval-mode", "plan"]
+resume_args = ["--resume"]
+built_in_skills = false

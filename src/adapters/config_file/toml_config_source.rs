@@ -105,6 +105,16 @@ env = ["OPENAI_API_KEY"]
 prompt_args = ["--prompt={prompt}"]
 plan_args = ["--agent", "plan"]
 resume_args = ["--continue"]
+
+# Gemini CLI works too. It reads skills only from its own config or the
+# worktree, so Ringleader leaves its built-in skills off.
+# [[agents]]
+# name = "gemini"
+# command = "gemini"
+# prompt_args = ["{prompt}"]
+# plan_args = ["--approval-mode", "plan"]
+# resume_args = ["--resume"]
+# built_in_skills = false
 "#;
     const REPOS_KEY: &'static str = "repos";
 
@@ -353,7 +363,7 @@ mod tests {
         let config = fixture.source().load().unwrap();
 
         let agents: Vec<&str> = config.agents().iter().map(Agent::name).collect();
-        assert_eq!(agents, ["claude", "opencode"]);
+        assert_eq!(agents, ["claude", "opencode", "gemini"]);
         assert_eq!(config.repos()[0].name().as_str(), "example-project");
         assert_eq!(config.session_size().width(), 160);
     }
@@ -756,6 +766,66 @@ mod tests {
             config.agent("opencode").unwrap().resume_argv(&session),
             ["opencode", "--continue"]
         );
+    }
+
+    #[test]
+    fn the_gemini_agent_takes_the_prompt_as_a_positional_argument() {
+        let fixture = SourceFixture::with_text(FIXTURE);
+        let config = fixture.source().load().unwrap();
+        let session = SessionName::new("fix-auth").unwrap();
+
+        assert_eq!(
+            config.agent("gemini").unwrap().launch_argv(
+                &session,
+                AgentMode::Build,
+                "fix the tests"
+            ),
+            ["gemini", "fix the tests"]
+        );
+    }
+
+    #[test]
+    fn the_gemini_agent_starts_in_its_read_only_plan_mode() {
+        let fixture = SourceFixture::with_text(FIXTURE);
+        let config = fixture.source().load().unwrap();
+        let session = SessionName::new("fix-auth").unwrap();
+
+        assert_eq!(
+            config
+                .agent("gemini")
+                .unwrap()
+                .launch_argv(&session, AgentMode::Plan, "fix the tests"),
+            ["gemini", "--approval-mode", "plan", "fix the tests"]
+        );
+    }
+
+    #[test]
+    fn the_gemini_agent_resumes_the_latest_session() {
+        let fixture = SourceFixture::with_text(FIXTURE);
+        let config = fixture.source().load().unwrap();
+        let session = SessionName::new("fix-auth").unwrap();
+
+        assert_eq!(
+            config.agent("gemini").unwrap().resume_argv(&session),
+            ["gemini", "--resume"]
+        );
+    }
+
+    #[test]
+    fn the_gemini_agent_gets_no_built_in_skills() {
+        let fixture = SourceFixture::with_text(FIXTURE);
+        let config = fixture.source().load().unwrap();
+
+        assert!(!config.agent("gemini").unwrap().gets_built_in_skills());
+    }
+
+    #[test]
+    fn the_first_run_template_offers_a_commented_gemini_agent() {
+        let offered = TomlConfigSource::TEMPLATE
+            .lines()
+            .any(|line| line == r#"# name = "gemini""#);
+
+        assert!(offered);
     }
 
     #[test]
