@@ -12,7 +12,7 @@ impl KeySequence {
         let pending_g = std::mem::take(&mut self.pending_g);
         match key.code {
             KeyCode::Char('g') if pending_g => KeyAction::Navigate(Navigation::SelectFirst),
-            KeyCode::Char('x') if pending_g => gate.open_pull_request(),
+            KeyCode::Char('x') if pending_g => gate.open_in_browser(),
             KeyCode::Char('g') => {
                 self.pending_g = true;
                 KeyAction::Ignore

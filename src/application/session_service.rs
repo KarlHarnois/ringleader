@@ -354,6 +354,10 @@ impl SessionService {
         self.access.open_repo_terminal(group)
     }
 
+    pub fn open_repo_page(&self, group: &RepoGroup) -> Result<(), ServiceError> {
+        self.access.open_repo_page(group)
+    }
+
     pub fn open_pull_request(&self, name: &str) -> Result<(), ServiceError> {
         let pull_request = self
             .entry(name)

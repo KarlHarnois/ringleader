@@ -29,6 +29,7 @@ pub use fakes::fake_interrupts::FakeInterrupts;
 pub use fakes::fake_lock::FakeLock;
 pub use fakes::fake_multiplexer::FakeMultiplexer;
 pub use fakes::fake_pull_requests::FakePullRequests;
+pub use fakes::fake_repo_pages::FakeRepoPages;
 pub use fakes::fake_repo_scanner::FakeRepoScanner;
 pub use fakes::fake_scratch_space::FakeScratchSpace;
 pub use fakes::fake_session_registry::FakeSessionRegistry;

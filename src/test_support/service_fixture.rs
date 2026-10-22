@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 
 use super::{
     FakeClock, FakeConfigSource, FakeDirectoryEnvironment, FakeHostProbe, FakeMultiplexer,
-    FakePullRequests, FakeRepoScanner, FakeScratchSpace, FakeSessionRegistry, FakeTerminalEmulator,
-    FakeUsageMeter, FakeWebBrowser, FakeWorkspace,
+    FakePullRequests, FakeRepoPages, FakeRepoScanner, FakeScratchSpace, FakeSessionRegistry,
+    FakeTerminalEmulator, FakeUsageMeter, FakeWebBrowser, FakeWorkspace,
 };
 use crate::application::ports::{
     ConfigError, MergeOutcome, MultiplexerError, ScratchSpace, WorktreeEntry,
@@ -29,6 +29,7 @@ pub struct ServiceFixture {
     scanner: Arc<FakeRepoScanner>,
     host: Arc<FakeHostProbe>,
     pull_requests: Arc<FakePullRequests>,
+    repo_pages: Arc<FakeRepoPages>,
     clock: Arc<FakeClock>,
     scratch_space: Arc<FakeScratchSpace>,
     directory_environment: Arc<FakeDirectoryEnvironment>,
@@ -46,6 +47,7 @@ impl ServiceFixture {
     pub const NOW: u64 = 1_700_000_100;
     pub const CREATED_AT: u64 = 1_700_000_000;
     pub const REPO: &'static str = "/repos/example-project";
+    pub const REPO_PAGE: &'static str = "https://github.example.com/example-org/example-project";
     pub const DATA_DIR: &'static str = "/data/ringleader";
     pub const HOME: &'static str = "/home/example";
     pub const WORKTREE_ROOT: &'static str = "/data/ringleader/worktrees";
@@ -70,6 +72,7 @@ impl ServiceFixture {
             scanner: Arc::new(FakeRepoScanner::finding(vec![Self::repo()])),
             host: Arc::new(Self::host_for(&[])),
             pull_requests: Arc::new(FakePullRequests::new()),
+            repo_pages: Arc::new(FakeRepoPages::default()),
             clock: Arc::new(FakeClock::at(Self::NOW)),
             scratch_space: Arc::new(FakeScratchSpace::default()),
             directory_environment: Arc::new(FakeDirectoryEnvironment::default()),
@@ -151,6 +154,13 @@ impl ServiceFixture {
     pub fn with_pull_requests(self, pull_requests: FakePullRequests) -> Self {
         Self {
             pull_requests: Arc::new(pull_requests),
+            ..self
+        }
+    }
+
+    pub fn with_repo_pages(self, repo_pages: FakeRepoPages) -> Self {
+        Self {
+            repo_pages: Arc::new(repo_pages),
             ..self
         }
     }
@@ -352,7 +362,7 @@ impl ServiceFixture {
     }
 
     pub fn pull_request_url(number: u64) -> String {
-        format!("https://github.example.com/example-org/example-project/pull/{number}")
+        format!("{}/pull/{number}", Self::REPO_PAGE)
     }
 
     pub fn session(name: &str) -> Session {
@@ -559,6 +569,7 @@ impl ServiceFixture {
                 self.scanner.clone(),
                 self.host.clone(),
                 self.pull_requests.clone(),
+                self.repo_pages.clone(),
                 self.directory_environment.clone(),
             )
             .with_diff_workspace(self.measuring_workspace()),
