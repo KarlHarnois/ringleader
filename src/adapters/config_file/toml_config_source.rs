@@ -107,7 +107,8 @@ plan_args = ["--agent", "plan"]
 resume_args = ["--continue"]
 
 # Gemini CLI works too. It reads skills only from its own config or the
-# worktree, so Ringleader leaves its built-in skills off. If you authenticate
+# worktree, so Ringleader cannot hand it the built-in skill. The flag below
+# only stops Ringleader from publishing the unused skill. If you authenticate
 # with an API key rather than Google sign-in, add env = ["GEMINI_API_KEY"].
 # Vertex AI users also need their Vertex variables in env.
 # [[agents]]
