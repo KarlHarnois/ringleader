@@ -566,12 +566,12 @@ mod tests {
         }
 
         fn ringing(fixture: &ServiceFixture, bell: &CapturedWriter) -> App {
-            let folds = Box::new(FakeViewStore::default());
+            let view = Box::new(FakeViewStore::default());
             let mut app = App::new(
                 fixture.service(),
                 Box::new(FakeLock::free()),
                 Box::new(bell.clone()),
-                folds,
+                view,
                 Instant::now(),
             );
             app.resize(100, 28);
@@ -593,8 +593,8 @@ mod tests {
             app
         }
 
-        fn restored(fixture: &ServiceFixture, folds: &FakeViewStore) -> App {
-            let mut app = UiHarness::app_with_view(fixture, folds);
+        fn restored(fixture: &ServiceFixture, view: &FakeViewStore) -> App {
+            let mut app = UiHarness::app_with_view(fixture, view);
             app.restore_view();
             app.resize(UiHarness::WIDTH, UiHarness::HEIGHT);
             UiHarness::settle(&mut app);
