@@ -318,9 +318,18 @@ mod tests {
         }
 
         fn gemini_example() -> String {
-            TomlConfigSource::TEMPLATE
-                .lines()
-                .skip_while(|line| *line != r#"# [[agents]]"#)
+            let lines: Vec<&str> = TomlConfigSource::TEMPLATE.lines().collect();
+            let name = lines
+                .iter()
+                .position(|line| *line == r#"# name = "gemini""#)
+                .expect("the template has a commented Gemini agent");
+            let header = lines[..name]
+                .iter()
+                .rposition(|line| *line == r#"# [[agents]]"#)
+                .expect("the Gemini agent has a table header");
+            lines[header..]
+                .iter()
+                .copied()
                 .take_while(|line| !line.is_empty())
                 .map(|line| line.strip_prefix("# ").unwrap_or(line))
                 .collect::<Vec<_>>()
