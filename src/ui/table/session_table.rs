@@ -130,16 +130,21 @@ impl<'a> SessionTable<'a> {
         let names = self.tree.rows().map(|row| row.name().to_string());
         let columns = TableColumns::new(inner_width.saturating_sub(self.branch_width()), names);
         if !self.shows_header() {
-            return columns.fitted();
+            return self.with_favorite_column(columns).fitted();
         }
         self.with_optional_columns(columns).fitted()
     }
 
+    fn with_favorite_column(&self, columns: TableColumns) -> TableColumns {
+        if self.has_favorites() {
+            return columns.with_favorite(self.tree.rows().map(Self::favorite_text));
+        }
+        columns
+    }
+
     fn with_optional_columns(&self, columns: TableColumns) -> TableColumns {
         let mut columns = columns.with_diff(self.tree.rows().map(Self::diff_text));
-        if self.has_favorites() {
-            columns = columns.with_favorite(self.tree.rows().map(Self::favorite_text));
-        }
+        columns = self.with_favorite_column(columns);
         if self.has_pull_requests() {
             columns = columns.with_pull_request(self.tree.rows().map(Self::pull_request_text));
         }
@@ -680,6 +685,27 @@ mod tests {
 
         assert!(!buffer[(3, 2)].modifier.contains(Modifier::DIM));
         assert!(buffer[(17, 2)].modifier.contains(Modifier::DIM));
+    }
+
+    #[test]
+    fn the_minimal_tier_shows_a_favorite_star() {
+        let rows = [TableFixture::favorite("fix-auth", SessionState::Waiting)];
+        let mut terminal = Terminal::new(TestBackend::new(36, 5)).unwrap();
+
+        terminal
+            .draw(|frame| {
+                SessionTable::new(
+                    SessionTree::new(&rows, &HashSet::new(), crate::domain::SessionFilter::All),
+                    None,
+                    0,
+                    Theme,
+                )
+                .for_tier(LayoutTier::Minimal)
+                .render(frame, frame.area())
+            })
+            .unwrap();
+
+        assert!(TableFixture::line(&terminal, 1).contains('★'));
     }
 
     #[test]
