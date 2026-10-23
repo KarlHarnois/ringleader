@@ -35,6 +35,15 @@ impl<'a> RepoHeading<'a> {
         }
     }
 
+    pub fn visible(
+        number: usize,
+        rows: &'a [SessionSummary],
+        filter: SessionFilter,
+    ) -> Option<Self> {
+        let heading = Self::new(number, rows, filter);
+        heading.has_visible_rows().then_some(heading)
+    }
+
     pub fn folded_among(self, folded: &HashSet<RepoGroup>) -> Self {
         let folded = folded.contains(&self.group);
         Self { folded, ..self }

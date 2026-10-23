@@ -112,10 +112,11 @@ impl<'a> SessionTree<'a> {
         folded: &HashSet<RepoGroup>,
         filter: SessionFilter,
     ) -> Vec<TreeLine<'a>> {
-        let numbered = rows.chunk_by(Self::share_a_group).zip(1..);
-        let headings = numbered.filter_map(|(rows, number)| {
-            let heading = RepoHeading::new(number, rows, filter).folded_among(folded);
-            heading.has_visible_rows().then_some(heading)
+        let mut next_number = 1;
+        let headings = rows.chunk_by(Self::share_a_group).filter_map(|rows| {
+            let heading = RepoHeading::visible(next_number, rows, filter)?;
+            next_number += 1;
+            Some(heading.folded_among(folded))
         });
         headings.flat_map(Self::group_lines).collect()
     }
@@ -318,6 +319,21 @@ mod tests {
         let tree = SessionTree::new(&rows, &HashSet::new(), SessionFilter::Favorites);
 
         assert!(!tree.is_grouped());
+    }
+
+    #[test]
+    fn visible_headings_are_numbered_without_gaps() {
+        let rows = vec![
+            TreeFixture::row("alpha-one", "/repos/alpha"),
+            TreeFixture::favorite("beta-one", "/repos/beta"),
+            TreeFixture::favorite("gamma-one", "/repos/gamma"),
+        ];
+
+        let tree = SessionTree::new(&rows, &HashSet::new(), SessionFilter::Favorites);
+        let numbers: Vec<usize> = tree.headings().map(RepoHeading::number).collect();
+
+        assert_eq!(numbers, [1, 2]);
+        assert_eq!(tree.heading(1).unwrap().group(), &RepoGroup::of(&rows[1]));
     }
 
     #[test]
