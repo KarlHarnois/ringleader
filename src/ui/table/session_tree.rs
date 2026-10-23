@@ -1,4 +1,3 @@
-use std::borrow::Borrow;
 use std::collections::HashSet;
 use std::iter::once;
 
@@ -8,7 +7,7 @@ use super::viewport::Viewport;
 use crate::domain::{RepoGroup, SessionFilter, SessionSummary};
 
 pub struct SessionTree<'a> {
-    rows: Vec<&'a SessionSummary>,
+    rows: &'a [SessionSummary],
     lines: Vec<TreeLine<'a>>,
     filter: SessionFilter,
 }
@@ -19,11 +18,10 @@ impl<'a> SessionTree<'a> {
         folded: &HashSet<RepoGroup>,
         filter: SessionFilter,
     ) -> Self {
-        let rows: Vec<&SessionSummary> = rows.iter().filter(|row| filter.allows(row)).collect();
-        let lines = if Self::groups_refs_by_repo(&rows) {
-            Self::grouped_lines(&rows, folded)
+        let lines = if Self::groups_visible_rows_by_repo(rows, filter) {
+            Self::grouped_lines(rows, folded, filter)
         } else {
-            Self::flat_lines(&rows)
+            Self::flat_lines(rows, filter)
         };
         Self {
             rows,
@@ -40,8 +38,9 @@ impl<'a> SessionTree<'a> {
         rows.sort_by_cached_key(|row| (RepoGroup::of(row), row.state(), row.name().to_string()));
     }
 
-    pub fn rows(&self) -> &[&'a SessionSummary] {
-        &self.rows
+    pub fn rows(&self) -> impl Iterator<Item = &'a SessionSummary> + '_ {
+        let filter = self.filter;
+        self.rows.iter().filter(move |row| filter.allows(row))
     }
 
     pub fn filter(&self) -> SessionFilter {
@@ -86,26 +85,38 @@ impl<'a> SessionTree<'a> {
             .position(|line| line.selection() == *selection)
     }
 
-    fn groups_refs_by_repo(rows: &[&SessionSummary]) -> bool {
-        rows.chunk_by(Self::share_a_group).nth(1).is_some()
+    fn groups_visible_rows_by_repo(rows: &[SessionSummary], filter: SessionFilter) -> bool {
+        let mut groups = rows
+            .iter()
+            .filter(|row| filter.allows(row))
+            .map(RepoGroup::of);
+        let Some(first) = groups.next() else {
+            return false;
+        };
+        groups.any(|group| group != first)
     }
 
-    fn share_a_group<T: Borrow<SessionSummary>>(first: &T, second: &T) -> bool {
-        RepoGroup::of(first.borrow()) == RepoGroup::of(second.borrow())
+    fn share_a_group(first: &SessionSummary, second: &SessionSummary) -> bool {
+        RepoGroup::of(first) == RepoGroup::of(second)
     }
 
-    fn flat_lines(rows: &[&'a SessionSummary]) -> Vec<TreeLine<'a>> {
-        let flat = |row| TreeLine::session(row, TreeBranch::Flat);
-        rows.iter().map(|row| flat(row)).collect()
+    fn flat_lines(rows: &'a [SessionSummary], filter: SessionFilter) -> Vec<TreeLine<'a>> {
+        rows.iter()
+            .filter(|row| filter.allows(row))
+            .map(|row| TreeLine::session(row, TreeBranch::Flat))
+            .collect()
     }
 
     fn grouped_lines(
-        rows: &[&'a SessionSummary],
+        rows: &'a [SessionSummary],
         folded: &HashSet<RepoGroup>,
+        filter: SessionFilter,
     ) -> Vec<TreeLine<'a>> {
         let numbered = rows.chunk_by(Self::share_a_group).zip(1..);
-        let headings = numbered
-            .map(|(rows, number)| RepoHeading::new(number, rows.to_vec()).folded_among(folded));
+        let headings = numbered.filter_map(|(rows, number)| {
+            let heading = RepoHeading::new(number, rows, filter).folded_among(folded);
+            heading.has_visible_rows().then_some(heading)
+        });
         headings.flat_map(Self::group_lines).collect()
     }
 
@@ -114,15 +125,18 @@ impl<'a> SessionTree<'a> {
         once(TreeLine::Heading(heading)).chain(branches).collect()
     }
 
-    fn branch_lines(rows: &[&'a SessionSummary]) -> Vec<TreeLine<'a>> {
-        let Some((last, middle)) = rows.split_last() else {
-            return Vec::new();
-        };
-        let middle = middle
-            .iter()
-            .map(|row| TreeLine::session(row, TreeBranch::Middle));
-        let last = TreeLine::session(last, TreeBranch::Last);
-        middle.chain(once(last)).collect()
+    fn branch_lines(rows: impl Iterator<Item = &'a SessionSummary>) -> Vec<TreeLine<'a>> {
+        let mut rows = rows.peekable();
+        let mut lines = Vec::new();
+        while let Some(row) = rows.next() {
+            let branch = if rows.peek().is_some() {
+                TreeBranch::Middle
+            } else {
+                TreeBranch::Last
+            };
+            lines.push(TreeLine::session(row, branch));
+        }
+        lines
     }
 }
 
@@ -290,7 +304,7 @@ mod tests {
         let tree = SessionTree::new(&rows, &HashSet::new(), SessionFilter::Favorites);
 
         assert_eq!(TreeFixture::shapes(&tree), ["Flat fix-auth"]);
-        assert_eq!(tree.rows().len(), 1);
+        assert_eq!(tree.rows().count(), 1);
     }
 
     #[test]

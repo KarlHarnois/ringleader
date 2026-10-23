@@ -5,7 +5,7 @@ use ratatui::text::Span;
 
 use super::list_selection::ListSelection;
 use super::state_indicator::StateIndicator;
-use crate::domain::{RepoGroup, SessionState, SessionSummary};
+use crate::domain::{RepoGroup, SessionFilter, SessionState, SessionSummary};
 use crate::ui::text_fit::TextFit;
 use crate::ui::theme::Theme;
 
@@ -13,7 +13,8 @@ pub struct RepoHeading<'a> {
     group: RepoGroup,
     number: usize,
     folded: bool,
-    rows: Vec<&'a SessionSummary>,
+    rows: &'a [SessionSummary],
+    filter: SessionFilter,
 }
 
 impl<'a> RepoHeading<'a> {
@@ -23,15 +24,14 @@ impl<'a> RepoHeading<'a> {
     const UNFOLDED: char = '▾';
     const FOLDED: char = '▸';
 
-    pub fn new(number: usize, rows: Vec<&'a SessionSummary>) -> Self {
-        let group = rows
-            .first()
-            .map_or(RepoGroup::Other, |row| RepoGroup::of(row));
+    pub fn new(number: usize, rows: &'a [SessionSummary], filter: SessionFilter) -> Self {
+        let group = rows.first().map_or(RepoGroup::Other, RepoGroup::of);
         Self {
             group,
             number,
             folded: false,
             rows,
+            filter,
         }
     }
 
@@ -49,17 +49,24 @@ impl<'a> RepoHeading<'a> {
     }
 
     pub fn jump_target(&self) -> ListSelection {
-        match self.shown_rows().first() {
+        match self.shown_rows().next() {
             Some(row) => ListSelection::Session(row.name().to_string()),
             None => ListSelection::Repo(self.group.clone()),
         }
     }
 
-    pub fn shown_rows(&self) -> &[&'a SessionSummary] {
-        if self.folded {
-            return &[];
-        }
-        &self.rows
+    pub fn shown_rows(&self) -> impl Iterator<Item = &'a SessionSummary> + '_ {
+        let shown = !self.folded;
+        self.filtered_rows().filter(move |_| shown)
+    }
+
+    pub fn has_visible_rows(&self) -> bool {
+        self.filtered_rows().next().is_some()
+    }
+
+    fn filtered_rows(&self) -> impl Iterator<Item = &'a SessionSummary> + '_ {
+        let filter = self.filter;
+        self.rows.iter().filter(move |row| filter.allows(row))
     }
 
     pub fn spans(&self, tick: u64, theme: &Theme, width: usize) -> Vec<Span<'static>> {
@@ -98,7 +105,10 @@ impl<'a> RepoHeading<'a> {
     }
 
     fn count_span(&self, state: SessionState, tick: u64, theme: &Theme) -> Option<Span<'static>> {
-        let count = self.rows.iter().filter(|row| row.state() == state).count();
+        let count = self
+            .filtered_rows()
+            .filter(|row| row.state() == state)
+            .count();
         let indicator = StateIndicator::new(state, tick);
         let text = format!("{}{count}", indicator.glyph());
         (count > 0).then(|| Span::styled(text, indicator.style(theme)))
@@ -137,9 +147,16 @@ mod tests {
             ServiceFixture::summary_in(name, "/repos/alpha", state)
         }
 
+        fn favorite(name: &str, state: SessionState) -> SessionSummary {
+            let session =
+                ServiceFixture::session_at(name, "/repos/alpha", ServiceFixture::CREATED_AT)
+                    .with_favorite(true);
+            SessionSummary::managed(session, state, false)
+        }
+
         fn folded(rows: &[SessionSummary]) -> RepoHeading<'_> {
             let folded = HashSet::from([RepoGroup::of(&rows[0])]);
-            RepoHeading::new(1, rows.iter().collect()).folded_among(&folded)
+            RepoHeading::new(1, rows, SessionFilter::All).folded_among(&folded)
         }
 
         fn text(heading: &RepoHeading) -> String {
@@ -173,14 +190,26 @@ mod tests {
         let heading = HeadingFixture::folded(&rows);
 
         assert_eq!(HeadingFixture::text(&heading), "1 ▸ alpha ●1");
-        assert!(heading.shown_rows().is_empty());
+        assert!(heading.shown_rows().next().is_none());
+    }
+
+    #[test]
+    fn the_counts_follow_the_favorites_filter() {
+        let rows = [
+            HeadingFixture::favorite("docs", SessionState::Waiting),
+            HeadingFixture::row("fix-auth", SessionState::Working),
+        ];
+        let folded = HashSet::from([RepoGroup::of(&rows[0])]);
+        let heading = RepoHeading::new(1, &rows, SessionFilter::Favorites).folded_among(&folded);
+
+        assert_eq!(HeadingFixture::text(&heading), "1 ▸ alpha ●1");
     }
 
     #[test]
     fn an_expanded_heading_shows_no_counts() {
         let rows = [HeadingFixture::row("docs", SessionState::Waiting)];
 
-        let heading = RepoHeading::new(1, rows.iter().collect());
+        let heading = RepoHeading::new(1, &rows, SessionFilter::All);
 
         assert_eq!(HeadingFixture::text(&heading), "1 ▾ alpha");
     }
@@ -205,7 +234,7 @@ mod tests {
     fn headings_after_the_ninth_show_a_blank_for_their_number() {
         let rows = [HeadingFixture::row("docs", SessionState::Waiting)];
 
-        let heading = RepoHeading::new(10, rows.iter().collect());
+        let heading = RepoHeading::new(10, &rows, SessionFilter::All);
 
         assert_eq!(HeadingFixture::text(&heading), "  ▾ alpha");
     }
@@ -215,7 +244,7 @@ mod tests {
         let rows = [HeadingFixture::row("docs", SessionState::Waiting)];
 
         for number in [1, 10] {
-            let text = HeadingFixture::text(&RepoHeading::new(number, rows.iter().collect()));
+            let text = HeadingFixture::text(&RepoHeading::new(number, &rows, SessionFilter::All));
             let name: String = text.chars().skip(RepoHeading::LEAD_WIDTH).collect();
             assert_eq!(name, "alpha");
         }

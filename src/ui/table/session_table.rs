@@ -79,7 +79,7 @@ impl<'a> SessionTable<'a> {
     }
 
     pub fn has_rows(&self) -> bool {
-        !self.tree.rows().is_empty()
+        self.tree.rows().next().is_some()
     }
 
     fn title(&self) -> &'static str {
@@ -127,8 +127,7 @@ impl<'a> SessionTable<'a> {
     }
 
     fn columns(&self, inner_width: usize) -> TableColumns {
-        let rows = self.tree.rows();
-        let names = rows.iter().map(|row| row.name().to_string());
+        let names = self.tree.rows().map(|row| row.name().to_string());
         let columns = TableColumns::new(inner_width.saturating_sub(self.branch_width()), names);
         if !self.shows_header() {
             return columns.fitted();
@@ -137,34 +136,29 @@ impl<'a> SessionTable<'a> {
     }
 
     fn with_optional_columns(&self, columns: TableColumns) -> TableColumns {
-        let rows = self.tree.rows();
-        let mut columns = columns.with_diff(rows.iter().map(|row| Self::diff_text(row)));
+        let mut columns = columns.with_diff(self.tree.rows().map(Self::diff_text));
         if self.has_favorites() {
-            columns = columns.with_favorite(rows.iter().map(|row| Self::favorite_text(row)));
+            columns = columns.with_favorite(self.tree.rows().map(Self::favorite_text));
         }
         if self.has_pull_requests() {
-            columns =
-                columns.with_pull_request(rows.iter().map(|row| Self::pull_request_text(row)));
+            columns = columns.with_pull_request(self.tree.rows().map(Self::pull_request_text));
         }
         if self.has_several_agents() {
-            columns = columns.with_agent(rows.iter().map(|row| Self::agent_text(row)));
+            columns = columns.with_agent(self.tree.rows().map(Self::agent_text));
         }
         columns
     }
 
     fn has_favorites(&self) -> bool {
-        self.tree.rows().iter().any(|row| row.is_favorite())
+        self.tree.rows().any(|row| row.is_favorite())
     }
 
     fn has_pull_requests(&self) -> bool {
-        self.tree
-            .rows()
-            .iter()
-            .any(|row| row.pull_request().is_some())
+        self.tree.rows().any(|row| row.pull_request().is_some())
     }
 
     fn has_several_agents(&self) -> bool {
-        let metadata = self.tree.rows().iter().filter_map(|row| row.metadata());
+        let metadata = self.tree.rows().filter_map(|row| row.metadata());
         let agents: HashSet<&str> = metadata.map(SessionMetadata::agent).collect();
         agents.len() > 1
     }
