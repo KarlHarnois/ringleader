@@ -43,6 +43,7 @@ pub use repos::repo_group::RepoGroup;
 pub use repos::repo_name::RepoName;
 pub use sessions::session::{Registration, Session, TmuxAddress};
 pub use sessions::session_classifier::SessionClassifier;
+pub use sessions::session_filter::SessionFilter;
 pub use sessions::session_metadata::{SessionMetadata, SessionRepo, SessionWorktree};
 pub use sessions::session_name::{InvalidName, SessionName};
 pub use sessions::session_observation::{AgentPane, SessionObservation};

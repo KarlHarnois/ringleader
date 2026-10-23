@@ -94,6 +94,10 @@ impl SessionSummary {
         self.state
     }
 
+    pub fn is_favorite(&self) -> bool {
+        self.session().is_some_and(Session::is_favorite)
+    }
+
     pub fn attached(&self) -> bool {
         self.attached
     }
@@ -154,5 +158,23 @@ mod tests {
         let summary = SessionSummary::unmanaged(UnmanagedSession::new("mystery", observation));
 
         assert_eq!(summary.state(), SessionState::Unmanaged);
+    }
+
+    #[test]
+    fn an_unmanaged_summary_is_never_a_favorite() {
+        let tmux = TmuxAddress::new("ringleader-mystery", Path::new("/tmp/tmux-1000/default"));
+        let observation = SessionObservation::new(tmux, 1_700_000_000);
+
+        let summary = SessionSummary::unmanaged(UnmanagedSession::new("mystery", observation));
+
+        assert!(!summary.is_favorite());
+    }
+
+    #[test]
+    fn a_managed_summary_is_a_favorite_when_its_session_is() {
+        let session = crate::test_support::ServiceFixture::session("fix-auth").with_favorite(true);
+        let summary = SessionSummary::managed(session, SessionState::Waiting, false);
+
+        assert!(summary.is_favorite());
     }
 }

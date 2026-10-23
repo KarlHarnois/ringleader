@@ -43,6 +43,7 @@ ringleader delete <name> [--force] [--forget]
 ringleader attach <name>
 ringleader send <name> <prompt>
 ringleader rename <old> <new>
+ringleader favorite <name>
 ringleader restart (<name> | --all)
 ringleader repo add <path> [--name <n>] [--base-branch <b>]
 ringleader repo remove <name>

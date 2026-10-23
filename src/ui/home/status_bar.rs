@@ -97,9 +97,10 @@ pub struct KeyHints {
 }
 
 impl KeyHints {
-    const HINTS: [(&'static str, &'static str); 11] = [
+    const HINTS: [(&'static str, &'static str); 13] = [
         ("n", "new"),
         ("d", "delete"),
+        ("f", "favorite"),
         ("R", "rename"),
         ("Enter", "attach"),
         ("t", "shell"),
@@ -107,10 +108,11 @@ impl KeyHints {
         ("p", "pull"),
         ("r", "refresh"),
         ("u", "usage"),
+        ("Ctrl-F", "filter"),
         ("?", "help"),
         ("q", "quit"),
     ];
-    const DROP_ORDER: [&'static str; 7] = ["u", "p", "r", "s", "t", "R", "d"];
+    const DROP_ORDER: [&'static str; 9] = ["Ctrl-F", "f", "u", "p", "r", "s", "t", "R", "d"];
     const WIDE_GAP: &'static str = "   ";
     const NARROW_GAP: &'static str = "  ";
 

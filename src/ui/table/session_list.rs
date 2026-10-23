@@ -5,7 +5,7 @@ use super::repo_heading::RepoHeading;
 use super::session_table::SessionTable;
 use super::session_tree::{SessionTree, TreeLine};
 use super::viewport::Viewport;
-use crate::domain::{DiffStat, PullRequest, RepoGroup, SessionSummary};
+use crate::domain::{DiffStat, PullRequest, RepoGroup, SessionFilter, SessionSummary};
 use crate::ui::theme::Theme;
 
 #[derive(Debug, Default)]
@@ -13,6 +13,7 @@ pub struct SessionList {
     rows: Vec<SessionSummary>,
     selection: Option<ListSelection>,
     folded: HashSet<RepoGroup>,
+    filter: SessionFilter,
     viewport: Viewport,
 }
 
@@ -49,6 +50,10 @@ impl SessionList {
 
     pub fn folded(&self) -> &HashSet<RepoGroup> {
         &self.folded
+    }
+
+    pub fn filter(&self) -> SessionFilter {
+        self.filter
     }
 
     pub fn names(&self) -> Vec<String> {
@@ -102,10 +107,15 @@ impl SessionList {
     }
 
     pub fn select(&mut self, name: &str) {
-        let Some(group) = self.row(name).map(RepoGroup::of) else {
+        let Some(row) = self.row(name) else {
             return;
         };
+        let group = RepoGroup::of(row);
+        let reveals = !self.filter.allows(row);
         self.folded.remove(&group);
+        if reveals {
+            self.filter = SessionFilter::All;
+        }
         self.move_selection_to(ListSelection::Session(name.to_string()));
     }
 
@@ -149,6 +159,18 @@ impl SessionList {
         self.folded = folded;
     }
 
+    pub fn restore_filter(&mut self, filter: SessionFilter) {
+        self.filter = filter;
+        self.selection = self.repaired_selection();
+        self.scroll_to_selection();
+    }
+
+    pub fn toggle_filter(&mut self) {
+        self.filter = self.filter.toggled();
+        self.selection = self.repaired_selection();
+        self.scroll_to_selection();
+    }
+
     pub fn jump_to_repo(&mut self, number: usize) {
         if let Some(target) = self.jump_target(number) {
             self.move_selection_to(target);
@@ -156,7 +178,7 @@ impl SessionList {
     }
 
     fn tree(&self) -> SessionTree<'_> {
-        SessionTree::new(&self.rows, &self.folded)
+        SessionTree::new(&self.rows, &self.folded, self.filter)
     }
 
     fn line_count(&self) -> usize {
@@ -189,7 +211,7 @@ impl SessionList {
     }
 
     fn forget_folds_without_a_heading(&mut self) {
-        let tree = self.tree();
+        let tree = SessionTree::new(&self.rows, &self.folded, SessionFilter::All);
         let headed: HashSet<RepoGroup> = tree
             .headings()
             .map(|heading| heading.group().clone())
@@ -206,7 +228,9 @@ impl SessionList {
         if tree.position_of(selection).is_some() {
             return Some(selection.clone());
         }
-        self.folded_heading_of(selection).or_else(first_line)
+        self.folded_heading_of(selection)
+            .filter(|heading| tree.position_of(heading).is_some())
+            .or_else(first_line)
     }
 
     fn folded_heading_of(&self, selection: &ListSelection) -> Option<ListSelection> {
@@ -251,6 +275,20 @@ mod tests {
                 ServiceFixture::summary_in("a-one", "/repos/alpha", SessionState::Waiting),
                 ServiceFixture::summary_in("b-two", "/repos/alpha", SessionState::Waiting),
                 ServiceFixture::summary_in("c-three", "/repos/beta", SessionState::Waiting),
+            ]
+        }
+
+        fn favorite_in(name: &str, repo: &str) -> SessionSummary {
+            let session = ServiceFixture::session_at(name, repo, ServiceFixture::CREATED_AT)
+                .with_favorite(true);
+            SessionSummary::managed(session, SessionState::Waiting, false)
+        }
+
+        fn mixed_favorites() -> Vec<SessionSummary> {
+            vec![
+                Self::favorite_in("a-one", "/repos/alpha"),
+                ServiceFixture::summary_in("b-two", "/repos/alpha", SessionState::Waiting),
+                Self::favorite_in("c-three", "/repos/beta"),
             ]
         }
 
@@ -455,6 +493,73 @@ mod tests {
         list.toggle_fold();
 
         assert_eq!(list.visible_managed(), ["a-one", "b-two", "c-three"]);
+    }
+
+    #[test]
+    fn the_favorites_filter_hides_non_favorites() {
+        let mut list = ListFixture::showing(ListFixture::mixed_favorites());
+
+        list.toggle_filter();
+
+        assert_eq!(list.visible_managed(), ["a-one", "c-three"]);
+    }
+
+    #[test]
+    fn toggling_the_favorites_filter_twice_shows_every_row() {
+        let mut list = ListFixture::showing(ListFixture::mixed_favorites());
+
+        list.toggle_filter();
+        list.toggle_filter();
+
+        assert_eq!(list.visible_managed(), ["a-one", "b-two", "c-three"]);
+    }
+
+    #[test]
+    fn a_selected_non_favorite_gives_way_when_the_filter_hides_it() {
+        let mut list = ListFixture::showing(ListFixture::mixed_favorites());
+        list.select("b-two");
+
+        list.toggle_filter();
+
+        assert!(list.selected_heading().is_some());
+        assert_eq!(list.selected_name(), None);
+    }
+
+    #[test]
+    fn selecting_a_hidden_session_shows_every_row_again() {
+        let mut list = ListFixture::showing(ListFixture::mixed_favorites());
+        list.toggle_filter();
+
+        list.select("b-two");
+
+        assert_eq!(list.filter(), SessionFilter::All);
+        assert_eq!(list.visible_managed(), ["a-one", "b-two", "c-three"]);
+    }
+
+    #[test]
+    fn a_fold_outside_the_favorites_filter_survives_the_toggle() {
+        let mut list = ListFixture::showing(ListFixture::mixed_favorites());
+        list.toggle_fold();
+
+        list.toggle_filter();
+        list.toggle_filter();
+
+        assert_eq!(list.visible_managed(), ["c-three"]);
+        assert!(
+            list.folded()
+                .contains(&ServiceFixture::repo_group("/repos/alpha"))
+        );
+    }
+
+    #[test]
+    fn a_restored_favorites_filter_hides_non_favorites_once_the_rows_arrive() {
+        let mut list = SessionList::default();
+        list.restore_filter(SessionFilter::Favorites);
+        list.resize(ListFixture::ROOM_FOR_EVERY_LINE);
+
+        list.show(ListFixture::mixed_favorites());
+
+        assert_eq!(list.visible_managed(), ["a-one", "c-three"]);
     }
 
     #[test]

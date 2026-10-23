@@ -6,13 +6,13 @@ use crate::domain::RepoGroup;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BlockingOperation {
-    Restart(String),
-    RestartAll,
+    Restart(RestartTarget),
     Create(CreateRequest),
     Delete(DeleteStep),
     Rename { old: String, new: String },
     Merge(String),
     OpenRepoPage(RepoGroup),
+    ToggleFavorite(String),
 }
 
 impl BlockingOperation {
@@ -25,25 +25,35 @@ impl BlockingOperation {
 
     pub fn busy_message(&self) -> String {
         match self {
-            Self::Restart(name) => format!("Restarting {name}…"),
-            Self::RestartAll => "Restarting every exited or stopped session…".to_string(),
+            Self::Restart(target) => target.busy_message(),
             Self::Create(request) => format!("Creating {}…", request.name()),
             Self::Delete(step) => step.busy_message(),
             Self::Rename { old, .. } => format!("Renaming {old}…"),
             Self::Merge(name) => format!("Fetching origin and merging it into {name}…"),
             Self::OpenRepoPage(group) => format!("Looking up the GitHub page of {group}…"),
+            Self::ToggleFavorite(name) => format!("Updating the favorites of {name}…"),
         }
     }
 
     pub fn run(self, service: &mut SessionService) -> OperationOutcome {
         match self {
-            Self::Restart(name) => Self::restart(service, name),
-            Self::RestartAll => Self::restart_all(service),
+            Self::Restart(target) => target.run(service),
             Self::Create(request) => Self::create(service, &request),
             Self::Delete(step) => step.run(service),
             Self::Rename { old, new } => Self::rename(service, &old, &new),
             Self::Merge(name) => Self::merge(service, name),
             Self::OpenRepoPage(group) => Self::open_repo_page(service, &group),
+            Self::ToggleFavorite(name) => Self::toggle_favorite(service, &name),
+        }
+    }
+
+    fn toggle_favorite(service: &mut SessionService, name: &str) -> OperationOutcome {
+        match service.toggle_favorite(name) {
+            Ok(session) if session.is_favorite() => {
+                OperationOutcome::done(format!("Added {name} to favorites."), None)
+            }
+            Ok(_) => OperationOutcome::done(format!("Removed {name} from favorites."), None),
+            Err(error) => OperationOutcome::Failed(error),
         }
     }
 
@@ -121,6 +131,28 @@ impl BlockingOperation {
                 Some(session.name().to_string()),
             ),
             Err(error) => OperationOutcome::Failed(error),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RestartTarget {
+    One(String),
+    All,
+}
+
+impl RestartTarget {
+    fn busy_message(&self) -> String {
+        match self {
+            Self::One(name) => format!("Restarting {name}…"),
+            Self::All => "Restarting every exited or stopped session…".to_string(),
+        }
+    }
+
+    fn run(self, service: &mut SessionService) -> OperationOutcome {
+        match self {
+            Self::One(name) => BlockingOperation::restart(service, name),
+            Self::All => BlockingOperation::restart_all(service),
         }
     }
 }
@@ -273,8 +305,8 @@ mod tests {
         let fixture = UiHarness::exited_session_fixture("fix-auth")
             .with_directory_environment(ServiceFixture::not_allowed_envrc("fix-auth"));
 
-        let outcome =
-            BlockingOperation::Restart("fix-auth".to_string()).run(&mut fixture.service());
+        let outcome = BlockingOperation::Restart(RestartTarget::One("fix-auth".to_string()))
+            .run(&mut fixture.service());
 
         let warning = StartOperationFixture::warning(outcome);
         assert!(
@@ -300,6 +332,41 @@ mod tests {
                 OperationOutcome::ConfirmDelete { changed: false, .. }
             ),
             "{outcome:?}"
+        );
+    }
+
+    #[test]
+    fn toggling_a_favorite_announces_it_while_it_runs() {
+        let operation = BlockingOperation::ToggleFavorite("fix-auth".to_string());
+
+        assert_eq!(
+            operation.busy_message(),
+            "Updating the favorites of fix-auth…"
+        );
+    }
+
+    #[test]
+    fn toggling_a_favorite_twice_reports_each_change() {
+        let fixture = UiHarness::exited_session_fixture("fix-auth");
+
+        let added =
+            BlockingOperation::ToggleFavorite("fix-auth".to_string()).run(&mut fixture.service());
+        let removed =
+            BlockingOperation::ToggleFavorite("fix-auth".to_string()).run(&mut fixture.service());
+
+        assert_eq!(
+            added,
+            OperationOutcome::Done {
+                message: "Added fix-auth to favorites.".to_string(),
+                select: None,
+            }
+        );
+        assert_eq!(
+            removed,
+            OperationOutcome::Done {
+                message: "Removed fix-auth from favorites.".to_string(),
+                select: None,
+            }
         );
     }
 

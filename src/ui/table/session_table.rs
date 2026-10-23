@@ -28,6 +28,9 @@ pub struct SessionTable<'a> {
 
 impl<'a> SessionTable<'a> {
     const NO_DIFF: &'static str = "—";
+    const TITLE: &'static str = " Sessions ";
+    const FAVORITES_TITLE: &'static str = " Sessions · favorites ";
+    const FAVORITE_MARKER: &'static str = "★";
 
     pub fn new(
         tree: SessionTree<'a>,
@@ -54,7 +57,7 @@ impl<'a> SessionTable<'a> {
     }
 
     pub fn render(&self, frame: &mut Frame, area: Rect) {
-        let block = Block::default().borders(Borders::ALL).title(" Sessions ");
+        let block = Block::default().borders(Borders::ALL).title(self.title());
         let inner = block.inner(area);
         frame.render_widget(block, area);
         let width = usize::from(inner.width);
@@ -64,7 +67,7 @@ impl<'a> SessionTable<'a> {
             lines.push(Line::styled(self.header(&columns), self.theme.emphasis()));
         }
         if !self.has_rows() {
-            Self::render_empty(lines, frame, inner);
+            self.render_empty(lines, frame, inner);
             return;
         }
         let room = usize::from(inner.height).saturating_sub(lines.len());
@@ -79,12 +82,26 @@ impl<'a> SessionTable<'a> {
         !self.tree.rows().is_empty()
     }
 
-    fn render_empty(header: Vec<Line>, frame: &mut Frame, inner: Rect) {
+    fn title(&self) -> &'static str {
+        if self.tree.filter().shows_only_favorites() {
+            return Self::FAVORITES_TITLE;
+        }
+        Self::TITLE
+    }
+
+    fn render_empty(&self, header: Vec<Line>, frame: &mut Frame, inner: Rect) {
         let header_height = u16::try_from(header.len()).unwrap_or(u16::MAX);
         let [header_area, body] =
             Layout::vertical([Constraint::Length(header_height), Constraint::Fill(1)]).areas(inner);
         frame.render_widget(Paragraph::new(header), header_area);
-        EmptyState.render(frame, body);
+        self.empty_state().render(frame, body);
+    }
+
+    fn empty_state(&self) -> EmptyState {
+        if self.tree.filter().shows_only_favorites() {
+            return EmptyState::favorites();
+        }
+        EmptyState::all()
     }
 
     fn shows_header(&self) -> bool {
@@ -121,14 +138,22 @@ impl<'a> SessionTable<'a> {
 
     fn with_optional_columns(&self, columns: TableColumns) -> TableColumns {
         let rows = self.tree.rows();
-        let mut columns = columns.with_diff(rows.iter().map(Self::diff_text));
+        let mut columns = columns.with_diff(rows.iter().map(|row| Self::diff_text(row)));
+        if self.has_favorites() {
+            columns = columns.with_favorite(rows.iter().map(|row| Self::favorite_text(row)));
+        }
         if self.has_pull_requests() {
-            columns = columns.with_pull_request(rows.iter().map(Self::pull_request_text));
+            columns =
+                columns.with_pull_request(rows.iter().map(|row| Self::pull_request_text(row)));
         }
         if self.has_several_agents() {
-            columns = columns.with_agent(rows.iter().map(Self::agent_text));
+            columns = columns.with_agent(rows.iter().map(|row| Self::agent_text(row)));
         }
         columns
+    }
+
+    fn has_favorites(&self) -> bool {
+        self.tree.rows().iter().any(|row| row.is_favorite())
     }
 
     fn has_pull_requests(&self) -> bool {
@@ -139,7 +164,7 @@ impl<'a> SessionTable<'a> {
     }
 
     fn has_several_agents(&self) -> bool {
-        let metadata = self.tree.rows().iter().filter_map(SessionSummary::metadata);
+        let metadata = self.tree.rows().iter().filter_map(|row| row.metadata());
         let agents: HashSet<&str> = metadata.map(SessionMetadata::agent).collect();
         agents.len() > 1
     }
@@ -188,6 +213,13 @@ impl<'a> SessionTable<'a> {
         let agent = vec![Span::styled(cells.agent().to_string(), self.theme.dim())];
         let mut colored = ColoredRow::new(&text, self.theme.base())
             .skip(&columns.name_cell(row.name()))
+            .color_first(
+                cells.favorite(),
+                vec![Span::styled(
+                    cells.favorite().to_string(),
+                    self.theme.favorite(),
+                )],
+            )
             .color_first(cells.agent(), agent);
         if let Some(pull_request) = row.pull_request() {
             let style = self.theme.pull_request(pull_request.state());
@@ -202,6 +234,7 @@ impl<'a> SessionTable<'a> {
 
     fn cells(row: &SessionSummary) -> RowCells {
         RowCells::new(row.name())
+            .with_favorite(Self::favorite_text(row))
             .with_agent(Self::agent_text(row))
             .with_pull_request(Self::pull_request_text(row))
             .with_diff(Self::diff_text(row))
@@ -217,6 +250,13 @@ impl<'a> SessionTable<'a> {
                 .map(|marker| Span::styled(format!(" {marker}"), self.theme.base())),
         );
         spans
+    }
+
+    fn favorite_text(row: &SessionSummary) -> String {
+        if row.is_favorite() {
+            return Self::FAVORITE_MARKER.to_string();
+        }
+        String::new()
     }
 
     fn agent_text(row: &SessionSummary) -> String {
@@ -262,6 +302,11 @@ mod tests {
             ]
         }
 
+        fn favorite(name: &str, state: SessionState) -> SessionSummary {
+            let session = ServiceFixture::session(name).with_favorite(true);
+            SessionSummary::managed(session, state, false)
+        }
+
         fn running(name: &str, agent: &str) -> SessionSummary {
             let session = ServiceFixture::session_with_agent(name, agent);
             SessionSummary::managed(session, SessionState::Waiting, false)
@@ -291,13 +336,28 @@ mod tests {
             tick: u64,
             height: u16,
         ) -> Terminal<TestBackend> {
-            let expanded = SessionTree::new(rows, &HashSet::new());
+            let expanded =
+                SessionTree::new(rows, &HashSet::new(), crate::domain::SessionFilter::All);
             Self::draw(expanded, selection, tick, height)
         }
 
         fn render_folded(rows: &[SessionSummary], height: u16) -> Terminal<TestBackend> {
             let every_repo = rows.iter().map(RepoGroup::of).collect();
-            Self::draw(SessionTree::new(rows, &every_repo), None, 0, height)
+            Self::draw(
+                SessionTree::new(rows, &every_repo, crate::domain::SessionFilter::All),
+                None,
+                0,
+                height,
+            )
+        }
+
+        fn render_favorites(rows: &[SessionSummary], height: u16) -> Terminal<TestBackend> {
+            let tree = SessionTree::new(
+                rows,
+                &HashSet::new(),
+                crate::domain::SessionFilter::Favorites,
+            );
+            Self::draw(tree, None, 0, height)
         }
 
         fn draw(
@@ -635,13 +695,74 @@ mod tests {
 
         terminal
             .draw(|frame| {
-                SessionTable::new(SessionTree::new(&rows, &HashSet::new()), None, 0, Theme)
-                    .for_tier(LayoutTier::Minimal)
-                    .render(frame, frame.area())
+                SessionTable::new(
+                    SessionTree::new(&rows, &HashSet::new(), crate::domain::SessionFilter::All),
+                    None,
+                    0,
+                    Theme,
+                )
+                .for_tier(LayoutTier::Minimal)
+                .render(frame, frame.area())
             })
             .unwrap();
 
         assert!(TableFixture::line(&terminal, 1).starts_with("│● fix-auth"));
+    }
+
+    #[test]
+    fn a_favorite_row_shows_a_star_after_its_name() {
+        let rows = [TableFixture::favorite("fix-auth", SessionState::Waiting)];
+
+        let terminal = TableFixture::render(&rows, None, 0, 6);
+
+        let line = TableFixture::line(&terminal, 2);
+        let name_end = line.find("fix-auth").unwrap() + "fix-auth".len();
+        let star = line.find('★').unwrap();
+
+        assert!(star > name_end);
+    }
+
+    #[test]
+    fn the_favorite_star_is_yellow() {
+        let rows = [TableFixture::favorite("fix-auth", SessionState::Waiting)];
+        let terminal = TableFixture::render(&rows, None, 0, 6);
+        let line = TableFixture::line(&terminal, 2);
+        let byte = line.find('★').unwrap();
+        let column = u16::try_from(line[..byte].chars().count()).unwrap();
+        let buffer = terminal.backend().buffer();
+
+        assert_eq!(buffer[(column, 2)].fg, Color::Yellow);
+    }
+
+    #[test]
+    fn a_table_without_favorites_shows_no_star() {
+        let rows = [TableFixture::managed("fix-auth", SessionState::Waiting)];
+
+        let terminal = TableFixture::render(&rows, None, 0, 6);
+
+        assert!(!TableFixture::line(&terminal, 0).contains("★"));
+        assert!(!TableFixture::line(&terminal, 2).contains("★"));
+    }
+
+    #[test]
+    fn the_favorites_filter_marks_the_title() {
+        let rows = [TableFixture::favorite("fix-auth", SessionState::Waiting)];
+
+        let terminal = TableFixture::render_favorites(&rows, 6);
+
+        assert!(TableFixture::line(&terminal, 0).contains("Sessions · favorites"));
+    }
+
+    #[test]
+    fn the_favorites_empty_state_names_the_filter_key() {
+        let terminal = TableFixture::render_favorites(&[], 12);
+        let screen: String = (0..12)
+            .map(|row| TableFixture::line(&terminal, row))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(screen.contains("No favorite sessions yet."));
+        assert!(screen.contains("Press Ctrl-F to show every session."));
     }
 
     #[test]
@@ -650,8 +771,13 @@ mod tests {
 
         terminal
             .draw(|frame| {
-                SessionTable::new(SessionTree::new(&[], &HashSet::new()), None, 0, Theme)
-                    .render(frame, frame.area())
+                SessionTable::new(
+                    SessionTree::new(&[], &HashSet::new(), crate::domain::SessionFilter::All),
+                    None,
+                    0,
+                    Theme,
+                )
+                .render(frame, frame.area())
             })
             .unwrap();
 

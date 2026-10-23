@@ -32,8 +32,8 @@ use adapters::direnv::direnv_directory_environment::DirenvDirectoryEnvironment;
 use adapters::filesystem::directory_repo_scanner::DirectoryRepoScanner;
 use adapters::filesystem::directory_scratch_space::DirectoryScratchSpace;
 use adapters::filesystem::file_lock::FileLock;
-use adapters::filesystem::json_fold_store::JsonFoldStore;
 use adapters::filesystem::json_session_registry::JsonSessionRegistry;
+use adapters::filesystem::json_view_store::JsonViewStore;
 use adapters::gh::gh_program::GhProgram;
 use adapters::gh::gh_pull_requests::GhPullRequests;
 use adapters::gh::gh_repo_pages::GhRepoPages;
@@ -237,7 +237,7 @@ impl CompositionRoot {
             self.service(config_source, loaded),
             Box::new(FileLock::new(&state_directory.join("lock"))),
             Box::new(io::stdout()),
-            Box::new(JsonFoldStore::new(&state_directory.join("folds.json"))),
+            Box::new(JsonViewStore::new(&state_directory.join("view.json"))),
             Instant::now(),
         );
         let process_warnings = [log_problem, startup_message]

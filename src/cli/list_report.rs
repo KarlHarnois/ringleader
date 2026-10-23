@@ -34,10 +34,15 @@ impl<'a> ListReport<'a> {
         let diff = self
             .diff(row)
             .map_or(Self::NO_DIFF.to_string(), |diff| diff.to_string());
+        let name = if row.is_favorite() {
+            format!("★ {}", row.name())
+        } else {
+            row.name().to_string()
+        };
         format!(
             "{:<9} {:<20} {:<30} {:<16} {}",
             row.state().label(),
-            row.name(),
+            name,
             branch,
             diff,
             worktree
@@ -55,6 +60,7 @@ impl<'a> ListReport<'a> {
             worktree: metadata.map(|metadata| metadata.worktree_path().display().to_string()),
             agent: metadata.map(|metadata| metadata.agent().to_string()),
             state: row.state().label(),
+            favorite: row.is_favorite(),
             diff: self.diff(row).map(DiffEntry::from_stat),
         }
     }
@@ -73,6 +79,7 @@ struct ListEntry {
     worktree: Option<String>,
     agent: Option<String>,
     state: &'static str,
+    favorite: bool,
     diff: Option<DiffEntry>,
 }
 

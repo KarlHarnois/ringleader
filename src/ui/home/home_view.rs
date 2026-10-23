@@ -175,7 +175,8 @@ mod tests {
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
             let selected = rows.first();
             let selection = selected.map(|row| ListSelection::Session(row.name().to_string()));
-            let tree = || SessionTree::new(rows, &HashSet::new());
+            let tree =
+                || SessionTree::new(rows, &HashSet::new(), crate::domain::SessionFilter::All);
             terminal
                 .draw(|frame| {
                     HomeView::new(

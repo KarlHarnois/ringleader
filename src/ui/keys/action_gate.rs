@@ -6,7 +6,7 @@ use super::back_key::BackKey;
 use crate::application::ports::ConfigError;
 use crate::domain::{RepoGroup, Session, SessionState, SessionSummary};
 use crate::ui::app::AppRequest;
-use crate::ui::blocking_operation::{BlockingOperation, DeleteStep};
+use crate::ui::blocking_operation::{BlockingOperation, DeleteStep, RestartTarget};
 use crate::ui::dialogs::DialogOpening;
 
 pub struct ActionGate<'a> {
@@ -49,15 +49,28 @@ impl<'a> ActionGate<'a> {
     }
 
     fn screen_action(key: &KeyEvent) -> Option<KeyAction> {
-        let action = match key.code {
+        Self::plain_screen_action(key.code).or_else(|| Self::control_screen_action(key))
+    }
+
+    fn plain_screen_action(code: KeyCode) -> Option<KeyAction> {
+        let action = match code {
             KeyCode::Char('q') => KeyAction::Request(AppRequest::Quit),
             KeyCode::Char('r') => KeyAction::Reload,
             KeyCode::Char('?') => KeyAction::Open(DialogOpening::Help),
             KeyCode::Char('u') => KeyAction::Open(DialogOpening::Usage),
             KeyCode::Char('/') => KeyAction::FindSession,
-            KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                KeyAction::FindSession
-            }
+            _ => return None,
+        };
+        Some(action)
+    }
+
+    fn control_screen_action(key: &KeyEvent) -> Option<KeyAction> {
+        if !key.modifiers.contains(KeyModifiers::CONTROL) {
+            return None;
+        }
+        let action = match key.code {
+            KeyCode::Char('k') => KeyAction::FindSession,
+            KeyCode::Char('f') => KeyAction::ToggleFilter,
             _ => return None,
         };
         Some(action)
@@ -100,20 +113,35 @@ impl<'a> ActionGate<'a> {
 
     fn session_change(&self, code: KeyCode) -> KeyAction {
         match code {
-            KeyCode::Char('n') => KeyAction::from(
-                self.writable()
-                    .map(|()| KeyAction::Open(DialogOpening::NewSession(self.selected_repo()))),
-            ),
-            KeyCode::Char('R') => KeyAction::from(
-                self.rename()
-                    .map(|session| KeyAction::Open(DialogOpening::Rename(Box::new(session)))),
-            ),
-            KeyCode::Char('s') => KeyAction::from(self.restart().map(KeyAction::Request)),
-            KeyCode::Char('S') => KeyAction::from(self.restart_all().map(KeyAction::Request)),
-            KeyCode::Char('d') => KeyAction::from(self.delete().map(KeyAction::Request)),
-            KeyCode::Char('p') => KeyAction::from(self.pull().map(KeyAction::Request)),
+            KeyCode::Char('f') => KeyAction::from(self.toggle_favorite()),
+            KeyCode::Char('n' | 'R') => self.session_dialog(code),
+            KeyCode::Char('s' | 'S' | 'd' | 'p') => self.session_command(code),
             _ => KeyAction::Ignore,
         }
+    }
+
+    fn session_dialog(&self, code: KeyCode) -> KeyAction {
+        let action = match code {
+            KeyCode::Char('n') => self
+                .writable()
+                .map(|()| KeyAction::Open(DialogOpening::NewSession(self.selected_repo()))),
+            KeyCode::Char('R') => self
+                .rename()
+                .map(|session| KeyAction::Open(DialogOpening::Rename(Box::new(session)))),
+            _ => return KeyAction::Ignore,
+        };
+        KeyAction::from(action)
+    }
+
+    fn session_command(&self, code: KeyCode) -> KeyAction {
+        let request = match code {
+            KeyCode::Char('s') => self.restart(),
+            KeyCode::Char('S') => self.restart_all(),
+            KeyCode::Char('d') => self.delete(),
+            KeyCode::Char('p') => self.pull(),
+            _ => return KeyAction::Ignore,
+        };
+        KeyAction::from(request.map(KeyAction::Request))
     }
 
     fn repo_number(digit: char) -> usize {
@@ -189,7 +217,7 @@ impl<'a> ActionGate<'a> {
         let name = row.name();
         match row.state() {
             state if state.allows_restart() => Ok(AppRequest::Block(BlockingOperation::Restart(
-                name.to_string(),
+                RestartTarget::One(name.to_string()),
             ))),
             SessionState::Unmanaged => {
                 Err(format!("{name} is unmanaged, so it cannot be restarted."))
@@ -201,9 +229,19 @@ impl<'a> ActionGate<'a> {
         }
     }
 
+    pub fn toggle_favorite(&self) -> Result<KeyAction, String> {
+        self.writable()?;
+        let name = self.selected()?.name().to_string();
+        Ok(KeyAction::Request(AppRequest::Block(
+            BlockingOperation::ToggleFavorite(name),
+        )))
+    }
+
     pub fn restart_all(&self) -> Result<AppRequest, String> {
         self.writable()?;
-        Ok(AppRequest::Block(BlockingOperation::RestartAll))
+        Ok(AppRequest::Block(BlockingOperation::Restart(
+            RestartTarget::All,
+        )))
     }
 
     pub fn pull(&self) -> Result<AppRequest, String> {
@@ -256,6 +294,7 @@ pub enum KeyAction {
     Fold,
     Open(DialogOpening),
     FindSession,
+    ToggleFilter,
     Reload,
     OpenOnDesktop(DesktopOpening),
     Refuse(String),
@@ -329,7 +368,7 @@ mod tests {
             assert_eq!(
                 ActionGate::new(Some(&row), None).restart(),
                 Ok(AppRequest::Block(BlockingOperation::Restart(
-                    "fix-auth".to_string()
+                    RestartTarget::One("fix-auth".to_string())
                 )))
             );
         }
@@ -373,7 +412,9 @@ mod tests {
 
         assert_eq!(
             gate.action_for(&KeyEvent::from(KeyCode::Char('S'))),
-            KeyAction::Request(AppRequest::Block(BlockingOperation::RestartAll))
+            KeyAction::Request(AppRequest::Block(BlockingOperation::Restart(
+                RestartTarget::All
+            )))
         );
     }
 
@@ -384,7 +425,9 @@ mod tests {
 
         assert_eq!(
             gate.action_for(&KeyEvent::from(KeyCode::Char('S'))),
-            KeyAction::Request(AppRequest::Block(BlockingOperation::RestartAll))
+            KeyAction::Request(AppRequest::Block(BlockingOperation::Restart(
+                RestartTarget::All
+            )))
         );
     }
 
@@ -824,6 +867,49 @@ mod tests {
         assert_eq!(
             ActionGate::new(Some(&row), None).terminal(),
             Err("mystery is unmanaged, so T cannot open a terminal in it.".to_string())
+        );
+    }
+
+    #[test]
+    fn f_toggles_the_selected_session_favorite() {
+        let row = GateFixture::row(SessionState::Waiting);
+
+        assert_eq!(
+            ActionGate::new(Some(&row), None).action_for(&KeyEvent::from(KeyCode::Char('f'))),
+            KeyAction::Request(AppRequest::Block(BlockingOperation::ToggleFavorite(
+                "fix-auth".to_string()
+            )))
+        );
+    }
+
+    #[test]
+    fn f_without_a_selection_is_refused() {
+        assert_eq!(
+            ActionGate::new(None, None).action_for(&KeyEvent::from(KeyCode::Char('f'))),
+            KeyAction::Refuse("No session is selected.".to_string())
+        );
+    }
+
+    #[test]
+    fn a_read_only_tui_refuses_to_toggle_a_favorite() {
+        let row = GateFixture::row(SessionState::Waiting);
+        let error = GateFixture::config_error();
+
+        let refusal = ActionGate::new(Some(&row), Some(&error))
+            .toggle_favorite()
+            .unwrap_err();
+
+        assert!(refusal.starts_with("config error, running read-only: "));
+    }
+
+    #[test]
+    fn control_f_toggles_the_filter_even_read_only() {
+        let error = GateFixture::config_error();
+        let key = KeyEvent::new(KeyCode::Char('f'), KeyModifiers::CONTROL);
+
+        assert_eq!(
+            ActionGate::new(None, Some(&error)).action_for(&key),
+            KeyAction::ToggleFilter
         );
     }
 }

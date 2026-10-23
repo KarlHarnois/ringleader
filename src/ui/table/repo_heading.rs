@@ -13,7 +13,7 @@ pub struct RepoHeading<'a> {
     group: RepoGroup,
     number: usize,
     folded: bool,
-    rows: &'a [SessionSummary],
+    rows: Vec<&'a SessionSummary>,
 }
 
 impl<'a> RepoHeading<'a> {
@@ -23,9 +23,12 @@ impl<'a> RepoHeading<'a> {
     const UNFOLDED: char = '▾';
     const FOLDED: char = '▸';
 
-    pub fn new(number: usize, rows: &'a [SessionSummary]) -> Self {
+    pub fn new(number: usize, rows: Vec<&'a SessionSummary>) -> Self {
+        let group = rows
+            .first()
+            .map_or(RepoGroup::Other, |row| RepoGroup::of(row));
         Self {
-            group: rows.first().map_or(RepoGroup::Other, RepoGroup::of),
+            group,
             number,
             folded: false,
             rows,
@@ -52,11 +55,11 @@ impl<'a> RepoHeading<'a> {
         }
     }
 
-    pub fn shown_rows(&self) -> &'a [SessionSummary] {
+    pub fn shown_rows(&self) -> &[&'a SessionSummary] {
         if self.folded {
             return &[];
         }
-        self.rows
+        &self.rows
     }
 
     pub fn spans(&self, tick: u64, theme: &Theme, width: usize) -> Vec<Span<'static>> {
@@ -136,7 +139,7 @@ mod tests {
 
         fn folded(rows: &[SessionSummary]) -> RepoHeading<'_> {
             let folded = HashSet::from([RepoGroup::of(&rows[0])]);
-            RepoHeading::new(1, rows).folded_among(&folded)
+            RepoHeading::new(1, rows.iter().collect()).folded_among(&folded)
         }
 
         fn text(heading: &RepoHeading) -> String {
@@ -177,7 +180,7 @@ mod tests {
     fn an_expanded_heading_shows_no_counts() {
         let rows = [HeadingFixture::row("docs", SessionState::Waiting)];
 
-        let heading = RepoHeading::new(1, &rows);
+        let heading = RepoHeading::new(1, rows.iter().collect());
 
         assert_eq!(HeadingFixture::text(&heading), "1 ▾ alpha");
     }
@@ -202,7 +205,7 @@ mod tests {
     fn headings_after_the_ninth_show_a_blank_for_their_number() {
         let rows = [HeadingFixture::row("docs", SessionState::Waiting)];
 
-        let heading = RepoHeading::new(10, &rows);
+        let heading = RepoHeading::new(10, rows.iter().collect());
 
         assert_eq!(HeadingFixture::text(&heading), "  ▾ alpha");
     }
@@ -212,7 +215,7 @@ mod tests {
         let rows = [HeadingFixture::row("docs", SessionState::Waiting)];
 
         for number in [1, 10] {
-            let text = HeadingFixture::text(&RepoHeading::new(number, &rows));
+            let text = HeadingFixture::text(&RepoHeading::new(number, rows.iter().collect()));
             let name: String = text.chars().skip(RepoHeading::LEAD_WIDTH).collect();
             assert_eq!(name, "alpha");
         }

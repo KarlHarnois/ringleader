@@ -43,6 +43,10 @@ impl Theme {
         self.base().fg(Color::Yellow)
     }
 
+    pub fn favorite(&self) -> Style {
+        self.warning()
+    }
+
     pub fn insertions(&self) -> Style {
         self.base().fg(Color::Green)
     }

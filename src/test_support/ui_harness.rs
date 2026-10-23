@@ -10,7 +10,7 @@ use ratatui::buffer::Cell;
 use ratatui::layout::{Position, Size};
 
 use super::{
-    Deadline, FakeFoldStore, FakeInterrupts, FakeLock, FakeMultiplexer, RecordingScreenMode,
+    Deadline, FakeInterrupts, FakeLock, FakeMultiplexer, FakeViewStore, RecordingScreenMode,
     ServiceFixture,
 };
 use crate::application::EphemeralShell;
@@ -67,23 +67,23 @@ impl UiHarness {
     }
 
     pub fn app(fixture: &ServiceFixture) -> App {
-        Self::app_with_folds(fixture, &FakeFoldStore::default())
+        Self::app_with_view(fixture, &FakeViewStore::default())
     }
 
-    pub fn app_with_folds(fixture: &ServiceFixture, folds: &FakeFoldStore) -> App {
-        Self::assembled(fixture, folds, &FakeLock::free())
+    pub fn app_with_view(fixture: &ServiceFixture, view: &FakeViewStore) -> App {
+        Self::assembled(fixture, view, &FakeLock::free())
     }
 
     pub fn app_with_lock(fixture: &ServiceFixture, lock: &FakeLock) -> App {
-        Self::assembled(fixture, &FakeFoldStore::default(), lock)
+        Self::assembled(fixture, &FakeViewStore::default(), lock)
     }
 
-    fn assembled(fixture: &ServiceFixture, folds: &FakeFoldStore, lock: &FakeLock) -> App {
+    fn assembled(fixture: &ServiceFixture, view: &FakeViewStore, lock: &FakeLock) -> App {
         App::new(
             fixture.service(),
             Box::new(lock.clone()),
             Box::new(io::sink()),
-            Box::new(folds.clone()),
+            Box::new(view.clone()),
             Instant::now(),
         )
     }

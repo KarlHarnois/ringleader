@@ -24,7 +24,7 @@ pub struct HelpView {
 impl HelpView {
     pub const TITLE: &'static str = concat!(" Help · ringleader ", env!("CARGO_PKG_VERSION"), " ");
     const KEYS_HEADING: &'static str = "Keys";
-    const KEYS: [(&'static str, &'static str); 19] = [
+    const KEYS: [(&'static str, &'static str); 21] = [
         ("n", "create a session"),
         ("d", "delete the selected session"),
         (
@@ -36,6 +36,11 @@ impl HelpView {
             "attach to the selected session, or fold the selected repo",
         ),
         ("Space", "fold or unfold the selected repo"),
+        ("f", "add the selected session to favorites, or remove it"),
+        (
+            "Ctrl-F",
+            "show only favorite sessions, or show every session",
+        ),
         ("/ Ctrl-K", "find a session by name and attach to it"),
         ("t", "open a shell in the selected session's worktree"),
         (
@@ -158,6 +163,7 @@ impl HelpView {
             Self::state_legend(theme),
             Self::pull_request_legend(theme),
             Self::diff_legend(theme),
+            Self::favorite_legend(theme),
         ];
         legends
             .iter()
@@ -191,6 +197,13 @@ impl HelpView {
             LegendEntry::new("?n", theme.base(), "untracked files"),
         ];
         Legend::new("Diff", entries)
+    }
+
+    fn favorite_legend(theme: &Theme) -> Legend {
+        Legend::new(
+            "Favorites",
+            vec![LegendEntry::new("★", theme.favorite(), "favorite")],
+        )
     }
 
     fn files(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
@@ -231,8 +244,8 @@ mod tests {
         const SHORT_WIDTH: usize = 56;
         const SHORT_HEIGHT: usize = 8;
         const PAST_THE_END: usize = 50;
-        const ROWS_ABOVE_THE_SMALLEST_FULL_SIZE: u16 = 15;
-        const TALL_NARROW_SIZE: (u16, u16) = (79, 39);
+        const ROWS_ABOVE_THE_SMALLEST_FULL_SIZE: u16 = 30;
+        const TALL_NARROW_SIZE: (u16, u16) = (79, 44);
         const TMUX_CONFIG_ROW: &'static str = "tmux config  ~/.local/state/ringleader/tmux.conf";
 
         fn help() -> HelpView {
@@ -366,7 +379,9 @@ mod tests {
 
         assert!(screen.lines().nth(1).unwrap().contains("┌ Help "));
         assert!(screen.contains("n            create a session"));
-        assert!(screen.contains("q            quit, the sessions keep running"));
+        assert!(
+            screen.contains("f            add the selected session to favorites, or remove it")
+        );
     }
 
     #[test]
@@ -375,6 +390,18 @@ mod tests {
 
         assert!(rows.contains(&"t            open a shell in the selected session's".to_string()));
         assert!(rows.contains(&"             worktree".to_string()));
+    }
+
+    #[test]
+    fn the_help_lists_the_favorite_and_filter_keys() {
+        let rows = HelpFixture::rows(&HelpFixture::help(), HelpFixture::UNWRAPPED_WIDTH);
+
+        assert!(rows.contains(
+            &"f            add the selected session to favorites, or remove it".to_string()
+        ));
+        assert!(rows.contains(
+            &"Ctrl-F       show only favorite sessions, or show every session".to_string()
+        ));
     }
 
     #[test]
@@ -600,6 +627,11 @@ mod tests {
         let text = HelpFixture::text(&HelpFixture::help());
 
         assert!(text.contains("Diff         +n added lines  -n removed lines  ?n untracked files"));
+    }
+
+    #[test]
+    fn the_legend_colors_the_favorite_star_like_the_session_table() {
+        assert_eq!(HelpFixture::span_style("★"), Theme.favorite());
     }
 
     #[test]

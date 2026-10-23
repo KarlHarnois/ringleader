@@ -1,7 +1,6 @@
 pub mod fake_clock;
 pub mod fake_config_source;
 pub mod fake_directory_environment;
-pub mod fake_fold_store;
 pub mod fake_host_probe;
 pub mod fake_interrupts;
 pub mod fake_lock;
@@ -13,6 +12,7 @@ pub mod fake_scratch_space;
 pub mod fake_session_registry;
 pub mod fake_terminal_emulator;
 pub mod fake_usage_meter;
+pub mod fake_view_store;
 pub mod fake_web_browser;
 pub mod fake_workspace;
 pub mod recording_screen_mode;

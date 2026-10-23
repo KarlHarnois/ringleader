@@ -1,24 +1,35 @@
+use std::borrow::Borrow;
 use std::collections::HashSet;
 use std::iter::once;
 
 use super::list_selection::ListSelection;
 use super::repo_heading::RepoHeading;
 use super::viewport::Viewport;
-use crate::domain::{RepoGroup, SessionSummary};
+use crate::domain::{RepoGroup, SessionFilter, SessionSummary};
 
 pub struct SessionTree<'a> {
-    rows: &'a [SessionSummary],
+    rows: Vec<&'a SessionSummary>,
     lines: Vec<TreeLine<'a>>,
+    filter: SessionFilter,
 }
 
 impl<'a> SessionTree<'a> {
-    pub fn new(rows: &'a [SessionSummary], folded: &HashSet<RepoGroup>) -> Self {
-        let lines = if Self::groups_by_repo(rows) {
-            Self::grouped_lines(rows, folded)
+    pub fn new(
+        rows: &'a [SessionSummary],
+        folded: &HashSet<RepoGroup>,
+        filter: SessionFilter,
+    ) -> Self {
+        let rows: Vec<&SessionSummary> = rows.iter().filter(|row| filter.allows(row)).collect();
+        let lines = if Self::groups_refs_by_repo(&rows) {
+            Self::grouped_lines(&rows, folded)
         } else {
-            Self::flat_lines(rows)
+            Self::flat_lines(&rows)
         };
-        Self { rows, lines }
+        Self {
+            rows,
+            lines,
+            filter,
+        }
     }
 
     pub fn groups_by_repo(rows: &[SessionSummary]) -> bool {
@@ -29,8 +40,12 @@ impl<'a> SessionTree<'a> {
         rows.sort_by_cached_key(|row| (RepoGroup::of(row), row.state(), row.name().to_string()));
     }
 
-    pub fn rows(&self) -> &'a [SessionSummary] {
-        self.rows
+    pub fn rows(&self) -> &[&'a SessionSummary] {
+        &self.rows
+    }
+
+    pub fn filter(&self) -> SessionFilter {
+        self.filter
     }
 
     pub fn lines(&self) -> &[TreeLine<'a>] {
@@ -71,19 +86,26 @@ impl<'a> SessionTree<'a> {
             .position(|line| line.selection() == *selection)
     }
 
-    fn share_a_group(first: &SessionSummary, second: &SessionSummary) -> bool {
-        RepoGroup::of(first) == RepoGroup::of(second)
+    fn groups_refs_by_repo(rows: &[&SessionSummary]) -> bool {
+        rows.chunk_by(Self::share_a_group).nth(1).is_some()
     }
 
-    fn flat_lines(rows: &'a [SessionSummary]) -> Vec<TreeLine<'a>> {
+    fn share_a_group<T: Borrow<SessionSummary>>(first: &T, second: &T) -> bool {
+        RepoGroup::of(first.borrow()) == RepoGroup::of(second.borrow())
+    }
+
+    fn flat_lines(rows: &[&'a SessionSummary]) -> Vec<TreeLine<'a>> {
         let flat = |row| TreeLine::session(row, TreeBranch::Flat);
-        rows.iter().map(flat).collect()
+        rows.iter().map(|row| flat(row)).collect()
     }
 
-    fn grouped_lines(rows: &'a [SessionSummary], folded: &HashSet<RepoGroup>) -> Vec<TreeLine<'a>> {
+    fn grouped_lines(
+        rows: &[&'a SessionSummary],
+        folded: &HashSet<RepoGroup>,
+    ) -> Vec<TreeLine<'a>> {
         let numbered = rows.chunk_by(Self::share_a_group).zip(1..);
-        let headings =
-            numbered.map(|(rows, number)| RepoHeading::new(number, rows).folded_among(folded));
+        let headings = numbered
+            .map(|(rows, number)| RepoHeading::new(number, rows.to_vec()).folded_among(folded));
         headings.flat_map(Self::group_lines).collect()
     }
 
@@ -92,7 +114,7 @@ impl<'a> SessionTree<'a> {
         once(TreeLine::Heading(heading)).chain(branches).collect()
     }
 
-    fn branch_lines(rows: &'a [SessionSummary]) -> Vec<TreeLine<'a>> {
+    fn branch_lines(rows: &[&'a SessionSummary]) -> Vec<TreeLine<'a>> {
         let Some((last, middle)) = rows.split_last() else {
             return Vec::new();
         };
@@ -173,6 +195,12 @@ mod tests {
             ServiceFixture::summary_in(name, repo, SessionState::Waiting)
         }
 
+        fn favorite(name: &str, repo: &str) -> SessionSummary {
+            let session = ServiceFixture::session_at(name, repo, ServiceFixture::CREATED_AT)
+                .with_favorite(true);
+            SessionSummary::managed(session, SessionState::Waiting, false)
+        }
+
         fn two_repos() -> Vec<SessionSummary> {
             vec![
                 Self::row("dark-mode", "/repos/alpha"),
@@ -200,7 +228,7 @@ mod tests {
             TreeFixture::row("fix-auth", "/repos/alpha"),
         ];
 
-        let tree = SessionTree::new(&rows, &HashSet::new());
+        let tree = SessionTree::new(&rows, &HashSet::new(), SessionFilter::All);
 
         assert_eq!(
             TreeFixture::shapes(&tree),
@@ -213,7 +241,7 @@ mod tests {
     fn two_repos_give_a_heading_then_middle_and_last_branches() {
         let rows = TreeFixture::two_repos();
 
-        let tree = SessionTree::new(&rows, &HashSet::new());
+        let tree = SessionTree::new(&rows, &HashSet::new(), SessionFilter::All);
 
         assert_eq!(
             TreeFixture::shapes(&tree),
@@ -233,7 +261,7 @@ mod tests {
         let rows = TreeFixture::two_repos();
         let folded = HashSet::from([RepoGroup::of(&rows[0])]);
 
-        let tree = SessionTree::new(&rows, &folded);
+        let tree = SessionTree::new(&rows, &folded, SessionFilter::All);
 
         assert_eq!(
             TreeFixture::shapes(&tree),
@@ -246,15 +274,42 @@ mod tests {
         let rows = [TreeFixture::row("dark-mode", "/repos/alpha")];
         let folded = HashSet::from([RepoGroup::of(&rows[0])]);
 
-        let tree = SessionTree::new(&rows, &folded);
+        let tree = SessionTree::new(&rows, &folded, SessionFilter::All);
 
         assert_eq!(TreeFixture::shapes(&tree), ["Flat dark-mode"]);
     }
 
     #[test]
+    fn the_favorites_filter_keeps_only_favorites() {
+        let rows = vec![
+            TreeFixture::favorite("fix-auth", "/repos/alpha"),
+            TreeFixture::row("dark-mode", "/repos/alpha"),
+            TreeFixture::row("docs", "/repos/beta"),
+        ];
+
+        let tree = SessionTree::new(&rows, &HashSet::new(), SessionFilter::Favorites);
+
+        assert_eq!(TreeFixture::shapes(&tree), ["Flat fix-auth"]);
+        assert_eq!(tree.rows().len(), 1);
+    }
+
+    #[test]
+    fn a_filtered_single_repo_is_flat() {
+        let rows = vec![
+            TreeFixture::favorite("fix-auth", "/repos/alpha"),
+            TreeFixture::row("dark-mode", "/repos/alpha"),
+            TreeFixture::row("docs", "/repos/beta"),
+        ];
+
+        let tree = SessionTree::new(&rows, &HashSet::new(), SessionFilter::Favorites);
+
+        assert!(!tree.is_grouped());
+    }
+
+    #[test]
     fn the_selection_stays_on_screen_when_headings_use_up_lines() {
         let rows = TreeFixture::two_repos();
-        let tree = SessionTree::new(&rows, &HashSet::new());
+        let tree = SessionTree::new(&rows, &HashSet::new(), SessionFilter::All);
         let docs = ListSelection::Session("docs".to_string());
 
         let visible: Vec<String> = tree

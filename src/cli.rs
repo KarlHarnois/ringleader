@@ -59,6 +59,8 @@ enum CliCommand {
     Send(SendArgs),
     #[command(about = "Rename a session and the branch made for it")]
     Rename(RenameArgs),
+    #[command(about = "Add a session to favorites, or remove it")]
+    Favorite(NameArgs),
     #[command(about = "Restart an exited or stopped session, or with --all every one")]
     Restart(RestartArgs),
     #[command(about = "Add, remove, or list repos")]
@@ -238,6 +240,7 @@ impl Cli {
                 CliCommand::New(_)
                     | CliCommand::Delete(_)
                     | CliCommand::Rename(_)
+                    | CliCommand::Favorite(_)
                     | CliCommand::Restart(_)
                     | CliCommand::Repo {
                         action: RepoAction::Add(_) | RepoAction::Remove(_)
@@ -334,6 +337,7 @@ impl Cli {
         match &self.command {
             Some(CliCommand::Repo { action }) => Self::dispatch_repo(action, service, session),
             Some(CliCommand::Send(args)) => SessionCommands::new(service, session).send(args),
+            Some(CliCommand::List(args)) => SessionCommands::new(service, session).list(args),
             Some(command) => Self::dispatch_session(command, service, session),
             None => Ok(0),
         }
@@ -346,14 +350,15 @@ impl Cli {
     ) -> Result<u8, CommandStop> {
         let mut commands = SessionCommands::new(service, session);
         match command {
-            CliCommand::List(args) => commands.list(args),
             CliCommand::New(args) => commands.create(args),
             CliCommand::Delete(args) => commands.delete(args),
             CliCommand::Attach(args) => commands.attach(&args.name),
             CliCommand::Rename(args) => commands.rename(args),
+            CliCommand::Favorite(args) => commands.favorite(&args.name),
             CliCommand::Restart(args) => commands.restart_one_or_all(args),
             CliCommand::Repo { .. }
             | CliCommand::Send(_)
+            | CliCommand::List(_)
             | CliCommand::Doctor(_)
             | CliCommand::ExecAgent { .. }
             | CliCommand::FindSession { .. } => Ok(0),

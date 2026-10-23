@@ -161,6 +161,19 @@ impl<'a> SessionCommands<'a> {
         Ok(0)
     }
 
+    pub fn favorite(&mut self, name: &str) -> Result<u8, CommandStop> {
+        self.service.observe_and_record()?;
+        self.session.stop_if_signaled()?;
+        let session = self.service.toggle_favorite(name)?;
+        let message = if session.is_favorite() {
+            format!("added {name} to favorites")
+        } else {
+            format!("removed {name} from favorites")
+        };
+        self.session.output().line(&message);
+        Ok(0)
+    }
+
     pub fn restart_one_or_all(&mut self, args: &RestartArgs) -> Result<u8, CommandStop> {
         match &args.name {
             Some(name) => self.restart(name),
@@ -253,6 +266,15 @@ mod tests {
 
         fn repo(name: &str, path: &str) -> Repo {
             Repo::discovered(RepoName::parse(name).unwrap(), Path::new(path))
+        }
+
+        fn favorite() -> ServiceFixture {
+            let session = Self::session().with_favorite(true);
+            ServiceFixture::new()
+                .with_sessions(std::slice::from_ref(&session))
+                .with_multiplexer(
+                    FakeMultiplexer::new().with_live(ServiceFixture::waiting(&session)),
+                )
         }
 
         fn renamed_by_hand() -> ServiceFixture {
@@ -964,6 +986,68 @@ mod tests {
         let harness = CliHarness::new(fixture);
 
         assert_eq!(harness.run(&["restart", "fix-auth"]), CliExit::Code(1));
+    }
+
+    #[test]
+    fn favorite_adds_and_removes_the_session() {
+        let harness = CliHarness::new(CommandFixture::live());
+
+        assert_eq!(harness.run(&["favorite", "fix-auth"]), CliExit::Code(0));
+        assert_eq!(harness.stdout(), "added fix-auth to favorites\n");
+        assert!(harness.fixture().registry().sessions()[0].is_favorite());
+
+        assert_eq!(harness.run(&["favorite", "fix-auth"]), CliExit::Code(0));
+        assert_eq!(
+            harness.stdout().lines().last(),
+            Some("removed fix-auth from favorites")
+        );
+        assert!(!harness.fixture().registry().sessions()[0].is_favorite());
+    }
+
+    #[test]
+    fn favorite_of_an_unknown_session_exits_two() {
+        let harness = CliHarness::new(ServiceFixture::new());
+
+        assert_eq!(harness.run(&["favorite", "nope"]), CliExit::Code(2));
+    }
+
+    #[test]
+    fn favorite_of_an_unmanaged_session_exits_three() {
+        let stranger = ServiceFixture::session("mystery");
+        let fixture = ServiceFixture::new().with_multiplexer(
+            FakeMultiplexer::new().with_live(ServiceFixture::waiting(&stranger).without_metadata()),
+        );
+        let harness = CliHarness::new(fixture);
+
+        assert_eq!(harness.run(&["favorite", "mystery"]), CliExit::Code(3));
+    }
+
+    #[test]
+    fn favorite_takes_the_write_lock_once() {
+        let harness = CliHarness::new(CommandFixture::live());
+
+        harness.run(&["favorite", "fix-auth"]);
+
+        assert_eq!(harness.lock_acquisitions(), ["try"]);
+    }
+
+    #[test]
+    fn list_marks_a_favorite_session() {
+        let harness = CliHarness::new(CommandFixture::favorite());
+
+        harness.run(&["list"]);
+
+        assert!(harness.stdout().starts_with("waiting   ★ fix-auth"));
+    }
+
+    #[test]
+    fn list_json_marks_a_favorite_session() {
+        let harness = CliHarness::new(CommandFixture::favorite());
+
+        harness.run(&["list", "--json"]);
+
+        let rows: serde_json::Value = serde_json::from_str(&harness.stdout()).unwrap();
+        assert_eq!(rows[0]["favorite"], true);
     }
 
     #[test]

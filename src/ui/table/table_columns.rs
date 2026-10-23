@@ -3,6 +3,7 @@ use crate::ui::text_fit::TextFit;
 pub struct TableColumns {
     inner_width: usize,
     name: usize,
+    favorite: Option<usize>,
     agent: Option<usize>,
     pull_request: Option<usize>,
     diff: Option<usize>,
@@ -15,6 +16,7 @@ impl TableColumns {
     const INDICATOR_GAP: &'static str = " ";
     const COLUMN_GAP: &'static str = "  ";
     const NAME_TITLE: &'static str = "Name";
+    const FAVORITE_TITLE: &'static str = "★";
     const AGENT_TITLE: &'static str = "Agent";
     const PULL_REQUEST_TITLE: &'static str = "PR";
     const DIFF_TITLE: &'static str = "Diff";
@@ -23,10 +25,16 @@ impl TableColumns {
         Self {
             inner_width,
             name: Self::widest(names, Self::NAME_TITLE).max(Self::MINIMUM_NAME_WIDTH),
+            favorite: None,
             agent: None,
             pull_request: None,
             diff: None,
         }
+    }
+
+    pub fn with_favorite(self, favorites: impl Iterator<Item = String>) -> Self {
+        let favorite = Some(Self::widest(favorites, Self::FAVORITE_TITLE));
+        Self { favorite, ..self }
     }
 
     pub fn with_agent(self, agents: impl Iterator<Item = String>) -> Self {
@@ -49,6 +57,9 @@ impl TableColumns {
 
     pub fn fitted(mut self) -> Self {
         if self.overflows() {
+            self.favorite = None;
+        }
+        if self.overflows() {
             self.agent = None;
         }
         if self.overflows() {
@@ -64,6 +75,7 @@ impl TableColumns {
 
     pub fn header(&self, lead: usize, name_title_column: usize) -> String {
         let titles = RowCells::new(Self::NAME_TITLE)
+            .with_favorite(Self::FAVORITE_TITLE)
             .with_agent(Self::AGENT_TITLE)
             .with_pull_request(Self::PULL_REQUEST_TITLE)
             .with_diff(Self::DIFF_TITLE);
@@ -93,6 +105,7 @@ impl TableColumns {
 
     fn optional_cells<'c>(&self, cells: &'c RowCells) -> impl Iterator<Item = (usize, &'c str)> {
         let columns = [
+            (self.favorite, &cells.favorite),
             (self.agent, &cells.agent),
             (self.pull_request, &cells.pull_request),
             (self.diff, &cells.diff),
@@ -107,7 +120,7 @@ impl TableColumns {
     }
 
     fn width(&self) -> usize {
-        let optional = [self.agent, self.pull_request, self.diff]
+        let optional = [self.favorite, self.agent, self.pull_request, self.diff]
             .into_iter()
             .flatten();
         let column_gap = Self::COLUMN_GAP.chars().count();
@@ -124,12 +137,13 @@ impl TableColumns {
             .map(|text| text.chars().count())
             .max()
             .unwrap_or(0)
-            .max(title.len())
+            .max(title.chars().count())
     }
 }
 
 pub struct RowCells {
     name: String,
+    favorite: String,
     agent: String,
     pull_request: String,
     diff: String,
@@ -139,10 +153,16 @@ impl RowCells {
     pub fn new(name: &str) -> Self {
         Self {
             name: name.to_string(),
+            favorite: String::new(),
             agent: String::new(),
             pull_request: String::new(),
             diff: String::new(),
         }
+    }
+
+    pub fn with_favorite(self, favorite: impl Into<String>) -> Self {
+        let favorite = favorite.into();
+        Self { favorite, ..self }
     }
 
     pub fn with_agent(self, agent: impl Into<String>) -> Self {
@@ -161,6 +181,10 @@ impl RowCells {
     pub fn with_diff(self, diff: impl Into<String>) -> Self {
         let diff = diff.into();
         Self { diff, ..self }
+    }
+
+    pub fn favorite(&self) -> &str {
+        &self.favorite
     }
 
     pub fn agent(&self) -> &str {
@@ -217,6 +241,17 @@ mod tests {
 
         fn row_with_agent(inner_width: usize) -> String {
             Self::fitted_with_agent(inner_width).row(&Self::cells(Self::NAME))
+        }
+
+        fn fitted_with_favorite(inner_width: usize) -> TableColumns {
+            TableColumns::new(inner_width, [Self::NAME.to_string()].into_iter())
+                .with_favorite(["★".to_string()].into_iter())
+                .with_diff([Self::DIFF.to_string()].into_iter())
+                .fitted()
+        }
+
+        fn cells_with_favorite(name: &str) -> RowCells {
+            Self::cells(name).with_favorite("★")
         }
 
         fn header(columns: &TableColumns) -> String {
@@ -301,6 +336,33 @@ mod tests {
             ColumnsFixture::header(&columns),
             "  Name          PR    Diff"
         );
+    }
+
+    #[test]
+    fn the_favorite_follows_the_name() {
+        let columns = ColumnsFixture::fitted_with_favorite(30);
+        let row = columns.row(&ColumnsFixture::cells_with_favorite(ColumnsFixture::NAME));
+
+        let name = row.find(ColumnsFixture::NAME).unwrap();
+        let star = row.find('★').unwrap();
+        assert!(star > name);
+        assert_eq!(row.trim_end(), " fix-auth      ★  +124 -31 ?2");
+    }
+
+    #[test]
+    fn a_tight_table_drops_the_favorite_before_the_diff() {
+        let columns = ColumnsFixture::fitted_with_favorite(20);
+        let row = columns.row(&ColumnsFixture::cells_with_favorite(ColumnsFixture::NAME));
+
+        assert!(!row.contains('★'));
+        assert_eq!(row.trim_end(), " fix-auth");
+    }
+
+    #[test]
+    fn a_header_with_a_favorite_column_names_it() {
+        let columns = ColumnsFixture::fitted_with_favorite(30);
+
+        assert_eq!(ColumnsFixture::header(&columns), "  Name          ★  Diff");
     }
 
     #[test]

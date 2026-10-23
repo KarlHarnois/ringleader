@@ -7,7 +7,7 @@ use ratatui::Frame;
 use super::blocking_operation::{BlockingOperation, OperationOutcome};
 use super::dialogs::{Dialog, DialogSlot, DialogStep};
 use super::theme::Theme;
-use crate::application::ports::{FoldStore, Lock, LockError};
+use crate::application::ports::{Lock, LockError, ViewStore};
 use crate::application::{
     CorruptRegistry, EphemeralShell, ServiceError, SessionService, ShellOutcome,
 };
@@ -39,13 +39,13 @@ impl App {
         service: SessionService,
         write_lock: Box<dyn Lock>,
         bell_sink: Box<dyn Write>,
-        folds: Box<dyn FoldStore>,
+        view: Box<dyn ViewStore>,
         now: Instant,
     ) -> Self {
         Self {
             service,
             write_lock,
-            home: HomeState::new(now, Bell::new(bell_sink), folds),
+            home: HomeState::new(now, Bell::new(bell_sink), view),
             key_sequence: KeySequence::default(),
             dialogs: DialogSlot::default(),
             status: StatusReport::default(),
@@ -85,8 +85,8 @@ impl App {
         }
     }
 
-    pub fn restore_folds(&mut self) {
-        self.home.restore_folds();
+    pub fn restore_view(&mut self) {
+        self.home.restore_view();
     }
 
     pub fn resize(&mut self, width: u16, height: u16) {
@@ -226,6 +226,10 @@ impl App {
                 self.status.error(refusal);
                 AppRequest::Continue
             }
+            KeyAction::ToggleFilter => {
+                self.toggle_filter();
+                AppRequest::Continue
+            }
             action => {
                 self.act_on(action);
                 AppRequest::Continue
@@ -246,8 +250,21 @@ impl App {
             }
             KeyAction::Reload => self.reload(),
             KeyAction::OpenOnDesktop(opening) => self.open_on_desktop(opening),
-            KeyAction::Request(_) | KeyAction::Refuse(_) | KeyAction::Ignore => {}
+            KeyAction::Request(_)
+            | KeyAction::Refuse(_)
+            | KeyAction::ToggleFilter
+            | KeyAction::Ignore => {}
         }
+    }
+
+    fn toggle_filter(&mut self) {
+        self.home.toggle_filter(&self.service);
+        let message = if self.home.sessions().filter().shows_only_favorites() {
+            "Showing favorite sessions."
+        } else {
+            "Showing every session."
+        };
+        self.status.info(message.to_string());
     }
 
     fn navigate(&mut self, navigation: Navigation) {
@@ -442,11 +459,11 @@ mod tests {
         SessionState, UsageLimit, UsageRow,
     };
     use crate::test_support::{
-        CapturedWriter, Deadline, FakeFoldStore, FakeLock, FakeMultiplexer, FakePullRequests,
-        FakeRepoPages, FakeSessionRegistry, FakeTerminalEmulator, FakeUsageMeter, FakeWebBrowser,
+        CapturedWriter, Deadline, FakeLock, FakeMultiplexer, FakePullRequests, FakeRepoPages,
+        FakeSessionRegistry, FakeTerminalEmulator, FakeUsageMeter, FakeViewStore, FakeWebBrowser,
         HeldCalls, LogCapture, ServiceFixture, UiHarness,
     };
-    use crate::ui::blocking_operation::DeleteStep;
+    use crate::ui::blocking_operation::{DeleteStep, RestartTarget};
 
     struct AppFixture;
 
@@ -462,6 +479,17 @@ mod tests {
                 ("dark-mode", "dark mode output"),
                 ("fix-auth", "fix auth output"),
             ])
+        }
+
+        fn favorite_and_plain_sessions() -> ServiceFixture {
+            let favorite = ServiceFixture::session("fix-auth").with_favorite(true);
+            let plain = ServiceFixture::session("dark-mode");
+            let multiplexer =
+                Self::with_waiting(FakeMultiplexer::new(), &favorite, "favorite output");
+            let multiplexer = Self::with_waiting(multiplexer, &plain, "plain output");
+            ServiceFixture::new()
+                .with_sessions(&[favorite, plain])
+                .with_multiplexer(multiplexer)
         }
 
         fn three_waiting_sessions() -> ServiceFixture {
@@ -538,7 +566,7 @@ mod tests {
         }
 
         fn ringing(fixture: &ServiceFixture, bell: &CapturedWriter) -> App {
-            let folds = Box::new(FakeFoldStore::default());
+            let folds = Box::new(FakeViewStore::default());
             let mut app = App::new(
                 fixture.service(),
                 Box::new(FakeLock::free()),
@@ -565,9 +593,9 @@ mod tests {
             app
         }
 
-        fn restored(fixture: &ServiceFixture, folds: &FakeFoldStore) -> App {
-            let mut app = UiHarness::app_with_folds(fixture, folds);
-            app.restore_folds();
+        fn restored(fixture: &ServiceFixture, folds: &FakeViewStore) -> App {
+            let mut app = UiHarness::app_with_view(fixture, folds);
+            app.restore_view();
             app.resize(UiHarness::WIDTH, UiHarness::HEIGHT);
             UiHarness::settle(&mut app);
             app
@@ -667,6 +695,10 @@ mod tests {
             app.handle_event(&UiHarness::character(character));
         }
 
+        fn press_control(app: &mut App, character: char) {
+            app.handle_event(&UiHarness::control(character));
+        }
+
         fn help_scrolled_past_its_end(app: &mut App, width: u16, height: u16) -> String {
             Self::press(app, '?');
             Self::screen(app, width, height);
@@ -748,7 +780,7 @@ mod tests {
                 fixture.unloaded_service(),
                 Box::new(lock.clone()),
                 Box::new(io::sink()),
-                Box::new(FakeFoldStore::default()),
+                Box::new(FakeViewStore::default()),
                 Instant::now(),
             )
         }
@@ -1086,7 +1118,7 @@ mod tests {
     #[test]
     fn space_saves_the_folded_repo() {
         let fixture = UiHarness::two_repos();
-        let folds = FakeFoldStore::default();
+        let folds = FakeViewStore::default();
         let mut app = AppFixture::restored(&fixture, &folds);
 
         AppFixture::press(&mut app, ' ');
@@ -1103,7 +1135,7 @@ mod tests {
 
         let app = AppFixture::restored(
             &fixture,
-            &FakeFoldStore::holding(&[UiHarness::docs_repo_group()]),
+            &FakeViewStore::holding(&[UiHarness::docs_repo_group()]),
         );
 
         let screen = AppFixture::screen(&app, 100, 28);
@@ -1114,7 +1146,7 @@ mod tests {
     #[test]
     fn observing_and_moving_without_a_fold_change_saves_nothing_so_ticks_write_no_file() {
         let fixture = UiHarness::two_repos();
-        let folds = FakeFoldStore::holding(&[UiHarness::docs_repo_group()]);
+        let folds = FakeViewStore::holding(&[UiHarness::docs_repo_group()]);
         let mut app = AppFixture::restored(&fixture, &folds);
 
         AppFixture::press(&mut app, 'j');
@@ -1126,7 +1158,7 @@ mod tests {
     #[test]
     fn returning_from_a_session_in_a_folded_repo_saves_its_repo_unfolded() {
         let fixture = UiHarness::two_repos();
-        let folds = FakeFoldStore::holding(&[UiHarness::docs_repo_group()]);
+        let folds = FakeViewStore::holding(&[UiHarness::docs_repo_group()]);
         let mut app = AppFixture::restored(&fixture, &folds);
 
         app.attach("docs");
@@ -1137,7 +1169,7 @@ mod tests {
     #[test]
     fn a_saved_fold_is_saved_as_forgotten_when_its_repo_starts_without_a_heading() {
         let fixture = AppFixture::two_waiting_sessions();
-        let folds = FakeFoldStore::holding(&[ServiceFixture::repo_group(ServiceFixture::REPO)]);
+        let folds = FakeViewStore::holding(&[ServiceFixture::repo_group(ServiceFixture::REPO)]);
 
         AppFixture::restored(&fixture, &folds);
 
@@ -1149,7 +1181,7 @@ mod tests {
         const DETAIL: &str = "the disk refused the fold save";
         let log = LogCapture::installed();
         let fixture = UiHarness::two_repos();
-        let mut app = AppFixture::restored(&fixture, &FakeFoldStore::failing_saves(DETAIL));
+        let mut app = AppFixture::restored(&fixture, &FakeViewStore::failing_saves(DETAIL));
 
         AppFixture::press(&mut app, ' ');
 
@@ -1165,7 +1197,7 @@ mod tests {
         let log = LogCapture::installed();
         let fixture = UiHarness::two_repos();
 
-        let app = AppFixture::restored(&fixture, &FakeFoldStore::failing_loads(DETAIL));
+        let app = AppFixture::restored(&fixture, &FakeViewStore::failing_loads(DETAIL));
 
         assert!(AppFixture::screen(&app, 100, 28).contains("docs"));
         assert_eq!(log.count_containing(DETAIL), 1);
@@ -1174,12 +1206,87 @@ mod tests {
     #[test]
     fn a_read_only_tui_still_saves_its_folds_because_a_fold_changes_no_session() {
         let fixture = UiHarness::two_repos().with_broken_config(AppFixture::config_error());
-        let folds = FakeFoldStore::default();
+        let folds = FakeViewStore::default();
         let mut app = AppFixture::restored(&fixture, &folds);
 
         AppFixture::press(&mut app, ' ');
 
         assert_eq!(folds.save_count(), 1);
+    }
+
+    #[test]
+    fn f_favorites_the_selected_session_and_its_star_shows() {
+        let fixture = UiHarness::two_repos();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, 'j');
+
+        AppFixture::press_and_perform(&mut app, 'f');
+
+        let screen = AppFixture::screen(&app, 100, 28);
+        assert!(screen.contains('★'));
+        assert!(
+            fixture
+                .registry()
+                .sessions()
+                .iter()
+                .any(|session| session.is_favorite())
+        );
+    }
+
+    #[test]
+    fn f_again_removes_the_favorite() {
+        let fixture = AppFixture::favorite_and_plain_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, 'j');
+
+        AppFixture::press_and_perform(&mut app, 'f');
+
+        assert!(
+            fixture
+                .registry()
+                .sessions()
+                .iter()
+                .all(|session| !session.is_favorite())
+        );
+    }
+
+    #[test]
+    fn control_f_hides_non_favorites_and_saves_the_filter() {
+        let fixture = AppFixture::favorite_and_plain_sessions();
+        let view = FakeViewStore::default();
+        let mut app = AppFixture::restored(&fixture, &view);
+
+        AppFixture::press_control(&mut app, 'f');
+
+        let screen = AppFixture::screen(&app, 100, 28);
+        assert!(screen.contains("fix-auth"));
+        assert!(!screen.contains("dark-mode"));
+        assert_eq!(view.filter(), crate::domain::SessionFilter::Favorites);
+    }
+
+    #[test]
+    fn a_saved_favorites_filter_hides_non_favorites_at_start() {
+        let fixture = AppFixture::favorite_and_plain_sessions();
+        let view = FakeViewStore::holding_filter(&[], crate::domain::SessionFilter::Favorites);
+
+        let app = AppFixture::restored(&fixture, &view);
+
+        let screen = AppFixture::screen(&app, 100, 28);
+        assert!(screen.contains("fix-auth"));
+        assert!(!screen.contains("dark-mode"));
+    }
+
+    #[test]
+    fn attaching_to_a_hidden_session_shows_every_row_again() {
+        let fixture = AppFixture::favorite_and_plain_sessions();
+        let view = FakeViewStore::holding_filter(&[], crate::domain::SessionFilter::Favorites);
+        let mut app = AppFixture::restored(&fixture, &view);
+
+        app.attach("dark-mode");
+
+        let screen = AppFixture::screen(&app, 100, 28);
+        assert!(screen.contains("dark-mode"));
+        assert_eq!(view.filter(), crate::domain::SessionFilter::All);
     }
 
     #[test]
@@ -1280,7 +1387,9 @@ mod tests {
 
         assert_eq!(
             request,
-            AppRequest::Block(BlockingOperation::Restart("fix-auth".to_string()))
+            AppRequest::Block(BlockingOperation::Restart(RestartTarget::One(
+                "fix-auth".to_string()
+            )))
         );
         assert_eq!(AppFixture::status_line(&app, 100), " Restarting fix-auth…");
     }
@@ -1293,7 +1402,9 @@ mod tests {
             .with_host(ServiceFixture::with_worktree_agent(&session));
         let mut app = AppFixture::started(&fixture, 80, 24);
 
-        app.perform(BlockingOperation::Restart("fix-auth".to_string()));
+        app.perform(BlockingOperation::Restart(RestartTarget::One(
+            "fix-auth".to_string(),
+        )));
 
         assert!(AppFixture::flattened_screen(&app, 80, 24).contains("Do not end them"));
     }
@@ -1309,7 +1420,9 @@ mod tests {
             .with_host(host);
         let mut app = AppFixture::started(&fixture, 80, 24);
 
-        app.perform(BlockingOperation::Restart("fix-auth".to_string()));
+        app.perform(BlockingOperation::Restart(RestartTarget::One(
+            "fix-auth".to_string(),
+        )));
 
         assert!(
             AppFixture::flattened_screen(&app, 80, 24)
@@ -1324,7 +1437,10 @@ mod tests {
 
         let request = app.handle_event(&UiHarness::character('S'));
 
-        assert_eq!(request, AppRequest::Block(BlockingOperation::RestartAll));
+        assert_eq!(
+            request,
+            AppRequest::Block(BlockingOperation::Restart(RestartTarget::All))
+        );
         assert_eq!(
             AppFixture::status_line(&app, 100),
             " Restarting every exited or stopped session…"
@@ -1336,7 +1452,7 @@ mod tests {
         let fixture = UiHarness::exited_session_fixture("fix-auth");
         let mut app = AppFixture::started(&fixture, 100, 28);
 
-        app.perform(BlockingOperation::RestartAll);
+        app.perform(BlockingOperation::Restart(RestartTarget::All));
 
         assert_eq!(fixture.multiplexer().launches().len(), 1);
         assert_eq!(AppFixture::status_line(&app, 100), " Restarted 1 session.");
@@ -1347,7 +1463,7 @@ mod tests {
         let fixture = ServiceFixture::new().with_sessions(&[ServiceFixture::session("fix-auth")]);
         let mut app = AppFixture::started(&fixture, 100, 28);
 
-        app.perform(BlockingOperation::RestartAll);
+        app.perform(BlockingOperation::Restart(RestartTarget::All));
 
         assert!(
             AppFixture::status_line(&app, 200)
@@ -1362,7 +1478,9 @@ mod tests {
         let fixture = UiHarness::exited_session_fixture("fix-auth");
         let mut app = AppFixture::started(&fixture, 100, 28);
 
-        app.perform(BlockingOperation::Restart("fix-auth".to_string()));
+        app.perform(BlockingOperation::Restart(RestartTarget::One(
+            "fix-auth".to_string(),
+        )));
 
         assert_eq!(fixture.multiplexer().launches().len(), 1);
         assert_eq!(AppFixture::status_line(&app, 100), " Restarted fix-auth.");
@@ -1374,7 +1492,9 @@ mod tests {
         fixture.multiplexer().lose_socket();
         let mut app = AppFixture::started(&fixture, 100, 28);
 
-        app.perform(BlockingOperation::Restart("fix-auth".to_string()));
+        app.perform(BlockingOperation::Restart(RestartTarget::One(
+            "fix-auth".to_string(),
+        )));
 
         assert!(
             AppFixture::flattened_screen(&app, 100, 28)
@@ -1388,7 +1508,9 @@ mod tests {
             .with_directory_environment(ServiceFixture::not_allowed_envrc("fix-auth"));
         let mut app = AppFixture::started(&fixture, 300, 28);
 
-        app.perform(BlockingOperation::Restart("fix-auth".to_string()));
+        app.perform(BlockingOperation::Restart(RestartTarget::One(
+            "fix-auth".to_string(),
+        )));
 
         assert!(
             AppFixture::flattened_screen(&app, 300, 28)
@@ -2563,7 +2685,9 @@ mod tests {
         let held_during_restart = AppFixture::lock_state_during(&fixture, &lock, "respawn_agent");
         let mut app = UiHarness::app_with_lock(&fixture, &lock);
 
-        app.perform(BlockingOperation::Restart("fix-auth".to_string()));
+        app.perform(BlockingOperation::Restart(RestartTarget::One(
+            "fix-auth".to_string(),
+        )));
 
         assert_eq!(*held_during_restart.lock().unwrap(), [true]);
         assert!(!lock.is_held());
@@ -2603,7 +2727,9 @@ mod tests {
         let fixture = UiHarness::exited_session_fixture("fix-auth");
         let mut app = UiHarness::app_with_lock(&fixture, &FakeLock::held_elsewhere());
 
-        app.perform(BlockingOperation::Restart("fix-auth".to_string()));
+        app.perform(BlockingOperation::Restart(RestartTarget::One(
+            "fix-auth".to_string(),
+        )));
 
         assert!(
             AppFixture::status_line(&app, 200)

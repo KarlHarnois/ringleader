@@ -13,7 +13,8 @@
       "socket_path": "/tmp/tmux-1000/default",
       "created_at": 1791000000,
       "worktree_root": "/home/user/.local/share/ringleader/worktrees",
-      "tmux_prefix": "ringleader-"
+      "tmux_prefix": "ringleader-",
+      "favorite": true
     },
     {
       "name": "dark-mode",

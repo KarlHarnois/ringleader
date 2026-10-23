@@ -123,6 +123,8 @@ struct SessionEntry {
     created_at: u64,
     worktree_root: PathBuf,
     tmux_prefix: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    favorite: Option<bool>,
 }
 
 impl SessionEntry {
@@ -142,6 +144,7 @@ impl SessionEntry {
             created_at: session.created_at(),
             worktree_root: naming.worktree_root().to_path_buf(),
             tmux_prefix: naming.tmux_prefix().to_string(),
+            favorite: session.is_favorite().then_some(true),
         }
     }
 
@@ -157,11 +160,15 @@ impl SessionEntry {
             NamingScheme::new(&self.worktree_root, &self.tmux_prefix),
             self.created_at,
         );
-        Some(Session::new(
-            SessionName::from_slug(&self.name).ok()?,
-            metadata,
-            registration,
-        ))
+        let favorite = self.favorite.unwrap_or(false);
+        Some(
+            Session::new(
+                SessionName::from_slug(&self.name).ok()?,
+                metadata,
+                registration,
+            )
+            .with_favorite(favorite),
+        )
     }
 }
 
@@ -220,6 +227,8 @@ mod tests {
             .collect();
         assert_eq!(names, ["fix-auth", "dark-mode"]);
         assert_eq!(sessions[0].naming().tmux_prefix(), "ringleader-");
+        assert!(sessions[0].is_favorite());
+        assert!(!sessions[1].is_favorite());
     }
 
     #[test]
@@ -259,6 +268,41 @@ mod tests {
         let sessions = fixture.registry().load().unwrap();
 
         assert_eq!(sessions[0].requested_base_branch(), None);
+    }
+
+    #[test]
+    fn an_entry_written_without_a_favorite_loads_as_not_a_favorite() {
+        let fixture = RegistryFixture::with_contents(VERSION_ONE);
+
+        let sessions = fixture.registry().load().unwrap();
+
+        assert!(!sessions[0].is_favorite());
+    }
+
+    #[test]
+    fn a_favorite_survives_a_save_and_load() {
+        let fixture = RegistryFixture::new();
+        let session = ServiceFixture::session("fix-auth").with_favorite(true);
+
+        fixture.registry().save(&[session]).unwrap();
+
+        assert!(fixture.registry().load().unwrap()[0].is_favorite());
+    }
+
+    #[test]
+    fn a_session_that_is_not_a_favorite_writes_no_field_for_it() {
+        let fixture = RegistryFixture::new();
+
+        fixture
+            .registry()
+            .save(&[ServiceFixture::session("fix-auth")])
+            .unwrap();
+
+        assert!(
+            !fs::read_to_string(fixture.path())
+                .unwrap()
+                .contains("favorite")
+        );
     }
 
     #[test]

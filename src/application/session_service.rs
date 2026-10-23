@@ -287,6 +287,15 @@ impl SessionService {
         Ok(renamed)
     }
 
+    pub fn toggle_favorite(&mut self, name: &str) -> Result<Session, ServiceError> {
+        let reconciliation = self.reconcile()?;
+        let toggled = reconciliation.managed(name)?.session().toggled_favorite();
+        let entries = reconciliation.entries_with(name, toggled.clone());
+        self.registry.save(&entries)?;
+        self.entries = entries;
+        Ok(toggled)
+    }
+
     pub fn doctor(&self) -> DoctorReport {
         self.doctor
             .examine(self.config(), self.read_only_reason(), &self.config_path())
@@ -523,6 +532,65 @@ mod tests {
             .unwrap();
 
         assert_eq!(fixture.registry().names(), ["dark-mode", "fix-auth"]);
+    }
+
+    #[test]
+    fn toggling_a_favorite_saves_it_in_the_registry() {
+        let fixture = OtherRingleaderFixture::renamable();
+        let mut service = fixture.service();
+
+        let toggled = service.toggle_favorite("fix-auth").unwrap();
+
+        assert!(toggled.is_favorite());
+        assert!(fixture.registry().sessions()[0].is_favorite());
+    }
+
+    #[test]
+    fn toggling_a_favorite_twice_restores_it() {
+        let fixture = OtherRingleaderFixture::renamable();
+        let mut service = fixture.service();
+
+        service.toggle_favorite("fix-auth").unwrap();
+        let restored = service.toggle_favorite("fix-auth").unwrap();
+
+        assert!(!restored.is_favorite());
+        assert!(!fixture.registry().sessions()[0].is_favorite());
+    }
+
+    #[test]
+    fn an_unmanaged_session_cannot_be_favorited() {
+        let stranger = ServiceFixture::session("mystery");
+        let fixture = ServiceFixture::new().with_multiplexer(
+            FakeMultiplexer::new().with_live(ServiceFixture::waiting(&stranger).without_metadata()),
+        );
+        let mut service = fixture.service();
+
+        let error = service.toggle_favorite("mystery").unwrap_err();
+
+        assert!(matches!(error, ServiceError::Conflict(_)));
+    }
+
+    #[test]
+    fn an_unknown_session_cannot_be_favorited() {
+        let fixture = ServiceFixture::new();
+        let mut service = fixture.service();
+
+        let error = service.toggle_favorite("nope").unwrap_err();
+
+        assert!(matches!(error, ServiceError::NotFound(_)));
+    }
+
+    #[test]
+    fn a_favorite_whose_save_fails_is_not_recorded() {
+        let session = ServiceFixture::session("fix-auth");
+        let fixture = OtherRingleaderFixture::renamable()
+            .with_registry(FakeSessionRegistry::with_sessions(vec![session]).failing_saves());
+        let mut service = fixture.service();
+
+        let error = service.toggle_favorite("fix-auth").unwrap_err();
+
+        assert!(matches!(error, ServiceError::Failed(_)));
+        assert!(!fixture.registry().sessions()[0].is_favorite());
     }
 
     #[test]

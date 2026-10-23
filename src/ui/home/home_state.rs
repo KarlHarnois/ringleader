@@ -5,9 +5,9 @@ use super::bell::Bell;
 use super::home_view::LayoutTier;
 use super::preview_panel::PreviewPanel;
 use super::status_bar::{StatusBar, StatusNote};
-use crate::application::ports::FoldStore;
+use crate::application::ports::{ViewState, ViewStore};
 use crate::application::{ServiceError, SessionService, Tool};
-use crate::domain::{RepoGroup, SessionSummary};
+use crate::domain::{RepoGroup, SessionFilter, SessionSummary};
 use crate::ui::background_jobs::diff_queue::DiffQueue;
 use crate::ui::background_jobs::observation_feed::ObservationFeed;
 use crate::ui::background_jobs::preview_feed::PreviewFeed;
@@ -18,7 +18,7 @@ use crate::ui::theme::Theme;
 
 pub struct HomeState {
     sessions: SessionList,
-    folds: Box<dyn FoldStore>,
+    view: Box<dyn ViewStore>,
     bell: Bell,
     observations: ObservationFeed,
     preview: PreviewFeed,
@@ -31,10 +31,10 @@ pub struct HomeState {
 impl HomeState {
     pub const TMUX_PAUSE: Duration = Duration::from_secs(30);
 
-    pub fn new(now: Instant, bell: Bell, folds: Box<dyn FoldStore>) -> Self {
+    pub fn new(now: Instant, bell: Bell, view: Box<dyn ViewStore>) -> Self {
         Self {
             sessions: SessionList::default(),
-            folds,
+            view,
             bell,
             observations: ObservationFeed::new(now),
             preview: PreviewFeed::new(now),
@@ -45,10 +45,13 @@ impl HomeState {
         }
     }
 
-    pub fn restore_folds(&mut self) {
-        match self.folds.load() {
-            Ok(folded) => self.sessions.restore_folds(folded),
-            Err(error) => log::warn!("could not restore the folded repos: {error}"),
+    pub fn restore_view(&mut self) {
+        match self.view.load() {
+            Ok(state) => {
+                self.sessions.restore_folds(state.folded().clone());
+                self.sessions.restore_filter(state.filter());
+            }
+            Err(error) => log::warn!("could not restore the view state: {error}"),
         }
     }
 
@@ -171,6 +174,12 @@ impl HomeState {
         self.change_list(service, SessionList::toggle_fold);
     }
 
+    pub fn toggle_filter(&mut self, service: &SessionService) {
+        self.change_list(service, SessionList::toggle_filter);
+        self.refresh_diffs_soon();
+        self.pull_requests.refresh_soon();
+    }
+
     pub fn jump_to_repo(&mut self, number: usize, service: &SessionService) {
         self.change_list(service, |sessions| sessions.jump_to_repo(number));
     }
@@ -178,9 +187,10 @@ impl HomeState {
     fn change_list(&mut self, service: &SessionService, change: impl FnOnce(&mut SessionList)) {
         let selected_before = self.sessions.selected_name().map(str::to_string);
         let folded_before = self.sessions.folded().clone();
+        let filter_before = self.sessions.filter();
         change(&mut self.sessions);
         self.refresh_preview_if_moved_from(selected_before.as_deref(), service);
-        self.save_folds_if_changed_from(&folded_before);
+        self.save_view_if_changed_from(&folded_before, filter_before);
     }
 
     fn refresh_preview_if_moved_from(
@@ -193,12 +203,17 @@ impl HomeState {
         }
     }
 
-    fn save_folds_if_changed_from(&self, folded_before: &HashSet<RepoGroup>) {
-        if self.sessions.folded() == folded_before {
+    fn save_view_if_changed_from(
+        &self,
+        folded_before: &HashSet<RepoGroup>,
+        filter_before: SessionFilter,
+    ) {
+        if self.sessions.folded() == folded_before && self.sessions.filter() == filter_before {
             return;
         }
-        if let Err(error) = self.folds.save(self.sessions.folded()) {
-            log::warn!("could not save the folded repos: {error}");
+        let state = ViewState::new(self.sessions.folded().clone(), self.sessions.filter());
+        if let Err(error) = self.view.save(&state) {
+            log::warn!("could not save the view state: {error}");
         }
     }
 

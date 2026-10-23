@@ -1,5 +1,6 @@
 pub mod session;
 pub mod session_classifier;
+pub mod session_filter;
 pub mod session_metadata;
 pub mod session_name;
 pub mod session_observation;

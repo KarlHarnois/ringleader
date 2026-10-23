@@ -12,4 +12,4 @@
 - Before each TUI change, reread the config too: the config can change while the TUI runs.
 - Never save an observation listed before the process took the write lock. Such a listing can predate another process's rename or delete, and saving the listing undoes that change.
 - If another process holds the write lock, a TUI observation saves nothing and never waits.
-- The TUI holds the TUI lock for its whole run. Only the TUI lock keeps a second TUI from writing `folds.json`.
+- The TUI holds the TUI lock for its whole run. Only the TUI lock keeps a second TUI from writing `view.json`.

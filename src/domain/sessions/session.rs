@@ -11,6 +11,7 @@ pub struct Session {
     name: SessionName,
     metadata: SessionMetadata,
     registration: Registration,
+    favorite: bool,
 }
 
 impl Session {
@@ -19,6 +20,7 @@ impl Session {
             name,
             metadata,
             registration,
+            favorite: false,
         }
     }
 
@@ -74,6 +76,19 @@ impl Session {
         &self.registration.naming
     }
 
+    pub fn is_favorite(&self) -> bool {
+        self.favorite
+    }
+
+    pub fn with_favorite(mut self, favorite: bool) -> Self {
+        self.favorite = favorite;
+        self
+    }
+
+    pub fn toggled_favorite(&self) -> Self {
+        self.clone().with_favorite(!self.favorite)
+    }
+
     pub fn has_branch_named_after_it(&self) -> bool {
         self.branch() == self.naming().branch_name(&self.name)
     }
@@ -94,6 +109,7 @@ impl Session {
                 .registration
                 .on_tmux(TmuxAddress::new(&tmux_name, self.socket_path())),
             name,
+            favorite: self.favorite,
         }
     }
 
@@ -109,6 +125,7 @@ impl Session {
             name,
             metadata,
             registration: self.registration.on_tmux(tmux),
+            favorite: self.favorite,
         }
     }
 
@@ -270,6 +287,50 @@ mod tests {
     #[test]
     fn a_session_in_its_own_worktree_allows_a_pull() {
         assert!(SessionFixture::fix_auth().allows_pull());
+    }
+
+    #[test]
+    fn a_new_session_is_not_a_favorite() {
+        assert!(!SessionFixture::fix_auth().is_favorite());
+    }
+
+    #[test]
+    fn toggling_a_favorite_changes_it_each_time() {
+        let session = SessionFixture::fix_auth();
+
+        let favorited = session.toggled_favorite();
+        let restored = favorited.toggled_favorite();
+
+        assert!(favorited.is_favorite());
+        assert!(!restored.is_favorite());
+    }
+
+    #[test]
+    fn renaming_keeps_the_favorite() {
+        let session = SessionFixture::fix_auth().with_favorite(true);
+
+        let renamed = session.renamed(SessionFixture::fix_login());
+
+        assert!(renamed.is_favorite());
+    }
+
+    #[test]
+    fn rekeying_keeps_the_favorite() {
+        let session = SessionFixture::fix_auth().with_favorite(true);
+        let tmux = TmuxAddress::new(session.tmux_name(), session.socket_path());
+
+        let rekeyed = session.rekeyed(session.name().clone(), session.metadata().clone(), tmux);
+
+        assert!(rekeyed.is_favorite());
+    }
+
+    #[test]
+    fn moving_to_another_socket_keeps_the_favorite() {
+        let session = SessionFixture::fix_auth().with_favorite(true);
+
+        let moved = session.on_socket(Path::new("/tmp/other/default"));
+
+        assert!(moved.is_favorite());
     }
 
     #[test]

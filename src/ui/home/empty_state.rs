@@ -5,7 +5,9 @@ use ratatui::text::Line;
 use super::home_view::CenteredText;
 use crate::ui::text_fit::TextFit;
 
-pub struct EmptyState;
+pub struct EmptyState {
+    message: &'static [&'static str],
+}
 
 impl EmptyState {
     const LOGO: [&'static str; 5] = [
@@ -16,13 +18,29 @@ impl EmptyState {
         r"/_/ |_/___/_/ |_/\____/_____/_____/_/  |_/_____/_____/_/ |_|",
     ];
     const MESSAGE: [&'static str; 2] = ["No sessions yet.", "Press n to create one."];
+    const FAVORITES_MESSAGE: [&'static str; 2] = [
+        "No favorite sessions yet.",
+        "Press Ctrl-F to show every session.",
+    ];
+
+    pub fn all() -> Self {
+        Self::for_message(&Self::MESSAGE)
+    }
+
+    pub fn favorites() -> Self {
+        Self::for_message(&Self::FAVORITES_MESSAGE)
+    }
+
+    fn for_message(message: &'static [&'static str]) -> Self {
+        Self { message }
+    }
 
     pub fn render(&self, frame: &mut Frame, area: Rect) {
-        let logo_above_message = CenteredText::new(Self::logo_above_message());
+        let logo_above_message = CenteredText::new(self.logo_above_message());
         if logo_above_message.fits(area) {
             logo_above_message.render(frame, area);
         } else {
-            CenteredText::new(Self::MESSAGE).render(frame, area);
+            CenteredText::new(self.message.to_vec()).render(frame, area);
         }
     }
 
@@ -31,10 +49,10 @@ impl EmptyState {
         Self::LOGO[Self::LOGO.len() - 1]
     }
 
-    fn logo_above_message() -> Vec<Line<'static>> {
+    fn logo_above_message(&self) -> Vec<Line<'static>> {
         Self::logo_rows_of_one_width()
             .chain([Line::default()])
-            .chain(Self::MESSAGE.map(Line::from))
+            .chain(self.message.iter().map(|line| Line::from(*line)))
             .collect()
     }
 
@@ -63,8 +81,8 @@ mod tests {
         const ODD_SPARE_COLUMNS: u16 = 19;
         const SPARE_ROWS: u16 = 2;
 
-        fn block_size() -> (u16, u16) {
-            let block = EmptyState::logo_above_message();
+        fn block_size(state: &EmptyState) -> (u16, u16) {
+            let block = state.logo_above_message();
             let width = block.iter().map(Line::width).max().unwrap();
             (
                 u16::try_from(width).unwrap(),
@@ -72,15 +90,19 @@ mod tests {
             )
         }
 
-        fn rows_with_room() -> Vec<String> {
-            let (width, height) = Self::block_size();
-            Self::rows(width + Self::ODD_SPARE_COLUMNS, height + Self::SPARE_ROWS)
+        fn rows_with_room(state: &EmptyState) -> Vec<String> {
+            let (width, height) = Self::block_size(state);
+            Self::rows(
+                state,
+                width + Self::ODD_SPARE_COLUMNS,
+                height + Self::SPARE_ROWS,
+            )
         }
 
-        fn rows(width: u16, height: u16) -> Vec<String> {
+        fn rows(state: &EmptyState, width: u16, height: u16) -> Vec<String> {
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
             terminal
-                .draw(|frame| EmptyState.render(frame, frame.area()))
+                .draw(|frame| state.render(frame, frame.area()))
                 .unwrap();
             terminal
                 .backend()
@@ -113,7 +135,8 @@ mod tests {
 
     #[test]
     fn the_logo_rows_start_in_the_same_column() {
-        let rows = ScreenFixture::rows_with_room();
+        let state = EmptyState::all();
+        let rows = ScreenFixture::rows_with_room(&state);
 
         let (top, indent) = ScreenFixture::logo_top_left(&rows);
         for (row, expected) in rows[top..].iter().zip(EmptyState::LOGO) {
@@ -123,7 +146,8 @@ mod tests {
 
     #[test]
     fn the_logo_and_message_are_centered_in_the_area() {
-        let rows = ScreenFixture::rows_with_room();
+        let state = EmptyState::all();
+        let rows = ScreenFixture::rows_with_room(&state);
 
         let (top, left) = ScreenFixture::logo_top_left(&rows);
         let bottom = usize::from(ScreenFixture::SPARE_ROWS) - top;
@@ -136,7 +160,8 @@ mod tests {
 
     #[test]
     fn the_message_stays_under_the_logo() {
-        let rows = ScreenFixture::rows_with_room();
+        let state = EmptyState::all();
+        let rows = ScreenFixture::rows_with_room(&state);
 
         let logo_bottom = rows
             .iter()
@@ -146,9 +171,18 @@ mod tests {
     }
 
     #[test]
+    fn the_favorites_message_names_the_filter_key() {
+        let state = EmptyState::favorites();
+        let rows = ScreenFixture::rows_with_room(&state);
+
+        assert!(ScreenFixture::drawn_rows(&rows).contains(&"Press Ctrl-F to show every session."));
+    }
+
+    #[test]
     fn an_area_exactly_the_size_of_the_logo_and_message_shows_both() {
-        let (width, height) = ScreenFixture::block_size();
-        let rows = ScreenFixture::rows(width, height);
+        let state = EmptyState::all();
+        let (width, height) = ScreenFixture::block_size(&state);
+        let rows = ScreenFixture::rows(&state, width, height);
 
         assert!(ScreenFixture::shows_logo(&rows));
         assert!(rows.last().unwrap().contains("Press n to create one."));
@@ -156,16 +190,18 @@ mod tests {
 
     #[test]
     fn an_area_narrower_than_the_logo_shows_only_the_message() {
-        let (width, height) = ScreenFixture::block_size();
-        let rows = ScreenFixture::rows(width - 1, height);
+        let state = EmptyState::all();
+        let (width, height) = ScreenFixture::block_size(&state);
+        let rows = ScreenFixture::rows(&state, width - 1, height);
 
         assert_eq!(ScreenFixture::drawn_rows(&rows), EmptyState::MESSAGE);
     }
 
     #[test]
     fn an_area_too_short_for_the_logo_and_message_shows_only_the_message() {
-        let (width, height) = ScreenFixture::block_size();
-        let rows = ScreenFixture::rows(width, height - 1);
+        let state = EmptyState::all();
+        let (width, height) = ScreenFixture::block_size(&state);
+        let rows = ScreenFixture::rows(&state, width, height - 1);
 
         assert_eq!(ScreenFixture::drawn_rows(&rows), EmptyState::MESSAGE);
     }

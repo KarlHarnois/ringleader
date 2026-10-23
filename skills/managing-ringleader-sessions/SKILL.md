@@ -95,6 +95,7 @@ Never put a secret into a handoff prompt: the prompt lands in the agent's transc
 | --- | --- | --- |
 | List | `ringleader list --json` | Report each session's `name`, `state`, and `branch`. |
 | Rename | `ringleader rename <old> <new>` | Run only when the user asks. |
+| Favorite | `ringleader favorite <name>` | Run only when the user asks. It toggles the favorite. |
 | Restart | `ringleader restart <name>` | Run only when the user asks. |
 | Delete | `ringleader delete <name>` | Run only when the user asks. Never delete the current session. |
 
