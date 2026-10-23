@@ -2181,7 +2181,7 @@ mod tests {
         assert_eq!(fixture.multiplexer().attached().len(), 1);
         assert_eq!(
             AppFixture::status_line(&app, 100),
-            " n new   d delete   R rename   Enter attach   t shell   s restart   r refresh   ? help   q quit"
+            " n new   d delete   f favorite   R rename   Enter attach   t shell   s restart   ? help   q quit"
         );
     }
 
