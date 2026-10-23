@@ -1219,17 +1219,23 @@ mod tests {
         let fixture = UiHarness::two_repos();
         let mut app = AppFixture::started(&fixture, 100, 28);
         AppFixture::press(&mut app, 'j');
+        let selected = AppFixture::selected(&app).unwrap();
 
         AppFixture::press_and_perform(&mut app, 'f');
 
+        let sessions = fixture.registry().sessions();
         let screen = AppFixture::screen(&app, 100, 28);
         assert!(screen.contains('★'));
         assert!(
-            fixture
-                .registry()
-                .sessions()
+            sessions
                 .iter()
-                .any(|session| session.is_favorite())
+                .any(|session| session.name().as_str() == selected && session.is_favorite())
+        );
+        assert!(
+            sessions
+                .iter()
+                .filter(|session| session.name().as_str() != selected)
+                .all(|session| !session.is_favorite())
         );
     }
 
