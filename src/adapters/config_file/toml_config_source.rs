@@ -333,7 +333,12 @@ mod tests {
                 .iter()
                 .copied()
                 .take_while(|line| !line.is_empty())
-                .map(|line| line.strip_prefix("# ").unwrap_or(line))
+                .filter_map(|line| {
+                    let stripped = line.strip_prefix("# ")?;
+                    let is_toml =
+                        stripped.starts_with('[') || stripped.parse::<DocumentMut>().is_ok();
+                    is_toml.then_some(stripped)
+                })
                 .collect::<Vec<_>>()
                 .join("\n")
         }
