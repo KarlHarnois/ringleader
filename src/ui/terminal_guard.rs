@@ -2,7 +2,9 @@ use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste};
+use crossterm::event::{
+    DisableBracketedPaste, DisableFocusChange, EnableBracketedPaste, EnableFocusChange,
+};
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -18,12 +20,22 @@ pub struct CrosstermScreenMode;
 impl ScreenMode for CrosstermScreenMode {
     fn enter(&mut self) -> io::Result<()> {
         enable_raw_mode()?;
-        execute!(io::stdout(), EnterAlternateScreen, EnableBracketedPaste)
+        execute!(
+            io::stdout(),
+            EnterAlternateScreen,
+            EnableBracketedPaste,
+            EnableFocusChange
+        )
     }
 
     fn leave(&mut self) -> io::Result<()> {
         let mut stdout = io::stdout();
-        let _ = execute!(stdout, DisableBracketedPaste, LeaveAlternateScreen);
+        let _ = execute!(
+            stdout,
+            DisableFocusChange,
+            DisableBracketedPaste,
+            LeaveAlternateScreen
+        );
         let _ = stdout.flush();
         disable_raw_mode()
     }

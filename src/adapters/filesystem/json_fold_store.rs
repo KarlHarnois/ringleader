@@ -3,6 +3,7 @@ use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
+use std::process;
 
 use serde::{Deserialize, Serialize};
 
@@ -22,13 +23,23 @@ impl JsonFoldStore {
         }
     }
 
-    fn write_without_syncing(&self, text: &str) -> io::Result<()> {
+    fn replace_without_syncing(&self, text: &str) -> io::Result<()> {
+        let temporary = self.path.with_extension(format!("{}.tmp", process::id()));
+        let replaced =
+            Self::write_new(&temporary, text).and_then(|()| fs::rename(&temporary, &self.path));
+        if replaced.is_err() {
+            let _ = fs::remove_file(&temporary);
+        }
+        replaced
+    }
+
+    fn write_new(path: &Path, text: &str) -> io::Result<()> {
         let mut file = OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(true)
             .mode(Self::PRIVATE_MODE)
-            .open(&self.path)?;
+            .open(path)?;
         file.write_all(text.as_bytes())
     }
 
@@ -73,7 +84,7 @@ impl FoldStore for JsonFoldStore {
     fn save(&self, folded: &HashSet<RepoGroup>) -> Result<(), FoldStoreError> {
         let document = FoldDocument::in_repo_order(folded);
         let text = serde_json::to_string_pretty(&document).map_err(|error| self.corrupt(error))?;
-        self.write_without_syncing(&text)
+        self.replace_without_syncing(&text)
             .map_err(|error| self.io_error(error))
     }
 }
@@ -130,6 +141,8 @@ mod tests {
     }
 
     impl FoldStoreFixture {
+        const LONGER_THAN_ANY_SAVE: usize = 4096;
+
         fn new() -> Self {
             Self {
                 directory: tempfile::tempdir().unwrap(),
@@ -200,6 +213,62 @@ mod tests {
                 ]
             })
         );
+    }
+
+    #[test]
+    fn a_save_replaces_the_file_so_a_window_reading_the_old_one_never_sees_a_partial_write() {
+        let fixture = FoldStoreFixture::with_contents(r#"{ "folded": [] }"#);
+        let reader_of_the_old_file = fixture.directory.path().join("reader.json");
+        fs::hard_link(fixture.path(), &reader_of_the_old_file).unwrap();
+
+        fixture
+            .store()
+            .save(&HashSet::from([RepoGroup::Other]))
+            .unwrap();
+
+        assert_eq!(
+            fs::read_to_string(reader_of_the_old_file).unwrap(),
+            r#"{ "folded": [] }"#
+        );
+        assert_eq!(
+            fixture.store().load().unwrap(),
+            HashSet::from([RepoGroup::Other])
+        );
+    }
+
+    #[test]
+    fn a_save_over_a_temporary_file_left_by_a_killed_save_writes_a_whole_fold_file() {
+        let fixture = FoldStoreFixture::new();
+        let leftover = fixture
+            .directory
+            .path()
+            .join(format!("folds.{}.tmp", process::id()));
+        fs::write(
+            &leftover,
+            "x".repeat(FoldStoreFixture::LONGER_THAN_ANY_SAVE),
+        )
+        .unwrap();
+
+        fixture
+            .store()
+            .save(&HashSet::from([RepoGroup::Other]))
+            .unwrap();
+
+        assert_eq!(
+            fixture.store().load().unwrap(),
+            HashSet::from([RepoGroup::Other])
+        );
+    }
+
+    #[test]
+    fn a_save_that_cannot_replace_the_file_leaves_no_temporary_file_behind() {
+        let fixture = FoldStoreFixture::new();
+        fs::create_dir(fixture.path()).unwrap();
+
+        let saved = fixture.store().save(&HashSet::from([RepoGroup::Other]));
+
+        assert!(matches!(saved, Err(FoldStoreError::Io { .. })));
+        assert_eq!(fs::read_dir(fixture.directory.path()).unwrap().count(), 1);
     }
 
     #[test]

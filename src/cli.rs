@@ -302,7 +302,8 @@ impl Cli {
             }
         }
         let result = self.dispatch(service, session);
-        session.wait_for_startup_input(service, lock);
+        lock.release();
+        session.wait_for_startup_input(service);
         session.finish(result)
     }
 

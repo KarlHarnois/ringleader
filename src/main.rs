@@ -57,9 +57,7 @@ use adapters::tmux::tmux_finder_popup::TmuxFinderPopup;
 use adapters::tmux::tmux_multiplexer::TmuxMultiplexer;
 use adapters::web_browser::xdg_web_browser::XdgWebBrowser;
 use adapters::{BoundedCommand, Deadlines, GitWorkspace, HostDesktop, HostMounts};
-use application::ports::{
-    ConfigSource, HostProbe, Lock, LockError, PullRequests, RepoPages, UsageMeter,
-};
+use application::ports::{ConfigSource, HostProbe, PullRequests, RepoPages, UsageMeter};
 use application::{
     AgentPorts, DesktopPorts, DiagnosticPaths, LoadedConfig, RepoPorts, ServiceContext,
     ServiceError, ServicePorts, SessionService, StatePorts, TmuxPorts,
@@ -199,19 +197,10 @@ impl CompositionRoot {
     fn run_tui_in(&self, cli: &Cli, state_directory: &Path) -> Result<(), ExitCode> {
         let log = self.start_log(cli);
         self.handoff().delete_stale();
-        let mut instance = Self::held_tui_lock(state_directory)?;
         Self::truncate_log(&log);
         self.started_app(cli, state_directory, log.err())
             .and_then(Self::run_app)
-            .map(|(app, signals)| Self::wait_for_startup_input(app, signals, &mut instance))
-    }
-
-    fn held_tui_lock(state_directory: &Path) -> Result<FileLock, ExitCode> {
-        let mut instance = FileLock::new(&state_directory.join("tui.lock"));
-        instance
-            .try_acquire()
-            .map(|()| instance)
-            .map_err(|error| Self::lock_failure(&error))
+            .map(|(app, signals)| Self::wait_for_startup_input(app, signals))
     }
 
     fn truncate_log(log: &Result<AppLog, String>) {
@@ -257,9 +246,9 @@ impl CompositionRoot {
             .map_err(|error| Self::fail(&error.to_string()))
     }
 
-    fn wait_for_startup_input(app: App, signals: SignalHookInterrupts, instance: &mut FileLock) {
+    fn wait_for_startup_input(app: App, signals: SignalHookInterrupts) {
         let mut session = CliSession::new(CliOutput::standard(), Box::new(signals));
-        session.wait_for_startup_input(&app.into_service(), instance);
+        session.wait_for_startup_input(&app.into_service());
     }
 
     fn run_event_loop(app: &mut App, signals: SignalHookInterrupts) -> io::Result<()> {
@@ -482,11 +471,6 @@ impl CompositionRoot {
             &self.environment,
             self.processes.clone(),
         )
-    }
-
-    fn lock_failure(error: &LockError) -> ExitCode {
-        let _ = writeln!(io::stderr(), "ringleader: {error}");
-        ExitCode::from(CliExit::lock_error_code(error))
     }
 
     fn refuse(error: &ServiceError) -> ExitCode {
