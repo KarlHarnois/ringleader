@@ -110,7 +110,8 @@ resume_args = ["--continue"]
 # worktree, so Ringleader cannot hand it the built-in skill. The flag below
 # only stops Ringleader from publishing the unused skill. If you authenticate
 # with an API key rather than Google sign-in, add env = ["GEMINI_API_KEY"].
-# Vertex AI users also need their Vertex variables in env.
+# Vertex AI users also need GOOGLE_GENAI_USE_VERTEXAI and their project
+# variables in env.
 # [[agents]]
 # name = "gemini"
 # command = "gemini"
