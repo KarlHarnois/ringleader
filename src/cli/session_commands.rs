@@ -426,7 +426,7 @@ mod tests {
         let harness = CliHarness::new(CommandFixture::live());
 
         assert_eq!(harness.run(&["list"]), CliExit::Code(0));
-        assert!(harness.stdout().starts_with("waiting   fix-auth"));
+        assert!(harness.stdout().starts_with("waiting     fix-auth"));
     }
 
     #[test]

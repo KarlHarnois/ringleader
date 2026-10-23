@@ -34,15 +34,12 @@ impl<'a> ListReport<'a> {
         let diff = self
             .diff(row)
             .map_or(Self::NO_DIFF.to_string(), |diff| diff.to_string());
-        let name = if row.is_favorite() {
-            format!("★ {}", row.name())
-        } else {
-            row.name().to_string()
-        };
+        let marker = if row.is_favorite() { "★" } else { " " };
         format!(
-            "{:<9} {:<20} {:<30} {:<16} {}",
+            "{:<9} {} {:<20} {:<30} {:<16} {}",
             row.state().label(),
-            name,
+            marker,
+            row.name(),
             branch,
             diff,
             worktree
@@ -99,5 +96,33 @@ impl DiffEntry {
             deletions: diff.deletions(),
             untracked: diff.untracked(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{SessionState, SessionSummary};
+    use crate::test_support::ServiceFixture;
+
+    #[test]
+    fn a_favorite_marker_keeps_the_columns_aligned() {
+        let session = ServiceFixture::session_at(
+            "fix-the-reconciler",
+            "/repos/alpha",
+            ServiceFixture::CREATED_AT,
+        )
+        .with_favorite(true);
+        let favorite = SessionSummary::managed(session, SessionState::Waiting, false);
+        let plain = ServiceFixture::summary_in("docs", "/repos/alpha", SessionState::Waiting);
+        let rows = [favorite, plain];
+
+        let lines = ListReport::new(&rows, &HashMap::new()).lines();
+        let column = |line: &str| {
+            let byte = line.find("/worktrees").unwrap();
+            line[..byte].chars().count()
+        };
+
+        assert_eq!(column(&lines[0]), column(&lines[1]));
     }
 }
