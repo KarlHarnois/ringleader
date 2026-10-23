@@ -94,6 +94,10 @@ impl SessionSummary {
         self.state
     }
 
+    pub fn can_be_favorited(&self) -> bool {
+        self.session().is_some()
+    }
+
     pub fn is_favorite(&self) -> bool {
         self.session().is_some_and(Session::is_favorite)
     }

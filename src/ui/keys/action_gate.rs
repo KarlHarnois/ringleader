@@ -231,9 +231,15 @@ impl<'a> ActionGate<'a> {
 
     pub fn toggle_favorite(&self) -> Result<KeyAction, String> {
         self.writable()?;
-        let name = self.selected()?.name().to_string();
+        let row = self.selected()?;
+        if !row.can_be_favorited() {
+            return Err(format!(
+                "{} is unmanaged, so it cannot be favorited.",
+                row.name()
+            ));
+        }
         Ok(KeyAction::Request(AppRequest::Block(
-            BlockingOperation::ToggleFavorite(name),
+            BlockingOperation::ToggleFavorite(row.name().to_string()),
         )))
     }
 
@@ -887,6 +893,16 @@ mod tests {
         assert_eq!(
             ActionGate::new(None, None).action_for(&KeyEvent::from(KeyCode::Char('f'))),
             KeyAction::Refuse("No session is selected.".to_string())
+        );
+    }
+
+    #[test]
+    fn an_unmanaged_session_cannot_be_favorited() {
+        let row = GateFixture::unmanaged_row();
+
+        assert_eq!(
+            ActionGate::new(Some(&row), None).action_for(&KeyEvent::from(KeyCode::Char('f'))),
+            KeyAction::Refuse("mystery is unmanaged, so it cannot be favorited.".to_string())
         );
     }
 
