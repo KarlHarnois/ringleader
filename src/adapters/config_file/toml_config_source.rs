@@ -109,6 +109,7 @@ resume_args = ["--continue"]
 # Gemini CLI works too. It reads skills only from its own config or the
 # worktree, so Ringleader leaves its built-in skills off. If you authenticate
 # with an API key rather than Google sign-in, add env = ["GEMINI_API_KEY"].
+# Vertex AI users also need their Vertex variables in env.
 # [[agents]]
 # name = "gemini"
 # command = "gemini"
