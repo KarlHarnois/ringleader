@@ -18,7 +18,7 @@ pub struct JsonSessionRegistry {
 }
 
 impl JsonSessionRegistry {
-    pub const SCHEMA_VERSION: u64 = 2;
+    pub const SCHEMA_VERSION: u64 = 3;
 
     pub fn new(path: &Path, clock: Arc<dyn Clock>) -> Self {
         Self {
@@ -315,7 +315,7 @@ mod tests {
     }
 
     #[test]
-    fn saving_a_loaded_version_one_registry_writes_version_two() {
+    fn saving_a_loaded_version_one_registry_writes_the_current_version() {
         let fixture = RegistryFixture::with_contents(VERSION_ONE);
         let registry = fixture.registry();
         let sessions = registry.load().unwrap();
@@ -324,7 +324,7 @@ mod tests {
 
         let text = fs::read_to_string(fixture.path()).unwrap();
         let saved: serde_json::Value = serde_json::from_str(&text).unwrap();
-        assert_eq!(saved["version"], 2);
+        assert_eq!(saved["version"], 3);
         assert!(saved["sessions"][0].get("branch_prefix").is_none());
     }
 
@@ -390,7 +390,7 @@ mod tests {
             error,
             RegistryError::NewerSchema {
                 found: 9,
-                supported: 2
+                supported: 3
             }
         );
         assert_eq!(fs::read_to_string(fixture.path()).unwrap(), newer);
