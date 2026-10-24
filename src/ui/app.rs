@@ -74,25 +74,25 @@ impl App {
                 self.resize(*width, *height);
                 AppRequest::Redraw
             }
-            Event::FocusGained | Event::FocusLost => self.change_focus(event),
-            _ if self.dialogs.is_open() => match self.dialogs.handle_event(event, &self.service) {
-                DialogStep::Request(request) | DialogStep::CloseWith(request) => {
-                    self.request(request)
-                }
-                DialogStep::Stay | DialogStep::Close => AppRequest::Continue,
-            },
+            Event::FocusGained => {
+                self.home.focus_gained();
+                AppRequest::Continue
+            }
+            Event::FocusLost => {
+                self.home.focus_lost();
+                AppRequest::Continue
+            }
+            _ if self.dialogs.is_open() => self.handle_dialog_event(event),
             Event::Key(key) if key.kind != KeyEventKind::Release => self.handle_key(key),
             _ => AppRequest::Continue,
         }
     }
 
-    fn change_focus(&mut self, event: &Event) -> AppRequest {
-        if matches!(event, Event::FocusGained) {
-            self.home.focus_gained();
-        } else {
-            self.home.focus_lost();
+    fn handle_dialog_event(&mut self, event: &Event) -> AppRequest {
+        match self.dialogs.handle_event(event, &self.service) {
+            DialogStep::Request(request) | DialogStep::CloseWith(request) => self.request(request),
+            DialogStep::Stay | DialogStep::Close => AppRequest::Continue,
         }
-        AppRequest::Continue
     }
 
     pub fn restore_folds(&mut self) {
