@@ -179,6 +179,7 @@ mod tests {
 
     const FIXTURE: &str = include_str!("../../../tests/fixtures/sessions.json");
     const VERSION_ONE: &str = include_str!("../../../tests/fixtures/sessions-v1.json");
+    const VERSION_TWO: &str = include_str!("../../../tests/fixtures/sessions-v2.json");
 
     struct RegistryFixture {
         directory: tempfile::TempDir,
@@ -272,7 +273,7 @@ mod tests {
 
     #[test]
     fn an_entry_written_without_a_favorite_loads_as_not_a_favorite() {
-        let fixture = RegistryFixture::with_contents(VERSION_ONE);
+        let fixture = RegistryFixture::with_contents(VERSION_TWO);
 
         let sessions = fixture.registry().load().unwrap();
 
