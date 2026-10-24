@@ -131,7 +131,7 @@ impl App {
         let outcome = self.service.attach(name);
         self.home.returned_from(name);
         self.observe();
-        self.home.select(name, &self.service);
+        self.home.reveal(name, &self.service);
         if let Err(error) = outcome {
             self.report_failure(error);
         }

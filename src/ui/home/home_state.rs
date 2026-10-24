@@ -146,6 +146,10 @@ impl HomeState {
         self.change_list(service, |sessions| sessions.select(name));
     }
 
+    pub fn reveal(&mut self, name: &str, service: &SessionService) {
+        self.change_list(service, |sessions| sessions.reveal(name));
+    }
+
     pub fn move_selection(&mut self, offset: isize, service: &SessionService) {
         self.change_list(service, |sessions| sessions.move_selection(offset));
     }

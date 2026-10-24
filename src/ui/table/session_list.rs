@@ -111,11 +111,23 @@ impl SessionList {
             return;
         };
         let group = RepoGroup::of(row);
-        let reveals = !self.filter.allows(row);
+        if !self.filter.allows(row) {
+            return;
+        }
         self.folded.remove(&group);
+        self.move_selection_to(ListSelection::Session(name.to_string()));
+    }
+
+    pub fn reveal(&mut self, name: &str) {
+        let Some(row) = self.row(name) else {
+            return;
+        };
+        let group = RepoGroup::of(row);
+        let reveals = !self.filter.allows(row);
         if reveals {
             self.filter = SessionFilter::All;
         }
+        self.folded.remove(&group);
         self.move_selection_to(ListSelection::Session(name.to_string()));
     }
 
@@ -526,14 +538,25 @@ mod tests {
     }
 
     #[test]
-    fn selecting_a_hidden_session_shows_every_row_again() {
+    fn revealing_a_hidden_session_shows_every_row_again() {
+        let mut list = ListFixture::showing(ListFixture::mixed_favorites());
+        list.toggle_filter();
+
+        list.reveal("b-two");
+
+        assert_eq!(list.filter(), SessionFilter::All);
+        assert_eq!(list.visible_managed(), ["a-one", "b-two", "c-three"]);
+    }
+
+    #[test]
+    fn selecting_a_hidden_session_keeps_the_favorites_filter() {
         let mut list = ListFixture::showing(ListFixture::mixed_favorites());
         list.toggle_filter();
 
         list.select("b-two");
 
-        assert_eq!(list.filter(), SessionFilter::All);
-        assert_eq!(list.visible_managed(), ["a-one", "b-two", "c-three"]);
+        assert_eq!(list.filter(), SessionFilter::Favorites);
+        assert_eq!(list.visible_managed(), ["a-one", "c-three"]);
     }
 
     #[test]
