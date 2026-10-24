@@ -1,58 +1,39 @@
 use std::collections::{BTreeSet, HashSet};
-use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
-use std::os::unix::fs::OpenOptionsExt;
+use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
-use std::process;
 
 use serde::{Deserialize, Serialize};
 
+use super::atomic_file::AtomicFile;
 use crate::application::ports::{FoldStore, FoldStoreError};
 use crate::domain::{RepoGroup, RepoName};
 
 pub struct JsonFoldStore {
-    path: PathBuf,
+    file: AtomicFile,
 }
 
 impl JsonFoldStore {
-    const PRIVATE_MODE: u32 = 0o600;
-
     pub fn new(path: &Path) -> Self {
         Self {
-            path: path.to_path_buf(),
+            file: AtomicFile::new(path),
         }
     }
 
-    fn replace_without_syncing(&self, text: &str) -> io::Result<()> {
-        let temporary = self.path.with_extension(format!("{}.tmp", process::id()));
-        let replaced =
-            Self::write_new(&temporary, text).and_then(|()| fs::rename(&temporary, &self.path));
-        if replaced.is_err() {
-            let _ = fs::remove_file(&temporary);
-        }
-        replaced
-    }
-
-    fn write_new(path: &Path, text: &str) -> io::Result<()> {
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(Self::PRIVATE_MODE)
-            .open(path)?;
-        file.write_all(text.as_bytes())
+    fn path(&self) -> PathBuf {
+        self.file.path().to_path_buf()
     }
 
     fn corrupt(&self, detail: impl ToString) -> FoldStoreError {
         FoldStoreError::Corrupt {
-            path: self.path.clone(),
+            path: self.path(),
             detail: detail.to_string(),
         }
     }
 
     fn io_error(&self, error: io::Error) -> FoldStoreError {
         FoldStoreError::Io {
-            path: self.path.clone(),
+            path: self.path(),
             detail: error.to_string(),
         }
     }
@@ -74,7 +55,7 @@ impl JsonFoldStore {
 
 impl FoldStore for JsonFoldStore {
     fn load(&self) -> Result<HashSet<RepoGroup>, FoldStoreError> {
-        match fs::read_to_string(&self.path) {
+        match fs::read_to_string(self.file.path()) {
             Ok(text) => self.parse(&text),
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(HashSet::new()),
             Err(error) => Err(self.io_error(error)),
@@ -84,7 +65,8 @@ impl FoldStore for JsonFoldStore {
     fn save(&self, folded: &HashSet<RepoGroup>) -> Result<(), FoldStoreError> {
         let document = FoldDocument::in_repo_order(folded);
         let text = serde_json::to_string_pretty(&document).map_err(|error| self.corrupt(error))?;
-        self.replace_without_syncing(&text)
+        self.file
+            .write(text.as_bytes())
             .map_err(|error| self.io_error(error))
     }
 }
@@ -141,8 +123,6 @@ mod tests {
     }
 
     impl FoldStoreFixture {
-        const LONGER_THAN_ANY_SAVE: usize = 4096;
-
         fn new() -> Self {
             Self {
                 directory: tempfile::tempdir().unwrap(),
@@ -234,41 +214,6 @@ mod tests {
             fixture.store().load().unwrap(),
             HashSet::from([RepoGroup::Other])
         );
-    }
-
-    #[test]
-    fn a_save_over_a_temporary_file_left_by_a_killed_save_writes_a_whole_fold_file() {
-        let fixture = FoldStoreFixture::new();
-        let leftover = fixture
-            .directory
-            .path()
-            .join(format!("folds.{}.tmp", process::id()));
-        fs::write(
-            &leftover,
-            "x".repeat(FoldStoreFixture::LONGER_THAN_ANY_SAVE),
-        )
-        .unwrap();
-
-        fixture
-            .store()
-            .save(&HashSet::from([RepoGroup::Other]))
-            .unwrap();
-
-        assert_eq!(
-            fixture.store().load().unwrap(),
-            HashSet::from([RepoGroup::Other])
-        );
-    }
-
-    #[test]
-    fn a_save_that_cannot_replace_the_file_leaves_no_temporary_file_behind() {
-        let fixture = FoldStoreFixture::new();
-        fs::create_dir(fixture.path()).unwrap();
-
-        let saved = fixture.store().save(&HashSet::from([RepoGroup::Other]));
-
-        assert!(matches!(saved, Err(FoldStoreError::Io { .. })));
-        assert_eq!(fs::read_dir(fixture.directory.path()).unwrap().count(), 1);
     }
 
     #[test]
