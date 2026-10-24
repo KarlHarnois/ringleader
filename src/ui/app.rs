@@ -821,10 +821,7 @@ mod tests {
 
         fn showing(fixture: &ServiceFixture, text: &str) -> App {
             let mut app = Self::started(fixture, 100, 28);
-            Deadline::for_background_work().wait_until(|| {
-                app.on_tick(Instant::now());
-                Self::screen(&app, 100, 28).contains(text)
-            });
+            Self::wait_for_text(&mut app, text);
             app
         }
 
