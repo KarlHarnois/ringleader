@@ -176,7 +176,7 @@ mod tests {
 
     #[test]
     fn a_managed_summary_is_a_favorite_when_its_session_is() {
-        let session = crate::test_support::ServiceFixture::session("fix-auth").with_favorite(true);
+        let session = crate::test_support::ServiceFixture::session("fix-auth").favorited();
         let summary = SessionSummary::managed(session, SessionState::Waiting, false);
 
         assert!(summary.is_favorite());

@@ -160,15 +160,15 @@ impl SessionEntry {
             NamingScheme::new(&self.worktree_root, &self.tmux_prefix),
             self.created_at,
         );
-        let favorite = self.favorite.unwrap_or(false);
-        Some(
-            Session::new(
-                SessionName::from_slug(&self.name).ok()?,
-                metadata,
-                registration,
-            )
-            .with_favorite(favorite),
-        )
+        let session = Session::new(
+            SessionName::from_slug(&self.name).ok()?,
+            metadata,
+            registration,
+        );
+        Some(match self.favorite.unwrap_or(false) {
+            true => session.favorited(),
+            false => session.unfavorited(),
+        })
     }
 }
 
@@ -282,7 +282,7 @@ mod tests {
     #[test]
     fn a_favorite_survives_a_save_and_load() {
         let fixture = RegistryFixture::new();
-        let session = ServiceFixture::session("fix-auth").with_favorite(true);
+        let session = ServiceFixture::session("fix-auth").favorited();
 
         fixture.registry().save(&[session]).unwrap();
 

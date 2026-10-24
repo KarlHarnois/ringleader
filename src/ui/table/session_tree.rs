@@ -211,8 +211,8 @@ mod tests {
         }
 
         fn favorite(name: &str, repo: &str) -> SessionSummary {
-            let session = ServiceFixture::session_at(name, repo, ServiceFixture::CREATED_AT)
-                .with_favorite(true);
+            let session =
+                ServiceFixture::session_at(name, repo, ServiceFixture::CREATED_AT).favorited();
             SessionSummary::managed(session, SessionState::Waiting, false)
         }
 

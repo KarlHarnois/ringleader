@@ -159,7 +159,7 @@ mod tests {
         fn favorite(name: &str, state: SessionState) -> SessionSummary {
             let session =
                 ServiceFixture::session_at(name, "/repos/alpha", ServiceFixture::CREATED_AT)
-                    .with_favorite(true);
+                    .favorited();
             SessionSummary::managed(session, state, false)
         }
 

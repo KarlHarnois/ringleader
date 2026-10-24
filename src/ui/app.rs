@@ -482,7 +482,7 @@ mod tests {
         }
 
         fn favorite_and_plain_sessions() -> ServiceFixture {
-            let favorite = ServiceFixture::session("fix-auth").with_favorite(true);
+            let favorite = ServiceFixture::session("fix-auth").favorited();
             let plain = ServiceFixture::session("dark-mode");
             let multiplexer =
                 Self::with_waiting(FakeMultiplexer::new(), &favorite, "favorite output");

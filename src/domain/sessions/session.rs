@@ -80,13 +80,21 @@ impl Session {
         self.favorite
     }
 
-    pub fn with_favorite(mut self, favorite: bool) -> Self {
-        self.favorite = favorite;
+    pub fn favorited(mut self) -> Self {
+        self.favorite = true;
+        self
+    }
+
+    pub fn unfavorited(mut self) -> Self {
+        self.favorite = false;
         self
     }
 
     pub fn toggled_favorite(&self) -> Self {
-        self.clone().with_favorite(!self.favorite)
+        match self.favorite {
+            true => self.clone().unfavorited(),
+            false => self.clone().favorited(),
+        }
     }
 
     pub fn has_branch_named_after_it(&self) -> bool {
@@ -307,7 +315,7 @@ mod tests {
 
     #[test]
     fn renaming_keeps_the_favorite() {
-        let session = SessionFixture::fix_auth().with_favorite(true);
+        let session = SessionFixture::fix_auth().favorited();
 
         let renamed = session.renamed(SessionFixture::fix_login());
 
@@ -316,7 +324,7 @@ mod tests {
 
     #[test]
     fn rekeying_keeps_the_favorite() {
-        let session = SessionFixture::fix_auth().with_favorite(true);
+        let session = SessionFixture::fix_auth().favorited();
         let tmux = TmuxAddress::new(session.tmux_name(), session.socket_path());
 
         let rekeyed = session.rekeyed(session.name().clone(), session.metadata().clone(), tmux);
@@ -326,7 +334,7 @@ mod tests {
 
     #[test]
     fn moving_to_another_socket_keeps_the_favorite() {
-        let session = SessionFixture::fix_auth().with_favorite(true);
+        let session = SessionFixture::fix_auth().favorited();
 
         let moved = session.on_socket(Path::new("/tmp/other/default"));
 

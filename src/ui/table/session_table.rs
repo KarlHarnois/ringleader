@@ -302,7 +302,7 @@ mod tests {
         }
 
         fn favorite(name: &str, state: SessionState) -> SessionSummary {
-            let session = ServiceFixture::session(name).with_favorite(true);
+            let session = ServiceFixture::session(name).favorited();
             SessionSummary::managed(session, state, false)
         }
 

@@ -112,7 +112,7 @@ mod tests {
             "/repos/alpha",
             ServiceFixture::CREATED_AT,
         )
-        .with_favorite(true);
+        .favorited();
         let favorite = SessionSummary::managed(session, SessionState::Waiting, false);
         let plain = ServiceFixture::summary_in("docs", "/repos/alpha", SessionState::Waiting);
         let rows = [favorite, plain];

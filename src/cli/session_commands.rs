@@ -269,7 +269,7 @@ mod tests {
         }
 
         fn favorite() -> ServiceFixture {
-            let session = Self::session().with_favorite(true);
+            let session = Self::session().favorited();
             ServiceFixture::new()
                 .with_sessions(std::slice::from_ref(&session))
                 .with_multiplexer(

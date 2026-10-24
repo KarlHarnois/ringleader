@@ -37,7 +37,7 @@ mod tests {
 
     impl FilterFixture {
         fn favorite() -> SessionSummary {
-            let session = ServiceFixture::session("fix-auth").with_favorite(true);
+            let session = ServiceFixture::session("fix-auth").favorited();
             SessionSummary::managed(session, SessionState::Waiting, false)
         }
 
