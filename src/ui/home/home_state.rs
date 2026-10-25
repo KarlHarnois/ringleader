@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 use super::bell::Bell;
+use super::fold_change::FoldChange;
 use super::home_view::LayoutTier;
 use super::preview_panel::PreviewPanel;
 use super::status_bar::{StatusBar, StatusNote};
@@ -26,6 +27,7 @@ pub struct HomeState {
     pull_requests: PullRequestFeed,
     screen: (u16, u16),
     tmux_paused_until: Option<Instant>,
+    focused: bool,
 }
 
 impl HomeState {
@@ -42,6 +44,7 @@ impl HomeState {
             pull_requests: PullRequestFeed::default(),
             screen: (0, 0),
             tmux_paused_until: None,
+            focused: true,
         }
     }
 
@@ -93,6 +96,14 @@ impl HomeState {
         self.diffs.refresh_soon();
     }
 
+    pub fn focus_gained(&mut self) {
+        self.focused = true;
+    }
+
+    pub fn focus_lost(&mut self) {
+        self.focused = false;
+    }
+
     pub fn pause_after(&mut self, error: &ServiceError) {
         if error.is_timeout_of(Tool::Tmux) {
             self.tmux_paused_until = Some(Instant::now() + Self::TMUX_PAUSE);
@@ -113,8 +124,8 @@ impl HomeState {
     ) -> Result<(), ServiceError> {
         self.fit_rows(status);
         let polled = self.poll(now, service);
-        let visible = self.sessions.visible_managed();
-        self.pull_requests.tick(now, &visible, service);
+        self.pull_requests
+            .tick(now, &self.rows_to_refresh(), service);
         self.sessions
             .apply_pull_requests(self.pull_requests.pull_requests());
         polled
@@ -197,9 +208,17 @@ impl HomeState {
         if self.sessions.folded() == folded_before {
             return;
         }
-        if let Err(error) = self.folds.save(self.sessions.folded()) {
+        let change = FoldChange::between(folded_before, self.sessions.folded());
+        if let Err(error) = self.folds.save(&change.applied_to(self.stored_folds())) {
             log::warn!("could not save the folded repos: {error}");
         }
+    }
+
+    fn stored_folds(&self) -> HashSet<RepoGroup> {
+        self.folds.load().unwrap_or_else(|error| {
+            log::warn!("could not reread the folded repos: {error}");
+            self.sessions.folded().clone()
+        })
     }
 
     fn poll_observations(
@@ -260,10 +279,16 @@ impl HomeState {
     }
 
     fn poll_diffs(&mut self, now: Instant, service: &SessionService) -> Result<(), ServiceError> {
-        let visible = self.sessions.visible_managed();
-        let measured = self.diffs.poll(now, &visible, service);
+        let measured = self.diffs.poll(now, &self.rows_to_refresh(), service);
         self.sessions.apply_diffs(self.diffs.diffs());
         measured
+    }
+
+    fn rows_to_refresh(&self) -> Vec<String> {
+        match self.focused {
+            true => self.sessions.visible_managed(),
+            false => Vec::new(),
+        }
     }
 
     fn refresh_preview(&mut self, service: &SessionService) {
