@@ -186,11 +186,19 @@ impl HelpView {
             })
             .collect();
         entries.push(LegendEntry::new(
-            format!("#n{}", SessionTable::APPROVED_CHECK),
+            Self::approved_pull_request_symbol(),
             theme.approved(),
             "approved",
         ));
         Legend::new("PRs", entries)
+    }
+
+    fn approved_pull_request_symbol() -> String {
+        format!(
+            "{}{}",
+            Self::PULL_REQUEST_SYMBOL,
+            SessionTable::APPROVED_CHECK
+        )
     }
 
     fn diff_legend(theme: &Theme) -> Legend {
@@ -622,12 +630,15 @@ mod tests {
         let text = HelpFixture::text(&HelpFixture::help());
 
         assert!(text.contains("PRs          #n open  #n draft  #n merged  #n closed"));
-        assert!(text.contains(&format!("#n{} approved", SessionTable::APPROVED_CHECK)));
+        assert!(text.contains(&format!(
+            "{} approved",
+            HelpView::approved_pull_request_symbol()
+        )));
     }
 
     #[test]
     fn the_legend_colors_approved_like_the_session_table() {
-        let symbol = format!("#n{}", SessionTable::APPROVED_CHECK);
+        let symbol = HelpView::approved_pull_request_symbol();
 
         assert_eq!(HelpFixture::span_style(&symbol), Theme.approved());
     }
