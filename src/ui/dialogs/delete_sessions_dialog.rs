@@ -3,6 +3,7 @@ use ratatui::text::Line;
 
 use super::confirmation_keys::ConfirmationKeys;
 use super::dialog::DialogStep;
+use super::scroll_window::ScrollWindow;
 use crate::application::{BatchReport, DeleteImpact, ServiceError};
 use crate::ui::app::AppRequest;
 use crate::ui::batch_operation::{BatchOperation, DeleteSessionsStep};
@@ -13,6 +14,7 @@ use crate::ui::theme::Theme;
 pub struct DeleteSessionsDialog {
     measured: BatchReport<DeleteImpact>,
     armed: bool,
+    scroll: ScrollWindow,
 }
 
 impl DeleteSessionsDialog {
@@ -23,22 +25,34 @@ impl DeleteSessionsDialog {
         Self {
             measured,
             armed: false,
+            scroll: ScrollWindow::default(),
         }
     }
 
     pub fn handle_key(&mut self, key: &KeyEvent) -> DialogStep {
+        self.scroll.scroll_for(key);
         ConfirmationKeys::step(key, || self.confirm())
     }
 
-    pub fn lines(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
-        let mut lines: Vec<Line<'static>> = self
-            .measured
+    pub fn lines(&self, width: usize, height: usize, theme: &Theme) -> Vec<Line<'static>> {
+        let room = height.saturating_sub(self.widest_hint_rows(width) + 1);
+        let mut lines = self.scroll.window(self.session_list(width, theme), room);
+        lines.push(Line::from(""));
+        let hints = self.scroll.hint(self.hints());
+        lines.extend(TextFit::new(&hints).styled_lines(width, theme.dim()));
+        lines
+    }
+
+    fn widest_hint_rows(&self, width: usize) -> usize {
+        let widest = ScrollWindow::scrolling_hint(self.hints());
+        TextFit::new(&widest).styled_lines(width, Theme.dim()).len()
+    }
+
+    fn session_list(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
+        self.measured
             .outcomes()
             .flat_map(|(name, impact)| Self::session_lines(name, impact, width, theme))
-            .collect();
-        lines.push(Line::from(""));
-        lines.extend(TextFit::new(self.hints()).styled_lines(width, theme.dim()));
-        lines
+            .collect()
     }
 
     fn session_lines(
@@ -119,6 +133,10 @@ mod tests {
     struct BatchDeleteFixture;
 
     impl BatchDeleteFixture {
+        const WIDTH: usize = 120;
+        const ROOM_FOR_EVERY_LINE: usize = 40;
+        const ROOM_FOR_FOUR_LINES: usize = 4;
+
         fn clean(name: &str) -> (String, Result<DeleteImpact, ServiceError>) {
             (name.to_string(), Ok(DeleteImpact::default()))
         }
@@ -148,7 +166,7 @@ mod tests {
         }
 
         fn text(dialog: &DeleteSessionsDialog) -> String {
-            let lines = dialog.lines(80, &Theme);
+            let lines = dialog.lines(Self::WIDTH, Self::ROOM_FOR_EVERY_LINE, &Theme);
             let rows: Vec<String> = lines.iter().map(ToString::to_string).collect();
             rows.join("\n")
         }
@@ -225,6 +243,37 @@ mod tests {
 
         assert_eq!(BatchDeleteFixture::enter(&mut dialog), DialogStep::Stay);
         assert!(BatchDeleteFixture::text(&dialog).contains("No selected session can be deleted"));
+    }
+
+    #[test]
+    fn a_list_taller_than_the_dialog_keeps_its_hint_and_scrolls_to_the_last_loss() {
+        let mut dialog = BatchDeleteFixture::dialog(vec![
+            BatchDeleteFixture::clean("alpha"),
+            BatchDeleteFixture::clean("bravo"),
+            BatchDeleteFixture::dirty("charlie"),
+        ]);
+        let page = |dialog: &DeleteSessionsDialog| {
+            let lines = dialog.lines(
+                BatchDeleteFixture::WIDTH,
+                BatchDeleteFixture::ROOM_FOR_FOUR_LINES,
+                &Theme,
+            );
+            lines
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
+        let first = page(&dialog);
+        for _ in 0..BatchDeleteFixture::WIDTH {
+            dialog.handle_key(&KeyEvent::from(KeyCode::Down));
+        }
+        let last = page(&dialog);
+
+        assert!(first.contains("↑ ↓ scroll · Enter delete"), "{first}");
+        assert!(!first.contains("2 commits"), "{first}");
+        assert!(last.contains("2 commits"), "{last}");
     }
 
     #[test]

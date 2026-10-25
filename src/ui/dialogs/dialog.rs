@@ -173,7 +173,7 @@ impl Dialog {
                 Self::render_lines(frame, inner, dialog.lines(width, labels, theme))
             }
             Self::DeleteSessions(dialog) => {
-                Self::render_lines(frame, inner, dialog.lines(width, theme))
+                Self::render_lines(frame, inner, dialog.lines(width, height, theme))
             }
             Self::Rename(dialog) => {
                 Self::render_lines(frame, inner, dialog.lines(width, labels, theme))
