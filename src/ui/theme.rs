@@ -69,4 +69,8 @@ impl Theme {
             PullRequestState::Closed => self.base().fg(Color::Red),
         }
     }
+
+    pub fn approved(&self) -> Style {
+        self.insertions().add_modifier(Modifier::BOLD)
+    }
 }

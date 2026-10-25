@@ -36,7 +36,7 @@ pub use hot_key::HotKey;
 pub use key_bindings::KeyBindings;
 pub use money::Money;
 pub use naming_scheme::NamingScheme;
-pub use pull_request::{PullRequest, PullRequestState};
+pub use pull_request::{PullRequest, PullRequestReview, PullRequestState};
 pub use repo_draft::RepoDraft;
 pub use repos::repo::{Repo, RepoScope};
 pub use repos::repo_group::RepoGroup;

@@ -12,7 +12,7 @@ use super::session_tree::{SessionTree, TreeBranch, TreeLine};
 use super::state_indicator::StateIndicator;
 use super::table_columns::{RowCells, TableColumns};
 use super::viewport::Viewport;
-use crate::domain::{DiffStat, SessionMetadata, SessionSummary};
+use crate::domain::{DiffStat, PullRequest, PullRequestState, SessionMetadata, SessionSummary};
 use crate::ui::home::empty_state::EmptyState;
 use crate::ui::home::home_view::LayoutTier;
 use crate::ui::theme::Theme;
@@ -190,9 +190,8 @@ impl<'a> SessionTable<'a> {
             .skip(&columns.name_cell(row.name()))
             .color_first(cells.agent(), agent);
         if let Some(pull_request) = row.pull_request() {
-            let style = self.theme.pull_request(pull_request.state());
-            let cell = vec![Span::styled(cells.pull_request().to_string(), style)];
-            colored = colored.color_first(cells.pull_request(), cell);
+            colored =
+                colored.color_first(cells.pull_request(), self.pull_request_spans(pull_request));
         }
         if let Some(diff) = row.diff() {
             colored = colored.color_last(cells.diff(), self.diff_spans(diff));
@@ -226,7 +225,29 @@ impl<'a> SessionTable<'a> {
 
     fn pull_request_text(row: &SessionSummary) -> String {
         row.pull_request()
-            .map_or(String::new(), |pull_request| pull_request.to_string())
+            .map_or(String::new(), Self::pull_request_cell_text)
+    }
+
+    fn pull_request_cell_text(pull_request: &PullRequest) -> String {
+        match Self::shows_approval(pull_request) {
+            true => format!("{pull_request}✓"),
+            false => pull_request.to_string(),
+        }
+    }
+
+    fn pull_request_spans(&self, pull_request: &PullRequest) -> Vec<Span<'static>> {
+        let style = match Self::shows_approval(pull_request) {
+            true => self.theme.approved(),
+            false => self.theme.pull_request(pull_request.state()),
+        };
+        vec![Span::styled(
+            Self::pull_request_cell_text(pull_request),
+            style,
+        )]
+    }
+
+    fn shows_approval(pull_request: &PullRequest) -> bool {
+        pull_request.state() == PullRequestState::Open && pull_request.is_approved()
     }
 
     fn diff_text(row: &SessionSummary) -> String {
@@ -244,7 +265,7 @@ mod tests {
     use ratatui::style::{Color, Modifier};
 
     use super::*;
-    use crate::domain::{DiffStat, PullRequestState, RepoGroup, SessionState, UnmanagedSession};
+    use crate::domain::{DiffStat, PullRequestReview, RepoGroup, SessionState, UnmanagedSession};
     use crate::test_support::ServiceFixture;
 
     struct TableFixture;
@@ -265,6 +286,13 @@ mod tests {
         fn running(name: &str, agent: &str) -> SessionSummary {
             let session = ServiceFixture::session_with_agent(name, agent);
             SessionSummary::managed(session, SessionState::Waiting, false)
+        }
+
+        fn approved(number: u64, state: PullRequestState) -> SessionSummary {
+            Self::managed("fix-auth", SessionState::Waiting).with_pull_request(
+                ServiceFixture::pull_request(number, state)
+                    .with_review(PullRequestReview::Approved),
+            )
         }
 
         fn unmanaged() -> SessionSummary {
@@ -332,6 +360,11 @@ mod tests {
             let line = Self::line(terminal, row);
             let byte = line.find(text).unwrap();
             line[..byte].chars().count()
+        }
+
+        fn header_starts_over(rows: &[SessionSummary], number: &str) -> bool {
+            let terminal = Self::render(rows, None, 0, 6);
+            Self::column(&terminal, 1, "PR") == Self::column(&terminal, 2, number)
         }
     }
 
@@ -487,6 +520,69 @@ mod tests {
         let buffer = terminal.backend().buffer();
 
         assert_eq!(buffer[(column, 2)].fg, Color::Red);
+    }
+
+    #[test]
+    fn an_approved_pull_request_shows_a_green_checkmark_after_its_number() {
+        let row = TableFixture::approved(142, PullRequestState::Open);
+
+        let terminal = TableFixture::render(&[row], None, 0, 6);
+        let line = TableFixture::line(&terminal, 2);
+        let number = u16::try_from(TableFixture::column(&terminal, 2, "#142")).unwrap();
+        let check = u16::try_from(TableFixture::column(&terminal, 2, "✓")).unwrap();
+        let buffer = terminal.backend().buffer();
+
+        assert!(line.contains("#142✓"));
+        assert_eq!(buffer[(number, 2)].fg, Color::Green);
+        assert!(buffer[(number, 2)].modifier.contains(Modifier::BOLD));
+        assert_eq!(buffer[(check, 2)].fg, Color::Green);
+        assert!(buffer[(check, 2)].modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn an_unapproved_pull_request_shows_only_its_number() {
+        let row = TableFixture::managed("fix-auth", SessionState::Waiting)
+            .with_pull_request(ServiceFixture::pull_request(142, PullRequestState::Open));
+
+        let terminal = TableFixture::render(&[row], None, 0, 6);
+        let line = TableFixture::line(&terminal, 2);
+        let number = u16::try_from(TableFixture::column(&terminal, 2, "#142")).unwrap();
+        let buffer = terminal.backend().buffer();
+
+        assert!(line.contains("#142"));
+        assert!(!line.contains('✓'));
+        assert_eq!(buffer[(number, 2)].fg, Color::Green);
+        assert!(!buffer[(number, 2)].modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn the_pull_request_header_starts_over_an_approved_number() {
+        assert!(TableFixture::header_starts_over(
+            &[TableFixture::approved(142, PullRequestState::Open)],
+            "#142",
+        ));
+    }
+
+    #[test]
+    fn the_pull_request_header_starts_over_an_unapproved_number() {
+        let row = TableFixture::managed("fix-auth", SessionState::Waiting)
+            .with_pull_request(ServiceFixture::pull_request(142, PullRequestState::Open));
+
+        assert!(TableFixture::header_starts_over(&[row], "#142"));
+    }
+
+    #[test]
+    fn only_an_open_pull_request_shows_its_approval() {
+        let states = [
+            PullRequestState::Draft,
+            PullRequestState::Merged,
+            PullRequestState::Closed,
+        ];
+
+        for state in states {
+            let terminal = TableFixture::render(&[TableFixture::approved(5, state)], None, 0, 6);
+            assert!(!TableFixture::line(&terminal, 2).contains('✓'));
+        }
     }
 
     #[test]

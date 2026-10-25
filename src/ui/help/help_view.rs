@@ -72,6 +72,7 @@ impl HelpView {
     const FINDER_ACTION: &'static str = "find a session by name and switch to it while attached";
     const FIRST_SPINNER_TICK: u64 = 0;
     const PULL_REQUEST_SYMBOL: &'static str = "#n";
+    const APPROVED_PULL_REQUEST_SYMBOL: &'static str = "#n✓";
     const CLOSE_HINT: &'static str = "? Esc q close";
 
     pub fn new(key_bindings: &KeyBindings, files: &[(&str, &Path)], home: &HomePath) -> Self {
@@ -174,14 +175,22 @@ impl HelpView {
     }
 
     fn pull_request_legend(theme: &Theme) -> Legend {
-        let entries = PullRequestState::ALL.iter().map(|&state| {
-            LegendEntry::new(
-                Self::PULL_REQUEST_SYMBOL,
-                theme.pull_request(state),
-                state.label(),
-            )
-        });
-        Legend::new("PRs", entries.collect())
+        let mut entries: Vec<LegendEntry> = PullRequestState::ALL
+            .iter()
+            .map(|&state| {
+                LegendEntry::new(
+                    Self::PULL_REQUEST_SYMBOL,
+                    theme.pull_request(state),
+                    state.label(),
+                )
+            })
+            .collect();
+        entries.push(LegendEntry::new(
+            Self::APPROVED_PULL_REQUEST_SYMBOL,
+            theme.approved(),
+            "approved",
+        ));
+        Legend::new("PRs", entries)
     }
 
     fn diff_legend(theme: &Theme) -> Legend {
@@ -613,6 +622,15 @@ mod tests {
         let text = HelpFixture::text(&HelpFixture::help());
 
         assert!(text.contains("PRs          #n open  #n draft  #n merged  #n closed"));
+        assert!(text.contains("#n✓ approved"));
+    }
+
+    #[test]
+    fn the_legend_colors_approved_like_the_session_table() {
+        assert_eq!(
+            HelpFixture::span_style(HelpView::APPROVED_PULL_REQUEST_SYMBOL),
+            Theme.approved()
+        );
     }
 
     #[test]
