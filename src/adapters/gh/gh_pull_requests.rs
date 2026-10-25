@@ -146,7 +146,7 @@ mod tests {
 
     use super::*;
     use crate::adapters::Deadlines;
-    use crate::domain::PullRequestState;
+    use crate::domain::{PullRequestReview, PullRequestState};
     use crate::test_support::ExecutableScript;
 
     struct ParseFixture;
@@ -169,7 +169,7 @@ listing=''
 while [ $# -gt 0 ]; do
   if [ "$1" = "-f" ]; then
     case "$2" in
-      branch*=fix-auth) entry='{"nodes":[{"number":42,"url":"https://github.example.com/example-org/example-project/pull/42","state":"OPEN","isDraft":false,"createdAt":"2023-11-14T22:13:20Z","headRepositoryOwner":{"login":"octocat"}}]}' ;;
+      branch*=fix-auth) entry='{"nodes":[{"number":42,"url":"https://github.example.com/example-org/example-project/pull/42","state":"OPEN","isDraft":false,"createdAt":"2023-11-14T22:13:20Z","headRepositoryOwner":{"login":"octocat"},"latestOpinionatedReviews":{"nodes":[{"state":"APPROVED"}]}}]}' ;;
       branch*=*) entry='{"nodes":[]}' ;;
       *) entry='' ;;
     esac
@@ -187,6 +187,7 @@ printf '{"data":{"viewer":{"login":"octocat"},"repository":{"owner":{"login":"ex
 
         fn fix_auth_pull_request() -> PullRequest {
             PullRequest::new(42, PullRequestState::Open, Self::OPENED_AT, Self::URL)
+                .with_review(PullRequestReview::Approved)
         }
 
         fn output(code: i32, stdout: &str) -> CommandOutput {
