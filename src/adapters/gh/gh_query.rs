@@ -4,7 +4,9 @@ pub struct GhQuery {
 
 impl GhQuery {
     const CANDIDATES: &'static str = "first: 10, orderBy: {field: CREATED_AT, direction: DESC}";
-    const FIELDS: &'static str = "number url state isDraft createdAt headRepositoryOwner { login } latestOpinionatedReviews(first: 100, writersOnly: true) { nodes { state } }";
+    const FIELDS: &'static str = "number url state isDraft createdAt headRepositoryOwner { login }";
+    const REVIEW_FIELDS: &'static str = "nodes { state }";
+    const REVIEW_LIMIT: usize = 100;
 
     pub fn new(branches: &[String]) -> Self {
         Self {
@@ -45,9 +47,18 @@ impl GhQuery {
 
     fn field(alias: &str) -> String {
         format!(
-            " {alias}: pullRequests(headRefName: ${alias}, {}) {{ nodes {{ {} }} }}",
+            " {alias}: pullRequests(headRefName: ${alias}, {}) {{ nodes {{ {} {} }} }}",
             Self::CANDIDATES,
-            Self::FIELDS
+            Self::FIELDS,
+            Self::review_fields()
+        )
+    }
+
+    fn review_fields() -> String {
+        format!(
+            "latestOpinionatedReviews(first: {}, writersOnly: true) {{ {} }}",
+            Self::REVIEW_LIMIT,
+            Self::REVIEW_FIELDS
         )
     }
 }
@@ -84,9 +95,16 @@ mod tests {
             .iter()
             .find(|argument| argument.starts_with("query="))
             .unwrap();
+        let review = format!(
+            "latestOpinionatedReviews(first: {}, writersOnly: true) {{ nodes {{ state }} }}",
+            GhQuery::REVIEW_LIMIT
+        );
 
-        assert!(query.contains(
-            "latestOpinionatedReviews(first: 100, writersOnly: true) { nodes { state } }"
-        ));
+        assert!(query.contains(&review));
+    }
+
+    #[test]
+    fn the_review_limit_is_the_github_connection_maximum() {
+        assert_eq!(GhQuery::REVIEW_LIMIT, 100);
     }
 }
