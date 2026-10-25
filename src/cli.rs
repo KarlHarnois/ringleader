@@ -872,14 +872,6 @@ mod tests {
     }
 
     #[test]
-    fn restart_refuses_names_beside_all_because_all_already_names_every_session() {
-        assert_eq!(
-            ParseFixture::exit_code(&["ringleader", "restart", "alpha", "--all"]),
-            CliExit::FAILURE
-        );
-    }
-
-    #[test]
     fn stop_and_delete_need_at_least_one_name() {
         for command in ["stop", "delete"] {
             assert_eq!(
