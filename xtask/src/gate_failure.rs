@@ -15,9 +15,9 @@ impl GateFailure {
         }
     }
 
-    pub fn tests_failed(status: ExitStatus) -> Self {
+    pub fn step_failed(step: &str, status: ExitStatus) -> Self {
         Self {
-            message: format!("the instrumented test run failed with {status}"),
+            message: format!("{step} failed with {status}"),
         }
     }
 

@@ -16,6 +16,8 @@ impl<'a> InstrumentedTests<'a> {
     const FORGET_PREVIOUS_RUNS: [&'static str; 4] =
         ["llvm-cov", "clean", "--profraw-only", "--workspace"];
     const KEEP_BUILD_ARTIFACTS: &'static str = "--no-clean";
+    const FORGET_STEP: &'static str = "clearing the previous coverage data";
+    const MEASURE_STEP: &'static str = "the instrumented test run";
 
     pub fn new(root: &'a Path) -> Self {
         Self { root }
@@ -24,8 +26,12 @@ impl<'a> InstrumentedTests<'a> {
     pub fn run(&self) -> Result<LcovReport, GateFailure> {
         let report = self.root.join(Self::REPORT);
         Self::create_parent(&report)?;
-        self.cargo(|command| command.args(Self::FORGET_PREVIOUS_RUNS))?;
-        self.cargo(|command| Self::measure(command, &report))?;
+        self.cargo(Self::FORGET_STEP, |command| {
+            command.args(Self::FORGET_PREVIOUS_RUNS)
+        })?;
+        self.cargo(Self::MEASURE_STEP, |command| {
+            Self::measure(command, &report)
+        })?;
         let text =
             fs::read_to_string(&report).map_err(|error| GateFailure::unreadable(&report, error))?;
         Ok(LcovReport::parse(&text, self.root))
@@ -48,6 +54,7 @@ impl<'a> InstrumentedTests<'a> {
 
     fn cargo(
         &self,
+        step: &str,
         arguments: impl FnOnce(&mut Command) -> &mut Command,
     ) -> Result<(), GateFailure> {
         let mut command = Command::new(Self::CARGO);
@@ -58,7 +65,7 @@ impl<'a> InstrumentedTests<'a> {
         if status.success() {
             Ok(())
         } else {
-            Err(GateFailure::tests_failed(status))
+            Err(GateFailure::step_failed(step, status))
         }
     }
 }
