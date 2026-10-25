@@ -74,14 +74,24 @@ impl App {
                 self.resize(*width, *height);
                 AppRequest::Redraw
             }
-            _ if self.dialogs.is_open() => match self.dialogs.handle_event(event, &self.service) {
-                DialogStep::Request(request) | DialogStep::CloseWith(request) => {
-                    self.request(request)
-                }
-                DialogStep::Stay | DialogStep::Close => AppRequest::Continue,
-            },
+            Event::FocusGained => {
+                self.home.focus_gained();
+                AppRequest::Continue
+            }
+            Event::FocusLost => {
+                self.home.focus_lost();
+                AppRequest::Continue
+            }
+            _ if self.dialogs.is_open() => self.handle_dialog_event(event),
             Event::Key(key) if key.kind != KeyEventKind::Release => self.handle_key(key),
             _ => AppRequest::Continue,
+        }
+    }
+
+    fn handle_dialog_event(&mut self, event: &Event) -> AppRequest {
+        match self.dialogs.handle_event(event, &self.service) {
+            DialogStep::Request(request) | DialogStep::CloseWith(request) => self.request(request),
+            DialogStep::Stay | DialogStep::Close => AppRequest::Continue,
         }
     }
 
@@ -787,12 +797,31 @@ mod tests {
             ))
         }
 
-        fn showing(fixture: &ServiceFixture, text: &str) -> App {
-            let mut app = Self::started(fixture, 100, 28);
+        fn with_diff() -> ServiceFixture {
+            let session = ServiceFixture::session("fix-auth");
+            let workspace = ServiceFixture::workspace_for(&[&session])
+                .with_diff(session.worktree_path(), DiffStat::from_changes([], 3));
+            Self::deletable().with_workspace(workspace)
+        }
+
+        fn unfocused(fixture: &ServiceFixture) -> App {
+            let mut app = UiHarness::app(fixture);
+            app.handle_event(&Event::FocusLost);
+            app.resize(100, 28);
+            UiHarness::settle(&mut app);
+            app
+        }
+
+        fn wait_for_text(app: &mut App, text: &str) -> bool {
             Deadline::for_background_work().wait_until(|| {
                 app.on_tick(Instant::now());
-                Self::screen(&app, 100, 28).contains(text)
-            });
+                Self::screen(app, 100, 28).contains(text)
+            })
+        }
+
+        fn showing(fixture: &ServiceFixture, text: &str) -> App {
+            let mut app = Self::started(fixture, 100, 28);
+            Self::wait_for_text(&mut app, text);
             app
         }
 
@@ -1095,6 +1124,42 @@ mod tests {
             folds.folded(),
             HashSet::from([UiHarness::docs_repo_group()])
         );
+    }
+
+    #[test]
+    fn a_fold_keeps_the_folds_another_window_saved_since_this_one_started() {
+        let fixture = UiHarness::two_repos();
+        let folds = FakeFoldStore::default();
+        let mut app = AppFixture::restored(&fixture, &folds);
+        let other_window_fold = ServiceFixture::repo_group("/repos/other-window");
+        folds
+            .save(&HashSet::from([other_window_fold.clone()]))
+            .unwrap();
+
+        AppFixture::press(&mut app, ' ');
+
+        assert_eq!(
+            folds.folded(),
+            HashSet::from([UiHarness::docs_repo_group(), other_window_fold])
+        );
+    }
+
+    #[test]
+    fn a_fold_over_an_unreadable_fold_file_saves_this_window_s_folds_and_logs_the_reread() {
+        const DETAIL: &str = "the disk refused the fold reread";
+        let log = LogCapture::installed();
+        let fixture = UiHarness::two_repos();
+        let folds = FakeFoldStore::failing_loads(DETAIL);
+        let mut app = AppFixture::restored(&fixture, &folds);
+
+        AppFixture::press(&mut app, ' ');
+
+        assert_eq!(
+            folds.folded(),
+            HashSet::from([UiHarness::docs_repo_group()])
+        );
+        assert_eq!(log.count_containing("could not reread the folded repos"), 1);
+        assert_eq!(log.count_containing(DETAIL), 2);
     }
 
     #[test]
@@ -2113,6 +2178,61 @@ mod tests {
     }
 
     #[test]
+    fn an_unfocused_window_measures_no_diff_so_an_idle_window_runs_no_git() {
+        let fixture = AppFixture::with_diff();
+
+        let app = AppFixture::unfocused(&fixture);
+
+        assert!(fixture.workspace().diff_bases().is_empty());
+        assert!(!AppFixture::screen(&app, 100, 28).contains("?3"));
+    }
+
+    #[test]
+    fn a_window_that_regains_focus_measures_its_diffs() {
+        let fixture = AppFixture::with_diff();
+        let mut app = AppFixture::unfocused(&fixture);
+
+        app.handle_event(&Event::FocusGained);
+
+        assert!(AppFixture::wait_for_text(&mut app, "+0 -0 ?3"));
+    }
+
+    #[test]
+    fn an_unfocused_window_looks_up_no_pull_request_so_idle_windows_spare_the_github_quota() {
+        const LOOKUP_GRACE: Duration = Duration::from_millis(300);
+        let fixture = AppFixture::with_pull_request();
+
+        AppFixture::unfocused(&fixture);
+
+        let looked_up = Deadline::after(LOOKUP_GRACE)
+            .wait_until(|| !fixture.pull_requests().calls().is_empty());
+        assert!(!looked_up);
+    }
+
+    #[test]
+    fn a_window_that_regains_focus_looks_up_its_pull_requests() {
+        let fixture = AppFixture::with_pull_request();
+        let mut app = AppFixture::unfocused(&fixture);
+
+        app.handle_event(&Event::FocusGained);
+
+        assert!(AppFixture::wait_for_text(&mut app, "#142"));
+    }
+
+    #[test]
+    fn a_focus_change_reaches_the_window_while_a_dialog_is_open() {
+        let fixture = AppFixture::with_diff();
+        let mut app = UiHarness::app(&fixture);
+        AppFixture::press(&mut app, '?');
+
+        app.handle_event(&Event::FocusLost);
+        app.resize(100, 28);
+        UiHarness::settle(&mut app);
+
+        assert!(fixture.workspace().diff_bases().is_empty());
+    }
+
+    #[test]
     fn rows_hidden_under_a_wrapped_status_bar_get_no_pull_request_lookup() {
         let sessions =
             ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot"].map(ServiceFixture::session);
@@ -2391,6 +2511,26 @@ mod tests {
         app.handle_event(&UiHarness::control('k'));
 
         assert!(AppFixture::screen(&app, 100, 28).contains("┌ Find session "));
+    }
+
+    #[test]
+    fn a_dialog_replaces_the_home_view_in_a_small_terminal() {
+        let openers = [
+            (UiHarness::key(KeyCode::Char('n')), "┌ New session "),
+            (UiHarness::key(KeyCode::Char('?')), "┌ Help · ringleader "),
+            (UiHarness::control('k'), "┌ Find session "),
+        ];
+        for (opener, title) in openers {
+            let fixture = AppFixture::two_waiting_sessions();
+            let mut app = AppFixture::started(&fixture, 60, 12);
+
+            app.handle_event(&opener);
+            let screen = AppFixture::screen(&app, 60, 12);
+
+            assert!(screen.starts_with(title), "{screen}");
+            assert!(!screen.contains("Sessions"), "{screen}");
+            assert!(screen.ends_with('┘'), "{screen}");
+        }
     }
 
     #[test]
