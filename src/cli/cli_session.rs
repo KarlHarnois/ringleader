@@ -1,5 +1,5 @@
 use super::{CliExit, CliOutput};
-use crate::application::ports::{Interrupts, Lock};
+use crate::application::ports::Interrupts;
 use crate::application::{Pending, ServiceError, SessionService};
 
 pub struct CliSession {
@@ -34,8 +34,7 @@ impl CliSession {
         }
     }
 
-    pub fn wait_for_startup_input(&mut self, service: &SessionService, lock: &mut dyn Lock) {
-        lock.release();
+    pub fn wait_for_startup_input(&mut self, service: &SessionService) {
         if let Some(note) = service.startup_wait_note()
             && !self.is_signaled()
         {

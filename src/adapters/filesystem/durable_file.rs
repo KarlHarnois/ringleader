@@ -1,73 +1,46 @@
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write};
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-use std::path::{Path, PathBuf};
+use std::fs::File;
+use std::io;
+use std::path::Path;
+
+use super::atomic_file::AtomicFile;
 
 pub struct DurableFile {
-    path: PathBuf,
+    file: AtomicFile,
 }
 
 impl DurableFile {
-    const PRIVATE_MODE: u32 = 0o600;
-
     pub fn new(path: &Path) -> Self {
         Self {
-            path: path.to_path_buf(),
+            file: AtomicFile::new(path),
         }
     }
 
     pub fn path(&self) -> &Path {
-        &self.path
+        self.file.path()
     }
 
     pub fn write(&self, contents: &[u8]) -> io::Result<()> {
-        self.write_with_mode(contents, Self::PRIVATE_MODE)
+        self.write_with_mode(contents, AtomicFile::PRIVATE_MODE)
     }
 
     pub fn write_with_mode(&self, contents: &[u8], mode: u32) -> io::Result<()> {
-        let temporary = self.temporary_path();
-        let written = self
-            .write_temporary(&temporary, contents)
-            .and_then(|()| fs::set_permissions(&temporary, fs::Permissions::from_mode(mode)));
-        if let Err(error) = written.and_then(|()| fs::rename(&temporary, &self.path)) {
-            let _ = fs::remove_file(&temporary);
-            return Err(error);
-        }
+        self.file.replace(contents, mode, File::sync_all)?;
         self.sync_directory();
         Ok(())
     }
 
-    fn write_temporary(&self, temporary: &Path, contents: &[u8]) -> io::Result<()> {
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(Self::PRIVATE_MODE)
-            .open(temporary)?;
-        file.write_all(contents)?;
-        file.sync_all()
-    }
-
     fn sync_directory(&self) {
-        let directory = self.path.parent().unwrap_or(Path::new("."));
+        let directory = self.path().parent().unwrap_or(Path::new("."));
         if let Err(error) = File::open(directory).and_then(|handle| handle.sync_all()) {
             log::warn!("could not sync {}: {error}", directory.display());
         }
-    }
-
-    fn temporary_path(&self) -> PathBuf {
-        let name = self
-            .path
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        self.path
-            .with_file_name(format!(".{name}.{}.tmp", std::process::id()))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
 
     #[test]
