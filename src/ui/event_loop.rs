@@ -128,10 +128,9 @@ where
     }
 
     fn handle(&mut self, app: &mut App, event: &Event) -> io::Result<Flow> {
-        match app.handle_event(event) {
-            AppRequest::Quit => Ok(Flow::Stop),
-            request => self.serve_request(app, request).map(|()| Flow::Continue),
-        }
+        let request = app.handle_event(event);
+        let flow = Flow::after(&request);
+        self.serve_request(app, request).map(|()| flow)
     }
 
     fn serve_request(&mut self, app: &mut App, request: AppRequest) -> io::Result<()> {
@@ -208,6 +207,16 @@ where
 enum Flow {
     Continue,
     Stop,
+}
+
+impl Flow {
+    fn after(request: &AppRequest) -> Self {
+        if matches!(request, AppRequest::Quit) {
+            Self::Stop
+        } else {
+            Self::Continue
+        }
+    }
 }
 
 #[cfg(test)]
