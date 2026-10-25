@@ -2529,7 +2529,7 @@ mod tests {
 
             assert!(screen.starts_with(title), "{screen}");
             assert!(!screen.contains("Sessions"), "{screen}");
-            assert!(!screen.contains("quit"), "{screen}");
+            assert!(screen.ends_with('┘'), "{screen}");
         }
     }
 
