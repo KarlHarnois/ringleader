@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use crossterm::event::{Event, KeyEvent, KeyEventKind};
 use ratatui::Frame;
-use ratatui::layout::{Margin, Rect};
+use ratatui::layout::Rect;
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Clear, Padding, Paragraph};
 
@@ -206,8 +206,7 @@ impl Dialog {
 
     fn placement(frame: Rect, preferred_height: u16) -> (Rect, DialogLabels) {
         if LayoutTier::for_size(frame.width, frame.height) != LayoutTier::Full {
-            let margin = Margin::new(1, 1);
-            return (frame.inner(margin), DialogLabels::abbreviated());
+            return (frame, DialogLabels::abbreviated());
         }
         let width = Self::WIDTH.min(frame.width);
         let height = preferred_height.min(frame.height.saturating_sub(2));
@@ -337,13 +336,13 @@ mod tests {
     }
 
     #[test]
-    fn a_compact_tier_uses_the_frame_with_a_margin_and_abbreviated_labels() {
+    fn a_compact_tier_fills_the_frame_with_abbreviated_labels() {
         let terminal = PlacementFixture::render(DialogOpening::NewSession(None), 60, 12);
 
-        assert_eq!(PlacementFixture::symbol(&terminal, 1, 1), "┌");
-        assert_eq!(PlacementFixture::symbol(&terminal, 2, 2), " ");
-        assert_eq!(PlacementFixture::symbol(&terminal, 3, 2), "N");
-        assert_eq!(PlacementFixture::symbol(&terminal, 4, 2), " ");
-        assert_eq!(PlacementFixture::symbol(&terminal, 3, 3), "R");
+        assert_eq!(PlacementFixture::symbol(&terminal, 0, 0), "┌");
+        assert_eq!(PlacementFixture::symbol(&terminal, 59, 11), "┘");
+        assert_eq!(PlacementFixture::symbol(&terminal, 2, 1), "N");
+        assert_eq!(PlacementFixture::symbol(&terminal, 3, 1), " ");
+        assert_eq!(PlacementFixture::symbol(&terminal, 2, 2), "R");
     }
 }
