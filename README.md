@@ -62,6 +62,8 @@ Every command accepts `--config <path>` and `--log-level <level>`.
 | 2 | no session or `[[repos]]` entry with the given name |
 | 3 | conflict with existing state |
 
+A command given several names exits with the code of the first name that failed.
+
 Conflicts with existing state include these:
 
 - a taken name or branch
