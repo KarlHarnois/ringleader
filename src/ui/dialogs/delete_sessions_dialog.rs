@@ -17,8 +17,6 @@ pub struct DeleteSessionsDialog {
 
 impl DeleteSessionsDialog {
     pub const TITLE: &'static str = " Delete sessions ";
-    const HINTS: &'static str = "Enter delete · Esc cancel";
-    const ARMED_HINTS: &'static str = "This loses work. Press Enter again to delete · Esc cancel";
     const NOTHING_TO_DELETE: &'static str = "No selected session can be deleted · Esc cancel";
 
     pub fn new(measured: BatchReport<DeleteImpact>) -> Self {
@@ -77,8 +75,8 @@ impl DeleteSessionsDialog {
             return Self::NOTHING_TO_DELETE;
         }
         match self.armed {
-            true => Self::ARMED_HINTS,
-            false => Self::HINTS,
+            true => ConfirmationKeys::ARMED_HINTS,
+            false => ConfirmationKeys::HINTS,
         }
     }
 

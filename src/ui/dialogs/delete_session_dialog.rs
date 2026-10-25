@@ -23,8 +23,6 @@ impl DeleteSessionDialog {
     pub const TITLE: &'static str = " Delete session ";
     const CHANGED: &'static str =
         "What delete would lose changed since the dialog opened. Review it again.";
-    const HINTS: &'static str = "Enter delete · Esc cancel";
-    const ARMED_HINTS: &'static str = "This loses work. Press Enter again to delete · Esc cancel";
     const UNKNOWN: &'static str = "unknown";
 
     pub fn new(row: Option<&SessionSummary>, name: &str, impact: DeleteImpact) -> Self {
@@ -92,9 +90,9 @@ impl DeleteSessionDialog {
             lines.extend(TextFit::new(Self::CHANGED).styled_lines(width, theme.error()));
         }
         let hints = if self.armed {
-            Self::ARMED_HINTS
+            ConfirmationKeys::ARMED_HINTS
         } else {
-            Self::HINTS
+            ConfirmationKeys::HINTS
         };
         lines.extend(TextFit::new(hints).styled_lines(width, theme.dim()));
         lines
