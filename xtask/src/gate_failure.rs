@@ -7,17 +7,24 @@ pub struct GateFailure {
 }
 
 impl GateFailure {
-    pub fn tool_missing(error: io::Error) -> Self {
+    pub fn cargo_missing(error: io::Error) -> Self {
+        Self {
+            message: format!("cannot run `cargo`: {error}"),
+        }
+    }
+
+    pub fn coverage_unavailable(status: ExitStatus) -> Self {
         Self {
             message: format!(
-                "cannot run `cargo llvm-cov`: {error}. Run the gate inside `nix develop`."
+                "`cargo llvm-cov clean` failed with {status}. Run the gate inside `nix develop`, \
+                 which provides `cargo-llvm-cov`."
             ),
         }
     }
 
-    pub fn step_failed(step: &str, status: ExitStatus) -> Self {
+    pub fn tests_failed(status: ExitStatus) -> Self {
         Self {
-            message: format!("{step} failed with {status}"),
+            message: format!("the instrumented test run failed with {status}"),
         }
     }
 

@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, ExitStatus};
 
 use crate::gate_failure::GateFailure;
 use crate::lcov_report::LcovReport;
@@ -16,8 +16,6 @@ impl<'a> InstrumentedTests<'a> {
     const FORGET_PREVIOUS_RUNS: [&'static str; 4] =
         ["llvm-cov", "clean", "--profraw-only", "--workspace"];
     const KEEP_BUILD_ARTIFACTS: &'static str = "--no-clean";
-    const FORGET_STEP: &'static str = "clearing the previous coverage data";
-    const MEASURE_STEP: &'static str = "the instrumented test run";
 
     pub fn new(root: &'a Path) -> Self {
         Self { root }
@@ -26,10 +24,10 @@ impl<'a> InstrumentedTests<'a> {
     pub fn run(&self) -> Result<LcovReport, GateFailure> {
         let report = self.root.join(Self::REPORT);
         Self::create_parent(&report)?;
-        self.cargo(Self::FORGET_STEP, |command| {
+        self.cargo(GateFailure::coverage_unavailable, |command| {
             command.args(Self::FORGET_PREVIOUS_RUNS)
         })?;
-        self.cargo(Self::MEASURE_STEP, |command| {
+        self.cargo(GateFailure::tests_failed, |command| {
             Self::measure(command, &report)
         })?;
         let text =
@@ -54,18 +52,18 @@ impl<'a> InstrumentedTests<'a> {
 
     fn cargo(
         &self,
-        step: &str,
+        failure: fn(ExitStatus) -> GateFailure,
         arguments: impl FnOnce(&mut Command) -> &mut Command,
     ) -> Result<(), GateFailure> {
         let mut command = Command::new(Self::CARGO);
         command.current_dir(self.root);
         let status = arguments(&mut command)
             .status()
-            .map_err(GateFailure::tool_missing)?;
+            .map_err(GateFailure::cargo_missing)?;
         if status.success() {
             Ok(())
         } else {
-            Err(GateFailure::step_failed(step, status))
+            Err(failure(status))
         }
     }
 }
