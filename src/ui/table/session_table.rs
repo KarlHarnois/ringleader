@@ -20,6 +20,7 @@ use crate::ui::theme::Theme;
 pub struct SessionTable<'a> {
     tree: SessionTree<'a>,
     selection: Option<&'a ListSelection>,
+    marked: Vec<ListSelection>,
     viewport: Viewport,
     tick: u64,
     theme: Theme,
@@ -39,6 +40,7 @@ impl<'a> SessionTable<'a> {
         Self {
             tree,
             selection,
+            marked: Vec::new(),
             viewport: Viewport::default(),
             tick,
             theme,
@@ -48,6 +50,10 @@ impl<'a> SessionTable<'a> {
 
     pub fn with_viewport(self, viewport: Viewport) -> Self {
         Self { viewport, ..self }
+    }
+
+    pub fn with_marked(self, marked: Vec<ListSelection>) -> Self {
+        Self { marked, ..self }
     }
 
     pub fn for_tier(self, tier: LayoutTier) -> Self {
@@ -157,7 +163,8 @@ impl<'a> SessionTable<'a> {
     }
 
     fn is_selected(&self, line: &TreeLine) -> bool {
-        self.selection == Some(&line.selection())
+        let selection = line.selection();
+        self.selection == Some(&selection) || self.marked.contains(&selection)
     }
 
     fn reversed(&self, spans: &[Span], width: usize) -> Line<'static> {

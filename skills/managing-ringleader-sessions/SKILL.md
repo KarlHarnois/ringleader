@@ -95,9 +95,9 @@ Never put a secret into a handoff prompt: the prompt lands in the agent's transc
 | --- | --- | --- |
 | List | `ringleader list --json` | Report each session's `name`, `state`, and `branch`. |
 | Rename | `ringleader rename <old> <new>` | Run only when the user asks. |
-| Restart | `ringleader restart <name>` | Run only when the user asks. |
-| Stop | `ringleader stop <name>` | Run only when the user asks. `ringleader restart <name>` resumes it. |
-| Delete | `ringleader delete <name>` | Run only when the user asks. Never delete the current session. |
+| Restart | `ringleader restart <name>...` | Run only when the user asks. |
+| Stop | `ringleader stop <name>...` | Run only when the user asks. `ringleader restart <name>` resumes it. |
+| Delete | `ringleader delete <name>...` | Run only when the user asks. Never delete the current session. |
 
 - If the user asks for `--force` or `--forget`, pass that flag to `delete`. Otherwise, never pass either flag.
 - Never run `ringleader attach`: it takes over this agent's terminal.

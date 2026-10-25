@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use super::batch_report::BatchReport;
 use super::pending::Pending;
 use super::ports::{Clock, ConfigError, ConfigSource, RegistryError, SessionRegistry};
 use super::pull_request_catalog::PullRequestCatalog;
@@ -310,15 +311,54 @@ impl SessionService {
 
     pub fn restart_all(&mut self, stop: impl Fn() -> bool) -> Result<RestartReport, ServiceError> {
         let names = self.reconcile()?.restartable_names();
-        let restarts = names
-            .into_iter()
+        Ok(self.restart_sessions(&names, stop))
+    }
+
+    pub fn restart_sessions(&mut self, names: &[String], stop: impl Fn() -> bool) -> RestartReport {
+        RestartReport::from(self.each_session(names, stop, Self::restart_session))
+    }
+
+    pub fn stop_sessions(&mut self, names: &[String], stop: impl Fn() -> bool) -> BatchReport<()> {
+        self.each_session(names, stop, Self::stop_session)
+    }
+
+    pub fn merge_upstream_sessions(&mut self, names: &[String]) -> BatchReport<MergeReport> {
+        self.each_session(names, Self::uninterrupted, Self::merge_upstream)
+    }
+
+    pub fn delete_impacts(&mut self, names: &[String]) -> BatchReport<DeleteImpact> {
+        self.each_session(names, Self::uninterrupted, Self::delete_impact)
+    }
+
+    pub fn delete_sessions(
+        &mut self,
+        confirmations: &[(String, DeleteConfirmation)],
+        stop: impl Fn() -> bool,
+    ) -> BatchReport<DeleteOutcome> {
+        let outcomes = confirmations
+            .iter()
             .take_while(|_| !stop())
-            .map(|name| {
-                let restart = self.restart_session(&name);
-                (name, restart)
-            })
+            .map(|(name, confirmation)| (name.clone(), self.delete_session(name, confirmation)))
             .collect();
-        Ok(RestartReport::new(restarts))
+        BatchReport::new(outcomes)
+    }
+
+    fn each_session<T>(
+        &mut self,
+        names: &[String],
+        stop: impl Fn() -> bool,
+        action: impl Fn(&mut Self, &str) -> Result<T, ServiceError>,
+    ) -> BatchReport<T> {
+        let outcomes = names
+            .iter()
+            .take_while(|_| !stop())
+            .map(|name| (name.clone(), action(self, name)))
+            .collect();
+        BatchReport::new(outcomes)
+    }
+
+    fn uninterrupted() -> bool {
+        false
     }
 
     pub fn merge_upstream(&mut self, name: &str) -> Result<MergeReport, ServiceError> {
@@ -955,6 +995,55 @@ mod tests {
                 .map(|spec| spec.tmux_name().to_string())
                 .collect()
         }
+    }
+
+    #[test]
+    fn restart_sessions_restarts_the_named_sessions_and_skips_a_waiting_one() {
+        let fixture = RestartAllFixture::mixed();
+        let names = ["alpha", "charlie"].map(String::from);
+
+        let report = fixture.service().restart_sessions(&names, || false);
+
+        assert_eq!(RestartAllFixture::restarted_names(&report), ["alpha"]);
+        assert_eq!(
+            report.failures().map(|(name, _)| name).collect::<Vec<_>>(),
+            ["charlie"]
+        );
+    }
+
+    #[test]
+    fn stop_sessions_stops_a_waiting_session_and_skips_a_working_and_an_unmanaged_one() {
+        let fixture = RestartAllFixture::mixed();
+        let names = ["charlie", "delta", "mystery"].map(String::from);
+
+        let report = fixture.service().stop_sessions(&names, || false);
+
+        assert_eq!(
+            report.succeeded().map(|(name, _)| name).collect::<Vec<_>>(),
+            ["charlie"]
+        );
+        assert!(report.failures().all(|(_, error)| error.is_refusal()));
+        assert_eq!(report.failures().count(), 2);
+    }
+
+    #[test]
+    fn a_batch_that_is_told_to_stop_leaves_the_remaining_sessions_alone() {
+        let fixture = RestartAllFixture::mixed();
+        let names = ["charlie"].map(String::from);
+
+        let report = fixture.service().stop_sessions(&names, || true);
+
+        assert!(report.is_empty());
+    }
+
+    #[test]
+    fn delete_impacts_measures_each_named_session() {
+        let fixture = RestartAllFixture::mixed();
+        let names = ["alpha", "bravo"].map(String::from);
+
+        let report = fixture.service().delete_impacts(&names);
+
+        assert_eq!(report.succeeded().count(), 2);
     }
 
     #[test]

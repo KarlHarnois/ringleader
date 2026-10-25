@@ -1,6 +1,7 @@
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::KeyEvent;
 use ratatui::text::Line;
 
+use super::confirmation_keys::ConfirmationKeys;
 use super::dialog::DialogStep;
 use super::dialog_labels::DialogLabels;
 use crate::application::DeleteImpact;
@@ -64,11 +65,7 @@ impl DeleteSessionDialog {
     }
 
     pub fn handle_key(&mut self, key: &KeyEvent) -> DialogStep {
-        match key.code {
-            KeyCode::Esc | KeyCode::Char('n' | 'q') => DialogStep::Close,
-            KeyCode::Enter | KeyCode::Char('y') => self.confirm(),
-            _ => DialogStep::Stay,
-        }
+        ConfirmationKeys::step(key, || self.confirm())
     }
 
     pub fn lines(&self, width: usize, labels: DialogLabels, theme: &Theme) -> Vec<Line<'static>> {
@@ -121,7 +118,7 @@ impl DeleteSessionDialog {
 mod tests {
     use std::path::PathBuf;
 
-    use crossterm::event::KeyModifiers;
+    use crossterm::event::{KeyCode, KeyModifiers};
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 

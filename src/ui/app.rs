@@ -18,7 +18,9 @@ use crate::ui::home::home_view::HomeView;
 use crate::ui::home::status_bar::{StatusBar, StatusMessage};
 use crate::ui::home::status_report::StatusReport;
 use crate::ui::keys::action_gate::{ActionGate, DesktopOpening, KeyAction, Navigation};
+use crate::ui::keys::key_map::KeyMap;
 use crate::ui::keys::key_sequence::KeySequence;
+use crate::ui::keys::visual_gate::VisualGate;
 
 pub struct App {
     service: SessionService,
@@ -210,6 +212,10 @@ impl App {
                     .open(Dialog::delete(row, &name, impact, changed));
                 self.status.show(None);
             }
+            OperationOutcome::ConfirmDeleteSessions(measured) => {
+                self.dialogs.open(Dialog::delete_sessions(measured));
+                self.status.show(None);
+            }
             OperationOutcome::Failed(error) => self.report_failure(error),
         }
     }
@@ -229,11 +235,17 @@ impl App {
 
     fn handle_key(&mut self, key: &KeyEvent) -> AppRequest {
         self.status.show(None);
-        let gate = Self::gate(&self.home, &self.service);
-        match self.key_sequence.handle_key(key, &gate) {
-            KeyAction::Request(request) => self.request(request),
+        match self.key_action(key) {
+            KeyAction::Request(request) => {
+                self.home.leave_visual();
+                self.request(request)
+            }
             KeyAction::Refuse(refusal) => {
                 self.status.error(refusal);
+                AppRequest::Continue
+            }
+            KeyAction::Visual(change) => {
+                self.home.change_visual(change);
                 AppRequest::Continue
             }
             action => {
@@ -241,6 +253,11 @@ impl App {
                 AppRequest::Continue
             }
         }
+    }
+
+    fn key_action(&mut self, key: &KeyEvent) -> KeyAction {
+        let key_map = Self::key_map(&self.home, &self.service);
+        self.key_sequence.handle_key(key, key_map.as_ref())
     }
 
     fn act_on(&mut self, action: KeyAction) {
@@ -256,7 +273,10 @@ impl App {
             }
             KeyAction::Reload => self.reload(),
             KeyAction::OpenOnDesktop(opening) => self.open_on_desktop(opening),
-            KeyAction::Request(_) | KeyAction::Refuse(_) | KeyAction::Ignore => {}
+            KeyAction::Request(_)
+            | KeyAction::Refuse(_)
+            | KeyAction::Visual(_)
+            | KeyAction::Ignore => {}
         }
     }
 
@@ -270,6 +290,15 @@ impl App {
             Navigation::SelectLow => self.home.select_low(&self.service),
             Navigation::JumpToRepo(number) => self.home.jump_to_repo(number, &self.service),
         }
+    }
+
+    fn key_map<'a>(home: &'a HomeState, service: &'a SessionService) -> Box<dyn KeyMap + 'a> {
+        let gate = Self::gate(home, service);
+        let sessions = home.sessions();
+        if sessions.in_visual_mode() {
+            return Box::new(VisualGate::new(gate, sessions.visual_names()));
+        }
+        Box::new(gate)
     }
 
     fn gate<'a>(home: &'a HomeState, service: &'a SessionService) -> ActionGate<'a> {
@@ -440,7 +469,7 @@ mod tests {
     use ratatui::backend::TestBackend;
 
     use super::*;
-    use ratatui::style::Color;
+    use ratatui::style::{Color, Modifier};
 
     use crate::application::ports::{
         ConfigError, MergeOutcome, MultiplexerError, RegistryError, TerminalEmulatorError,
@@ -456,6 +485,7 @@ mod tests {
         FakeRepoPages, FakeSessionRegistry, FakeTerminalEmulator, FakeUsageMeter, FakeWebBrowser,
         HeldCalls, LogCapture, ServiceFixture, UiHarness,
     };
+    use crate::ui::batch_operation::{BatchOperation, DeleteSessionsStep};
     use crate::ui::blocking_operation::DeleteStep;
 
     struct AppFixture;
@@ -1389,7 +1419,10 @@ mod tests {
 
         let request = app.handle_event(&UiHarness::character('S'));
 
-        assert_eq!(request, AppRequest::Block(BlockingOperation::RestartAll));
+        assert_eq!(
+            request,
+            AppRequest::Block(BlockingOperation::Batch(BatchOperation::RestartAll))
+        );
         assert_eq!(
             AppFixture::status_line(&app, 100),
             " Restarting every exited or stopped session…"
@@ -1408,6 +1441,100 @@ mod tests {
             AppRequest::Block(BlockingOperation::Stop("fix-auth".to_string()))
         );
         assert_eq!(AppFixture::status_line(&app, 100), " Stopping fix-auth…");
+    }
+
+    #[test]
+    fn x_in_visual_mode_asks_to_stop_the_range_and_leaves_visual_mode() {
+        let fixture = AppFixture::three_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, 'V');
+        AppFixture::press(&mut app, 'j');
+
+        let request = app.handle_event(&UiHarness::character('x'));
+
+        assert_eq!(
+            request,
+            AppRequest::Block(BlockingOperation::Batch(BatchOperation::Stop(
+                ["dark-mode", "fix-auth"].map(String::from).to_vec()
+            )))
+        );
+        assert_eq!(AppFixture::status_line(&app, 100), " Stopping 2 sessions…");
+    }
+
+    #[test]
+    fn the_status_bar_names_visual_mode_and_its_keys() {
+        let fixture = AppFixture::three_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press(&mut app, 'v');
+        AppFixture::press(&mut app, 'j');
+
+        assert!(
+            AppFixture::status_line(&app, 100).contains("-- VISUAL -- 2 sessions · x stop"),
+            "{}",
+            AppFixture::status_line(&app, 100)
+        );
+    }
+
+    #[test]
+    fn every_session_in_the_range_is_reversed() {
+        let fixture = AppFixture::three_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, 'V');
+        AppFixture::press(&mut app, 'j');
+        let mut terminal = Terminal::new(TestBackend::new(100, 28)).unwrap();
+
+        terminal.draw(|frame| app.render(frame)).unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let reversed_rows = (0..28)
+            .filter(|row| buffer[(5, *row)].modifier.contains(Modifier::REVERSED))
+            .count();
+        assert_eq!(reversed_rows, 2);
+    }
+
+    #[test]
+    fn performing_a_stop_of_several_sessions_counts_them() {
+        let fixture = AppFixture::three_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        let names = ["dark-mode", "fix-auth"].map(String::from).to_vec();
+
+        app.perform(BlockingOperation::Batch(BatchOperation::Stop(names)));
+
+        assert_eq!(AppFixture::status_line(&app, 100), " Stopped 2 sessions.");
+    }
+
+    #[test]
+    fn d_in_visual_mode_opens_one_dialog_for_the_whole_range() {
+        let fixture = AppFixture::three_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, 'V');
+        AppFixture::press(&mut app, 'j');
+
+        AppFixture::press_and_perform(&mut app, 'd');
+
+        let screen = AppFixture::flattened_screen(&app, 100, 28);
+        assert!(screen.contains("Delete sessions"), "{screen}");
+    }
+
+    #[test]
+    fn enter_in_the_batch_delete_dialog_asks_to_delete_the_range() {
+        let fixture = AppFixture::three_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, 'V');
+        AppFixture::press_and_perform(&mut app, 'd');
+
+        let request = app.handle_event(&UiHarness::key(KeyCode::Enter));
+
+        assert!(
+            matches!(
+                request,
+                AppRequest::Block(BlockingOperation::Batch(BatchOperation::Delete(
+                    DeleteSessionsStep::Confirmed(_)
+                )))
+            ),
+            "{request:?}"
+        );
     }
 
     #[test]
@@ -1430,7 +1557,7 @@ mod tests {
         let fixture = UiHarness::exited_session_fixture("fix-auth");
         let mut app = AppFixture::started(&fixture, 100, 28);
 
-        app.perform(BlockingOperation::RestartAll);
+        app.perform(BlockingOperation::Batch(BatchOperation::RestartAll));
 
         assert_eq!(fixture.multiplexer().launches().len(), 1);
         assert_eq!(AppFixture::status_line(&app, 100), " Restarted 1 session.");
@@ -1441,7 +1568,7 @@ mod tests {
         let fixture = ServiceFixture::new().with_sessions(&[ServiceFixture::session("fix-auth")]);
         let mut app = AppFixture::started(&fixture, 100, 28);
 
-        app.perform(BlockingOperation::RestartAll);
+        app.perform(BlockingOperation::Batch(BatchOperation::RestartAll));
 
         assert!(
             AppFixture::status_line(&app, 200)
