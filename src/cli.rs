@@ -51,7 +51,7 @@ enum CliCommand {
     List(ListArgs),
     #[command(about = "Create a session in a new worktree or the main checkout")]
     New(NewArgs),
-    #[command(about = "Delete a session and the worktree and branch made for it")]
+    #[command(about = "Delete sessions and the worktrees and branches made for them")]
     Delete(DeleteArgs),
     #[command(about = "Attach to a session")]
     Attach(NameArgs),
@@ -59,10 +59,10 @@ enum CliCommand {
     Send(SendArgs),
     #[command(about = "Rename a session and the branch made for it")]
     Rename(RenameArgs),
-    #[command(about = "Restart an exited or stopped session, or with --all every one")]
+    #[command(about = "Restart exited or stopped sessions, or with --all every one")]
     Restart(RestartArgs),
-    #[command(about = "Stop a waiting or exited session to free its memory, restart resumes it")]
-    Stop(NameArgs),
+    #[command(about = "Stop waiting or exited sessions to free their memory, restart resumes them")]
+    Stop(NamesArgs),
     #[command(about = "Add, remove, or list repos")]
     Repo {
         #[command(subcommand)]
@@ -129,7 +129,8 @@ struct NewArgs {
 
 #[derive(Debug, Args)]
 struct DeleteArgs {
-    name: String,
+    #[arg(required = true)]
+    names: Vec<String>,
     #[arg(long)]
     force: bool,
     #[arg(long)]
@@ -142,6 +143,12 @@ struct NameArgs {
 }
 
 #[derive(Debug, Args)]
+struct NamesArgs {
+    #[arg(required = true)]
+    names: Vec<String>,
+}
+
+#[derive(Debug, Args)]
 struct SendArgs {
     name: String,
     #[arg(allow_hyphen_values = true)]
@@ -151,7 +158,7 @@ struct SendArgs {
 #[derive(Debug, Args)]
 #[group(required = true, multiple = false)]
 struct RestartArgs {
-    name: Option<String>,
+    names: Vec<String>,
     #[arg(long)]
     all: bool,
 }
@@ -355,8 +362,8 @@ impl Cli {
             CliCommand::Delete(args) => commands.delete(args),
             CliCommand::Attach(args) => commands.attach(&args.name),
             CliCommand::Rename(args) => commands.rename(args),
-            CliCommand::Restart(args) => commands.restart_one_or_all(args),
-            CliCommand::Stop(args) => commands.stop(&args.name),
+            CliCommand::Restart(args) => commands.restart_named_or_all(args),
+            CliCommand::Stop(args) => commands.stop(&args.names),
             CliCommand::Repo { .. }
             | CliCommand::Send(_)
             | CliCommand::Doctor(_)
@@ -862,5 +869,15 @@ mod tests {
         let stop = Cli::try_parse_from(["ringleader", "stop", "fix-auth"]).unwrap();
 
         assert!(stop.is_mutating());
+    }
+
+    #[test]
+    fn stop_and_delete_need_at_least_one_name() {
+        for command in ["stop", "delete"] {
+            assert_eq!(
+                ParseFixture::exit_code(&["ringleader", command]),
+                CliExit::FAILURE
+            );
+        }
     }
 }

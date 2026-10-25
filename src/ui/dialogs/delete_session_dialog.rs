@@ -1,6 +1,7 @@
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::KeyEvent;
 use ratatui::text::Line;
 
+use super::confirmation_keys::ConfirmationKeys;
 use super::dialog::DialogStep;
 use super::dialog_labels::DialogLabels;
 use crate::application::DeleteImpact;
@@ -22,8 +23,6 @@ impl DeleteSessionDialog {
     pub const TITLE: &'static str = " Delete session ";
     const CHANGED: &'static str =
         "What delete would lose changed since the dialog opened. Review it again.";
-    const HINTS: &'static str = "Enter delete · Esc cancel";
-    const ARMED_HINTS: &'static str = "This loses work. Press Enter again to delete · Esc cancel";
     const UNKNOWN: &'static str = "unknown";
 
     pub fn new(row: Option<&SessionSummary>, name: &str, impact: DeleteImpact) -> Self {
@@ -64,11 +63,7 @@ impl DeleteSessionDialog {
     }
 
     pub fn handle_key(&mut self, key: &KeyEvent) -> DialogStep {
-        match key.code {
-            KeyCode::Esc | KeyCode::Char('n' | 'q') => DialogStep::Close,
-            KeyCode::Enter | KeyCode::Char('y') => self.confirm(),
-            _ => DialogStep::Stay,
-        }
+        ConfirmationKeys::step(key, || self.confirm())
     }
 
     pub fn lines(&self, width: usize, labels: DialogLabels, theme: &Theme) -> Vec<Line<'static>> {
@@ -95,9 +90,9 @@ impl DeleteSessionDialog {
             lines.extend(TextFit::new(Self::CHANGED).styled_lines(width, theme.error()));
         }
         let hints = if self.armed {
-            Self::ARMED_HINTS
+            ConfirmationKeys::ARMED_HINTS
         } else {
-            Self::HINTS
+            ConfirmationKeys::HINTS
         };
         lines.extend(TextFit::new(hints).styled_lines(width, theme.dim()));
         lines
@@ -121,7 +116,7 @@ impl DeleteSessionDialog {
 mod tests {
     use std::path::PathBuf;
 
-    use crossterm::event::KeyModifiers;
+    use crossterm::event::{KeyCode, KeyModifiers};
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 

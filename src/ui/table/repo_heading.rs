@@ -59,6 +59,13 @@ impl<'a> RepoHeading<'a> {
         self.rows
     }
 
+    pub fn hidden_rows(&self) -> &'a [SessionSummary] {
+        if self.folded {
+            return self.rows;
+        }
+        &[]
+    }
+
     pub fn spans(&self, tick: u64, theme: &Theme, width: usize) -> Vec<Span<'static>> {
         let lead = self.lead_spans(theme);
         let tail = self.tail_spans(tick, theme);

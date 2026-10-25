@@ -39,6 +39,13 @@ impl ServiceError {
         matches!(self, ServiceError::TimedOut { tool, .. } if *tool == expected)
     }
 
+    pub fn is_refusal(&self) -> bool {
+        matches!(
+            self,
+            ServiceError::Conflict(_) | ServiceError::GuardsChanged { .. }
+        )
+    }
+
     pub fn adding_context(self, context: &str) -> Self {
         let message = format!("{self}; {context}");
         match self {

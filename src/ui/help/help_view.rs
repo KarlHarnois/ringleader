@@ -25,7 +25,7 @@ pub struct HelpView {
 impl HelpView {
     pub const TITLE: &'static str = concat!(" Help · ringleader ", env!("CARGO_PKG_VERSION"), " ");
     const KEYS_HEADING: &'static str = "Keys";
-    const KEYS: [(&'static str, &'static str); 20] = [
+    const KEYS: [(&'static str, &'static str); 21] = [
         ("n", "create a session"),
         ("d", "delete the selected session"),
         (
@@ -66,6 +66,7 @@ impl HelpView {
         ("gg G", "select the first or the last row"),
         ("H M L", "select the top, middle, or bottom row on screen"),
         ("1-9", "jump to a repo"),
+        ("v V", "select a range of sessions, then x s d p act on it"),
         ("q", "quit, the sessions keep running"),
     ];
     const RETURN_ACTION: &'static str = "detach from a session and return here";
@@ -252,8 +253,8 @@ mod tests {
         const SHORT_WIDTH: usize = 56;
         const SHORT_HEIGHT: usize = 8;
         const PAST_THE_END: usize = 50;
-        const ROWS_ABOVE_THE_SMALLEST_FULL_SIZE: u16 = 16;
-        const TALL_NARROW_SIZE: (u16, u16) = (79, 39);
+        const ROWS_ABOVE_THE_SMALLEST_FULL_SIZE: u16 = 17;
+        const TALL_NARROW_SIZE: (u16, u16) = (79, 40);
         const TMUX_CONFIG_ROW: &'static str = "tmux config  ~/.local/state/ringleader/tmux.conf";
 
         fn help() -> HelpView {
@@ -387,7 +388,7 @@ mod tests {
 
         assert!(screen.lines().nth(1).unwrap().contains("┌ Help "));
         assert!(screen.contains("n            create a session"));
-        assert!(screen.contains("q            quit, the sessions keep running"));
+        assert!(screen.contains("1-9          jump to a repo"));
     }
 
     #[test]
