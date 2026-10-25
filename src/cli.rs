@@ -323,11 +323,15 @@ impl Cli {
         if args.json {
             session.output().line(&report.json());
         } else {
-            for line in report.lines() {
-                session.output().line(&line);
-            }
+            Self::print_lines(report.lines(), session);
         }
         u8::from(report.has_problems())
+    }
+
+    fn print_lines(lines: impl IntoIterator<Item = String>, session: &mut CliSession) {
+        for line in lines {
+            session.output().line(&line);
+        }
     }
 
     fn dispatch(

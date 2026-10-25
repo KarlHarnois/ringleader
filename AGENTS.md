@@ -220,8 +220,8 @@ Create each fixture repo with `git init -b <branch>`. Never rely on `init.defaul
 
 ```sh
 nix develop -c cargo fmt --check
-nix develop -c cargo clippy --all-targets -- -D warnings
-nix develop -c cargo test
+nix develop -c cargo clippy --workspace --all-targets -- -D warnings
+nix develop -c cargo xtask crap
 nix build --no-link ".#checks.$(nix eval --impure --raw --expr builtins.currentSystem).readme-version-badge"
 nix build .#
 nix flake check
@@ -229,7 +229,7 @@ nix flake check
 
 **The Commands are the six commands above.** CI runs them on Linux and macOS.
 
-**A change is done when the Commands pass.** If the change edits a file under `src/`, the change is done only after the completion steps also pass. If one of the Commands also fails without the change, stop and show its output to the project owner.
+**A change is done when the Commands pass.** If one of the Commands also fails without the change, stop and show its output to the project owner.
 
 ## Reference files
 
@@ -237,9 +237,7 @@ nix flake check
 
 | Reference file | Read the file before you |
 | --- | --- |
-| `docs/agents/completion-steps.md` | run a metrics tool or the completion steps |
 | `docs/agents/manual-runs.md` | make a manual run |
-| `docs/agents/uml-viewer.md` | open uml-viewer |
 | `docs/agents/source-folders.md` | add a file under `src/`, move a file there, or make a folder there |
 | `docs/agents/platform-code.md` | change a file or a re-export that a `target_os` cfg attribute limits, or write such an attribute |
 | `docs/agents/tmux-tests.md` | write or change a test that runs tmux |
@@ -338,12 +336,14 @@ nix flake check
 - Put the channel's fake in `src/test_support/`.
 - A test seam inside `adapters` has the same shape. Its fake lives in the adapter's own tests.
 
-## Metrics
+## CRAP gate
 
-**The metrics tools are `dryer`, `crapper`, and `mutator`.** They are local code-health tools that you run in the completion steps.
+**`cargo xtask crap` runs every workspace test under coverage, then fails if a production function scores over 8.**
 
-- CI never builds or runs the metrics tools. Never add them to `checks`, to the default dev shell, or to `.github/workflows/ci.yml`.
-- `nix flake check` still downloads the four upstream inputs. If an upstream input can no longer be fetched, CI's flake check fails until someone repins or removes the input.
+- Never raise `CrapGate::MAXIMUM_CRAP` without the project owner's approval.
+- Never hide a branch from the gate, such as by moving it into a macro: the gate cannot see inside a macro.
+- A function that no test can reach, such as one that needs a terminal, scores 8 or less only at complexity 2 or less. Move its logic into functions that tests reach.
+- The gate scores only the code that compiles on the host. A macOS-only function therefore fails only the macOS CI job.
 
 ## Layout rules
 
@@ -448,7 +448,7 @@ Ringleader checks a registry entry recorded on another socket only through `Proc
 - UI tests drive `EventLoop` with scripted input, a recording screen mode, and a recording shell runner.
 - No test calls crossterm or needs a terminal.
 - No test reads wall-clock time to classify a session.
-- Mark a constructor, accessor, or helper that only tests call with `#[cfg(test)]`: `cargo clippy --all-targets -- -D warnings` then stays clean without any dead-code allowance.
+- Mark a constructor, accessor, or helper that only tests call with `#[cfg(test)]`: `cargo clippy --workspace --all-targets -- -D warnings` then stays clean without any dead-code allowance.
 
 ## Commits
 

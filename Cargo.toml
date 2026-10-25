@@ -7,6 +7,9 @@ license = "MIT"
 description = "A tmux session manager for Claude and opencode"
 repository = "https://github.com/KarlHarnois/ringleader"
 
+[workspace]
+members = ["xtask"]
+
 [dependencies]
 ansi-to-tui = "8.0.1"
 clap = { version = "4.6.7", features = ["derive"] }

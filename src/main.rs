@@ -113,53 +113,110 @@ impl CompositionRoot {
 
     fn run_cli(&self, cli: &Cli) -> ExitCode {
         let state_directory = self.paths.state_directory();
-        let state_ready = fs::create_dir_all(&state_directory);
-        if let (Err(error), true) = (&state_ready, cli.is_mutating()) {
-            return Self::fail(&format!(
+        self.cli_log(cli, &state_directory)
+            .and_then(|log| self.run_cli_with_log(cli, &state_directory, &log))
+            .unwrap_or_else(convert::identity)
+    }
+
+    fn cli_log(
+        &self,
+        cli: &Cli,
+        state_directory: &Path,
+    ) -> Result<Result<AppLog, String>, ExitCode> {
+        if let Err(error) = fs::create_dir_all(state_directory) {
+            return Self::log_without_state_directory(cli, state_directory, &error);
+        }
+        Ok(self.start_log(cli))
+    }
+
+    fn log_without_state_directory(
+        cli: &Cli,
+        state_directory: &Path,
+        error: &io::Error,
+    ) -> Result<Result<AppLog, String>, ExitCode> {
+        if cli.is_mutating() {
+            Err(Self::fail(&format!(
                 "cannot create {}: {error}",
                 state_directory.display()
-            ));
-        }
-        let log = match &state_ready {
-            Ok(()) => self.start_log(cli),
-            Err(error) => Err(AppLog::disabled(
-                &AppLog::path_in(&state_directory),
+            )))
+        } else {
+            Ok(Err(AppLog::disabled(
+                &AppLog::path_in(state_directory),
                 &error.to_string(),
-            )),
-        };
+            )))
+        }
+    }
+
+    fn run_cli_with_log(
+        &self,
+        cli: &Cli,
+        state_directory: &Path,
+        log: &Result<AppLog, String>,
+    ) -> Result<ExitCode, ExitCode> {
         self.handoff().delete_stale();
-        let signals = match cli.is_mutating() {
-            true => SignalHookInterrupts::register()
-                .unwrap_or_else(|_| SignalHookInterrupts::unregistered()),
-            false => SignalHookInterrupts::unregistered(),
-        };
-        let mut session = CliSession::new(CliOutput::standard(), Box::new(signals));
-        if let Err(message) = &log {
+        let mut session = CliSession::new(CliOutput::standard(), Box::new(Self::cli_signals(cli)));
+        Self::report_log_problem(log, &mut session);
+        let mut lock = FileLock::new(&state_directory.join("lock"));
+        cli.take_write_lock(&mut lock, &mut session)
+            .map_err(Self::exit_with)?;
+        Self::truncate_log_of_mutating(cli, log);
+        Ok(self.execute_cli(cli, &mut session, &mut lock))
+    }
+
+    fn cli_signals(cli: &Cli) -> SignalHookInterrupts {
+        if cli.is_mutating() {
+            SignalHookInterrupts::register()
+                .unwrap_or_else(|_| SignalHookInterrupts::unregistered())
+        } else {
+            SignalHookInterrupts::unregistered()
+        }
+    }
+
+    fn report_log_problem(log: &Result<AppLog, String>, session: &mut CliSession) {
+        if let Err(message) = log {
             session.output().error(message);
         }
-        let mut lock = FileLock::new(&state_directory.join("lock"));
-        if let Err(exit) = cli.take_write_lock(&mut lock, &mut session) {
-            return Self::exit_with(exit);
+    }
+
+    fn truncate_log_of_mutating(cli: &Cli, log: &Result<AppLog, String>) {
+        if cli.is_mutating() {
+            Self::truncate_log(log);
         }
-        if let (Ok(log), true) = (&log, cli.is_mutating()) {
-            log.truncate_if_large();
-        }
+    }
+
+    fn execute_cli(&self, cli: &Cli, session: &mut CliSession, lock: &mut FileLock) -> ExitCode {
         let config_source = self.config_source(cli);
-        if cli.is_mutating()
-            && let Some(warning) = Self::write_template_if_missing(&config_source)
-        {
-            session.output().error(&warning);
-        }
+        Self::warn_of_mutating_template_problem(cli, &config_source, session);
         let loaded = Self::load(&config_source);
         let mut service = self.service(config_source, loaded);
-        Self::exit_with(cli.execute(&mut service, &mut session, &mut lock))
+        Self::exit_with(cli.execute(&mut service, session, lock))
+    }
+
+    fn warn_of_mutating_template_problem(
+        cli: &Cli,
+        source: &TomlConfigSource,
+        session: &mut CliSession,
+    ) {
+        if cli.is_mutating() {
+            Self::warn_of_template_problem(source, session);
+        }
+    }
+
+    fn warn_of_template_problem(source: &TomlConfigSource, session: &mut CliSession) {
+        if let Some(warning) = Self::write_template_if_missing(source) {
+            session.output().error(&warning);
+        }
     }
 
     fn start_log(&self, cli: &Cli) -> Result<AppLog, String> {
         let log = AppLog::open(&self.paths.state_directory())?;
-        let level = cli.log_level().and_then(|level| level.parse().ok());
-        log.start(level.unwrap_or(LevelFilter::Info))?;
-        Ok(log)
+        log.start(Self::log_level(cli)).map(|()| log)
+    }
+
+    fn log_level(cli: &Cli) -> LevelFilter {
+        cli.log_level()
+            .and_then(|level| level.parse().ok())
+            .unwrap_or(LevelFilter::Info)
     }
 
     fn exit_with(exit: CliExit) -> ExitCode {
@@ -254,9 +311,14 @@ impl CompositionRoot {
     fn run_event_loop(app: &mut App, signals: SignalHookInterrupts) -> io::Result<()> {
         let screen = TerminalGuard::enter(Box::new(CrosstermScreenMode))?;
         screen.state().install_panic_hook();
+        Self::cleared_terminal().and_then(|terminal| {
+            EventLoop::new(terminal, CrosstermInput, Box::new(signals), screen.state()).run(app)
+        })
+    }
+
+    fn cleared_terminal() -> io::Result<Terminal<CrosstermBackend<io::Stdout>>> {
         let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
-        Self::clear_alternate_screen_leftovers(&mut terminal)?;
-        EventLoop::new(terminal, CrosstermInput, Box::new(signals), screen.state()).run(app)
+        Self::clear_alternate_screen_leftovers(&mut terminal).map(|()| terminal)
     }
 
     fn clear_alternate_screen_leftovers(
@@ -283,17 +345,16 @@ impl CompositionRoot {
         if source.exists() {
             return None;
         }
-        let error = source.write_first_run_template().err()?;
-        Some(format!(
-            "could not write the first-run config, using the defaults: {error}"
-        ))
+        source.write_first_run_template().err().map(|error| {
+            format!("could not write the first-run config, using the defaults: {error}")
+        })
     }
 
     fn load(source: &TomlConfigSource) -> LoadedConfig {
-        match source.load() {
-            Ok(config) => LoadedConfig::valid(config),
-            Err(error) => LoadedConfig::failed(source.defaults(), error),
-        }
+        source.load().map_or_else(
+            |error| LoadedConfig::failed(source.defaults(), error),
+            LoadedConfig::valid,
+        )
     }
 
     fn service(&self, config_source: TomlConfigSource, loaded: LoadedConfig) -> SessionService {
@@ -417,9 +478,10 @@ impl CompositionRoot {
         )
         .with_tmux_server(self.server.socket(), self.server.config())
         .with_log_file(&AppLog::path_in(&self.paths.state_directory()));
-        match self.paths.has_runtime_directory() {
-            true => paths,
-            false => paths.with_socket_in_state_directory(),
+        if self.paths.has_runtime_directory() {
+            paths
+        } else {
+            paths.with_socket_in_state_directory()
         }
     }
 

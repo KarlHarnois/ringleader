@@ -3,6 +3,3 @@
 /result-*
 /.direnv
 /.claude/worktrees
-/.metrics
-/.uml-viewer
-/uml-viewer-log.txt
