@@ -61,6 +61,8 @@ enum CliCommand {
     Rename(RenameArgs),
     #[command(about = "Restart an exited or stopped session, or with --all every one")]
     Restart(RestartArgs),
+    #[command(about = "Stop a waiting or exited session to free its memory, restart resumes it")]
+    Stop(NameArgs),
     #[command(about = "Add, remove, or list repos")]
     Repo {
         #[command(subcommand)]
@@ -239,6 +241,7 @@ impl Cli {
                     | CliCommand::Delete(_)
                     | CliCommand::Rename(_)
                     | CliCommand::Restart(_)
+                    | CliCommand::Stop(_)
                     | CliCommand::Repo {
                         action: RepoAction::Add(_) | RepoAction::Remove(_)
                     }
@@ -353,6 +356,7 @@ impl Cli {
             CliCommand::Attach(args) => commands.attach(&args.name),
             CliCommand::Rename(args) => commands.rename(args),
             CliCommand::Restart(args) => commands.restart_one_or_all(args),
+            CliCommand::Stop(args) => commands.stop(&args.name),
             CliCommand::Repo { .. }
             | CliCommand::Send(_)
             | CliCommand::Doctor(_)
@@ -851,5 +855,12 @@ mod tests {
         let restart_all = Cli::try_parse_from(["ringleader", "restart", "--all"]).unwrap();
 
         assert!(restart_all.is_mutating());
+    }
+
+    #[test]
+    fn stop_takes_the_write_lock() {
+        let stop = Cli::try_parse_from(["ringleader", "stop", "fix-auth"]).unwrap();
+
+        assert!(stop.is_mutating());
     }
 }

@@ -176,6 +176,14 @@ impl<'a> SessionCommands<'a> {
         Ok(0)
     }
 
+    pub fn stop(&mut self, name: &str) -> Result<u8, CommandStop> {
+        self.service.observe_and_record()?;
+        self.session.stop_if_signaled()?;
+        self.service.stop_session(name)?;
+        self.session.output().line(&format!("stopped {name}"));
+        Ok(0)
+    }
+
     pub fn restart_all(&mut self) -> Result<u8, CommandStop> {
         self.service.observe_and_record()?;
         self.session.stop_if_signaled()?;
@@ -964,6 +972,22 @@ mod tests {
         let harness = CliHarness::new(fixture);
 
         assert_eq!(harness.run(&["restart", "fix-auth"]), CliExit::Code(1));
+    }
+
+    #[test]
+    fn stop_prints_the_stopped_session() {
+        let harness = CliHarness::new(CommandFixture::live());
+
+        assert_eq!(harness.run(&["stop", "fix-auth"]), CliExit::Code(0));
+        assert_eq!(harness.stdout(), "stopped fix-auth\n");
+    }
+
+    #[test]
+    fn stop_of_a_stopped_session_exits_three() {
+        let harness =
+            CliHarness::new(CommandFixture::live().with_multiplexer(FakeMultiplexer::new()));
+
+        assert_eq!(harness.run(&["stop", "fix-auth"]), CliExit::Code(3));
     }
 
     #[test]

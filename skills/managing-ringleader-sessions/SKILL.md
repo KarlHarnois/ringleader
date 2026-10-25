@@ -1,6 +1,6 @@
 ---
 name: managing-ringleader-sessions
-description: Hand a task to a new Ringleader session, send a prompt to another session, or list, rename, restart, or delete sessions, through the ringleader CLI. Use this skill from inside a Ringleader session whenever the user asks to start a session for a task, to pass work or a prompt to another session, to spin up a worktree, or to check on the other sessions.
+description: Hand a task to a new Ringleader session, send a prompt to another session, or list, rename, restart, stop, or delete sessions, through the ringleader CLI. Use this skill from inside a Ringleader session whenever the user asks to start a session for a task, to pass work or a prompt to another session, to spin up a worktree, or to check on the other sessions.
 ---
 
 # Managing Ringleader sessions
@@ -96,6 +96,7 @@ Never put a secret into a handoff prompt: the prompt lands in the agent's transc
 | List | `ringleader list --json` | Report each session's `name`, `state`, and `branch`. |
 | Rename | `ringleader rename <old> <new>` | Run only when the user asks. |
 | Restart | `ringleader restart <name>` | Run only when the user asks. |
+| Stop | `ringleader stop <name>` | Run only when the user asks. `ringleader restart <name>` resumes it. |
 | Delete | `ringleader delete <name>` | Run only when the user asks. Never delete the current session. |
 
 - If the user asks for `--force` or `--forget`, pass that flag to `delete`. Otherwise, never pass either flag.
