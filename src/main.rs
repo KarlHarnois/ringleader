@@ -72,6 +72,8 @@ fn main() -> ExitCode {
     CompositionRoot::capture().run()
 }
 
+type OpenedLog = Result<AppLog, String>;
+
 struct CompositionRoot {
     environment: ProcessEnvironment,
     programs: ProgramPaths,
@@ -118,11 +120,7 @@ impl CompositionRoot {
             .unwrap_or_else(convert::identity)
     }
 
-    fn cli_log(
-        &self,
-        cli: &Cli,
-        state_directory: &Path,
-    ) -> Result<Result<AppLog, String>, ExitCode> {
+    fn cli_log(&self, cli: &Cli, state_directory: &Path) -> Result<OpenedLog, ExitCode> {
         if let Err(error) = fs::create_dir_all(state_directory) {
             return Self::log_without_state_directory(cli, state_directory, &error);
         }
@@ -133,7 +131,7 @@ impl CompositionRoot {
         cli: &Cli,
         state_directory: &Path,
         error: &io::Error,
-    ) -> Result<Result<AppLog, String>, ExitCode> {
+    ) -> Result<OpenedLog, ExitCode> {
         if cli.is_mutating() {
             Err(Self::fail(&format!(
                 "cannot create {}: {error}",
@@ -151,7 +149,7 @@ impl CompositionRoot {
         &self,
         cli: &Cli,
         state_directory: &Path,
-        log: &Result<AppLog, String>,
+        log: &OpenedLog,
     ) -> Result<ExitCode, ExitCode> {
         self.handoff().delete_stale();
         let mut session = CliSession::new(CliOutput::standard(), Box::new(Self::cli_signals(cli)));
@@ -172,13 +170,13 @@ impl CompositionRoot {
         }
     }
 
-    fn report_log_problem(log: &Result<AppLog, String>, session: &mut CliSession) {
+    fn report_log_problem(log: &OpenedLog, session: &mut CliSession) {
         if let Err(message) = log {
             session.output().error(message);
         }
     }
 
-    fn truncate_log_of_mutating(cli: &Cli, log: &Result<AppLog, String>) {
+    fn truncate_log_of_mutating(cli: &Cli, log: &OpenedLog) {
         if cli.is_mutating() {
             Self::truncate_log(log);
         }
@@ -208,7 +206,7 @@ impl CompositionRoot {
         }
     }
 
-    fn start_log(&self, cli: &Cli) -> Result<AppLog, String> {
+    fn start_log(&self, cli: &Cli) -> OpenedLog {
         let log = AppLog::open(&self.paths.state_directory())?;
         log.start(Self::log_level(cli)).map(|()| log)
     }
@@ -260,7 +258,7 @@ impl CompositionRoot {
             .map(|(app, signals)| Self::wait_for_startup_input(app, signals))
     }
 
-    fn truncate_log(log: &Result<AppLog, String>) {
+    fn truncate_log(log: &OpenedLog) {
         if let Ok(log) = log {
             log.truncate_if_large();
         }
