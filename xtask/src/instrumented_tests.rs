@@ -52,13 +52,13 @@ impl<'a> InstrumentedTests<'a> {
     ) -> Result<(), GateFailure> {
         let mut command = Command::new(Self::CARGO);
         command.current_dir(self.root);
-        let output = arguments(&mut command)
-            .output()
+        let status = arguments(&mut command)
+            .status()
             .map_err(GateFailure::tool_missing)?;
-        if output.status.success() {
+        if status.success() {
             Ok(())
         } else {
-            Err(GateFailure::tests_failed(&output))
+            Err(GateFailure::tests_failed(status))
         }
     }
 }

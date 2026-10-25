@@ -1,6 +1,6 @@
 use std::io;
 use std::path::Path;
-use std::process::{ExitCode, Output};
+use std::process::{ExitCode, ExitStatus};
 
 pub struct GateFailure {
     message: String,
@@ -15,13 +15,9 @@ impl GateFailure {
         }
     }
 
-    pub fn tests_failed(output: &Output) -> Self {
+    pub fn tests_failed(status: ExitStatus) -> Self {
         Self {
-            message: format!(
-                "the instrumented test run failed\n{}{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            ),
+            message: format!("the instrumented test run failed with {status}"),
         }
     }
 
