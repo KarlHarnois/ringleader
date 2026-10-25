@@ -236,10 +236,7 @@ impl App {
     fn handle_key(&mut self, key: &KeyEvent) -> AppRequest {
         self.status.show(None);
         match self.key_action(key) {
-            KeyAction::Request(request) => {
-                self.home.leave_visual();
-                self.request(request)
-            }
+            KeyAction::Request(request) => self.request(request),
             KeyAction::Refuse(refusal) => {
                 self.status.error(refusal);
                 AppRequest::Continue
@@ -311,6 +308,7 @@ impl App {
     }
 
     fn request(&mut self, request: AppRequest) -> AppRequest {
+        self.home.leave_visual();
         if let AppRequest::Block(operation) = &request {
             self.status.info(operation.busy_message());
         }
@@ -1459,6 +1457,18 @@ mod tests {
             )))
         );
         assert_eq!(AppFixture::status_line(&app, 100), " Stopping 2 sessions…");
+    }
+
+    #[test]
+    fn a_request_from_a_dialog_leaves_visual_mode() {
+        let fixture = AppFixture::three_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, 'V');
+        AppFixture::press(&mut app, '/');
+
+        app.handle_event(&UiHarness::key(KeyCode::Enter));
+
+        assert!(!app.home.sessions().in_visual_mode());
     }
 
     #[test]
