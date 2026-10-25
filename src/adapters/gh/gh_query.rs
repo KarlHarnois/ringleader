@@ -4,7 +4,7 @@ pub struct GhQuery {
 
 impl GhQuery {
     const CANDIDATES: &'static str = "first: 10, orderBy: {field: CREATED_AT, direction: DESC}";
-    const FIELDS: &'static str = "number url state isDraft createdAt headRepositoryOwner { login } latestOpinionatedReviews(first: 10) { nodes { state } }";
+    const FIELDS: &'static str = "number url state isDraft createdAt headRepositoryOwner { login } latestOpinionatedReviews(first: 10, writersOnly: true) { nodes { state } }";
 
     pub fn new(branches: &[String]) -> Self {
         Self {
@@ -85,6 +85,8 @@ mod tests {
             .find(|argument| argument.starts_with("query="))
             .unwrap();
 
-        assert!(query.contains("latestOpinionatedReviews(first: 10) { nodes { state } }"));
+        assert!(query.contains(
+            "latestOpinionatedReviews(first: 10, writersOnly: true) { nodes { state } }"
+        ));
     }
 }
