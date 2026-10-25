@@ -28,7 +28,7 @@ mod tests {
     use crate::domain::{SessionState, SessionSummary};
     use crate::test_support::ServiceFixture;
     use crate::ui::app::AppRequest;
-    use crate::ui::blocking_operation::BlockingOperation;
+    use crate::ui::blocking_operation::{BlockingOperation, StopTarget};
     use crate::ui::keys::action_gate::DesktopOpening;
 
     struct SequenceFixture;
@@ -113,7 +113,7 @@ mod tests {
         assert_eq!(
             SequenceFixture::actions_on(&SequenceFixture::row(), "x"),
             [KeyAction::Request(AppRequest::Block(
-                BlockingOperation::Stop("fix-auth".to_string())
+                BlockingOperation::Stop(StopTarget::Session("fix-auth".to_string()))
             ))]
         );
     }

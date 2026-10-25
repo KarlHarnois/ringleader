@@ -1,7 +1,7 @@
 use super::service_error::ServiceError;
 use crate::domain::{
-    Session, SessionMetadata, SessionName, SessionObservation, SessionState, SessionSummary,
-    UnmanagedSession,
+    RepoGroup, Session, SessionMetadata, SessionName, SessionObservation, SessionState,
+    SessionSummary, UnmanagedSession,
 };
 
 pub struct Reconciliation {
@@ -75,6 +75,18 @@ impl Reconciliation {
             .collect();
         names.sort();
         names
+    }
+
+    pub fn live_entries_in(&self, repo: &RepoGroup) -> Vec<(&Session, SessionState)> {
+        let mut entries: Vec<(&Session, SessionState)> = self
+            .managed_entries()
+            .into_iter()
+            .filter(|(entry, state)| {
+                *state != SessionState::Stopped && repo.path() == Some(entry.repo_path())
+            })
+            .collect();
+        entries.sort_by(|(left, _), (right, _)| left.name().as_str().cmp(right.name().as_str()));
+        entries
     }
 
     pub fn into_summaries(self) -> Vec<SessionSummary> {

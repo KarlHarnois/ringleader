@@ -61,8 +61,10 @@ enum CliCommand {
     Rename(RenameArgs),
     #[command(about = "Restart an exited or stopped session, or with --all every one")]
     Restart(RestartArgs),
-    #[command(about = "Stop a waiting or exited session to free its memory, restart resumes it")]
-    Stop(NameArgs),
+    #[command(
+        about = "Stop a waiting or exited session to free its memory, or with --repo every one in a repo"
+    )]
+    Stop(StopArgs),
     #[command(about = "Add, remove, or list repos")]
     Repo {
         #[command(subcommand)]
@@ -154,6 +156,14 @@ struct RestartArgs {
     name: Option<String>,
     #[arg(long)]
     all: bool,
+}
+
+#[derive(Debug, Args)]
+#[group(required = true, multiple = false)]
+struct StopArgs {
+    name: Option<String>,
+    #[arg(long)]
+    repo: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -356,7 +366,7 @@ impl Cli {
             CliCommand::Attach(args) => commands.attach(&args.name),
             CliCommand::Rename(args) => commands.rename(args),
             CliCommand::Restart(args) => commands.restart_one_or_all(args),
-            CliCommand::Stop(args) => commands.stop(&args.name),
+            CliCommand::Stop(args) => commands.stop_one_or_repo(args),
             CliCommand::Repo { .. }
             | CliCommand::Send(_)
             | CliCommand::Doctor(_)
@@ -737,6 +747,25 @@ mod tests {
     }
 
     #[test]
+    fn stop_with_both_a_name_and_a_repo_exits_one() {
+        assert_eq!(
+            ParseFixture::exit_code(&[
+                "ringleader",
+                "stop",
+                "fix-auth",
+                "--repo",
+                "example-project"
+            ]),
+            1
+        );
+    }
+
+    #[test]
+    fn stop_without_a_name_or_a_repo_exits_one() {
+        assert_eq!(ParseFixture::exit_code(&["ringleader", "stop"]), 1);
+    }
+
+    #[test]
     fn new_in_the_main_checkout_with_a_base_branch_exits_one() {
         assert_eq!(
             ParseFixture::exit_code(&[
@@ -855,6 +884,14 @@ mod tests {
         let restart_all = Cli::try_parse_from(["ringleader", "restart", "--all"]).unwrap();
 
         assert!(restart_all.is_mutating());
+    }
+
+    #[test]
+    fn stop_of_a_repo_takes_the_write_lock() {
+        let stop =
+            Cli::try_parse_from(["ringleader", "stop", "--repo", "example-project"]).unwrap();
+
+        assert!(stop.is_mutating());
     }
 
     #[test]

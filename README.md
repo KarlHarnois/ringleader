@@ -44,7 +44,7 @@ ringleader attach <name>
 ringleader send <name> <prompt>
 ringleader rename <old> <new>
 ringleader restart (<name> | --all)
-ringleader stop <name>
+ringleader stop (<name> | --repo <r>)
 ringleader repo add <path> [--name <n>] [--base-branch <b>]
 ringleader repo remove <name>
 ringleader repo list

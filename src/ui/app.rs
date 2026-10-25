@@ -456,7 +456,7 @@ mod tests {
         FakeRepoPages, FakeSessionRegistry, FakeTerminalEmulator, FakeUsageMeter, FakeWebBrowser,
         HeldCalls, LogCapture, ServiceFixture, UiHarness,
     };
-    use crate::ui::blocking_operation::DeleteStep;
+    use crate::ui::blocking_operation::{DeleteStep, RestartTarget, StopTarget};
 
     struct AppFixture;
 
@@ -1345,7 +1345,9 @@ mod tests {
 
         assert_eq!(
             request,
-            AppRequest::Block(BlockingOperation::Restart("fix-auth".to_string()))
+            AppRequest::Block(BlockingOperation::Restart(RestartTarget::Session(
+                "fix-auth".to_string()
+            )))
         );
         assert_eq!(AppFixture::status_line(&app, 100), " Restarting fix-auth…");
     }
@@ -1358,7 +1360,9 @@ mod tests {
             .with_host(ServiceFixture::with_worktree_agent(&session));
         let mut app = AppFixture::started(&fixture, 80, 24);
 
-        app.perform(BlockingOperation::Restart("fix-auth".to_string()));
+        app.perform(BlockingOperation::Restart(RestartTarget::Session(
+            "fix-auth".to_string(),
+        )));
 
         assert!(AppFixture::flattened_screen(&app, 80, 24).contains("Do not end them"));
     }
@@ -1374,7 +1378,9 @@ mod tests {
             .with_host(host);
         let mut app = AppFixture::started(&fixture, 80, 24);
 
-        app.perform(BlockingOperation::Restart("fix-auth".to_string()));
+        app.perform(BlockingOperation::Restart(RestartTarget::Session(
+            "fix-auth".to_string(),
+        )));
 
         assert!(
             AppFixture::flattened_screen(&app, 80, 24)
@@ -1389,7 +1395,10 @@ mod tests {
 
         let request = app.handle_event(&UiHarness::character('S'));
 
-        assert_eq!(request, AppRequest::Block(BlockingOperation::RestartAll));
+        assert_eq!(
+            request,
+            AppRequest::Block(BlockingOperation::Restart(RestartTarget::All))
+        );
         assert_eq!(
             AppFixture::status_line(&app, 100),
             " Restarting every exited or stopped session…"
@@ -1405,7 +1414,9 @@ mod tests {
 
         assert_eq!(
             request,
-            AppRequest::Block(BlockingOperation::Stop("fix-auth".to_string()))
+            AppRequest::Block(BlockingOperation::Stop(StopTarget::Session(
+                "fix-auth".to_string()
+            )))
         );
         assert_eq!(AppFixture::status_line(&app, 100), " Stopping fix-auth…");
     }
@@ -1415,7 +1426,9 @@ mod tests {
         let fixture = UiHarness::exited_session_fixture("fix-auth");
         let mut app = AppFixture::started(&fixture, 100, 28);
 
-        app.perform(BlockingOperation::Stop("fix-auth".to_string()));
+        app.perform(BlockingOperation::Stop(StopTarget::Session(
+            "fix-auth".to_string(),
+        )));
 
         assert!(fixture.multiplexer().live_names().is_empty());
         assert_eq!(
@@ -1430,7 +1443,7 @@ mod tests {
         let fixture = UiHarness::exited_session_fixture("fix-auth");
         let mut app = AppFixture::started(&fixture, 100, 28);
 
-        app.perform(BlockingOperation::RestartAll);
+        app.perform(BlockingOperation::Restart(RestartTarget::All));
 
         assert_eq!(fixture.multiplexer().launches().len(), 1);
         assert_eq!(AppFixture::status_line(&app, 100), " Restarted 1 session.");
@@ -1441,7 +1454,7 @@ mod tests {
         let fixture = ServiceFixture::new().with_sessions(&[ServiceFixture::session("fix-auth")]);
         let mut app = AppFixture::started(&fixture, 100, 28);
 
-        app.perform(BlockingOperation::RestartAll);
+        app.perform(BlockingOperation::Restart(RestartTarget::All));
 
         assert!(
             AppFixture::status_line(&app, 200)
@@ -1456,7 +1469,9 @@ mod tests {
         let fixture = UiHarness::exited_session_fixture("fix-auth");
         let mut app = AppFixture::started(&fixture, 100, 28);
 
-        app.perform(BlockingOperation::Restart("fix-auth".to_string()));
+        app.perform(BlockingOperation::Restart(RestartTarget::Session(
+            "fix-auth".to_string(),
+        )));
 
         assert_eq!(fixture.multiplexer().launches().len(), 1);
         assert_eq!(AppFixture::status_line(&app, 100), " Restarted fix-auth.");
@@ -1468,7 +1483,9 @@ mod tests {
         fixture.multiplexer().lose_socket();
         let mut app = AppFixture::started(&fixture, 100, 28);
 
-        app.perform(BlockingOperation::Restart("fix-auth".to_string()));
+        app.perform(BlockingOperation::Restart(RestartTarget::Session(
+            "fix-auth".to_string(),
+        )));
 
         assert!(
             AppFixture::flattened_screen(&app, 100, 28)
@@ -1482,7 +1499,9 @@ mod tests {
             .with_directory_environment(ServiceFixture::not_allowed_envrc("fix-auth"));
         let mut app = AppFixture::started(&fixture, 300, 28);
 
-        app.perform(BlockingOperation::Restart("fix-auth".to_string()));
+        app.perform(BlockingOperation::Restart(RestartTarget::Session(
+            "fix-auth".to_string(),
+        )));
 
         assert!(
             AppFixture::flattened_screen(&app, 300, 28)
@@ -1809,6 +1828,41 @@ mod tests {
         assert_eq!(
             AppFixture::status_line(&app, 100),
             " Looking up the GitHub page of alpha…"
+        );
+    }
+
+    #[test]
+    fn x_on_a_repo_heading_asks_to_stop_its_sessions_behind_a_busy_message() {
+        let fixture = UiHarness::two_repos();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        let request = app.handle_event(&UiHarness::character('x'));
+
+        assert_eq!(
+            request,
+            AppRequest::Block(BlockingOperation::Stop(StopTarget::Repo(
+                UiHarness::docs_repo_group()
+            )))
+        );
+        assert_eq!(
+            AppFixture::status_line(&app, 100),
+            " Stopping every waiting or exited session in alpha…"
+        );
+    }
+
+    #[test]
+    fn x_on_a_repo_heading_stops_only_the_sessions_of_that_repo() {
+        let fixture = UiHarness::two_repos();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press_and_perform(&mut app, 'x');
+
+        assert_eq!(fixture.multiplexer().live_names(), ["ringleader-fix-auth"]);
+        assert_eq!(
+            app.status.message(),
+            Some(&StatusMessage::Info(
+                "Stopped 1 session in alpha.".to_string()
+            ))
         );
     }
 
@@ -2732,7 +2786,9 @@ mod tests {
         let held_during_restart = AppFixture::lock_state_during(&fixture, &lock, "respawn_agent");
         let mut app = UiHarness::app_with_lock(&fixture, &lock);
 
-        app.perform(BlockingOperation::Restart("fix-auth".to_string()));
+        app.perform(BlockingOperation::Restart(RestartTarget::Session(
+            "fix-auth".to_string(),
+        )));
 
         assert_eq!(*held_during_restart.lock().unwrap(), [true]);
         assert!(!lock.is_held());
@@ -2772,7 +2828,9 @@ mod tests {
         let fixture = UiHarness::exited_session_fixture("fix-auth");
         let mut app = UiHarness::app_with_lock(&fixture, &FakeLock::held_elsewhere());
 
-        app.perform(BlockingOperation::Restart("fix-auth".to_string()));
+        app.perform(BlockingOperation::Restart(RestartTarget::Session(
+            "fix-auth".to_string(),
+        )));
 
         assert!(
             AppFixture::status_line(&app, 200)

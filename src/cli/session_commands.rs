@@ -5,13 +5,13 @@ use super::list_report::ListReport;
 use super::repo_argument::RepoArgument;
 use super::{
     CliExit, CliSession, CommandStop, DeleteArgs, ListArgs, NewArgs, RenameArgs, RestartArgs,
-    SendArgs,
+    SendArgs, StopArgs,
 };
 use crate::application::{
     CreateRequest, DeleteConfirmation, DeleteImpact, DeleteOutcome, RestartReport, ServiceError,
-    SessionService, StartOutcome,
+    SessionService, StartOutcome, StopReport,
 };
-use crate::domain::{AgentMode, BaseBranch, Checkout, Repo};
+use crate::domain::{AgentMode, BaseBranch, Checkout, Repo, RepoGroup};
 
 pub struct SessionCommands<'a> {
     service: &'a mut SessionService,
@@ -20,6 +20,7 @@ pub struct SessionCommands<'a> {
 
 impl<'a> SessionCommands<'a> {
     const NOTHING_TO_RESTART: &'static str = "no exited or stopped session to restart";
+    const NOTHING_TO_STOP: &'static str = "no waiting or exited session to stop";
 
     pub fn new(service: &'a mut SessionService, session: &'a mut CliSession) -> Self {
         Self { service, session }
@@ -176,6 +177,13 @@ impl<'a> SessionCommands<'a> {
         Ok(0)
     }
 
+    pub fn stop_one_or_repo(&mut self, args: &StopArgs) -> Result<u8, CommandStop> {
+        match &args.repo {
+            Some(repo) => self.stop_repo(repo),
+            None => self.stop(args.name.as_deref().unwrap_or_default()),
+        }
+    }
+
     pub fn stop(&mut self, name: &str) -> Result<u8, CommandStop> {
         self.service.observe_and_record()?;
         self.session.stop_if_signaled()?;
@@ -184,13 +192,42 @@ impl<'a> SessionCommands<'a> {
         Ok(0)
     }
 
+    pub fn stop_repo(&mut self, repo: &str) -> Result<u8, CommandStop> {
+        self.service.observe_and_record()?;
+        let repo = RepoArgument::new(repo).resolve(self.service, self.session)?;
+        self.session.stop_if_signaled()?;
+        let session = &*self.session;
+        let report = self
+            .service
+            .stop_repo(&RepoGroup::of_repo(&repo), || session.is_signaled())?;
+        self.report_stops(&report);
+        Ok(Self::first_failure_code(report.failures()))
+    }
+
+    fn report_stops(&mut self, report: &StopReport) {
+        for (name, skip) in report.skips() {
+            self.session
+                .output()
+                .note(&format!("skipped {name}, {}", skip.label()));
+        }
+        if report.outcomes().next().is_none() {
+            self.session.output().note(Self::NOTHING_TO_STOP);
+        }
+        for (name, stop) in report.outcomes() {
+            match stop {
+                Ok(()) => self.session.output().line(&format!("stopped {name}")),
+                Err(error) => self.session.output().error(&format!("{name}: {error}")),
+            }
+        }
+    }
+
     pub fn restart_all(&mut self) -> Result<u8, CommandStop> {
         self.service.observe_and_record()?;
         self.session.stop_if_signaled()?;
         let session = &*self.session;
         let report = self.service.restart_all(|| session.is_signaled())?;
         self.report_restarts(&report);
-        Ok(Self::restart_all_code(&report))
+        Ok(Self::first_failure_code(report.failures()))
     }
 
     fn report_restarts(&mut self, report: &RestartReport) {
@@ -211,9 +248,10 @@ impl<'a> SessionCommands<'a> {
         self.session.output().line(&format!("restarted {name}"));
     }
 
-    fn restart_all_code(report: &RestartReport) -> u8 {
-        report
-            .failures()
+    fn first_failure_code<'r>(
+        mut failures: impl Iterator<Item = (&'r str, &'r ServiceError)>,
+    ) -> u8 {
+        failures
             .next()
             .map_or(0, |(_, error)| CliExit::error_code(error))
     }
@@ -988,6 +1026,54 @@ mod tests {
             CliHarness::new(CommandFixture::live().with_multiplexer(FakeMultiplexer::new()));
 
         assert_eq!(harness.run(&["stop", "fix-auth"]), CliExit::Code(3));
+    }
+
+    #[test]
+    fn stop_with_a_repo_prints_each_stopped_session_of_that_repo() {
+        let harness = CliHarness::new(CommandFixture::live());
+
+        let exit = harness.run(&["stop", "--repo", "example-project"]);
+
+        assert_eq!(exit, CliExit::Code(0));
+        assert_eq!(harness.stdout(), "stopped fix-auth\n");
+    }
+
+    #[test]
+    fn stop_with_a_repo_notes_a_skipped_working_session() {
+        let session = CommandFixture::session();
+        let harness =
+            CliHarness::new(CommandFixture::live().with_multiplexer(
+                FakeMultiplexer::new().with_live(ServiceFixture::working(&session)),
+            ));
+
+        let exit = harness.run(&["stop", "--repo", "example-project"]);
+
+        assert_eq!(exit, CliExit::Code(0));
+        assert!(
+            harness.stderr().contains("skipped fix-auth, working"),
+            "{}",
+            harness.stderr()
+        );
+    }
+
+    #[test]
+    fn stop_with_a_repo_exits_with_the_code_of_a_refused_stop() {
+        let harness = CliHarness::new(
+            CommandFixture::live().with_multiplexer(
+                FakeMultiplexer::new()
+                    .with_live(ServiceFixture::waiting(&CommandFixture::session()))
+                    .with_caller("ringleader-fix-auth"),
+            ),
+        );
+
+        let exit = harness.run(&["stop", "--repo", "example-project"]);
+
+        assert_eq!(exit, CliExit::Code(3));
+        assert!(
+            harness.stderr().contains("fix-auth: "),
+            "{}",
+            harness.stderr()
+        );
     }
 
     #[test]

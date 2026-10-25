@@ -6,7 +6,7 @@ use super::back_key::BackKey;
 use crate::application::ports::ConfigError;
 use crate::domain::{RepoGroup, Session, SessionState, SessionSummary};
 use crate::ui::app::AppRequest;
-use crate::ui::blocking_operation::{BlockingOperation, DeleteStep};
+use crate::ui::blocking_operation::{BlockingOperation, DeleteStep, RestartTarget, StopTarget};
 use crate::ui::dialogs::DialogOpening;
 
 pub struct ActionGate<'a> {
@@ -190,7 +190,7 @@ impl<'a> ActionGate<'a> {
         let name = row.name();
         match row.state() {
             state if state.allows_restart() => Ok(AppRequest::Block(BlockingOperation::Restart(
-                name.to_string(),
+                RestartTarget::Session(name.to_string()),
             ))),
             SessionState::Unmanaged => {
                 Err(format!("{name} is unmanaged, so it cannot be restarted."))
@@ -204,13 +204,18 @@ impl<'a> ActionGate<'a> {
 
     pub fn stop(&self) -> Result<AppRequest, String> {
         self.writable()?;
-        let name = self.managed_name("it cannot be stopped")?;
-        Ok(AppRequest::Block(BlockingOperation::Stop(name)))
+        let target = match self.heading {
+            Some(group) => StopTarget::Repo(group.clone()),
+            None => StopTarget::Session(self.managed_name("it cannot be stopped")?),
+        };
+        Ok(AppRequest::Block(BlockingOperation::Stop(target)))
     }
 
     pub fn restart_all(&self) -> Result<AppRequest, String> {
         self.writable()?;
-        Ok(AppRequest::Block(BlockingOperation::RestartAll))
+        Ok(AppRequest::Block(BlockingOperation::Restart(
+            RestartTarget::All,
+        )))
     }
 
     pub fn pull(&self) -> Result<AppRequest, String> {
@@ -336,7 +341,7 @@ mod tests {
             assert_eq!(
                 ActionGate::new(Some(&row), None).restart(),
                 Ok(AppRequest::Block(BlockingOperation::Restart(
-                    "fix-auth".to_string()
+                    RestartTarget::Session("fix-auth".to_string())
                 )))
             );
         }
@@ -381,7 +386,7 @@ mod tests {
         assert_eq!(
             gate.action_for(&KeyEvent::from(KeyCode::Char('x'))),
             KeyAction::Request(AppRequest::Block(BlockingOperation::Stop(
-                "fix-auth".to_string()
+                StopTarget::Session("fix-auth".to_string())
             )))
         );
     }
@@ -419,7 +424,9 @@ mod tests {
 
         assert_eq!(
             gate.action_for(&KeyEvent::from(KeyCode::Char('S'))),
-            KeyAction::Request(AppRequest::Block(BlockingOperation::RestartAll))
+            KeyAction::Request(AppRequest::Block(BlockingOperation::Restart(
+                RestartTarget::All
+            )))
         );
     }
 
@@ -430,7 +437,22 @@ mod tests {
 
         assert_eq!(
             gate.action_for(&KeyEvent::from(KeyCode::Char('S'))),
-            KeyAction::Request(AppRequest::Block(BlockingOperation::RestartAll))
+            KeyAction::Request(AppRequest::Block(BlockingOperation::Restart(
+                RestartTarget::All
+            )))
+        );
+    }
+
+    #[test]
+    fn x_on_a_heading_asks_to_stop_every_session_of_its_repo() {
+        let heading = GateFixture::heading();
+        let gate = ActionGate::on_heading(&heading, None);
+
+        assert_eq!(
+            gate.action_for(&KeyEvent::from(KeyCode::Char('x'))),
+            KeyAction::Request(AppRequest::Block(BlockingOperation::Stop(
+                StopTarget::Repo(GateFixture::heading())
+            )))
         );
     }
 
