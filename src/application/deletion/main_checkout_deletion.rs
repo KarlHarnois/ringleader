@@ -2,13 +2,13 @@ use std::sync::Arc;
 
 use super::delete_impact::{DeleteConfirmation, DeleteImpact};
 use super::delete_outcome::DeleteOutcome;
-use super::tmux_teardown::{TeardownContexts, TmuxTeardown};
 use crate::application::ServiceError;
 use crate::application::ServicePorts;
 use crate::application::checks::unseen_session::UnseenSession;
 use crate::application::ports::{ProcessInfo, SessionRegistry};
 use crate::application::reconciliation::ManagedRow;
 use crate::application::session_scratch::SessionScratch;
+use crate::application::tmux_teardown::{TeardownContexts, TmuxTeardown};
 use crate::domain::{Session, SessionState};
 
 pub struct MainCheckoutDeletion {

@@ -27,6 +27,8 @@ mod tests {
     use super::*;
     use crate::domain::{SessionState, SessionSummary};
     use crate::test_support::ServiceFixture;
+    use crate::ui::app::AppRequest;
+    use crate::ui::blocking_operation::BlockingOperation;
     use crate::ui::keys::action_gate::DesktopOpening;
 
     struct SequenceFixture;
@@ -107,10 +109,12 @@ mod tests {
     }
 
     #[test]
-    fn a_lone_x_does_nothing() {
+    fn a_lone_x_stops_the_selected_session_instead_of_opening_its_pull_request() {
         assert_eq!(
             SequenceFixture::actions_on(&SequenceFixture::row(), "x"),
-            [KeyAction::Ignore]
+            [KeyAction::Request(AppRequest::Block(
+                BlockingOperation::Stop("fix-auth".to_string())
+            ))]
         );
     }
 }

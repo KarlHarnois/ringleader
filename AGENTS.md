@@ -69,6 +69,7 @@ Each way comes from an ecosystem users already know, and keeps the meaning it ha
   - rename
   - restart
   - restart all
+  - stop
   - attach
 
 ### Side work never blocks or breaks the main action

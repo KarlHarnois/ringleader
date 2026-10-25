@@ -1397,6 +1397,35 @@ mod tests {
     }
 
     #[test]
+    fn x_asks_to_stop_the_selected_session_behind_a_busy_message() {
+        let fixture = UiHarness::exited_session_fixture("fix-auth");
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        let request = app.handle_event(&UiHarness::character('x'));
+
+        assert_eq!(
+            request,
+            AppRequest::Block(BlockingOperation::Stop("fix-auth".to_string()))
+        );
+        assert_eq!(AppFixture::status_line(&app, 100), " Stopping fix-auth…");
+    }
+
+    #[test]
+    fn performing_a_stop_shows_the_session_as_stopped_and_how_to_resume_it() {
+        let fixture = UiHarness::exited_session_fixture("fix-auth");
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        app.perform(BlockingOperation::Stop("fix-auth".to_string()));
+
+        assert!(fixture.multiplexer().live_names().is_empty());
+        assert_eq!(
+            AppFixture::status_line(&app, 100),
+            " Stopped fix-auth. Press s to resume it."
+        );
+        assert!(AppFixture::flattened_screen(&app, 100, 28).contains("stopped"));
+    }
+
+    #[test]
     fn performing_a_restart_of_every_session_reports_the_count() {
         let fixture = UiHarness::exited_session_fixture("fix-auth");
         let mut app = AppFixture::started(&fixture, 100, 28);

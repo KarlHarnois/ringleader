@@ -303,6 +303,11 @@ impl SessionService {
         Ok(outcome.with_recovery(recovery))
     }
 
+    pub fn stop_session(&mut self, name: &str) -> Result<(), ServiceError> {
+        let reconciliation = self.reconcile()?;
+        self.lifecycle.stop(&reconciliation, name)
+    }
+
     pub fn restart_all(&mut self, stop: impl Fn() -> bool) -> Result<RestartReport, ServiceError> {
         let names = self.reconcile()?.restartable_names();
         let restarts = names
