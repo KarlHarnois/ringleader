@@ -48,6 +48,13 @@ impl<'a> VisualGate<'a> {
         Ok(KeyAction::Request(AppRequest::Block(operation)))
     }
 
+    fn single_session_refusal(code: KeyCode) -> Option<KeyAction> {
+        match code {
+            KeyCode::Enter | KeyCode::Char('t' | 'T' | 'o' | 'R') => Some(Self::refusal(code)),
+            _ => None,
+        }
+    }
+
     fn refusal(key: impl std::fmt::Display) -> KeyAction {
         KeyAction::Refuse(format!(
             "{key} acts on one session. Press Esc to leave visual mode."
@@ -62,8 +69,8 @@ impl KeyMap for VisualGate<'_> {
         }
         Self::mode_change(key.code)
             .or_else(|| self.batch_action(key.code))
-            .or_else(|| ActionGate::list_action(key))
-            .unwrap_or_else(|| Self::refusal(key.code))
+            .or_else(|| Self::single_session_refusal(key.code))
+            .unwrap_or_else(|| self.gate.action_for(key))
     }
 
     fn open_in_browser(&self) -> KeyAction {
@@ -77,6 +84,7 @@ mod tests {
 
     use super::*;
     use crate::application::ports::ConfigError;
+    use crate::ui::dialogs::DialogOpening;
     use crate::ui::keys::action_gate::Navigation;
 
     struct VisualFixture;
@@ -156,6 +164,23 @@ mod tests {
             KeyAction::Refuse(
                 "Enter acts on one session. Press Esc to leave visual mode.".to_string()
             )
+        );
+    }
+
+    #[test]
+    fn an_unbound_key_is_ignored_as_in_normal_mode() {
+        assert_eq!(VisualFixture::press('z'), KeyAction::Ignore);
+    }
+
+    #[test]
+    fn keys_that_never_needed_a_selection_keep_their_meaning() {
+        assert_eq!(
+            VisualFixture::press('S'),
+            VisualFixture::block(BlockingOperation::Batch(BatchOperation::RestartAll))
+        );
+        assert_eq!(
+            VisualFixture::press('n'),
+            KeyAction::Open(DialogOpening::NewSession(None))
         );
     }
 
