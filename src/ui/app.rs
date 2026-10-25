@@ -2514,6 +2514,26 @@ mod tests {
     }
 
     #[test]
+    fn a_dialog_replaces_the_home_view_in_a_small_terminal() {
+        let openers = [
+            (UiHarness::key(KeyCode::Char('n')), "┌ New session "),
+            (UiHarness::key(KeyCode::Char('?')), "┌ Help · ringleader "),
+            (UiHarness::control('k'), "┌ Find session "),
+        ];
+        for (opener, title) in openers {
+            let fixture = AppFixture::two_waiting_sessions();
+            let mut app = AppFixture::started(&fixture, 60, 12);
+
+            app.handle_event(&opener);
+            let screen = AppFixture::screen(&app, 60, 12);
+
+            assert!(screen.starts_with(title), "{screen}");
+            assert!(!screen.contains("Sessions"), "{screen}");
+            assert!(screen.ends_with('┘'), "{screen}");
+        }
+    }
+
+    #[test]
     fn control_q_closes_every_dialog() {
         let fixture = AppFixture::two_waiting_sessions();
         let mut app = AppFixture::started(&fixture, 100, 28);
