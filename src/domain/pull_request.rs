@@ -4,6 +4,7 @@ use std::fmt;
 pub struct PullRequest {
     number: u64,
     state: PullRequestState,
+    review: PullRequestReview,
     opened_at: u64,
     url: String,
 }
@@ -13,13 +14,27 @@ impl PullRequest {
         Self {
             number,
             state,
+            review: PullRequestReview::Unreviewed,
             opened_at,
             url: url.to_string(),
         }
     }
 
+    pub fn with_review(self, review: PullRequestReview) -> Self {
+        Self { review, ..self }
+    }
+
     pub fn state(&self) -> PullRequestState {
         self.state
+    }
+
+    #[cfg(test)]
+    pub fn review(&self) -> PullRequestReview {
+        self.review
+    }
+
+    pub fn is_approved(&self) -> bool {
+        self.review.is_approved()
     }
 
     pub fn url(&self) -> &str {
@@ -59,6 +74,31 @@ impl PullRequestState {
             PullRequestState::Draft => "draft",
             PullRequestState::Merged => "merged",
             PullRequestState::Closed => "closed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PullRequestReview {
+    Unreviewed,
+    Approved,
+    ChangesRequested,
+}
+
+impl PullRequestReview {
+    pub fn strongest_of(reviews: impl IntoIterator<Item = PullRequestReview>) -> Self {
+        reviews.into_iter().fold(Self::Unreviewed, Self::strongest)
+    }
+
+    pub fn is_approved(self) -> bool {
+        self == Self::Approved
+    }
+
+    fn strongest(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::ChangesRequested, _) | (_, Self::ChangesRequested) => Self::ChangesRequested,
+            (Self::Approved, _) | (_, Self::Approved) => Self::Approved,
+            _ => Self::Unreviewed,
         }
     }
 }
@@ -121,6 +161,57 @@ mod tests {
     #[test]
     fn a_pull_request_keeps_its_url() {
         assert_eq!(PullRequestFixture::open().url(), PullRequestFixture::URL);
+    }
+
+    #[test]
+    fn a_pull_request_starts_unreviewed() {
+        assert_eq!(
+            PullRequestFixture::open().review(),
+            PullRequestReview::Unreviewed
+        );
+    }
+
+    #[test]
+    fn a_pull_request_keeps_the_review_it_is_given() {
+        let pull_request = PullRequestFixture::open().with_review(PullRequestReview::Approved);
+
+        assert_eq!(pull_request.review(), PullRequestReview::Approved);
+        assert!(pull_request.is_approved());
+    }
+
+    #[test]
+    fn an_approval_wins_over_no_review() {
+        let strongest = PullRequestReview::strongest_of([
+            PullRequestReview::Unreviewed,
+            PullRequestReview::Approved,
+        ]);
+
+        assert_eq!(strongest, PullRequestReview::Approved);
+    }
+
+    #[test]
+    fn a_change_request_wins_over_an_approval() {
+        let strongest = PullRequestReview::strongest_of([
+            PullRequestReview::Approved,
+            PullRequestReview::ChangesRequested,
+        ]);
+
+        assert_eq!(strongest, PullRequestReview::ChangesRequested);
+    }
+
+    #[test]
+    fn no_review_is_unreviewed() {
+        assert_eq!(
+            PullRequestReview::strongest_of(std::iter::empty()),
+            PullRequestReview::Unreviewed
+        );
+    }
+
+    #[test]
+    fn only_an_approval_reads_as_approved() {
+        assert!(PullRequestReview::Approved.is_approved());
+        assert!(!PullRequestReview::ChangesRequested.is_approved());
+        assert!(!PullRequestReview::Unreviewed.is_approved());
     }
 
     #[test]

@@ -11,6 +11,7 @@ use crate::domain::{HotKey, KeyBindings, PullRequestState, SessionState};
 use crate::ui::dialogs::DialogStep;
 use crate::ui::dialogs::home_path::HomePath;
 use crate::ui::dialogs::scroll_window::ScrollWindow;
+use crate::ui::table::session_table::SessionTable;
 use crate::ui::table::state_indicator::StateIndicator;
 use crate::ui::text_fit::TextFit;
 use crate::ui::theme::Theme;
@@ -174,14 +175,30 @@ impl HelpView {
     }
 
     fn pull_request_legend(theme: &Theme) -> Legend {
-        let entries = PullRequestState::ALL.iter().map(|&state| {
-            LegendEntry::new(
-                Self::PULL_REQUEST_SYMBOL,
-                theme.pull_request(state),
-                state.label(),
-            )
-        });
-        Legend::new("PRs", entries.collect())
+        let mut entries: Vec<LegendEntry> = PullRequestState::ALL
+            .iter()
+            .map(|&state| {
+                LegendEntry::new(
+                    Self::PULL_REQUEST_SYMBOL,
+                    theme.pull_request(state),
+                    state.label(),
+                )
+            })
+            .collect();
+        entries.push(LegendEntry::new(
+            Self::approved_pull_request_symbol(),
+            theme.approved(),
+            "approved",
+        ));
+        Legend::new("PRs", entries)
+    }
+
+    fn approved_pull_request_symbol() -> String {
+        format!(
+            "{}{}",
+            Self::PULL_REQUEST_SYMBOL,
+            SessionTable::APPROVED_CHECK
+        )
     }
 
     fn diff_legend(theme: &Theme) -> Legend {
@@ -613,6 +630,17 @@ mod tests {
         let text = HelpFixture::text(&HelpFixture::help());
 
         assert!(text.contains("PRs          #n open  #n draft  #n merged  #n closed"));
+        assert!(text.contains(&format!(
+            "{} approved",
+            HelpView::approved_pull_request_symbol()
+        )));
+    }
+
+    #[test]
+    fn the_legend_colors_approved_like_the_session_table() {
+        let symbol = HelpView::approved_pull_request_symbol();
+
+        assert_eq!(HelpFixture::span_style(&symbol), Theme.approved());
     }
 
     #[test]
