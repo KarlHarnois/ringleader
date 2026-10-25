@@ -27,6 +27,7 @@ pub struct SessionTable<'a> {
 }
 
 impl<'a> SessionTable<'a> {
+    pub const APPROVED_CHECK: char = '✓';
     const NO_DIFF: &'static str = "—";
 
     pub fn new(
@@ -230,7 +231,7 @@ impl<'a> SessionTable<'a> {
 
     fn pull_request_cell_text(pull_request: &PullRequest) -> String {
         match Self::shows_approval(pull_request) {
-            true => format!("{pull_request}✓"),
+            true => format!("{pull_request}{}", Self::APPROVED_CHECK),
             false => pull_request.to_string(),
         }
     }

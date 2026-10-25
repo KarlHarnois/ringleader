@@ -11,6 +11,7 @@ use crate::domain::{HotKey, KeyBindings, PullRequestState, SessionState};
 use crate::ui::dialogs::DialogStep;
 use crate::ui::dialogs::home_path::HomePath;
 use crate::ui::dialogs::scroll_window::ScrollWindow;
+use crate::ui::table::session_table::SessionTable;
 use crate::ui::table::state_indicator::StateIndicator;
 use crate::ui::text_fit::TextFit;
 use crate::ui::theme::Theme;
@@ -72,7 +73,6 @@ impl HelpView {
     const FINDER_ACTION: &'static str = "find a session by name and switch to it while attached";
     const FIRST_SPINNER_TICK: u64 = 0;
     const PULL_REQUEST_SYMBOL: &'static str = "#n";
-    const APPROVED_PULL_REQUEST_SYMBOL: &'static str = "#n✓";
     const CLOSE_HINT: &'static str = "? Esc q close";
 
     pub fn new(key_bindings: &KeyBindings, files: &[(&str, &Path)], home: &HomePath) -> Self {
@@ -186,7 +186,7 @@ impl HelpView {
             })
             .collect();
         entries.push(LegendEntry::new(
-            Self::APPROVED_PULL_REQUEST_SYMBOL,
+            format!("#n{}", SessionTable::APPROVED_CHECK),
             theme.approved(),
             "approved",
         ));
@@ -622,15 +622,14 @@ mod tests {
         let text = HelpFixture::text(&HelpFixture::help());
 
         assert!(text.contains("PRs          #n open  #n draft  #n merged  #n closed"));
-        assert!(text.contains("#n✓ approved"));
+        assert!(text.contains(&format!("#n{} approved", SessionTable::APPROVED_CHECK)));
     }
 
     #[test]
     fn the_legend_colors_approved_like_the_session_table() {
-        assert_eq!(
-            HelpFixture::span_style(HelpView::APPROVED_PULL_REQUEST_SYMBOL),
-            Theme.approved()
-        );
+        let symbol = format!("#n{}", SessionTable::APPROVED_CHECK);
+
+        assert_eq!(HelpFixture::span_style(&symbol), Theme.approved());
     }
 
     #[test]
