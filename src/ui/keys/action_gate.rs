@@ -110,6 +110,7 @@ impl<'a> ActionGate<'a> {
             ),
             KeyCode::Char('s') => KeyAction::from(self.restart().map(KeyAction::Request)),
             KeyCode::Char('S') => KeyAction::from(self.restart_all().map(KeyAction::Request)),
+            KeyCode::Char('x') => KeyAction::from(self.stop().map(KeyAction::Request)),
             KeyCode::Char('d') => KeyAction::from(self.delete().map(KeyAction::Request)),
             KeyCode::Char('p') => KeyAction::from(self.pull().map(KeyAction::Request)),
             _ => KeyAction::Ignore,
@@ -199,6 +200,12 @@ impl<'a> ActionGate<'a> {
                 state.label()
             )),
         }
+    }
+
+    pub fn stop(&self) -> Result<AppRequest, String> {
+        self.writable()?;
+        let name = self.managed_name("it cannot be stopped")?;
+        Ok(AppRequest::Block(BlockingOperation::Stop(name)))
     }
 
     pub fn restart_all(&self) -> Result<AppRequest, String> {
@@ -364,6 +371,45 @@ mod tests {
             ActionGate::new(Some(&row), None).restart(),
             Err("mystery is unmanaged, so it cannot be restarted.".to_string())
         );
+    }
+
+    #[test]
+    fn x_asks_to_stop_the_selected_session() {
+        let row = GateFixture::row(SessionState::Waiting);
+        let gate = ActionGate::new(Some(&row), None);
+
+        assert_eq!(
+            gate.action_for(&KeyEvent::from(KeyCode::Char('x'))),
+            KeyAction::Request(AppRequest::Block(BlockingOperation::Stop(
+                "fix-auth".to_string()
+            )))
+        );
+    }
+
+    #[test]
+    fn an_unmanaged_session_cannot_stop() {
+        let stranger = ServiceFixture::session("mystery");
+        let row = SessionSummary::unmanaged(UnmanagedSession::new(
+            "mystery",
+            ServiceFixture::waiting(&stranger).without_metadata(),
+        ));
+
+        assert_eq!(
+            ActionGate::new(Some(&row), None).stop(),
+            Err("mystery is unmanaged, so it cannot be stopped.".to_string())
+        );
+    }
+
+    #[test]
+    fn a_read_only_tui_refuses_a_stop_with_the_config_error() {
+        let row = GateFixture::row(SessionState::Waiting);
+        let error = GateFixture::config_error();
+
+        let refusal = ActionGate::new(Some(&row), Some(&error))
+            .stop()
+            .unwrap_err();
+
+        assert!(refusal.starts_with("config error, running read-only: "));
     }
 
     #[test]

@@ -22,7 +22,9 @@ pub mod session_lifecycle;
 pub mod session_reconciler;
 pub mod session_scratch;
 pub mod session_service;
+pub mod session_stop;
 pub mod start;
+pub mod tmux_teardown;
 pub mod usage_catalog;
 pub mod usage_reading;
 
