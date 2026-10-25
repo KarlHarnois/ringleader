@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use syn::Item;
+use syn::{Item, ItemMod};
 
 use crate::function_collector::FunctionCollector;
 use crate::gate_failure::GateFailure;
@@ -33,7 +33,7 @@ impl SourceTree {
     fn functions_from(&self, path: &Path) -> Result<Vec<SourceFunction>, GateFailure> {
         let syntax = Self::parse(path)?;
         let mut functions = FunctionCollector::collect(self.relative(path), self.host, &syntax);
-        for module in self.compiled_module_files(&syntax) {
+        for module in self.compiled_module_files(&syntax.items) {
             functions.extend(self.functions_from(&Self::module_path(path, &module)?)?);
         }
         Ok(functions)
@@ -45,20 +45,35 @@ impl SourceTree {
         syn::parse_file(&text).map_err(|error| GateFailure::unparsable(path, &error))
     }
 
-    fn compiled_module_files(&self, syntax: &syn::File) -> Vec<String> {
-        syntax
-            .items
-            .iter()
-            .filter_map(|item| match item {
-                Item::Mod(module) if module.content.is_none() => Some(module),
-                _ => None,
-            })
-            .filter(|module| self.host.compiles(&module.attrs))
-            .map(|module| module.ident.to_string())
+    fn compiled_module_files(&self, items: &[Item]) -> Vec<PathBuf> {
+        self.compiled_modules(items)
+            .flat_map(|module| self.module_files_under(module))
             .collect()
     }
 
-    fn module_path(declaring_file: &Path, module: &str) -> Result<PathBuf, GateFailure> {
+    fn compiled_modules<'a>(&self, items: &'a [Item]) -> impl Iterator<Item = &'a ItemMod> {
+        items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Mod(module) => Some(module),
+                _ => None,
+            })
+            .filter(|module| self.host.compiles(&module.attrs))
+    }
+
+    fn module_files_under(&self, module: &ItemMod) -> Vec<PathBuf> {
+        let name = PathBuf::from(module.ident.to_string());
+        match &module.content {
+            None => vec![name],
+            Some((_, inline_items)) => self
+                .compiled_module_files(inline_items)
+                .into_iter()
+                .map(|nested| name.join(nested))
+                .collect(),
+        }
+    }
+
+    fn module_path(declaring_file: &Path, module: &Path) -> Result<PathBuf, GateFailure> {
         let directory = Self::child_directory(declaring_file);
         let candidates = [
             directory.join(module).with_extension(Self::EXTENSION),
@@ -67,7 +82,9 @@ impl SourceTree {
         candidates
             .into_iter()
             .find(|candidate| candidate.is_file())
-            .ok_or_else(|| GateFailure::module_missing(declaring_file, module))
+            .ok_or_else(|| {
+                GateFailure::module_missing(declaring_file, &module.display().to_string())
+            })
     }
 
     fn child_directory(declaring_file: &Path) -> PathBuf {
@@ -149,6 +166,21 @@ mod tests {
                 "src/shapes/circle.rs:1 radius",
                 "src/adapters/mod.rs:1 adapt",
             ]
+        );
+    }
+
+    #[test]
+    fn follows_module_files_declared_inside_inline_modules() {
+        let functions = SampleCrate::new()
+            .with(
+                "src/main.rs",
+                "mod platform {\n    mod linux;\n}\nfn main() {}\n",
+            )
+            .with("src/platform/linux.rs", "fn open() {}\n")
+            .functions();
+        assert_eq!(
+            functions,
+            ["src/main.rs:4 main", "src/platform/linux.rs:1 open"]
         );
     }
 
