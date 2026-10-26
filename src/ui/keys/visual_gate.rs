@@ -14,6 +14,7 @@ pub struct VisualGate<'a> {
 
 impl<'a> VisualGate<'a> {
     const OPEN_IN_BROWSER: &'static str = "gx";
+    const ENTER: &'static str = "Enter";
 
     pub fn new(gate: ActionGate<'a>, names: Vec<String>) -> Self {
         Self { gate, names }
@@ -50,7 +51,8 @@ impl<'a> VisualGate<'a> {
 
     fn single_session_refusal(code: KeyCode) -> Option<KeyAction> {
         match code {
-            KeyCode::Enter | KeyCode::Char('t' | 'T' | 'o' | 'R') => Some(Self::refusal(code)),
+            KeyCode::Enter => Some(Self::refusal(Self::ENTER)),
+            KeyCode::Char(key @ ('t' | 'T' | 'o' | 'R')) => Some(Self::refusal(key)),
             _ => None,
         }
     }
@@ -176,6 +178,16 @@ mod tests {
 
     #[test]
     fn a_key_for_one_session_is_refused_with_how_to_leave() {
+        assert_eq!(
+            VisualFixture::action(VisualFixture::names(), KeyCode::Enter),
+            KeyAction::Refuse(
+                "Enter acts on one session. Press Esc to leave visual mode.".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn a_letter_for_one_session_is_refused_by_its_letter() {
         assert_eq!(
             VisualFixture::press('t'),
             KeyAction::Refuse("t acts on one session. Press Esc to leave visual mode.".to_string())
