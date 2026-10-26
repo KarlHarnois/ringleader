@@ -64,7 +64,11 @@ impl HomeState {
     }
 
     pub fn table(&self, tick: u64, theme: Theme) -> SessionTable<'_> {
-        self.sessions.table(tick, theme)
+        let table = self.sessions.table(tick, theme);
+        match self.focused {
+            true => table,
+            false => table.out_of_focus(),
+        }
     }
 
     pub fn preview_panel(&self, theme: Theme) -> PreviewPanel<'_> {
