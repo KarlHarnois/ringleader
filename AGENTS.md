@@ -218,29 +218,27 @@ Create each fixture repo with `git init -b <branch>`. Never rely on `init.defaul
 
 ## Commands
 
-**The working commands are the four commands below.** Run them while you work.
+**The working commands are the three commands below.** Run them while you work.
 
 ```sh
 nix develop -c cargo fmt --check
 nix develop -c cargo clippy --workspace --all-targets -- -D warnings
-nix develop -c cargo test
-nix develop -c cargo xtask crap
+nix develop -c cargo test --lib <module::path>
 ```
 
-**The gate is the four commands below.** Run the gate once, before the last commit of a task. CI runs the gate on Linux and macOS.
+- Use the narrowest `<module::path>` that covers the change.
+- If the change is in `xtask`, run `nix develop -c cargo test -p xtask` instead.
 
-```sh
-nix develop -c cargo fmt --check
-nix develop -c cargo clippy --workspace --all-targets -- -D warnings
-nix develop -c cargo xtask crap
-nix flake check
-```
+**NEVER run these commands locally:** each compiles the whole suite or rebuilds everything on all cores, and CI runs them.
 
-**The gate runs no `nix build`:** `nix flake check` builds the package and the `readme-version-badge` check.
+- `cargo test` without a module path
+- `cargo xtask crap`
+- `nix flake check`
+- `nix build`, except the command below
 
-**NEVER run `nix flake check` or `nix build` while you iterate.** Each run rebuilds Ringleader and every dependency on all cores.
+**If a change touches what a small flake check checks, build that check alone with `nix build --no-link .#checks.<system>.<name>`.** The small flake checks are `agent-docs`, `readme-version-badge`, and `dev-shell-tools`.
 
-**A change is done when the gate passes.** If a command of the gate also fails without the change, stop and show its output to the project owner.
+**A change is done when CI passes on Linux and macOS.** If CI also fails on `master` without the change, stop and show its output to the project owner.
 
 ## Reference files
 
@@ -349,7 +347,7 @@ nix flake check
 
 ## CRAP gate
 
-**The CRAP gate is `cargo xtask crap`.** It runs every workspace test under coverage. If a production function scores over 8, the gate fails.
+**The CRAP gate is `cargo xtask crap`, which CI runs.** It runs every workspace test under coverage. If a production function scores over 8, the gate fails.
 
 - Never raise `CrapGate::MAXIMUM_CRAP` without the project owner's approval.
 - Never move a branch into a macro to lower a score: the gate cannot see inside a macro.
