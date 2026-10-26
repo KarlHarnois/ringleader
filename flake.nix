@@ -22,18 +22,25 @@
       forEachSystem =
         build: nixpkgs.lib.genAttrs supportedSystems (system: build nixpkgs.legacyPackages.${system});
 
-      developmentPackages = pkgs: [
+      ciPackages = pkgs: [
         pkgs.rustc
         pkgs.cargo
         pkgs.clippy
         pkgs.rustfmt
         pkgs.tmux
         pkgs.git
-        pkgs.nixfmt
-        pkgs.util-linux
         pkgs.direnv
         pkgs.cargo-llvm-cov
       ];
+
+      developmentPackages =
+        pkgs:
+        ciPackages pkgs
+        ++ [
+          pkgs.nixfmt
+          pkgs.util-linux
+          pkgs.rust-analyzer
+        ];
 
       llvmCoverageEnv = pkgs: {
         LLVM_COV = "${pkgs.rustc.llvmPackages.llvm}/bin/llvm-cov";
@@ -133,13 +140,17 @@
 
       devShells = forEachSystem (pkgs: {
         default = pkgs.mkShell {
-          packages = developmentPackages pkgs ++ [ pkgs.rust-analyzer ];
+          packages = developmentPackages pkgs;
           env = llvmCoverageEnv pkgs;
           shellHook = ''
             if [[ -z ''${CI:-} ]]; then
               export CARGO_BUILD_JOBS=''${CARGO_BUILD_JOBS:-2}
             fi
           '';
+        };
+        ci = pkgs.mkShell {
+          packages = ciPackages pkgs;
+          env = llvmCoverageEnv pkgs;
         };
       });
 
