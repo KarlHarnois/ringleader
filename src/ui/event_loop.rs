@@ -20,10 +20,8 @@ pub struct CrosstermInput;
 
 impl InputSource for CrosstermInput {
     fn next_event(&mut self, timeout: Duration) -> io::Result<Option<Event>> {
-        if event::poll(timeout)? {
-            return event::read().map(Some);
-        }
-        Ok(None)
+        let ready = event::poll(timeout)?;
+        ready.then(event::read).transpose()
     }
 }
 
@@ -130,15 +128,19 @@ where
     }
 
     fn handle(&mut self, app: &mut App, event: &Event) -> io::Result<Flow> {
-        match app.handle_event(event) {
-            AppRequest::Quit => return Ok(Flow::Stop),
-            AppRequest::Redraw => self.clear()?,
-            AppRequest::Attach(name) => self.attach(app, &name)?,
-            AppRequest::Shell(name) => self.open_shell(app, &name)?,
-            AppRequest::Block(operation) => self.perform(app, operation)?,
-            AppRequest::Continue => {}
+        let request = app.handle_event(event);
+        let flow = Flow::after(&request);
+        self.serve_request(app, request).map(|()| flow)
+    }
+
+    fn serve_request(&mut self, app: &mut App, request: AppRequest) -> io::Result<()> {
+        match request {
+            AppRequest::Redraw => self.clear(),
+            AppRequest::Attach(name) => self.attach(app, &name),
+            AppRequest::Shell(name) => self.open_shell(app, &name),
+            AppRequest::Block(operation) => self.perform(app, operation),
+            AppRequest::Quit | AppRequest::Continue => Ok(()),
         }
-        Ok(Flow::Continue)
     }
 
     fn perform(&mut self, app: &mut App, operation: BlockingOperation) -> io::Result<()> {
@@ -205,6 +207,16 @@ where
 enum Flow {
     Continue,
     Stop,
+}
+
+impl Flow {
+    fn after(request: &AppRequest) -> Self {
+        if matches!(request, AppRequest::Quit) {
+            Self::Stop
+        } else {
+            Self::Continue
+        }
+    }
 }
 
 #[cfg(test)]

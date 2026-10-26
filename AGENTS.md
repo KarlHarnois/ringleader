@@ -88,7 +88,7 @@ Ringleader stays minimal in what it shows, what it asks for, and what it documen
 
 ### Break freely before 1.0
 
-Before 1.0, every downstream setup pins Ringleader: a Nix setup in its `flake.lock`, a Homebrew install at the formula's release.
+Before 1.0, every downstream setup pins a version.
 
 - If the design changes, change the code and tests outright.
 - Never add a deprecation path, a compatibility shim, or a flag that keeps old behavior.
@@ -218,18 +218,27 @@ Create each fixture repo with `git init -b <branch>`. Never rely on `init.defaul
 
 ## Commands
 
+**The working commands are the three commands below.** Run them while you work.
+
 ```sh
 nix develop -c cargo fmt --check
-nix develop -c cargo clippy --all-targets -- -D warnings
-nix develop -c cargo test
-nix build --no-link ".#checks.$(nix eval --impure --raw --expr builtins.currentSystem).readme-version-badge"
-nix build .#
-nix flake check
+nix develop -c cargo clippy --workspace --all-targets -- -D warnings
+nix develop -c cargo test --bin ringleader <module::path>
 ```
 
-**The Commands are the six commands above.** CI runs them on Linux and macOS.
+- Use the narrowest `<module::path>` that covers the change.
+- If the change is in `xtask`, run `nix develop -c cargo test -p xtask` instead.
 
-**A change is done when the Commands pass.** If the change edits a file under `src/`, the change is done only after the completion steps also pass. If one of the Commands also fails without the change, stop and show its output to the project owner.
+**NEVER run these commands locally:** each compiles the whole suite or rebuilds everything on all cores, and CI runs them.
+
+- `cargo test` without a module path
+- `cargo xtask crap`
+- `nix flake check`
+- `nix build`, except the command below
+
+**If a change touches what a small flake check checks, build that check alone with `nix build --no-link .#checks.<system>.<name>`.** Every flake check except `default` is small.
+
+**A change is done when CI passes on Linux and macOS.**
 
 ## Reference files
 
@@ -237,15 +246,13 @@ nix flake check
 
 | Reference file | Read the file before you |
 | --- | --- |
-| `docs/agents/completion-steps.md` | run a metrics tool or the completion steps |
 | `docs/agents/manual-runs.md` | make a manual run |
-| `docs/agents/uml-viewer.md` | open uml-viewer |
 | `docs/agents/source-folders.md` | add a file under `src/`, move a file there, or make a folder there |
 | `docs/agents/platform-code.md` | change a file or a re-export that a `target_os` cfg attribute limits, or write such an attribute |
 | `docs/agents/tmux-tests.md` | write or change a test that runs tmux |
-| `docs/agents/hint-lines.md` | write or change a dialog's hint line, or add a text-editing key |
+| `docs/agents/hint-lines.md` | add or change a TUI key, a dialog's hint line, or the hint bar |
 | `docs/agents/tmux-commands.md` | write or change a tmux command that Ringleader runs or writes into the generated config |
-| `docs/agents/homebrew.md` | change `pinnedTools` in `flake.nix`, or release a version |
+| `docs/agents/homebrew.md` | release, or change `pinnedTools` |
 | `docs/agents/features/pull.md` | change the pull that the `p` key starts |
 | `docs/agents/features/direnv.md` | change how create or restart launches an agent, or which variables the agent gets |
 | `docs/agents/features/agent-hooks.md` | change how Ringleader types or pastes into an agent, or the check that an agent is at its prompt |
@@ -254,6 +261,7 @@ nix flake check
 | `docs/agents/features/write-lock.md` | change what a process saves, or when a process takes a lock |
 | `docs/agents/skills.md` | add or change a skill, change how a launch gets the built-in skills, or change the CLI |
 | `docs/agents/features/usage.md` | change how Ringleader measures an agent's usage, or the usage view that the `u` key opens |
+| `docs/agents/pull-requests.md` | open a pull request, push to one, or fix a CI failure |
 
 ## Architecture
 
@@ -339,12 +347,16 @@ nix flake check
 - Put the channel's fake in `src/test_support/`.
 - A test seam inside `adapters` has the same shape. Its fake lives in the adapter's own tests.
 
-## Metrics
+## CRAP gate
 
-**The metrics tools are `dryer`, `crapper`, and `mutator`.** They are local code-health tools that you run in the completion steps.
+**The CRAP gate is `cargo xtask crap`, which CI runs.** It runs every workspace test under coverage. If a production function scores over 8, the gate fails.
 
-- CI never builds or runs the metrics tools. Never add them to `checks`, to the default dev shell, or to `.github/workflows/ci.yml`.
-- `nix flake check` still downloads the four upstream inputs. If an upstream input can no longer be fetched, CI's flake check fails until someone repins or removes the input.
+- Never raise `CrapGate::MAXIMUM_CRAP` without the project owner's approval.
+- Never move a branch into a macro to lower a score: the gate cannot see inside a macro.
+- If no test can reach a function, keep its complexity at 2 or less.
+- Move such a function's logic into functions that tests reach.
+- A function that needs a terminal is a function that no test can reach.
+- If a change edits a macOS-only function, only the macOS CI job scores the function.
 
 ## Layout rules
 
@@ -449,14 +461,14 @@ Ringleader checks a registry entry recorded on another socket only through `Proc
 - UI tests drive `EventLoop` with scripted input, a recording screen mode, and a recording shell runner.
 - No test calls crossterm or needs a terminal.
 - No test reads wall-clock time to classify a session.
-- Mark a constructor, accessor, or helper that only tests call with `#[cfg(test)]`: `cargo clippy --all-targets -- -D warnings` then stays clean without any dead-code allowance.
+- Mark a constructor, accessor, or helper that only tests call with `#[cfg(test)]`: `cargo clippy --workspace --all-targets -- -D warnings` then stays clean without any dead-code allowance.
 
 ## Commits
 
-- Give each change one commit. Make the commit after the change is done, as the Commands section defines done.
+- Give each change one commit. Make the commit after the working commands pass.
 - Start the title with a capital letter, write it in the imperative mood, and keep it under 72 characters.
 - Write the body in plain language, and say what changed.
-- Push only when the project owner asks.
+- Push only to a pull request that the project owner asked for.
 
 ## Documentation
 

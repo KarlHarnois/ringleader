@@ -1,6 +1,7 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+use super::repo::Repo;
 use super::repo_name::RepoName;
 use crate::domain::SessionSummary;
 
@@ -20,6 +21,10 @@ impl RepoGroup {
                 metadata.repo_path().to_path_buf(),
             )
         })
+    }
+
+    pub fn of_repo(repo: &Repo) -> Self {
+        Self::Named(repo.name().clone(), repo.path().to_path_buf())
     }
 
     pub fn path(&self) -> Option<&Path> {

@@ -3,10 +3,12 @@ use std::path::{Path, PathBuf};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::back_key::BackKey;
+use super::key_map::KeyMap;
 use crate::application::ports::ConfigError;
 use crate::domain::{RepoGroup, Session, SessionState, SessionSummary};
 use crate::ui::app::AppRequest;
-use crate::ui::blocking_operation::{BlockingOperation, DeleteStep};
+use crate::ui::batch_operation::BatchOperation;
+use crate::ui::blocking_operation::{BlockingOperation, BrowserPage, DeleteStep};
 use crate::ui::dialogs::DialogOpening;
 
 pub struct ActionGate<'a> {
@@ -16,7 +18,7 @@ pub struct ActionGate<'a> {
 }
 
 impl<'a> ActionGate<'a> {
-    const NO_SELECTION: &'static str = "No session is selected.";
+    pub const NO_SELECTION: &'static str = "No session is selected.";
 
     pub fn new(
         selected: Option<&'a SessionSummary>,
@@ -37,15 +39,18 @@ impl<'a> ActionGate<'a> {
         }
     }
 
-    pub fn action_for(&self, key: &KeyEvent) -> KeyAction {
-        if BackKey::matches(key) {
-            return KeyAction::Ignore;
-        }
+    pub fn list_action(key: &KeyEvent) -> Option<KeyAction> {
         Self::screen_action(key)
             .or_else(|| Self::selection_move(key.code))
             .or_else(|| Self::repo_action(key.code))
-            .or_else(|| self.access_action(key.code))
-            .unwrap_or_else(|| self.session_change(key.code))
+            .or_else(|| Self::visual_toggle(key.code))
+    }
+
+    fn visual_toggle(code: KeyCode) -> Option<KeyAction> {
+        match code {
+            KeyCode::Char('v' | 'V') => Some(KeyAction::Visual(VisualChange::Toggle)),
+            _ => None,
+        }
     }
 
     fn screen_action(key: &KeyEvent) -> Option<KeyAction> {
@@ -92,7 +97,7 @@ impl<'a> ActionGate<'a> {
             KeyCode::Enter => self.enter(),
             KeyCode::Char('t') => KeyAction::from(self.shell().map(KeyAction::Request)),
             KeyCode::Char('T') => KeyAction::from(self.terminal().map(KeyAction::OpenOnDesktop)),
-            KeyCode::Char('o') => self.open_in_browser(),
+            KeyCode::Char('o') => self.open_heading_or_pull_request(),
             _ => return None,
         };
         Some(action)
@@ -146,15 +151,17 @@ impl<'a> ActionGate<'a> {
             .map(DesktopOpening::SessionTerminal)
     }
 
-    pub fn open_in_browser(&self) -> KeyAction {
+    fn open_heading_or_pull_request(&self) -> KeyAction {
         if let Some(group) = self.heading {
-            let operation = BlockingOperation::OpenRepoPage(group.clone());
+            let operation = BlockingOperation::Open(BrowserPage::RepoPage(group.clone()));
             return KeyAction::Request(AppRequest::Block(operation));
         }
         let name = self.selected().map(|row| row.name().to_string());
-        KeyAction::from(
-            name.map(|name| KeyAction::OpenOnDesktop(DesktopOpening::PullRequest(name))),
-        )
+        KeyAction::from(name.map(|name| {
+            KeyAction::Request(AppRequest::Block(BlockingOperation::Open(
+                BrowserPage::PullRequest(name),
+            )))
+        }))
     }
 
     fn managed_name(&self, refusal: &str) -> Result<String, String> {
@@ -204,13 +211,18 @@ impl<'a> ActionGate<'a> {
 
     pub fn stop(&self) -> Result<AppRequest, String> {
         self.writable()?;
-        let name = self.managed_name("it cannot be stopped")?;
-        Ok(AppRequest::Block(BlockingOperation::Stop(name)))
+        let operation = match self.heading {
+            Some(group) => BlockingOperation::Batch(BatchOperation::StopRepo(group.clone())),
+            None => BlockingOperation::Stop(self.managed_name("it cannot be stopped")?),
+        };
+        Ok(AppRequest::Block(operation))
     }
 
     pub fn restart_all(&self) -> Result<AppRequest, String> {
         self.writable()?;
-        Ok(AppRequest::Block(BlockingOperation::RestartAll))
+        Ok(AppRequest::Block(BlockingOperation::Batch(
+            BatchOperation::RestartAll,
+        )))
     }
 
     pub fn pull(&self) -> Result<AppRequest, String> {
@@ -236,7 +248,7 @@ impl<'a> ActionGate<'a> {
         }
     }
 
-    fn writable(&self) -> Result<(), String> {
+    pub fn writable(&self) -> Result<(), String> {
         match self.config_error {
             Some(error) => Err(format!("config error, running read-only: {error}")),
             None => Ok(()),
@@ -256,11 +268,27 @@ impl<'a> ActionGate<'a> {
     }
 }
 
+impl KeyMap for ActionGate<'_> {
+    fn action_for(&self, key: &KeyEvent) -> KeyAction {
+        if BackKey::matches(key) {
+            return KeyAction::Ignore;
+        }
+        Self::list_action(key)
+            .or_else(|| self.access_action(key.code))
+            .unwrap_or_else(|| self.session_change(key.code))
+    }
+
+    fn open_in_browser(&self) -> KeyAction {
+        self.open_heading_or_pull_request()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KeyAction {
     Request(AppRequest),
     Navigate(Navigation),
     Fold,
+    Visual(VisualChange),
     Open(DialogOpening),
     FindSession,
     Reload,
@@ -269,11 +297,16 @@ pub enum KeyAction {
     Ignore,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VisualChange {
+    Toggle,
+    Leave,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DesktopOpening {
     SessionTerminal(String),
     RepoTerminal(RepoGroup),
-    PullRequest(String),
 }
 
 impl From<Result<KeyAction, String>> for KeyAction {
@@ -419,7 +452,22 @@ mod tests {
 
         assert_eq!(
             gate.action_for(&KeyEvent::from(KeyCode::Char('S'))),
-            KeyAction::Request(AppRequest::Block(BlockingOperation::RestartAll))
+            KeyAction::Request(AppRequest::Block(BlockingOperation::Batch(
+                BatchOperation::RestartAll
+            )))
+        );
+    }
+
+    #[test]
+    fn x_on_a_heading_asks_to_stop_every_session_of_its_repo() {
+        let heading = GateFixture::heading();
+        let gate = ActionGate::on_heading(&heading, None);
+
+        assert_eq!(
+            gate.action_for(&KeyEvent::from(KeyCode::Char('x'))),
+            KeyAction::Request(AppRequest::Block(BlockingOperation::Batch(
+                BatchOperation::StopRepo(GateFixture::heading())
+            )))
         );
     }
 
@@ -430,7 +478,9 @@ mod tests {
 
         assert_eq!(
             gate.action_for(&KeyEvent::from(KeyCode::Char('S'))),
-            KeyAction::Request(AppRequest::Block(BlockingOperation::RestartAll))
+            KeyAction::Request(AppRequest::Block(BlockingOperation::Batch(
+                BatchOperation::RestartAll
+            )))
         );
     }
 
@@ -656,6 +706,15 @@ mod tests {
     }
 
     #[test]
+    fn v_and_capital_v_toggle_visual_mode() {
+        let gate = ActionGate::new(None, None);
+        let action = |character| gate.action_for(&KeyEvent::from(KeyCode::Char(character)));
+
+        assert_eq!(action('v'), KeyAction::Visual(VisualChange::Toggle));
+        assert_eq!(action('V'), KeyAction::Visual(VisualChange::Toggle));
+    }
+
+    #[test]
     fn capital_g_selects_the_last_session() {
         let key = KeyEvent::from(KeyCode::Char('G'));
 
@@ -813,7 +872,9 @@ mod tests {
         assert_eq!(
             ActionGate::new(Some(&row), Some(&error))
                 .action_for(&KeyEvent::from(KeyCode::Char('o'))),
-            KeyAction::OpenOnDesktop(DesktopOpening::PullRequest("fix-auth".to_string()))
+            KeyAction::Request(AppRequest::Block(BlockingOperation::Open(
+                BrowserPage::PullRequest("fix-auth".to_string())
+            )))
         );
     }
 
@@ -857,8 +918,8 @@ mod tests {
 
         assert_eq!(
             ActionGate::on_heading(&heading, Some(&error)).action_for(&key),
-            KeyAction::Request(AppRequest::Block(BlockingOperation::OpenRepoPage(
-                GateFixture::heading()
+            KeyAction::Request(AppRequest::Block(BlockingOperation::Open(
+                BrowserPage::RepoPage(GateFixture::heading())
             )))
         );
     }

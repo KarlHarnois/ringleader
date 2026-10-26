@@ -1682,7 +1682,7 @@ mod tests {
         let fixture = GitTestRepo::new();
         WorktreeFixture::marked(&fixture);
         let workspace = fixture.workspace();
-        fixture.git(fixture.path(), &["branch", "feature"]);
+        fixture.git(fixture.path(), &["branch", "unmarked"]);
         fixture.git(fixture.path(), &["branch", "Feature/v1.2"]);
         workspace
             .mark_branch_managed(fixture.path(), "Feature/v1.2")

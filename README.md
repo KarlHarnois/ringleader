@@ -48,12 +48,12 @@ Sessions run on Ringleader's own tmux server. The server ignores your tmux confi
 ringleader
 ringleader list [--json]
 ringleader new --name <n> --repo <r> [--agent <a>] [--base-branch <b> | --main-checkout] [--plan] [--prompt <text>]
-ringleader delete <name> [--force] [--forget]
+ringleader delete <name>... [--force] [--forget]
 ringleader attach <name>
 ringleader send <name> <prompt>
 ringleader rename <old> <new>
-ringleader restart (<name> | --all)
-ringleader stop <name>
+ringleader restart (<name>... | --all)
+ringleader stop (<name>... | --repo <r>)
 ringleader repo add <path> [--name <n>] [--base-branch <b>]
 ringleader repo remove <name>
 ringleader repo list
@@ -70,6 +70,8 @@ Every command accepts `--config <path>` and `--log-level <level>`.
 | 1 | invalid input or any other failure |
 | 2 | no session or `[[repos]]` entry with the given name |
 | 3 | conflict with existing state |
+
+A command given several names exits with the code of the first name that failed.
 
 Conflicts with existing state include these:
 

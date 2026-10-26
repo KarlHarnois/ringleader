@@ -1,34 +1,16 @@
 {
-  description = "Ringleader, a tmux session manager for Claude and opencode";
+  description = "Ringleader, a tmux session manager for AI coding agents";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
-    dryer = {
-      url = "github:unclebob/dryer";
-      flake = false;
-    };
-    crapper = {
-      url = "github:unclebob/crapper/9f1bead298b5a9d576bdd6319289fcf426e5b18a";
-      flake = false;
-    };
-    mutator = {
-      url = "github:unclebob/mutator/c57f03879a08d2afe8c7e044e86c80bb164afd30";
-      flake = false;
-    };
-    uml-viewer = {
-      url = "github:unclebob/uml-viewer";
-      flake = false;
-    };
+    crane.url = "github:ipetkov/crane";
   };
 
   outputs =
     {
       self,
       nixpkgs,
-      dryer,
-      crapper,
-      mutator,
-      uml-viewer,
+      crane,
     }:
     let
       supportedSystems = [
@@ -40,91 +22,30 @@
       forEachSystem =
         build: nixpkgs.lib.genAttrs supportedSystems (system: build nixpkgs.legacyPackages.${system});
 
-      developmentPackages = pkgs: [
+      ciPackages = pkgs: [
         pkgs.rustc
         pkgs.cargo
         pkgs.clippy
         pkgs.rustfmt
         pkgs.tmux
         pkgs.git
-        pkgs.nixfmt
-        pkgs.util-linux
         pkgs.direnv
+        pkgs.cargo-llvm-cov
       ];
 
-      metricsTools =
+      developmentPackages =
         pkgs:
-        let
-          python = pkgs.python3;
-          treeSitterDeps = [
-            python.pkgs.tree-sitter
-            python.pkgs.tree-sitter-language-pack
-          ];
-          pyprojectVersion =
-            source: (builtins.fromTOML (builtins.readFile "${source}/pyproject.toml")).project.version;
-          buildTool =
-            name: source: extraDependencies:
-            python.pkgs.buildPythonApplication {
-              pname = name;
-              version = pyprojectVersion source;
-              pyproject = true;
-              src = source;
-              doCheck = false;
-              build-system = [ python.pkgs.setuptools ];
-              dependencies = treeSitterDeps ++ extraDependencies;
-            };
-          dryerTool = buildTool "dryer" dryer [ ];
-          crapperTool = buildTool "crapper" crapper [ ];
-          mutatorTool = (buildTool "mutator" mutator [ crapperTool ]).overridePythonAttrs {
-            patches = [ ./patches/mutator-copy-debug-build.patch ];
-            patchFlags = [
-              "-p1"
-              "--fuzz=0"
-            ];
-          };
-          llvm = pkgs.rustc.llvmPackages.llvm;
-          llvmCoverageEnv = {
-            LLVM_COV = "${llvm}/bin/llvm-cov";
-            LLVM_PROFDATA = "${llvm}/bin/llvm-profdata";
-          };
-          gitRuntime = {
-            runtimeInputs = [ pkgs.git ];
-          };
-          coverageRuntime = {
-            runtimeInputs =
-              developmentPackages pkgs
-              ++ pkgs.stdenv.initialPath
-              ++ [
-                pkgs.stdenv.cc
-                pkgs.cargo-llvm-cov
-              ];
-            runtimeEnv = llvmCoverageEnv;
-          };
-          pidNamespace = pkgs.lib.optionalString pkgs.stdenv.isLinux "${pkgs.util-linux}/bin/unshare --map-current-user --pid --fork --kill-child --mount-proc ";
-          wrapTool = wrapToolBehind "";
-          wrapToolBehind =
-            prefix: name: tool: runtime:
-            pkgs.writeShellApplication (
-              runtime
-              // {
-                inherit name;
-                text = ''exec ${prefix}${tool}/bin/${name} "$@"'';
-              }
-            );
-        in
-        {
-          inherit
-            dryerTool
-            crapperTool
-            mutatorTool
-            llvmCoverageEnv
-            ;
-          dryerApp = wrapTool "dryer" dryerTool gitRuntime;
-          crapperApp = wrapTool "crapper" crapperTool coverageRuntime;
-          mutatorApp = wrapToolBehind pidNamespace "mutator" mutatorTool coverageRuntime;
-        };
+        ciPackages pkgs
+        ++ [
+          pkgs.nixfmt
+          pkgs.util-linux
+          pkgs.rust-analyzer
+        ];
 
-      forEachSystemWithMetricsTools = build: forEachSystem (pkgs: build pkgs (metricsTools pkgs));
+      llvmCoverageEnv = pkgs: {
+        LLVM_COV = "${pkgs.rustc.llvmPackages.llvm}/bin/llvm-cov";
+        LLVM_PROFDATA = "${pkgs.rustc.llvmPackages.llvm}/bin/llvm-profdata";
+      };
 
       crateVersion = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).package.version;
 
@@ -151,15 +72,17 @@
 
       pinnedToolsWrapper =
         pkgs: package:
-        pkgs.runCommand "pinned-tools-wrapper" { } ''
-          wrapped=$({ grep --only-matching '^export RINGLEADER_[A-Z_]*' ${nixpkgs.lib.getExe package} || true; } | cut --delimiter=' ' --fields=2 | sort)
-          pinned=$(printf '%s\n' ${nixpkgs.lib.escapeShellArgs (builtins.attrNames package.pinnedTools)} | sort)
-          [[ $wrapped == "$pinned" ]] || {
-            echo "The wrapper sets" ''${wrapped:-nothing} "but pinnedTools lists" ''${pinned:-nothing}". Pin each tool the wrapper names through pinnedTools: the Homebrew tap bundles only those." >&2
-            exit 1
-          }
-          touch $out
-        '';
+        pkgs.runCommand "pinned-tools-wrapper"
+          { wrapperCommand = builtins.unsafeDiscardStringContext package.postInstall; }
+          ''
+            wrapped=$({ grep --only-matching --regexp='--set-default RINGLEADER_[A-Z_]*' <<< "$wrapperCommand" || true; } | cut --delimiter=' ' --fields=2 | sort)
+            pinned=$(printf '%s\n' ${nixpkgs.lib.escapeShellArgs (builtins.attrNames package.pinnedTools)} | sort)
+            [[ $wrapped == "$pinned" ]] || {
+              echo "The wrapper sets" ''${wrapped:-nothing} "but pinnedTools lists" ''${pinned:-nothing}". Pin each tool the wrapper names through pinnedTools: the Homebrew tap bundles only those." >&2
+              exit 1
+            }
+            touch $out
+          '';
 
       agentDocs =
         pkgs:
@@ -208,77 +131,53 @@
         '';
     in
     {
-      packages = forEachSystem (
-        pkgs:
-        let
-          tools = pinnedTools pkgs;
-        in
-        {
-          default = pkgs.rustPlatform.buildRustPackage {
-            pname = "ringleader";
-            version = crateVersion;
-            src = self;
-            cargoLock.lockFile = ./Cargo.lock;
-            nativeBuildInputs = [ pkgs.makeWrapper ];
-            doCheck = true;
-            __darwinAllowLocalNetworking = true;
-            nativeCheckInputs = builtins.attrValues tools ++ [ pkgs.direnv ];
-            postInstall = ''
-              wrapProgram $out/bin/ringleader ${pinnedToolDefaults tools}
-            '';
-            passthru.pinnedTools = tools;
-            meta = {
-              description = "A tmux session manager for Claude and opencode";
-              license = pkgs.lib.licenses.mit;
-              mainProgram = "ringleader";
-              platforms = supportedSystems;
+      packages = forEachSystem (pkgs: {
+        default =
+          let
+            craneLib = crane.mkLib pkgs;
+            tools = pinnedTools pkgs;
+            buildArgs = {
+              pname = "ringleader";
+              version = crateVersion;
+              src = self;
+              cargoExtraArgs = "--locked --package ringleader";
+              doCheck = false;
             };
-          };
-        }
-      );
+          in
+          craneLib.buildPackage (
+            buildArgs
+            // {
+              cargoArtifacts = craneLib.buildDepsOnly (buildArgs // { cargoCheckCommand = "true"; });
+              nativeBuildInputs = [ pkgs.makeWrapper ];
+              postInstall = ''
+                wrapProgram $out/bin/ringleader ${pinnedToolDefaults tools}
+              '';
+              passthru.pinnedTools = tools;
+              meta = {
+                description = "A tmux session manager for AI coding agents";
+                license = pkgs.lib.licenses.mit;
+                mainProgram = "ringleader";
+                platforms = supportedSystems;
+              };
+            }
+          );
+      });
 
-      apps = forEachSystemWithMetricsTools (
-        pkgs: tools: {
-          dryer = {
-            type = "app";
-            program = "${tools.dryerApp}/bin/dryer";
-            meta.description = "Find candidate duplicate code";
-          };
-          crapper = {
-            type = "app";
-            program = "${tools.crapperApp}/bin/crapper";
-            meta.description = "Score complexity, coverage, and CRAP";
-          };
-          mutator = {
-            type = "app";
-            program = "${tools.mutatorApp}/bin/mutator";
-            meta.description = "Run mutation testing";
-          };
-        }
-      );
-
-      devShells = forEachSystemWithMetricsTools (
-        pkgs: tools: rec {
-          default = pkgs.mkShell {
-            packages = developmentPackages pkgs ++ [ pkgs.rust-analyzer ];
-          };
-          metrics = pkgs.mkShell {
-            inputsFrom = [ default ];
-            packages = [
-              pkgs.cargo-llvm-cov
-              pkgs.clojure
-              tools.dryerTool
-              tools.crapperTool
-              tools.mutatorApp
-            ];
-            env = tools.llvmCoverageEnv;
-            UML_VIEWER_DEPS = ''
-              {:deps {uml-viewer/uml-viewer {:local/root "${uml-viewer}"} quil/quil {:mvn/version "4.3.1563"}}
-               :aliases {:ir {:main-opts ["-m" "uml-viewer.main.ir-generator"]}
-                         :run {:main-opts ["-m" "uml-viewer.main.uml-viewer"]}}}'';
-          };
-        }
-      );
+      devShells = forEachSystem (pkgs: {
+        default = pkgs.mkShell {
+          packages = developmentPackages pkgs;
+          env = llvmCoverageEnv pkgs;
+          shellHook = ''
+            if [[ -z ''${CI:-} ]]; then
+              export CARGO_BUILD_JOBS=''${CARGO_BUILD_JOBS:-2}
+            fi
+          '';
+        };
+        ci = pkgs.mkShell {
+          packages = ciPackages pkgs;
+          env = llvmCoverageEnv pkgs;
+        };
+      });
 
       formatter = forEachSystem (pkgs: pkgs.nixfmt-tree);
 

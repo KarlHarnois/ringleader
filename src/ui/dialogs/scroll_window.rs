@@ -35,10 +35,14 @@ impl ScrollWindow {
 
     pub fn hint(&self, close_hint: &str) -> String {
         if self.scrolls() {
-            format!("{}{close_hint}", Self::HINT)
+            Self::scrolling_hint(close_hint)
         } else {
             close_hint.to_string()
         }
+    }
+
+    pub fn scrolling_hint(close_hint: &str) -> String {
+        format!("{}{close_hint}", Self::HINT)
     }
 
     fn scrolls(&self) -> bool {

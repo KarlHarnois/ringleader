@@ -4,15 +4,17 @@ use std::time::{Duration, Instant};
 use super::bell::Bell;
 use super::fold_change::FoldChange;
 use super::home_view::LayoutTier;
+use super::key_hints::KeyHints;
 use super::preview_panel::PreviewPanel;
 use super::status_bar::{StatusBar, StatusNote};
 use crate::application::ports::FoldStore;
-use crate::application::{ServiceError, SessionService, Tool};
+use crate::application::{ServiceError, SessionCount, SessionService, Tool};
 use crate::domain::{RepoGroup, SessionSummary};
 use crate::ui::background_jobs::diff_queue::DiffQueue;
 use crate::ui::background_jobs::observation_feed::ObservationFeed;
 use crate::ui::background_jobs::preview_feed::PreviewFeed;
 use crate::ui::background_jobs::pull_request_feed::PullRequestFeed;
+use crate::ui::keys::action_gate::VisualChange;
 use crate::ui::table::session_list::SessionList;
 use crate::ui::table::session_table::SessionTable;
 use crate::ui::theme::Theme;
@@ -32,6 +34,8 @@ pub struct HomeState {
 
 impl HomeState {
     pub const TMUX_PAUSE: Duration = Duration::from_secs(30);
+    const VISUAL_MODE: &'static str = "-- VISUAL --";
+    const VISUAL_KEYS: &'static str = "x stop · s restart · d delete · p pull · Esc leave";
 
     pub fn new(now: Instant, bell: Bell, folds: Box<dyn FoldStore>) -> Self {
         Self {
@@ -60,7 +64,11 @@ impl HomeState {
     }
 
     pub fn table(&self, tick: u64, theme: Theme) -> SessionTable<'_> {
-        self.sessions.table(tick, theme)
+        let table = self.sessions.table(tick, theme);
+        match self.focused {
+            true => table,
+            false => table.out_of_focus(),
+        }
     }
 
     pub fn preview_panel(&self, theme: Theme) -> PreviewPanel<'_> {
@@ -69,8 +77,26 @@ impl HomeState {
     }
 
     pub fn note(&self) -> Option<String> {
+        if self.sessions.in_visual_mode() {
+            return Some(self.visual_note());
+        }
         let row = self.sessions.selected()?;
         StatusNote::new(row).text()
+    }
+
+    fn visual_note(&self) -> String {
+        let count = SessionCount::new(self.sessions.visual_names().len());
+        format!("{} {count} · {}", Self::VISUAL_MODE, Self::VISUAL_KEYS)
+    }
+
+    pub fn key_hints(&self) -> KeyHints {
+        if self.sessions.selected_heading().is_some() {
+            return KeyHints::on_heading();
+        }
+        match self.sessions.selected() {
+            Some(_) => KeyHints::on_session(),
+            None => KeyHints::without_selection(),
+        }
     }
 
     pub fn resize(
@@ -94,6 +120,10 @@ impl HomeState {
 
     pub fn refresh_diffs_soon(&mut self) {
         self.diffs.refresh_soon();
+    }
+
+    pub fn adopt_latest_pull_request(&mut self, name: &str, service: &SessionService) {
+        self.pull_requests.adopt_latest(name, service);
     }
 
     pub fn focus_gained(&mut self) {
@@ -148,6 +178,7 @@ impl HomeState {
 
     pub fn returned_from(&mut self, name: &str) {
         self.bell.forget(name);
+        self.pull_requests.refresh_soon();
     }
 
     pub fn select(&mut self, name: &str, service: &SessionService) {
@@ -176,6 +207,17 @@ impl HomeState {
 
     pub fn select_low(&mut self, service: &SessionService) {
         self.change_list(service, SessionList::select_low);
+    }
+
+    pub fn change_visual(&mut self, change: VisualChange) {
+        match change {
+            VisualChange::Toggle => self.sessions.toggle_visual(),
+            VisualChange::Leave => self.sessions.leave_visual(),
+        }
+    }
+
+    pub fn leave_visual(&mut self) {
+        self.sessions.leave_visual();
     }
 
     pub fn toggle_fold(&mut self, service: &SessionService) {

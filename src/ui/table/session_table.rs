@@ -20,10 +20,12 @@ use crate::ui::theme::Theme;
 pub struct SessionTable<'a> {
     tree: SessionTree<'a>,
     selection: Option<&'a ListSelection>,
+    marked: Vec<ListSelection>,
     viewport: Viewport,
     tick: u64,
     theme: Theme,
     tier: LayoutTier,
+    out_of_focus: bool,
 }
 
 impl<'a> SessionTable<'a> {
@@ -39,10 +41,12 @@ impl<'a> SessionTable<'a> {
         Self {
             tree,
             selection,
+            marked: Vec::new(),
             viewport: Viewport::default(),
             tick,
             theme,
             tier: LayoutTier::Full,
+            out_of_focus: false,
         }
     }
 
@@ -50,8 +54,19 @@ impl<'a> SessionTable<'a> {
         Self { viewport, ..self }
     }
 
+    pub fn with_marked(self, marked: Vec<ListSelection>) -> Self {
+        Self { marked, ..self }
+    }
+
     pub fn for_tier(self, tier: LayoutTier) -> Self {
         Self { tier, ..self }
+    }
+
+    pub fn out_of_focus(self) -> Self {
+        Self {
+            out_of_focus: true,
+            ..self
+        }
     }
 
     pub fn render(&self, frame: &mut Frame, area: Rect) {
@@ -150,22 +165,43 @@ impl<'a> SessionTable<'a> {
             TreeLine::Heading(heading) => heading.spans(self.tick, &self.theme, width),
             TreeLine::Session { row, branch } => self.row_spans(row, *branch, columns),
         };
-        if self.is_selected(line) {
-            return self.reversed(&spans, width);
+        if self.is_cursor(line) {
+            return self.cursor_line(spans, width);
+        }
+        if self.is_marked(line) {
+            return self.bar(&spans, width);
         }
         Line::from(spans)
     }
 
-    fn is_selected(&self, line: &TreeLine) -> bool {
+    fn is_cursor(&self, line: &TreeLine) -> bool {
         self.selection == Some(&line.selection())
     }
 
-    fn reversed(&self, spans: &[Span], width: usize) -> Line<'static> {
+    fn is_marked(&self, line: &TreeLine) -> bool {
+        self.marked.contains(&line.selection())
+    }
+
+    fn cursor_line(&self, spans: Vec<Span<'static>>, width: usize) -> Line<'static> {
+        match self.out_of_focus {
+            true => self.underlined(spans, width),
+            false => self.bar(&spans, width),
+        }
+    }
+
+    fn bar(&self, spans: &[Span], width: usize) -> Line<'static> {
         let text: String = spans.iter().map(|span| span.content.as_ref()).collect();
         Line::from(Span::styled(
             format!("{text:<width$}"),
             self.theme.selected(),
         ))
+    }
+
+    fn underlined(&self, spans: Vec<Span<'static>>, width: usize) -> Line<'static> {
+        let mut line = Line::from(spans);
+        let padding = width.saturating_sub(line.width());
+        line.push_span(Span::raw(" ".repeat(padding)));
+        line.patch_style(self.theme.selected_out_of_focus())
     }
 
     fn row_spans(
@@ -335,11 +371,30 @@ mod tests {
             tick: u64,
             height: u16,
         ) -> Terminal<TestBackend> {
+            Self::draw_table(SessionTable::new(tree, selection, tick, Theme), height)
+        }
+
+        fn render_out_of_focus(
+            rows: &[SessionSummary],
+            cursor: &str,
+            marked: &[&str],
+        ) -> Terminal<TestBackend> {
+            let cursor = ListSelection::Session(cursor.to_string());
+            let marked = marked
+                .iter()
+                .map(|name| ListSelection::Session(name.to_string()))
+                .collect();
+            let tree = SessionTree::new(rows, &HashSet::new());
+            let table = SessionTable::new(tree, Some(&cursor), 0, Theme)
+                .with_marked(marked)
+                .out_of_focus();
+            Self::draw_table(table, 6)
+        }
+
+        fn draw_table(table: SessionTable, height: u16) -> Terminal<TestBackend> {
             let mut terminal = Terminal::new(TestBackend::new(50, height)).unwrap();
             terminal
-                .draw(|frame| {
-                    SessionTable::new(tree, selection, tick, Theme).render(frame, frame.area())
-                })
+                .draw(|frame| table.render(frame, frame.area()))
                 .unwrap();
             terminal
         }
@@ -599,6 +654,52 @@ mod tests {
         assert!(!buffer[(1, 2)].modifier.contains(Modifier::REVERSED));
         assert!(buffer[(1, 3)].modifier.contains(Modifier::REVERSED));
         assert!(buffer[(48, 3)].modifier.contains(Modifier::REVERSED));
+    }
+
+    #[test]
+    fn an_out_of_focus_cursor_row_is_underlined_instead_of_reversed() {
+        let rows = [TableFixture::managed("fix-auth", SessionState::Waiting)];
+
+        let terminal = TableFixture::render_out_of_focus(&rows, "fix-auth", &[]);
+        let cell = &terminal.backend().buffer()[(1, 2)];
+
+        assert!(cell.modifier.contains(Modifier::UNDERLINED));
+        assert!(!cell.modifier.contains(Modifier::REVERSED));
+    }
+
+    #[test]
+    fn an_out_of_focus_underline_spans_the_whole_width() {
+        let rows = [TableFixture::managed("fix-auth", SessionState::Waiting)];
+
+        let terminal = TableFixture::render_out_of_focus(&rows, "fix-auth", &[]);
+        let last_cell = &terminal.backend().buffer()[(48, 2)];
+
+        assert!(last_cell.modifier.contains(Modifier::UNDERLINED));
+    }
+
+    #[test]
+    fn an_out_of_focus_cursor_row_keeps_its_colors() {
+        let rows = [TableFixture::managed("fix-auth", SessionState::Waiting)];
+
+        let terminal = TableFixture::render_out_of_focus(&rows, "fix-auth", &[]);
+        let indicator = &terminal.backend().buffer()[(1, 2)];
+
+        assert_eq!(indicator.fg, Color::Green);
+    }
+
+    #[test]
+    fn an_out_of_focus_marked_row_stays_reversed_so_only_the_cursor_shows_focus() {
+        let rows = [
+            TableFixture::managed("dark-mode", SessionState::Waiting),
+            TableFixture::managed("fix-auth", SessionState::Waiting),
+        ];
+
+        let terminal =
+            TableFixture::render_out_of_focus(&rows, "fix-auth", &["dark-mode", "fix-auth"]);
+        let cell = &terminal.backend().buffer()[(1, 2)];
+
+        assert!(cell.modifier.contains(Modifier::REVERSED));
+        assert!(!cell.modifier.contains(Modifier::UNDERLINED));
     }
 
     #[test]
