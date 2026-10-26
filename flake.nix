@@ -49,15 +49,30 @@
 
       crateVersion = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).package.version;
 
-      readmeVersionBadge =
-        pkgs:
-        pkgs.runCommand "readme-version-badge" { } ''
-          grep --fixed-strings --quiet 'badge/version-${crateVersion}-' ${./README.md} || {
-            echo "The README version badge does not show ${crateVersion} from Cargo.toml" >&2
-            exit 1
-          }
-          touch $out
-        '';
+      pinnedTools = pkgs: {
+        RINGLEADER_TMUX = pkgs.tmux;
+        RINGLEADER_GIT = pkgs.gitMinimal;
+      };
+
+      pinnedToolDefaults =
+        tools:
+        nixpkgs.lib.concatMapAttrsStringSep " " (
+          variable: tool: "--set-default ${variable} ${nixpkgs.lib.getExe tool}"
+        ) tools;
+
+      pinnedToolsWrapper =
+        pkgs: package:
+        pkgs.runCommand "pinned-tools-wrapper"
+          { wrapperCommand = builtins.unsafeDiscardStringContext package.postInstall; }
+          ''
+            wrapped=$({ grep --only-matching --regexp='--set-default RINGLEADER_[A-Z_]*' <<< "$wrapperCommand" || true; } | cut --delimiter=' ' --fields=2 | sort)
+            pinned=$(printf '%s\n' ${nixpkgs.lib.escapeShellArgs (builtins.attrNames package.pinnedTools)} | sort)
+            [[ $wrapped == "$pinned" ]] || {
+              echo "The wrapper sets" ''${wrapped:-nothing} "but pinnedTools lists" ''${pinned:-nothing}". Pin each tool the wrapper names through pinnedTools: the Homebrew tap bundles only those." >&2
+              exit 1
+            }
+            touch $out
+          '';
 
       agentDocs =
         pkgs:
@@ -110,6 +125,7 @@
         default =
           let
             craneLib = crane.mkLib pkgs;
+            tools = pinnedTools pkgs;
             buildArgs = {
               pname = "ringleader";
               version = crateVersion;
@@ -124,10 +140,9 @@
               cargoArtifacts = craneLib.buildDepsOnly (buildArgs // { cargoCheckCommand = "true"; });
               nativeBuildInputs = [ pkgs.makeWrapper ];
               postInstall = ''
-                wrapProgram $out/bin/ringleader \
-                  --set-default RINGLEADER_TMUX ${pkgs.tmux}/bin/tmux \
-                  --set-default RINGLEADER_GIT ${pkgs.gitMinimal}/bin/git
+                wrapProgram $out/bin/ringleader ${pinnedToolDefaults tools}
               '';
+              passthru.pinnedTools = tools;
               meta = {
                 description = "A tmux session manager for AI coding agents";
                 license = pkgs.lib.licenses.mit;
@@ -158,8 +173,10 @@
 
       checks = nixpkgs.lib.genAttrs supportedSystems (system: {
         default = self.packages.${system}.default;
-        readme-version-badge = readmeVersionBadge nixpkgs.legacyPackages.${system};
         agent-docs = agentDocs nixpkgs.legacyPackages.${system};
+        pinned-tools-wrapper =
+          pinnedToolsWrapper nixpkgs.legacyPackages.${system}
+            self.packages.${system}.default;
         dev-shell-tools = devShellTools nixpkgs.legacyPackages.${system} self.devShells.${system}.default;
       });
     };

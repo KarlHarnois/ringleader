@@ -1,9 +1,10 @@
 # Ringleader
 
 [![CI](https://github.com/KarlHarnois/ringleader/actions/workflows/ci.yml/badge.svg)](https://github.com/KarlHarnois/ringleader/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-0.1.0-orange)](Cargo.toml)
+[![Version](https://img.shields.io/github/v/tag/KarlHarnois/ringleader?label=version&color=orange)](https://github.com/KarlHarnois/ringleader/tags)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Nix flake](https://img.shields.io/badge/nix-flake-5277C3?logo=nixos&logoColor=white)](#install)
+[![Homebrew](https://img.shields.io/badge/homebrew-tap-FBB040?logo=homebrew&logoColor=white)](#install)
 
 Ringleader is a tmux session manager for Claude Code and opencode. Each session runs an agent in its own git worktree and branch, or in the repo's main checkout. Ringleader's TUI lists the sessions grouped by repo and shows how each one is doing.
 
@@ -13,6 +14,12 @@ Ringleader runs on Linux and Apple Silicon macOS.
 
 ## Install
 
+**Install Ringleader with [Homebrew](https://brew.sh) on Apple Silicon macOS:**
+
+```sh
+brew install KarlHarnois/tap/ringleader
+```
+
 **Install Ringleader with [Nix](https://nixos.org/download/):**
 
 ```sh
@@ -20,6 +27,8 @@ nix profile add github:KarlHarnois/ringleader
 ```
 
 **If your Nix is older than 2.30, run `nix profile install` instead of `nix profile add`.**
+
+Both installs bring Ringleader's own tmux and git, and leave yours untouched.
 
 ## First run
 
