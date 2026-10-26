@@ -34,11 +34,14 @@ jobs:
           persist-credentials: false
           ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
-      - name: Find the commits since the latest release
+      - name: Find the commit's tag, or the commits since the latest release
         id: since
         run: |
+          existing=$(git tag --points-at "$COMMIT" --list 'v*' | head -n 1)
           latest=$(git tag --list 'v*' --sort=-v:refname | head -n 1)
-          if git merge-base --is-ancestor "$COMMIT" "$latest"; then
+          if [ -n "$existing" ]; then
+            echo "tag=$existing" >> "$GITHUB_OUTPUT"
+          elif git merge-base --is-ancestor "$COMMIT" "$latest"; then
             echo "$latest already releases $COMMIT"
           else
             echo "latest=$latest" >> "$GITHUB_OUTPUT"
@@ -75,10 +78,10 @@ jobs:
           gh api --silent "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$tag" -f sha="$COMMIT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
       - name: Tell the tap about the tag
-        if: steps.tag.outputs.tag != ''
+        if: steps.tag.outputs.tag != '' || steps.since.outputs.tag != ''
         env:
           GH_TOKEN: ${{ secrets.TAP_DISPATCH_TOKEN }}
-          TAG: ${{ steps.tag.outputs.tag }}
+          TAG: ${{ steps.tag.outputs.tag || steps.since.outputs.tag }}
         run: |
           if [ -z "$GH_TOKEN" ]; then
             echo "::warning::TAP_DISPATCH_TOKEN is not set, so the Homebrew tap does not hear about $TAG."
