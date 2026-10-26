@@ -1,44 +1,19 @@
 use super::batch_report::BatchReport;
-use super::named_outcomes::NamedOutcomes;
 use super::repo_stop_plan::StopSkip;
 use super::service_error::ServiceError;
 use crate::domain::RepoGroup;
 
 pub struct StopReport {
     repo: RepoGroup,
-    stops: NamedOutcomes<()>,
+    stops: BatchReport<()>,
     skips: Vec<(String, StopSkip)>,
 }
 
-impl BatchReport for StopReport {
-    fn summary(&self) -> String {
-        let sentences: Vec<String> = [
-            Some(self.headline()),
-            self.stops.failure_note(),
-            self.skip_note(),
-        ]
-        .into_iter()
-        .flatten()
-        .collect();
-        sentences.join(" ")
-    }
-
-    fn needs_attention(&self) -> bool {
-        self.failures().next().is_some()
-    }
-}
-
 impl StopReport {
-    pub fn new(
-        repo: RepoGroup,
-        stops: Vec<(String, Result<(), ServiceError>)>,
-        skips: Vec<(String, StopSkip)>,
-    ) -> Self {
-        Self {
-            repo,
-            stops: NamedOutcomes::new(stops),
-            skips,
-        }
+    const STOPPED: &'static str = "Stopped";
+
+    pub fn new(repo: RepoGroup, stops: BatchReport<()>, skips: Vec<(String, StopSkip)>) -> Self {
+        Self { repo, stops, skips }
     }
 
     pub fn outcomes(&self) -> impl Iterator<Item = (&str, Result<&(), &ServiceError>)> {
@@ -53,11 +28,27 @@ impl StopReport {
         self.stops.failures()
     }
 
+    pub fn needs_attention(&self) -> bool {
+        self.stops.has_failures()
+    }
+
+    pub fn summary(&self) -> String {
+        let sentences: Vec<String> = [
+            Some(self.headline()),
+            self.stops.failure_note(),
+            self.skip_note(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        sentences.join(" ")
+    }
+
     fn headline(&self) -> String {
         if self.stops.is_empty() {
             return format!("No waiting or exited session in {} to stop.", self.repo);
         }
-        format!("{} in {}.", self.stops.tally("Stopped"), self.repo)
+        self.stops.headline(Self::STOPPED)
     }
 
     fn skip_note(&self) -> Option<String> {
@@ -92,8 +83,12 @@ mod tests {
     struct ReportFixture;
 
     impl ReportFixture {
-        fn repo() -> RepoGroup {
-            ServiceFixture::repo_group("/repos/alpha")
+        fn report(
+            stops: Vec<(String, Result<(), ServiceError>)>,
+            skips: Vec<(String, StopSkip)>,
+        ) -> StopReport {
+            let repo = ServiceFixture::repo_group("/repos/alpha");
+            StopReport::new(repo, BatchReport::new(stops), skips)
         }
 
         fn stopped(name: &str) -> (String, Result<(), ServiceError>) {
@@ -103,7 +98,7 @@ mod tests {
         fn failed(name: &str, reason: &str) -> (String, Result<(), ServiceError>) {
             (
                 name.to_string(),
-                Err(ServiceError::Conflict(reason.to_string())),
+                Err(ServiceError::Failed(reason.to_string())),
             )
         }
 
@@ -117,9 +112,8 @@ mod tests {
     }
 
     #[test]
-    fn a_report_of_every_stop_counts_the_sessions_of_the_repo() {
-        let report = StopReport::new(
-            ReportFixture::repo(),
+    fn a_report_of_every_stop_counts_the_sessions() {
+        let report = ReportFixture::report(
             vec![
                 ReportFixture::stopped("bravo"),
                 ReportFixture::stopped("delta"),
@@ -127,14 +121,13 @@ mod tests {
             Vec::new(),
         );
 
-        assert_eq!(report.summary(), "Stopped 2 sessions in alpha.");
+        assert_eq!(report.summary(), "Stopped 2 sessions.");
         assert!(!report.needs_attention());
     }
 
     #[test]
     fn skipped_sessions_are_counted_by_reason() {
-        let report = StopReport::new(
-            ReportFixture::repo(),
+        let report = ReportFixture::report(
             vec![ReportFixture::stopped("bravo")],
             vec![
                 ReportFixture::working("charlie"),
@@ -145,14 +138,13 @@ mod tests {
 
         assert_eq!(
             report.summary(),
-            "Stopped 1 session in alpha. Skipped 2 working, 1 in the main checkout."
+            "Stopped 1 session. Skipped 2 working, 1 in the main checkout."
         );
     }
 
     #[test]
     fn a_failed_stop_is_named_with_its_reason_and_needs_attention() {
-        let report = StopReport::new(
-            ReportFixture::repo(),
+        let report = ReportFixture::report(
             vec![
                 ReportFixture::failed("bravo", "processes the agent started still run"),
                 ReportFixture::stopped("delta"),
@@ -162,18 +154,14 @@ mod tests {
 
         assert_eq!(
             report.summary(),
-            "Stopped 1 of 2 sessions in alpha. bravo failed: processes the agent started still run."
+            "Stopped 1 of 2 sessions. bravo failed: processes the agent started still run."
         );
         assert!(report.needs_attention());
     }
 
     #[test]
-    fn a_repo_without_a_stoppable_session_says_so_and_still_counts_the_skips() {
-        let report = StopReport::new(
-            ReportFixture::repo(),
-            Vec::new(),
-            vec![ReportFixture::working("charlie")],
-        );
+    fn a_repo_without_a_stoppable_session_names_the_repo_and_still_counts_the_skips() {
+        let report = ReportFixture::report(Vec::new(), vec![ReportFixture::working("charlie")]);
 
         assert_eq!(
             report.summary(),

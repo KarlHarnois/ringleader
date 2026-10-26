@@ -1,3 +1,4 @@
+use super::batch_operation::BatchOperation;
 use crate::application::{
     BatchReport, CreateRequest, DeleteConfirmation, DeleteImpact, DeleteOutcome, ServiceError,
     SessionService, StartOutcome,
@@ -6,44 +7,48 @@ use crate::domain::RepoGroup;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BlockingOperation {
-    Restart(RestartTarget),
-    Stop(StopTarget),
+    Restart(String),
+    Stop(String),
     Create(CreateRequest),
     Delete(DeleteStep),
     Rename { old: String, new: String },
     Merge(String),
     OpenRepoPage(RepoGroup),
+    Batch(BatchOperation),
 }
 
 impl BlockingOperation {
     pub fn changes_state(&self) -> bool {
-        !matches!(
-            self,
-            Self::Delete(DeleteStep::Measure(_)) | Self::OpenRepoPage(_)
-        )
+        match self {
+            Self::Delete(DeleteStep::Measure(_)) | Self::OpenRepoPage(_) => false,
+            Self::Batch(batch) => batch.changes_state(),
+            _ => true,
+        }
     }
 
     pub fn busy_message(&self) -> String {
         match self {
-            Self::Restart(target) => target.busy_message(),
-            Self::Stop(target) => target.busy_message(),
+            Self::Restart(name) => format!("Restarting {name}…"),
+            Self::Stop(name) => format!("Stopping {name}…"),
             Self::Create(request) => format!("Creating {}…", request.name()),
             Self::Delete(step) => step.busy_message(),
             Self::Rename { old, .. } => format!("Renaming {old}…"),
             Self::Merge(name) => format!("Fetching origin and merging it into {name}…"),
             Self::OpenRepoPage(group) => format!("Looking up the GitHub page of {group}…"),
+            Self::Batch(batch) => batch.busy_message(),
         }
     }
 
     pub fn run(self, service: &mut SessionService) -> OperationOutcome {
         match self {
-            Self::Restart(target) => target.run(service),
-            Self::Stop(target) => target.run(service),
+            Self::Restart(name) => Self::restart(service, name),
+            Self::Stop(name) => Self::stop(service, name),
             Self::Create(request) => Self::create(service, &request),
             Self::Delete(step) => step.run(service),
             Self::Rename { old, new } => Self::rename(service, &old, &new),
             Self::Merge(name) => Self::merge(service, name),
             Self::OpenRepoPage(group) => Self::open_repo_page(service, &group),
+            Self::Batch(batch) => batch.run(service),
         }
     }
 
@@ -80,50 +85,7 @@ impl BlockingOperation {
         format!("Created {} on branch {}.", session.name(), session.branch())
     }
 
-    fn summarized(report: &impl BatchReport) -> OperationOutcome {
-        let message = report.summary();
-        if report.needs_attention() {
-            return OperationOutcome::Warned {
-                message,
-                select: None,
-            };
-        }
-        OperationOutcome::done(message, None)
-    }
-
-    fn rename(service: &mut SessionService, old: &str, new: &str) -> OperationOutcome {
-        match service.rename_session(old, new) {
-            Ok(session) => OperationOutcome::done(
-                format!("Renamed {old} to {}.", session.name()),
-                Some(session.name().to_string()),
-            ),
-            Err(error) => OperationOutcome::Failed(error),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RestartTarget {
-    Session(String),
-    All,
-}
-
-impl RestartTarget {
-    fn busy_message(&self) -> String {
-        match self {
-            Self::Session(name) => format!("Restarting {name}…"),
-            Self::All => "Restarting every exited or stopped session…".to_string(),
-        }
-    }
-
-    fn run(self, service: &mut SessionService) -> OperationOutcome {
-        match self {
-            Self::Session(name) => Self::restart_session(service, name),
-            Self::All => Self::restart_all(service),
-        }
-    }
-
-    fn restart_session(service: &mut SessionService, name: String) -> OperationOutcome {
+    fn restart(service: &mut SessionService, name: String) -> OperationOutcome {
         match service.restart_session(&name) {
             Ok(outcome) => {
                 OperationOutcome::started(Self::restarted(&name, outcome.recovery()), &outcome)
@@ -139,36 +101,7 @@ impl RestartTarget {
         }
     }
 
-    fn restart_all(service: &mut SessionService) -> OperationOutcome {
-        match service.restart_all(|| false) {
-            Ok(report) => BlockingOperation::summarized(&report),
-            Err(error) => OperationOutcome::Failed(error),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum StopTarget {
-    Session(String),
-    Repo(RepoGroup),
-}
-
-impl StopTarget {
-    fn busy_message(&self) -> String {
-        match self {
-            Self::Session(name) => format!("Stopping {name}…"),
-            Self::Repo(group) => format!("Stopping every waiting or exited session in {group}…"),
-        }
-    }
-
-    fn run(self, service: &mut SessionService) -> OperationOutcome {
-        match self {
-            Self::Session(name) => Self::stop_session(service, name),
-            Self::Repo(group) => Self::stop_repo(service, &group),
-        }
-    }
-
-    fn stop_session(service: &mut SessionService, name: String) -> OperationOutcome {
+    fn stop(service: &mut SessionService, name: String) -> OperationOutcome {
         match service.stop_session(&name) {
             Ok(()) => {
                 OperationOutcome::done(format!("Stopped {name}. Press s to resume it."), Some(name))
@@ -177,9 +110,12 @@ impl StopTarget {
         }
     }
 
-    fn stop_repo(service: &mut SessionService, group: &RepoGroup) -> OperationOutcome {
-        match service.stop_repo(group, || false) {
-            Ok(report) => BlockingOperation::summarized(&report),
+    fn rename(service: &mut SessionService, old: &str, new: &str) -> OperationOutcome {
+        match service.rename_session(old, new) {
+            Ok(session) => OperationOutcome::done(
+                format!("Renamed {old} to {}.", session.name()),
+                Some(session.name().to_string()),
+            ),
             Err(error) => OperationOutcome::Failed(error),
         }
     }
@@ -261,12 +197,27 @@ pub enum OperationOutcome {
         impact: DeleteImpact,
         changed: bool,
     },
+    ConfirmDeleteSessions(BatchReport<DeleteImpact>),
     Failed(ServiceError),
 }
 
 impl OperationOutcome {
-    fn done(message: String, select: Option<String>) -> Self {
+    pub fn done(message: String, select: Option<String>) -> Self {
         Self::Done { message, select }
+    }
+
+    pub fn reported<T>(report: &BatchReport<T>, past_tense: &str) -> Self {
+        Self::batch(report.summary(past_tense), report.has_failures())
+    }
+
+    pub fn batch(message: String, needs_attention: bool) -> Self {
+        match needs_attention {
+            true => Self::Warned {
+                message,
+                select: None,
+            },
+            false => Self::done(message, None),
+        }
     }
 
     fn started(message: String, outcome: &StartOutcome) -> Self {
@@ -333,8 +284,8 @@ mod tests {
         let fixture = UiHarness::exited_session_fixture("fix-auth")
             .with_directory_environment(ServiceFixture::not_allowed_envrc("fix-auth"));
 
-        let outcome = BlockingOperation::Restart(RestartTarget::Session("fix-auth".to_string()))
-            .run(&mut fixture.service());
+        let outcome =
+            BlockingOperation::Restart("fix-auth".to_string()).run(&mut fixture.service());
 
         let warning = StartOperationFixture::warning(outcome);
         assert!(

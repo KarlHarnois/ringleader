@@ -101,17 +101,27 @@ impl<'a> SessionCommands<'a> {
         self.service.observe_and_record()?;
         let confirmation = Self::delete_confirmation(args);
         self.session.stop_if_signaled()?;
-        let report = DeleteReport::new(&args.name);
-        match self.service.delete_session(&args.name, &confirmation) {
-            Ok(outcome) => {
-                self.report_deleted(&report, &outcome);
-                Ok(0)
-            }
-            Err(ServiceError::GuardsChanged { impact, .. }) => {
-                self.report_refusal(&report, &impact);
-                Ok(CliExit::CONFLICT)
-            }
-            Err(error) => Err(error.into()),
+        let confirmations: Vec<(String, DeleteConfirmation)> = args
+            .names
+            .iter()
+            .map(|name| (name.clone(), confirmation.clone()))
+            .collect();
+        let session = &*self.session;
+        let report = self
+            .service
+            .delete_sessions(&confirmations, || session.is_signaled());
+        for (name, outcome) in report.outcomes() {
+            self.report_delete(name, outcome);
+        }
+        Ok(Self::failure_code(report.failures()))
+    }
+
+    fn report_delete(&mut self, name: &str, outcome: Result<&DeleteOutcome, &ServiceError>) {
+        let report = DeleteReport::new(name);
+        match outcome {
+            Ok(outcome) => self.report_deleted(&report, outcome),
+            Err(ServiceError::GuardsChanged { impact, .. }) => self.report_refusal(&report, impact),
+            Err(error) => self.report_failure(name, error),
         }
     }
 
@@ -162,34 +172,43 @@ impl<'a> SessionCommands<'a> {
         Ok(0)
     }
 
-    pub fn restart_one_or_all(&mut self, args: &RestartArgs) -> Result<u8, CommandStop> {
-        match &args.name {
-            Some(name) => self.restart(name),
-            None => self.restart_all(),
+    pub fn restart_named_or_all(&mut self, args: &RestartArgs) -> Result<u8, CommandStop> {
+        match args.all {
+            true => self.restart_all(),
+            false => self.restart(&args.names),
         }
     }
 
-    pub fn restart(&mut self, name: &str) -> Result<u8, CommandStop> {
+    pub fn restart(&mut self, names: &[String]) -> Result<u8, CommandStop> {
         self.service.observe_and_record()?;
         self.session.stop_if_signaled()?;
-        let outcome = self.service.restart_session(name)?;
-        self.report_restart(name, &outcome);
-        Ok(0)
+        let session = &*self.session;
+        let report = self
+            .service
+            .restart_sessions(names, || session.is_signaled());
+        self.report_restarts(&report);
+        Ok(Self::failure_code(report.failures()))
     }
 
-    pub fn stop_one_or_repo(&mut self, args: &StopArgs) -> Result<u8, CommandStop> {
+    pub fn stop_named_or_repo(&mut self, args: &StopArgs) -> Result<u8, CommandStop> {
         match &args.repo {
             Some(repo) => self.stop_repo(repo),
-            None => self.stop(args.name.as_deref().unwrap_or_default()),
+            None => self.stop(&args.names),
         }
     }
 
-    pub fn stop(&mut self, name: &str) -> Result<u8, CommandStop> {
+    pub fn stop(&mut self, names: &[String]) -> Result<u8, CommandStop> {
         self.service.observe_and_record()?;
         self.session.stop_if_signaled()?;
-        self.service.stop_session(name)?;
-        self.session.output().line(&format!("stopped {name}"));
-        Ok(0)
+        let session = &*self.session;
+        let report = self.service.stop_sessions(names, || session.is_signaled());
+        for (name, outcome) in report.outcomes() {
+            match outcome {
+                Ok(()) => self.session.output().line(&format!("stopped {name}")),
+                Err(error) => self.report_failure(name, error),
+            }
+        }
+        Ok(Self::failure_code(report.failures()))
     }
 
     pub fn stop_repo(&mut self, repo: &str) -> Result<u8, CommandStop> {
@@ -201,7 +220,7 @@ impl<'a> SessionCommands<'a> {
             .service
             .stop_repo(&RepoGroup::of_repo(&repo), || session.is_signaled())?;
         self.report_stops(&report);
-        Ok(Self::first_failure_code(report.failures()))
+        Ok(Self::failure_code(report.failures()))
     }
 
     fn report_stops(&mut self, report: &StopReport) {
@@ -216,7 +235,7 @@ impl<'a> SessionCommands<'a> {
         for (name, stop) in report.outcomes() {
             match stop {
                 Ok(()) => self.session.output().line(&format!("stopped {name}")),
-                Err(error) => self.session.output().error(&format!("{name}: {error}")),
+                Err(error) => self.report_failure(name, error),
             }
         }
     }
@@ -227,7 +246,7 @@ impl<'a> SessionCommands<'a> {
         let session = &*self.session;
         let report = self.service.restart_all(|| session.is_signaled())?;
         self.report_restarts(&report);
-        Ok(Self::first_failure_code(report.failures()))
+        Ok(Self::failure_code(report.failures()))
     }
 
     fn report_restarts(&mut self, report: &RestartReport) {
@@ -237,7 +256,7 @@ impl<'a> SessionCommands<'a> {
         for (name, restart) in report.outcomes() {
             match restart {
                 Ok(outcome) => self.report_restart(name, outcome),
-                Err(error) => self.session.output().error(&format!("{name}: {error}")),
+                Err(error) => self.report_failure(name, error),
             }
         }
     }
@@ -248,9 +267,11 @@ impl<'a> SessionCommands<'a> {
         self.session.output().line(&format!("restarted {name}"));
     }
 
-    fn first_failure_code<'r>(
-        mut failures: impl Iterator<Item = (&'r str, &'r ServiceError)>,
-    ) -> u8 {
+    fn report_failure(&mut self, name: &str, error: &ServiceError) {
+        self.session.output().error(&format!("{name}: {error}"));
+    }
+
+    fn failure_code<'e>(mut failures: impl Iterator<Item = (&'e str, &'e ServiceError)>) -> u8 {
         failures
             .next()
             .map_or(0, |(_, error)| CliExit::error_code(error))
@@ -1039,6 +1060,17 @@ mod tests {
     }
 
     #[test]
+    fn stop_of_several_sessions_keeps_going_past_a_refusal_and_exits_with_its_code() {
+        let harness = CliHarness::new(CommandFixture::live());
+
+        let exit = harness.run(&["stop", "missing", "fix-auth"]);
+
+        assert_eq!(exit, CliExit::Code(CliExit::NOT_FOUND));
+        assert!(harness.stderr().starts_with("ringleader: missing: "));
+        assert_eq!(harness.stdout(), "stopped fix-auth\n");
+    }
+
+    #[test]
     fn stop_with_a_repo_notes_a_skipped_working_session() {
         let session = CommandFixture::session();
         let harness =
@@ -1074,6 +1106,32 @@ mod tests {
             "{}",
             harness.stderr()
         );
+    }
+
+    #[test]
+    fn restart_of_several_sessions_restarts_only_the_named_ones() {
+        let harness = CliHarness::new(CommandFixture::stopped(
+            &["alpha", "bravo", "charlie"],
+            &["alpha", "bravo", "charlie"],
+        ));
+
+        let exit = harness.run(&["restart", "alpha", "charlie"]);
+
+        assert_eq!(exit, CliExit::Code(0));
+        assert_eq!(harness.stdout(), "restarted alpha\nrestarted charlie\n");
+    }
+
+    #[test]
+    fn delete_of_several_sessions_deletes_each() {
+        let harness = CliHarness::new(CommandFixture::stopped(
+            &["alpha", "bravo"],
+            &["alpha", "bravo"],
+        ));
+
+        let exit = harness.run(&["delete", "alpha", "bravo"]);
+
+        assert_eq!(exit, CliExit::Code(0));
+        assert!(harness.fixture().registry().sessions().is_empty());
     }
 
     #[test]
