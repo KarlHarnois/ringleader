@@ -3,12 +3,14 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
+    crane.url = "github:ipetkov/crane";
   };
 
   outputs =
     {
       self,
       nixpkgs,
+      crane,
     }:
     let
       supportedSystems = [
@@ -98,25 +100,35 @@
     in
     {
       packages = forEachSystem (pkgs: {
-        default = pkgs.rustPlatform.buildRustPackage {
-          pname = "ringleader";
-          version = crateVersion;
-          src = self;
-          cargoLock.lockFile = ./Cargo.lock;
-          nativeBuildInputs = [ pkgs.makeWrapper ];
-          doCheck = false;
-          postInstall = ''
-            wrapProgram $out/bin/ringleader \
-              --set-default RINGLEADER_TMUX ${pkgs.tmux}/bin/tmux \
-              --set-default RINGLEADER_GIT ${pkgs.gitMinimal}/bin/git
-          '';
-          meta = {
-            description = "A tmux session manager for AI coding agents";
-            license = pkgs.lib.licenses.mit;
-            mainProgram = "ringleader";
-            platforms = supportedSystems;
-          };
-        };
+        default =
+          let
+            craneLib = crane.mkLib pkgs;
+            buildArgs = {
+              pname = "ringleader";
+              version = crateVersion;
+              src = self;
+              cargoExtraArgs = "--locked --package ringleader";
+              doCheck = false;
+            };
+          in
+          craneLib.buildPackage (
+            buildArgs
+            // {
+              cargoArtifacts = craneLib.buildDepsOnly (buildArgs // { cargoCheckCommand = "true"; });
+              nativeBuildInputs = [ pkgs.makeWrapper ];
+              postInstall = ''
+                wrapProgram $out/bin/ringleader \
+                  --set-default RINGLEADER_TMUX ${pkgs.tmux}/bin/tmux \
+                  --set-default RINGLEADER_GIT ${pkgs.gitMinimal}/bin/git
+              '';
+              meta = {
+                description = "A tmux session manager for AI coding agents";
+                license = pkgs.lib.licenses.mit;
+                mainProgram = "ringleader";
+                platforms = supportedSystems;
+              };
+            }
+          );
       });
 
       devShells = forEachSystem (pkgs: {
