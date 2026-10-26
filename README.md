@@ -14,6 +14,8 @@
 /_/ |_/___/_/ |_/\____/_____/_____/_/  |_/_____/_____/_/ |_|
 ```
 
+<img width="2254" height="1456" alt="image" src="https://github.com/user-attachments/assets/f71fa5c3-3187-484d-b474-caef09f5e08f" />
+
 Ringleader is a tmux session manager for Claude Code and opencode. Each session runs an agent in its own git worktree and branch, or in the repo's main checkout. Ringleader's TUI lists the sessions grouped by repo and shows how each one is doing.
 
 Ringleader runs on Linux and Apple Silicon macOS.
