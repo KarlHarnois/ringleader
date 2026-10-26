@@ -202,12 +202,7 @@ impl<'a> SessionCommands<'a> {
         self.session.stop_if_signaled()?;
         let session = &*self.session;
         let report = self.service.stop_sessions(names, || session.is_signaled());
-        for (name, outcome) in report.outcomes() {
-            match outcome {
-                Ok(()) => self.session.output().line(&format!("stopped {name}")),
-                Err(error) => self.report_failure(name, error),
-            }
-        }
+        self.report_stopped(report.outcomes());
         Ok(Self::failure_code(report.failures()))
     }
 
@@ -232,7 +227,14 @@ impl<'a> SessionCommands<'a> {
         if report.outcomes().next().is_none() {
             self.session.output().note(Self::NOTHING_TO_STOP);
         }
-        for (name, stop) in report.outcomes() {
+        self.report_stopped(report.outcomes());
+    }
+
+    fn report_stopped<'r>(
+        &mut self,
+        outcomes: impl Iterator<Item = (&'r str, Result<&'r (), &'r ServiceError>)>,
+    ) {
+        for (name, stop) in outcomes {
             match stop {
                 Ok(()) => self.session.output().line(&format!("stopped {name}")),
                 Err(error) => self.report_failure(name, error),
