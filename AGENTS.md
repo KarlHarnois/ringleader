@@ -205,7 +205,7 @@ Create each fixture repo with `git init -b <branch>`. Never rely on `init.defaul
 
 ### This repository
 
-- The private GitHub repository exists and is the `origin` remote. Never create another repository. Never add another remote.
+- The GitHub repository exists and is the `origin` remote. Never create another repository. Never add another remote.
 - **Keep this repository consumer-agnostic.** Never reference or assume a specific downstream setup, local directory layout, or personal configuration.
 - Give examples and fixtures generic names, such as `example-project`.
 - Capitalize the name Ringleader in human-facing prose.
