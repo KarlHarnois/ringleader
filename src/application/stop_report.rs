@@ -9,7 +9,7 @@ pub struct StopReport {
 }
 
 impl StopReport {
-    const STOPPED: &'static str = "Stopped";
+    pub const STOPPED: &'static str = "Stopped";
 
     pub fn new(repo: RepoGroup, stops: BatchReport<()>, skips: Vec<(String, StopSkip)>) -> Self {
         Self { repo, stops, skips }

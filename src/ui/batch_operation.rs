@@ -1,6 +1,6 @@
 use super::blocking_operation::OperationOutcome;
 use crate::application::{
-    DeleteConfirmation, DeleteImpact, RestartReport, SessionCount, SessionService,
+    DeleteConfirmation, DeleteImpact, RestartReport, SessionCount, SessionService, StopReport,
 };
 use crate::domain::RepoGroup;
 
@@ -15,7 +15,6 @@ pub enum BatchOperation {
 }
 
 impl BatchOperation {
-    const STOPPED: &'static str = "Stopped";
     const MERGED: &'static str = "Merged origin into";
 
     pub fn changes_state(&self) -> bool {
@@ -42,9 +41,10 @@ impl BatchOperation {
         match self {
             Self::RestartAll => Self::restart_all(service),
             Self::Restart(names) => Self::restarted(&service.restart_sessions(&names, || false)),
-            Self::Stop(names) => {
-                OperationOutcome::reported(&service.stop_sessions(&names, || false), Self::STOPPED)
-            }
+            Self::Stop(names) => OperationOutcome::reported(
+                &service.stop_sessions(&names, || false),
+                StopReport::STOPPED,
+            ),
             Self::StopRepo(group) => Self::stop_repo(service, &group),
             Self::Merge(names) => Self::merge(service, &names),
             Self::Delete(step) => step.run(service),
