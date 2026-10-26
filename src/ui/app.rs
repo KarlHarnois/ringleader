@@ -867,6 +867,15 @@ mod tests {
             app
         }
 
+        fn underlined_rows(app: &App) -> usize {
+            let mut terminal = Terminal::new(TestBackend::new(100, 28)).unwrap();
+            terminal.draw(|frame| app.render(frame)).unwrap();
+            let buffer = terminal.backend().buffer();
+            (0..28)
+                .filter(|row| buffer[(5, *row)].modifier.contains(Modifier::UNDERLINED))
+                .count()
+        }
+
         fn wait_for_text(app: &mut App, text: &str) -> bool {
             Deadline::for_background_work().wait_until(|| {
                 app.on_tick(Instant::now());
@@ -2484,6 +2493,25 @@ mod tests {
         app.handle_event(&Event::FocusGained);
 
         assert!(AppFixture::wait_for_text(&mut app, "+0 -0 ?3"));
+    }
+
+    #[test]
+    fn an_unfocused_window_underlines_its_cursor_row() {
+        let fixture = AppFixture::with_diff();
+
+        let app = AppFixture::unfocused(&fixture);
+
+        assert_eq!(AppFixture::underlined_rows(&app), 1);
+    }
+
+    #[test]
+    fn a_window_that_regains_focus_drops_the_underline() {
+        let fixture = AppFixture::with_diff();
+        let mut app = AppFixture::unfocused(&fixture);
+
+        app.handle_event(&Event::FocusGained);
+
+        assert_eq!(AppFixture::underlined_rows(&app), 0);
     }
 
     #[test]
