@@ -252,7 +252,7 @@ nix flake check
 | `docs/agents/source-folders.md` | add a file under `src/`, move a file there, or make a folder there |
 | `docs/agents/platform-code.md` | change a file or a re-export that a `target_os` cfg attribute limits, or write such an attribute |
 | `docs/agents/tmux-tests.md` | write or change a test that runs tmux |
-| `docs/agents/hint-lines.md` | write or change a dialog's hint line, or add a text-editing key |
+| `docs/agents/hint-lines.md` | add or change a TUI key, a dialog's hint line, or the hint bar |
 | `docs/agents/tmux-commands.md` | write or change a tmux command that Ringleader runs or writes into the generated config |
 | `docs/agents/features/pull.md` | change the pull that the `p` key starts |
 | `docs/agents/features/direnv.md` | change how create or restart launches an agent, or which variables the agent gets |

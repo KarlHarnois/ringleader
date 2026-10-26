@@ -1,6 +1,8 @@
 # Hint lines
 
-**Every rule in this file binds each change to a dialog's hint line and each new text-editing key.**
+**Every rule in this file binds each change to a TUI key, a dialog's hint line, or the hint bar.**
+
+## Dialog hint lines
 
 **A dialog's hint line lists only two kinds of keys:**
 
@@ -10,3 +12,10 @@
 **Never list a text-editing key in a hint line:** every terminal user already expects those keys. A text-editing key is a key that moves the cursor in a text field or changes the field's text. A key that types a printable character is not a text-editing key.
 
 **Add each new text-editing key to the type that edits the field the key acts on.**
+
+## The hint bar
+
+**Besides `?` and `q`, every key that `KeyHints` lists passes both tests:**
+
+- The key's meaning is Ringleader's own.
+- A user presses the key often.

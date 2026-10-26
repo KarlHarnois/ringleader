@@ -238,6 +238,7 @@ impl App {
         StatusBar::new(theme)
             .with_message(status.message())
             .with_note(home.note())
+            .with_hints(home.key_hints())
     }
 
     fn handle_key(&mut self, key: &KeyEvent) -> AppRequest {
@@ -1172,6 +1173,24 @@ mod tests {
         assert!(screen.contains("1 ▸ alpha ●1"));
         assert!(!screen.contains("docs"));
         assert!(screen.contains("fix-auth"));
+    }
+
+    #[test]
+    fn a_selected_repo_heading_offers_enter_fold_in_the_hint_bar() {
+        let fixture = UiHarness::two_repos();
+        let app = AppFixture::started(&fixture, 100, 28);
+
+        assert!(AppFixture::status_line(&app, 100).contains("Enter fold"));
+    }
+
+    #[test]
+    fn the_empty_home_screen_offers_no_session_key_in_the_hint_bar() {
+        let app = AppFixture::started(&ServiceFixture::new(), 100, 28);
+
+        assert_eq!(
+            AppFixture::status_line(&app, 100),
+            " n new   u usage   ? help   q quit"
+        );
     }
 
     #[test]
@@ -2388,7 +2407,7 @@ mod tests {
         assert_eq!(fixture.multiplexer().attached().len(), 1);
         assert_eq!(
             AppFixture::status_line(&app, 100),
-            " n new   d delete   R rename   Enter attach   t shell   s restart   r refresh   ? help   q quit"
+            " n new   d delete   Enter attach   / find   t shell   o PR   p pull   u usage   ? help   q quit"
         );
     }
 

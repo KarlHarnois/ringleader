@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 use super::bell::Bell;
 use super::fold_change::FoldChange;
 use super::home_view::LayoutTier;
+use super::key_hints::KeyHints;
 use super::preview_panel::PreviewPanel;
 use super::status_bar::{StatusBar, StatusNote};
 use crate::application::ports::FoldStore;
@@ -82,6 +83,16 @@ impl HomeState {
     fn visual_note(&self) -> String {
         let count = SessionCount::new(self.sessions.visual_names().len());
         format!("{} {count} · {}", Self::VISUAL_MODE, Self::VISUAL_KEYS)
+    }
+
+    pub fn key_hints(&self) -> KeyHints {
+        if self.sessions.selected_heading().is_some() {
+            return KeyHints::on_heading();
+        }
+        match self.sessions.selected() {
+            Some(_) => KeyHints::on_session(),
+            None => KeyHints::without_selection(),
+        }
     }
 
     pub fn resize(
