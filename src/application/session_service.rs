@@ -2,18 +2,21 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use super::batch_report::BatchReport;
 use super::pending::Pending;
 use super::ports::{
-    Clock, ConfigError, ConfigSource, PullRequestError, RegistryError, SessionRegistry,
+    Clock, ConfigError, ConfigSource, HostProbe, PullRequestError, RegistryError, SessionRegistry,
 };
 use super::pull_request_catalog::PullRequestCatalog;
 use super::reconciliation::Reconciliation;
+use super::repo_stop_plan::RepoStopPlan;
 use super::restart_report::RestartReport;
 use super::service_context::{LoadedConfig, ServiceContext};
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
 use super::session_access::{SessionAccess, ShellOutcome};
 use super::session_lifecycle::SessionLifecycle;
+use super::stop_report::StopReport;
 use super::usage_catalog::UsageCatalog;
 use super::usage_reading::UsageReading;
 use crate::application::CreateRequest;
@@ -30,12 +33,14 @@ use crate::application::repos::repo_catalog::RepoCatalog;
 use crate::application::{AddRepoRequest, RepoAddition};
 use crate::application::{DeleteConfirmation, DeleteImpact};
 use crate::domain::{
-    Config, DiffStat, KeyBindings, PullRequest, Repo, Session, SessionObservation, SessionSummary,
+    Config, DiffStat, KeyBindings, PullRequest, Repo, RepoGroup, Session, SessionObservation,
+    SessionSummary,
 };
 
 pub struct SessionService {
     config: LoadedConfig,
     entries: Vec<Session>,
+    rereads_failing: bool,
     registry: Arc<dyn SessionRegistry>,
     config_source: Arc<dyn ConfigSource>,
     monitor: SessionMonitor,
@@ -45,6 +50,7 @@ pub struct SessionService {
     pull_request_catalog: PullRequestCatalog,
     usage_catalog: UsageCatalog,
     clock: Arc<dyn Clock>,
+    host: Arc<dyn HostProbe>,
     doctor: Doctor,
     paths: DiagnosticPaths,
 }
@@ -59,10 +65,12 @@ impl SessionService {
             pull_request_catalog: PullRequestCatalog::new(ports.repos().pull_requests()),
             usage_catalog: UsageCatalog::new(ports.agents().usage_meters(), ports.state().clock()),
             clock: ports.state().clock(),
+            host: ports.repos().host(),
             doctor: Doctor::new(&ports, context.diagnostics().clone()),
             paths: context.diagnostics().clone(),
             config: context.into_config(),
             entries: Vec::new(),
+            rereads_failing: false,
             registry: ports.state().registry(),
             config_source: ports.state().config_source(),
         }
@@ -110,8 +118,8 @@ impl SessionService {
         self.catalog.find_repos(self.config())
     }
 
-    pub fn default_repo(&self) -> Pending<Option<Repo>> {
-        self.catalog.default_repo(self.config(), &self.entries)
+    pub fn default_repo(&self, preferred_repo: Option<PathBuf>) -> Pending<Option<Repo>> {
+        self.catalog.default_repo(self.config(), preferred_repo)
     }
 
     pub fn repo_at(&self, input: &str) -> Pending<Repo> {
@@ -176,25 +184,26 @@ impl SessionService {
         Ok(())
     }
 
-    pub fn observe(&mut self, persist: bool) -> Result<Vec<SessionSummary>, ServiceError> {
-        let observations = self.monitor.observe_all()?;
-        self.observe_with(observations, persist)
+    pub fn observe(&mut self) -> Result<Vec<SessionSummary>, ServiceError> {
+        Ok(self.reconcile()?.into_summaries())
+    }
+
+    pub fn observe_and_record(&mut self) -> Result<Vec<SessionSummary>, ServiceError> {
+        let reconciliation = self.reconcile()?;
+        if reconciliation.changed() && self.read_only_reason().is_none() {
+            self.registry.save(reconciliation.entries())?;
+        }
+        Ok(reconciliation.into_summaries())
     }
 
     pub fn start_observing(&self) -> Pending<Vec<SessionObservation>> {
         self.monitor.start_observing()
     }
 
-    pub fn observe_with(
-        &mut self,
-        observations: Vec<SessionObservation>,
-        persist: bool,
-    ) -> Result<Vec<SessionSummary>, ServiceError> {
-        let reconciliation = self.reconcile_with(observations);
-        if persist && reconciliation.changed() {
-            self.registry.save(reconciliation.entries())?;
-        }
-        Ok(reconciliation.into_summaries())
+    pub fn observe_with(&mut self, observations: Vec<SessionObservation>) -> Vec<SessionSummary> {
+        let reread = self.refresh_entries();
+        self.log_reread_change(reread);
+        self.reconcile_with(observations).into_summaries()
     }
 
     pub fn diff_stats(&self, names: &[String]) -> Vec<(String, Result<DiffStat, ServiceError>)> {
@@ -301,17 +310,72 @@ impl SessionService {
         Ok(outcome.with_recovery(recovery))
     }
 
+    pub fn stop_session(&mut self, name: &str) -> Result<(), ServiceError> {
+        let reconciliation = self.reconcile()?;
+        self.lifecycle.stop(&reconciliation, name)
+    }
+
+    pub fn stop_repo(
+        &mut self,
+        repo: &RepoGroup,
+        cancelled: impl Fn() -> bool,
+    ) -> Result<StopReport, ServiceError> {
+        let reconciliation = self.reconcile()?;
+        let plan = RepoStopPlan::new(&reconciliation.live_entries_in(repo, self.host.as_ref()));
+        let stops = self.stop_sessions(plan.targets(), cancelled);
+        Ok(StopReport::new(repo.clone(), stops, plan.into_skips()))
+    }
+
     pub fn restart_all(&mut self, stop: impl Fn() -> bool) -> Result<RestartReport, ServiceError> {
         let names = self.reconcile()?.restartable_names();
-        let restarts = names
-            .into_iter()
+        Ok(self.restart_sessions(&names, stop))
+    }
+
+    pub fn restart_sessions(&mut self, names: &[String], stop: impl Fn() -> bool) -> RestartReport {
+        RestartReport::from(self.each_session(names, stop, Self::restart_session))
+    }
+
+    pub fn stop_sessions(&mut self, names: &[String], stop: impl Fn() -> bool) -> BatchReport<()> {
+        self.each_session(names, stop, Self::stop_session)
+    }
+
+    pub fn merge_upstream_sessions(&mut self, names: &[String]) -> BatchReport<MergeReport> {
+        self.each_session(names, Self::uninterrupted, Self::merge_upstream)
+    }
+
+    pub fn delete_impacts(&mut self, names: &[String]) -> BatchReport<DeleteImpact> {
+        self.each_session(names, Self::uninterrupted, Self::delete_impact)
+    }
+
+    pub fn delete_sessions(
+        &mut self,
+        confirmations: &[(String, DeleteConfirmation)],
+        stop: impl Fn() -> bool,
+    ) -> BatchReport<DeleteOutcome> {
+        let outcomes = confirmations
+            .iter()
             .take_while(|_| !stop())
-            .map(|name| {
-                let restart = self.restart_session(&name);
-                (name, restart)
-            })
+            .map(|(name, confirmation)| (name.clone(), self.delete_session(name, confirmation)))
             .collect();
-        Ok(RestartReport::new(restarts))
+        BatchReport::new(outcomes)
+    }
+
+    fn each_session<T>(
+        &mut self,
+        names: &[String],
+        stop: impl Fn() -> bool,
+        action: impl Fn(&mut Self, &str) -> Result<T, ServiceError>,
+    ) -> BatchReport<T> {
+        let outcomes = names
+            .iter()
+            .take_while(|_| !stop())
+            .map(|name| (name.clone(), action(self, name)))
+            .collect();
+        BatchReport::new(outcomes)
+    }
+
+    fn uninterrupted() -> bool {
+        false
     }
 
     pub fn merge_upstream(&mut self, name: &str) -> Result<MergeReport, ServiceError> {
@@ -325,6 +389,17 @@ impl SessionService {
         self.access.attach(reconciliation.row(name)?)
     }
 
+    pub fn switch_client(&mut self, name: &str, client: &str) -> Result<(), ServiceError> {
+        let reconciliation = self.reconcile()?;
+        self.access.switch_client(reconciliation.row(name)?, client)
+    }
+
+    pub fn send_prompt(&mut self, name: &str, prompt: &str) -> Result<(), ServiceError> {
+        let reconciliation = self.reconcile()?;
+        self.access
+            .send_prompt(&reconciliation.managed(name)?, prompt)
+    }
+
     pub fn open_shell(&mut self, name: &str) -> Result<ShellOutcome, ServiceError> {
         let reconciliation = self.reconcile()?;
         self.access.open_shell(reconciliation.row(name)?)
@@ -335,6 +410,14 @@ impl SessionService {
             .entry(name)
             .ok_or_else(|| ServiceError::NotFound(format!("no managed session named {name}")))?;
         self.access.open_terminal(session)
+    }
+
+    pub fn open_repo_terminal(&self, group: &RepoGroup) -> Result<(), ServiceError> {
+        self.access.open_repo_terminal(group)
+    }
+
+    pub fn open_repo_page(&self, group: &RepoGroup) -> Result<(), ServiceError> {
+        self.access.open_repo_page(group)
     }
 
     pub fn latest_pull_request(&self, name: &str) -> Option<PullRequest> {
@@ -369,8 +452,30 @@ impl SessionService {
     }
 
     fn reconcile(&mut self) -> Result<Reconciliation, ServiceError> {
+        self.refresh_entries()?;
         let observations = self.monitor.observe_all()?;
         Ok(self.reconcile_with(observations))
+    }
+
+    fn log_reread_change(&mut self, reread: Result<(), RegistryError>) {
+        match (reread, self.rereads_failing) {
+            (Err(error), false) => {
+                log::warn!(
+                    "could not reread the registry, showing the sessions read before: {error}"
+                );
+                self.rereads_failing = true;
+            }
+            (Ok(()), true) => {
+                log::info!("reread the registry again");
+                self.rereads_failing = false;
+            }
+            _ => {}
+        }
+    }
+
+    fn refresh_entries(&mut self) -> Result<(), RegistryError> {
+        self.entries = self.registry.load()?;
+        Ok(())
     }
 
     fn reconcile_with(&mut self, observations: Vec<SessionObservation>) -> Reconciliation {
@@ -407,9 +512,12 @@ pub enum CorruptRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::application::ports::Multiplexer;
+    use crate::domain::SessionState;
+    use crate::domain::StopSkip;
     use crate::domain::{Agent, AgentUsage};
     use crate::test_support::{
-        Deadline, FakeMultiplexer, FakeSessionRegistry, FakeUsageMeter, ServiceFixture,
+        Deadline, FakeMultiplexer, FakeSessionRegistry, FakeUsageMeter, LogCapture, ServiceFixture,
     };
 
     #[test]
@@ -461,6 +569,144 @@ mod tests {
         service.reload().unwrap();
 
         assert_eq!(service.last_usage(), None);
+    }
+
+    struct OtherRingleaderFixture;
+
+    impl OtherRingleaderFixture {
+        fn renamable() -> ServiceFixture {
+            let session = ServiceFixture::session("fix-auth");
+            ServiceFixture::new()
+                .with_sessions(std::slice::from_ref(&session))
+                .with_workspace(ServiceFixture::workspace_for(&[&session]))
+                .with_host(ServiceFixture::host_for(&[&session]))
+                .with_multiplexer(
+                    FakeMultiplexer::new().with_live(ServiceFixture::waiting(&session)),
+                )
+        }
+
+        fn corrupt() -> RegistryError {
+            RegistryError::Corrupt {
+                path: PathBuf::from("/state/ringleader/sessions.json"),
+                detail: "expected value".to_string(),
+            }
+        }
+    }
+
+    #[test]
+    fn a_create_keeps_a_stopped_session_another_ringleader_saved_meanwhile() {
+        let fixture = ServiceFixture::new();
+        let mut service = fixture.service();
+        fixture
+            .registry()
+            .save_from_elsewhere(ServiceFixture::session("dark-mode"));
+
+        service
+            .create_session(&CreateRequest::new("fix-auth", ServiceFixture::repo()))
+            .unwrap();
+
+        assert_eq!(fixture.registry().names(), ["dark-mode", "fix-auth"]);
+    }
+
+    #[test]
+    fn a_listing_taken_before_another_ringleader_renamed_a_session_keeps_the_rename() {
+        let fixture = OtherRingleaderFixture::renamable();
+        let mut service = fixture.service();
+        let listed_before = fixture.multiplexer().observe_all().unwrap();
+        fixture
+            .service()
+            .rename_session("fix-auth", "fix-login")
+            .unwrap();
+
+        service.observe_with(listed_before);
+
+        assert_eq!(fixture.registry().names(), ["fix-login"]);
+    }
+
+    #[test]
+    fn a_registry_that_cannot_be_reread_keeps_the_sessions_read_before_in_view() {
+        let fixture = OtherRingleaderFixture::renamable();
+        let mut service = fixture.service();
+        let listing = fixture.multiplexer().observe_all().unwrap();
+        fixture
+            .registry()
+            .break_loads(OtherRingleaderFixture::corrupt());
+
+        let rows = service.observe_with(listing);
+
+        assert!(rows.iter().any(|row| row.session().is_some()));
+    }
+
+    #[test]
+    fn a_registry_that_stays_unreadable_is_logged_once() {
+        let log = LogCapture::installed();
+        let fixture = OtherRingleaderFixture::renamable();
+        let mut service = fixture.service();
+        let listing = fixture.multiplexer().observe_all().unwrap();
+        fixture.registry().break_loads(RegistryError::Corrupt {
+            path: PathBuf::from("/state/ringleader/sessions.json"),
+            detail: "unreadable on every poll".to_string(),
+        });
+
+        service.observe_with(listing.clone());
+        service.observe_with(listing);
+
+        assert_eq!(log.count_containing("unreadable on every poll"), 1);
+    }
+
+    #[test]
+    fn a_registry_that_turns_unreadable_again_is_logged_again() {
+        let log = LogCapture::installed();
+        let fixture = OtherRingleaderFixture::renamable();
+        let mut service = fixture.service();
+        let listing = fixture.multiplexer().observe_all().unwrap();
+        let unreadable = RegistryError::Corrupt {
+            path: PathBuf::from("/state/ringleader/sessions.json"),
+            detail: "unreadable twice with a good read between".to_string(),
+        };
+        fixture.registry().break_loads(unreadable.clone());
+        service.observe_with(listing.clone());
+        fixture.registry().mend_loads();
+        service.observe_with(listing.clone());
+        fixture.registry().break_loads(unreadable);
+
+        service.observe_with(listing);
+
+        assert_eq!(
+            log.count_containing("unreadable twice with a good read between"),
+            2
+        );
+    }
+
+    #[test]
+    fn a_change_refuses_while_the_registry_cannot_be_reread() {
+        let fixture = OtherRingleaderFixture::renamable();
+        let mut service = fixture.service();
+        fixture
+            .registry()
+            .break_loads(OtherRingleaderFixture::corrupt());
+
+        let refusal = service.rename_session("fix-auth", "fix-login");
+
+        assert!(refusal.is_err());
+        assert_eq!(fixture.registry().save_count(), 0);
+    }
+
+    #[test]
+    fn a_recording_observation_on_a_broken_config_saves_nothing() {
+        let adoptable = ServiceFixture::session("fix-auth");
+        let fixture = ServiceFixture::new()
+            .with_broken_config(ConfigError::Parse {
+                path: PathBuf::from("/config/ringleader/config.toml"),
+                detail: "expected `=`".to_string(),
+            })
+            .with_multiplexer(
+                FakeMultiplexer::new().with_live(ServiceFixture::waiting(&adoptable)),
+            );
+
+        fixture.service().observe_and_record().unwrap();
+
+        assert_eq!(fixture.registry().save_count(), 0);
     }
 
     #[test]
@@ -574,7 +820,7 @@ mod tests {
             fixture
                 .multiplexer()
                 .calls()
-                .contains(&"apply_config C-q M-n M-k M-Up M-l".to_string())
+                .contains(&"apply_config C-q M-n M-k M-Up M-l C-k".to_string())
         );
     }
 
@@ -588,7 +834,7 @@ mod tests {
             fixture
                 .multiplexer()
                 .calls()
-                .contains(&"apply_config C-q M-j M-Down M-k M-Up M-l".to_string())
+                .contains(&"apply_config C-q M-j M-Down M-k M-Up M-l C-k".to_string())
         );
     }
 
@@ -790,6 +1036,55 @@ mod tests {
     }
 
     #[test]
+    fn restart_sessions_restarts_the_named_sessions_and_skips_a_waiting_one() {
+        let fixture = RestartAllFixture::mixed();
+        let names = ["alpha", "charlie"].map(String::from);
+
+        let report = fixture.service().restart_sessions(&names, || false);
+
+        assert_eq!(RestartAllFixture::restarted_names(&report), ["alpha"]);
+        assert_eq!(
+            report.failures().map(|(name, _)| name).collect::<Vec<_>>(),
+            ["charlie"]
+        );
+    }
+
+    #[test]
+    fn stop_sessions_stops_a_waiting_session_and_skips_a_working_and_an_unmanaged_one() {
+        let fixture = RestartAllFixture::mixed();
+        let names = ["charlie", "delta", "mystery"].map(String::from);
+
+        let report = fixture.service().stop_sessions(&names, || false);
+
+        assert_eq!(
+            report.succeeded().map(|(name, _)| name).collect::<Vec<_>>(),
+            ["charlie"]
+        );
+        assert!(report.failures().all(|(_, error)| error.is_refusal()));
+        assert_eq!(report.failures().count(), 2);
+    }
+
+    #[test]
+    fn a_batch_that_is_told_to_stop_leaves_the_remaining_sessions_alone() {
+        let fixture = RestartAllFixture::mixed();
+        let names = ["charlie"].map(String::from);
+
+        let report = fixture.service().stop_sessions(&names, || true);
+
+        assert!(report.is_empty());
+    }
+
+    #[test]
+    fn delete_impacts_measures_each_named_session() {
+        let fixture = RestartAllFixture::mixed();
+        let names = ["alpha", "bravo"].map(String::from);
+
+        let report = fixture.service().delete_impacts(&names);
+
+        assert_eq!(report.succeeded().count(), 2);
+    }
+
+    #[test]
     fn restart_all_restarts_every_exited_and_stopped_session_in_name_order() {
         let fixture = RestartAllFixture::mixed();
 
@@ -903,5 +1198,146 @@ mod tests {
             .map(|outcome| outcome.recovery().is_some())
             .collect();
         assert_eq!(recoveries, [true, false, false]);
+    }
+
+    struct RepoStopFixture;
+
+    impl RepoStopFixture {
+        const OTHER_REPO: &'static str = "/repos/other-project";
+
+        fn sessions() -> Vec<Session> {
+            let mut sessions = ["alpha", "bravo", "charlie", "echo"]
+                .map(ServiceFixture::session)
+                .to_vec();
+            sessions.push(ServiceFixture::session_at(
+                "delta",
+                Self::OTHER_REPO,
+                ServiceFixture::CREATED_AT,
+            ));
+            sessions
+        }
+
+        fn mixed() -> ServiceFixture {
+            let sessions = Self::sessions();
+            let all: Vec<&Session> = sessions.iter().collect();
+            ServiceFixture::new()
+                .with_sessions(&sessions)
+                .with_workspace(ServiceFixture::workspace_for(&all))
+                .with_host(ServiceFixture::host_for(&all))
+                .with_multiplexer(Self::live_sessions())
+        }
+
+        fn live_sessions() -> FakeMultiplexer {
+            let session = ServiceFixture::session;
+            FakeMultiplexer::new()
+                .with_live(ServiceFixture::waiting(&session("alpha")))
+                .with_live(ServiceFixture::exited(&session("bravo")))
+                .with_live(ServiceFixture::working(&session("charlie")))
+                .with_live(ServiceFixture::waiting(&ServiceFixture::session_at(
+                    "delta",
+                    Self::OTHER_REPO,
+                    ServiceFixture::CREATED_AT,
+                )))
+        }
+
+        fn repo() -> RepoGroup {
+            ServiceFixture::repo_group(ServiceFixture::REPO)
+        }
+
+        fn stopped_names(report: &StopReport) -> Vec<&str> {
+            report
+                .outcomes()
+                .filter(|(_, stop)| stop.is_ok())
+                .map(|(name, _)| name)
+                .collect()
+        }
+    }
+
+    #[test]
+    fn stop_repo_stops_the_waiting_and_exited_sessions_of_that_repo_only() {
+        let fixture = RepoStopFixture::mixed();
+
+        let report = fixture
+            .service()
+            .stop_repo(&RepoStopFixture::repo(), || false)
+            .unwrap();
+
+        assert_eq!(RepoStopFixture::stopped_names(&report), ["alpha", "bravo"]);
+        assert_eq!(
+            fixture.multiplexer().live_names(),
+            ["ringleader-charlie", "ringleader-delta"]
+        );
+    }
+
+    #[test]
+    fn stop_repo_skips_a_working_session_and_leaves_out_a_stopped_one() {
+        let fixture = RepoStopFixture::mixed();
+
+        let report = fixture
+            .service()
+            .stop_repo(&RepoStopFixture::repo(), || false)
+            .unwrap();
+
+        let skips: Vec<(&str, StopSkip)> = report.skips().collect();
+        assert_eq!(skips, [("charlie", StopSkip::State(SessionState::Working))]);
+    }
+
+    #[test]
+    fn stop_repo_keeps_going_past_a_refused_stop_and_reports_it() {
+        let fixture = RepoStopFixture::mixed()
+            .with_multiplexer(RepoStopFixture::live_sessions().with_caller("ringleader-alpha"));
+
+        let report = fixture
+            .service()
+            .stop_repo(&RepoStopFixture::repo(), || false)
+            .unwrap();
+
+        let failures: Vec<&str> = report.failures().map(|(name, _)| name).collect();
+        assert_eq!(failures, ["alpha"]);
+        assert_eq!(RepoStopFixture::stopped_names(&report), ["bravo"]);
+    }
+
+    #[test]
+    fn stop_repo_skips_the_rest_once_cancelled() {
+        let fixture = RepoStopFixture::mixed();
+        let checks = std::cell::Cell::new(0);
+
+        let report = fixture
+            .service()
+            .stop_repo(&RepoStopFixture::repo(), || {
+                checks.set(checks.get() + 1);
+                checks.get() > 1
+            })
+            .unwrap();
+
+        assert_eq!(RepoStopFixture::stopped_names(&report), ["alpha"]);
+    }
+
+    #[test]
+    fn stop_repo_matches_a_repo_named_through_a_link_to_its_recorded_path() {
+        let link = Path::new("/links/example-project");
+        let sessions = RepoStopFixture::sessions();
+        let all: Vec<&Session> = sessions.iter().collect();
+        let host =
+            ServiceFixture::host_for(&all).with_canonical(link, Path::new(ServiceFixture::REPO));
+        let fixture = RepoStopFixture::mixed().with_host(host);
+        let linked_repo = ServiceFixture::repo_group("/links/example-project");
+
+        let report = fixture.service().stop_repo(&linked_repo, || false).unwrap();
+
+        assert_eq!(RepoStopFixture::stopped_names(&report), ["alpha", "bravo"]);
+    }
+
+    #[test]
+    fn stop_repo_of_the_other_group_finds_nothing_to_stop() {
+        let fixture = RepoStopFixture::mixed();
+
+        let report = fixture
+            .service()
+            .stop_repo(&RepoGroup::Other, || false)
+            .unwrap();
+
+        assert_eq!(report.outcomes().count(), 0);
+        assert_eq!(fixture.multiplexer().live_names().len(), 4);
     }
 }

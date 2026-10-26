@@ -133,11 +133,11 @@ mod tests {
             words.iter().map(|word| word.to_string()).collect()
         }
 
-        fn environment_once_started(pid: u32) -> Vec<String> {
+        fn environment_once_holding(pid: u32, entry: &str) -> Vec<String> {
             let mut environment = Vec::new();
             Deadline::for_background_work().wait_until(|| {
                 environment = ProcfsProcessTable::environment(pid);
-                !environment.is_empty()
+                environment.iter().any(|variable| variable == entry)
             });
             environment
         }
@@ -165,14 +165,14 @@ mod tests {
     #[test]
     fn the_environment_of_a_child_holds_what_it_started_with() {
         let marker = ProcessMarker::new();
+        let (name, value) = marker.variable();
+        let entry = format!("{}={}", name.to_string_lossy(), value.to_string_lossy());
         let mut child = marker.sleeping_child();
 
-        let environment = TableFixture::environment_once_started(child.id());
+        let environment = TableFixture::environment_once_holding(child.id(), &entry);
         child.kill().unwrap();
         child.wait().unwrap();
 
-        let (name, value) = marker.variable();
-        let entry = format!("{}={}", name.to_string_lossy(), value.to_string_lossy());
         assert!(environment.contains(&entry));
     }
 }

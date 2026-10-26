@@ -15,6 +15,7 @@ pub trait Multiplexer: Send + Sync {
     fn caller_in_other_tmux(&self) -> bool;
     fn observe_all(&self) -> Result<Vec<SessionObservation>, MultiplexerError>;
     fn attach(&self, target: &AttachTarget) -> Result<(), MultiplexerError>;
+    fn switch_client(&self, client: &str, target: &AttachTarget) -> Result<(), MultiplexerError>;
     fn capture_pane(&self, tmux_name: &str) -> Result<String, MultiplexerError>;
     fn rename_session(
         &self,
@@ -25,6 +26,7 @@ pub trait Multiplexer: Send + Sync {
     fn respawn_agent(&self, tmux_name: &str, launch: &AgentLaunch) -> Result<(), MultiplexerError>;
     fn type_when_ready(&self, tmux_name: &str, lines: &[String]) -> Result<(), MultiplexerError>;
     fn type_if_ready(&self, tmux_name: &str, lines: &[String]) -> Result<(), MultiplexerError>;
+    fn submit_when_ready(&self, tmux_name: &str, prompt: &str) -> Result<(), MultiplexerError>;
     fn agent_at_prompt(&self, tmux_name: &str) -> Result<bool, MultiplexerError>;
     fn ensure_shell_window(
         &self,

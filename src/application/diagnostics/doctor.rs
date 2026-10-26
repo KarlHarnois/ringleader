@@ -262,11 +262,11 @@ mod tests {
     }
 
     #[test]
-    fn an_old_tmux_is_a_problem() {
+    fn a_tmux_whose_popups_lack_the_finder_flags_is_a_problem() {
         let fixture = DoctorFixture::healthy()
-            .with_multiplexer(FakeMultiplexer::new().with_versions("3.1c", None));
+            .with_multiplexer(FakeMultiplexer::new().with_versions("3.2a", None));
 
-        assert!(DoctorFixture::has_problem(&fixture, "older than 3.2"));
+        assert!(DoctorFixture::has_problem(&fixture, "older than 3.3"));
     }
 
     #[test]

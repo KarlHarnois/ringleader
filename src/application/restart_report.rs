@@ -1,33 +1,38 @@
+use super::batch_report::BatchReport;
 use super::service_error::ServiceError;
 use crate::application::StartOutcome;
 
 pub struct RestartReport {
-    restarts: Vec<(String, Result<StartOutcome, ServiceError>)>,
+    restarts: BatchReport<StartOutcome>,
+}
+
+impl From<BatchReport<StartOutcome>> for RestartReport {
+    fn from(restarts: BatchReport<StartOutcome>) -> Self {
+        Self { restarts }
+    }
 }
 
 impl RestartReport {
     const NOTHING_TO_RESTART: &'static str = "No exited or stopped session to restart.";
+    const RESTARTED: &'static str = "Restarted";
 
+    #[cfg(test)]
     pub fn new(restarts: Vec<(String, Result<StartOutcome, ServiceError>)>) -> Self {
-        Self { restarts }
+        Self {
+            restarts: BatchReport::new(restarts),
+        }
     }
 
     pub fn outcomes(&self) -> impl Iterator<Item = (&str, Result<&StartOutcome, &ServiceError>)> {
-        self.restarts
-            .iter()
-            .map(|(name, restart)| (name.as_str(), restart.as_ref()))
+        self.restarts.outcomes()
     }
 
     pub fn restarted(&self) -> impl Iterator<Item = &StartOutcome> {
-        self.restarts
-            .iter()
-            .filter_map(|(_, restart)| restart.as_ref().ok())
+        self.restarts.succeeded().map(|(_, outcome)| outcome)
     }
 
     pub fn failures(&self) -> impl Iterator<Item = (&str, &ServiceError)> {
-        self.restarts.iter().filter_map(|(name, restart)| {
-            restart.as_ref().err().map(|error| (name.as_str(), error))
-        })
+        self.restarts.failures()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -35,7 +40,7 @@ impl RestartReport {
     }
 
     pub fn needs_attention(&self) -> bool {
-        self.failures().next().is_some() || self.warning_note().is_some()
+        self.restarts.has_failures() || self.warning_note().is_some()
     }
 
     pub fn summary(&self) -> String {
@@ -44,23 +49,13 @@ impl RestartReport {
         }
         let notes = [
             self.recovery_note(),
-            self.failure_note(),
+            self.restarts.failure_note(),
             self.warning_note(),
         ];
-        let sentences: Vec<String> = std::iter::once(self.headline())
+        let sentences: Vec<String> = std::iter::once(self.restarts.headline(Self::RESTARTED))
             .chain(notes.into_iter().flatten())
             .collect();
         sentences.join(" ")
-    }
-
-    fn headline(&self) -> String {
-        let restarted = self.restarted().count();
-        let total = self.restarts.len();
-        if restarted == total {
-            format!("Restarted {}.", Self::sessions(total))
-        } else {
-            format!("Restarted {restarted} of {}.", Self::sessions(total))
-        }
     }
 
     fn recovery_note(&self) -> Option<String> {
@@ -69,27 +64,10 @@ impl RestartReport {
             .map(|note| format!("Also {note}."))
     }
 
-    fn failure_note(&self) -> Option<String> {
-        let mut failures = self.failures();
-        let (name, error) = failures.next()?;
-        let first = format!("{name} failed: {error}.");
-        match failures.count() {
-            0 => Some(first),
-            more => Some(format!("{first} {more} more failed.")),
-        }
-    }
-
     fn warning_note(&self) -> Option<String> {
         self.restarted()
             .find_map(StartOutcome::warning)
             .map(|warning| format!("But {warning}."))
-    }
-
-    fn sessions(count: usize) -> String {
-        match count {
-            1 => "1 session".to_string(),
-            count => format!("{count} sessions"),
-        }
     }
 }
 

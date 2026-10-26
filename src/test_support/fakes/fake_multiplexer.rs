@@ -38,6 +38,7 @@ struct MultiplexerState {
     failures: HashMap<&'static str, MultiplexerError>,
     failed_create_still_creates: bool,
     attached: Vec<AttachTarget>,
+    switched: Vec<(String, AttachTarget)>,
     calls: Vec<String>,
     client_version: String,
     server: Option<ServerState>,
@@ -51,13 +52,14 @@ struct MultiplexerState {
 
 impl FakeMultiplexer {
     pub const SOCKET: &'static str = "/run/user/1000/ringleader/tmux/tmux.sock";
-    pub const STATE_CHANGING: [&'static str; 7] = [
+    pub const STATE_CHANGING: [&'static str; 8] = [
         "create_session",
         "kill_session",
         "rename_session",
         "respawn_agent",
         "type_when_ready",
         "type_if_ready",
+        "submit_when_ready",
         "ensure_shell_window",
     ];
     const TYPING_GATE_LIMIT: Duration = Duration::from_secs(5);
@@ -80,6 +82,7 @@ impl FakeMultiplexer {
                 failures: HashMap::new(),
                 failed_create_still_creates: false,
                 attached: Vec::new(),
+                switched: Vec::new(),
                 calls: Vec::new(),
                 client_version: "3.6a".to_string(),
                 server: Some(ServerState::new("3.6a", 1)),
@@ -257,6 +260,10 @@ impl FakeMultiplexer {
         self.typed_by("type_if_ready", tmux_name)
     }
 
+    pub fn submitted_when_ready(&self, tmux_name: &str) -> Vec<String> {
+        self.typed_by("submit_when_ready", tmux_name)
+    }
+
     fn typed_by(&self, method: &str, tmux_name: &str) -> Vec<String> {
         self.edit(|state| {
             state
@@ -280,6 +287,10 @@ impl FakeMultiplexer {
 
     pub fn attached(&self) -> Vec<AttachTarget> {
         self.edit(|state| state.attached.clone())
+    }
+
+    pub fn switched(&self) -> Vec<(String, AttachTarget)> {
+        self.edit(|state| state.switched.clone())
     }
 
     fn edit<T>(&self, change: impl FnOnce(&mut MultiplexerState) -> T) -> T {
@@ -412,6 +423,12 @@ impl Multiplexer for FakeMultiplexer {
         Ok(())
     }
 
+    fn switch_client(&self, client: &str, target: &AttachTarget) -> Result<(), MultiplexerError> {
+        self.call("switch_client", &format!("{client} {target:?}"))?;
+        self.edit(|state| state.switched.push((client.to_string(), target.clone())));
+        Ok(())
+    }
+
     fn capture_pane(&self, tmux_name: &str) -> Result<String, MultiplexerError> {
         self.call("capture_pane", tmux_name)?;
         Ok(self.edit(|state| state.captures.get(tmux_name).cloned().unwrap_or_default()))
@@ -453,6 +470,12 @@ impl Multiplexer for FakeMultiplexer {
     fn type_if_ready(&self, tmux_name: &str, lines: &[String]) -> Result<(), MultiplexerError> {
         self.call("type_if_ready", tmux_name)?;
         self.edit(|state| state.type_lines("type_if_ready", tmux_name, lines));
+        Ok(())
+    }
+
+    fn submit_when_ready(&self, tmux_name: &str, prompt: &str) -> Result<(), MultiplexerError> {
+        self.call("submit_when_ready", tmux_name)?;
+        self.edit(|state| state.type_lines("submit_when_ready", tmux_name, &[prompt.to_string()]));
         Ok(())
     }
 

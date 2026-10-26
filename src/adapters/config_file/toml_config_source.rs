@@ -16,6 +16,7 @@ pub struct TomlConfigSource {
 }
 
 impl TomlConfigSource {
+    pub const PATH_VARIABLE: &'static str = "RINGLEADER_CONFIG";
     pub const TEMPLATE: &'static str = r#"# Absolute or ~/ paths only. Environment variables are not expanded.
 # Defaults to $XDG_DATA_HOME/ringleader/worktrees.
 # worktree_root = "~/.local/share/ringleader/worktrees"
@@ -28,7 +29,8 @@ return_key = "C-q"
 # Inside your own tmux, they must not be bound in its root table, and its
 # escape-time must be low, such as 10, or Esc followed by j, k, or an arrow
 # switches sessions. A removed key that tmux binds in copy mode, other than
-# M-Up and M-Down, stays unbound there until Ringleader's tmux server restarts.
+# M-Up, M-Down, and C-k, stays unbound there until Ringleader's tmux server
+# restarts.
 next_session_keys = ["M-j", "M-Down"]
 previous_session_keys = ["M-k", "M-Up"]
 # Keys that switch between a session's agent and its shell, the one t opens,
@@ -37,6 +39,12 @@ previous_session_keys = ["M-k", "M-Up"]
 # and in copy mode, so a removed M-l stays unbound in emacs copy mode until
 # Ringleader's tmux server restarts.
 shell_toggle_keys = ["M-l"]
+# Keys that open the session finder over a session while you are attached.
+# Enter switches to the session you pick, and Esc keeps you where you were.
+# [] turns the finder off, and a missing list keeps this default. C-k takes
+# Ctrl-K, which deletes to the end of the line, away from agents and shells.
+# Inside your own tmux, they must not be bound in its root table.
+finder_keys = ["C-k"]
 state_poll_ms = 1000
 preview_refresh_ms = 750
 diff_refresh_ms = 3000
@@ -84,6 +92,11 @@ resume_args = ["--continue"]
 # startup_input is typed at every start, rename_input after a rename.
 startup_input = ["/color"]
 rename_input = ["/rename {name}"]
+# Ringleader gives claude and opencode its built-in skills, such as one that
+# runs the ringleader CLI from inside a session. built_in_skills = false turns
+# all of them off, for an organization whose Claude Code policy blocks plugin
+# loading, since claude then refuses to start.
+# built_in_skills = false
 
 [[agents]]
 name = "opencode"
@@ -100,6 +113,13 @@ resume_args = ["--continue"]
             path: path.to_path_buf(),
             default_worktree_root: default_worktree_root.to_path_buf(),
             home: home.map(Path::to_path_buf),
+        }
+    }
+
+    pub fn resolved_from(self, launch_directory: &Path) -> Self {
+        Self {
+            path: launch_directory.join(&self.path),
+            ..self
         }
     }
 
@@ -287,6 +307,33 @@ mod tests {
     }
 
     #[test]
+    fn a_relative_config_path_resolves_from_the_launch_directory() {
+        let source = TomlConfigSource::new(
+            Path::new("configs/ringleader.toml"),
+            Path::new("/data/ringleader/worktrees"),
+            None,
+        )
+        .resolved_from(Path::new("/home/example/code"));
+
+        assert_eq!(
+            source.path(),
+            Path::new("/home/example/code/configs/ringleader.toml")
+        );
+    }
+
+    #[test]
+    fn an_absolute_config_path_stays_as_given() {
+        let source = TomlConfigSource::new(
+            Path::new("/config/ringleader.toml"),
+            Path::new("/data/ringleader/worktrees"),
+            None,
+        )
+        .resolved_from(Path::new("/home/example/code"));
+
+        assert_eq!(source.path(), Path::new("/config/ringleader.toml"));
+    }
+
+    #[test]
     fn a_missing_config_loads_the_defaults_without_writing_a_file() {
         let fixture = SourceFixture::new();
 
@@ -352,6 +399,25 @@ mod tests {
 
         let toggle = config.key_bindings().shell_toggle_keys();
         assert_eq!(SourceFixture::names(toggle), ["M-l"]);
+    }
+
+    #[test]
+    fn the_finder_keys_in_a_file_reach_the_config() {
+        let fixture = SourceFixture::with_text("finder_keys = [\"M-f\", \"F9\"]\n");
+
+        let config = fixture.source().load().unwrap();
+
+        let finder = config.key_bindings().finder_keys();
+        assert_eq!(SourceFixture::names(finder), ["M-f", "F9"]);
+    }
+
+    #[test]
+    fn an_empty_finder_list_in_a_file_binds_no_finder_key() {
+        let fixture = SourceFixture::with_text("finder_keys = []\n");
+
+        let config = fixture.source().load().unwrap();
+
+        assert!(config.key_bindings().finder_keys().is_empty());
     }
 
     #[test]
@@ -601,6 +667,15 @@ mod tests {
     }
 
     #[test]
+    fn the_first_run_template_writes_the_default_finder_keys() {
+        let written = TomlConfigSource::TEMPLATE
+            .lines()
+            .any(|line| line == r#"finder_keys = ["C-k"]"#);
+
+        assert!(written);
+    }
+
+    #[test]
     fn the_first_run_template_starts_claude_in_its_permission_plan_mode() {
         let fixture = SourceFixture::new();
         fixture.source().write_first_run_template().unwrap();
@@ -615,6 +690,27 @@ mod tests {
                 .launch_argv(&session, AgentMode::Plan, ""),
             ["claude", "--name", "fix-auth", "--permission-mode", "plan"]
         );
+    }
+
+    #[test]
+    fn the_first_run_template_gives_claude_the_built_in_skills() {
+        let fixture = SourceFixture::new();
+        fixture.source().write_first_run_template().unwrap();
+
+        let config = fixture.source().load().unwrap();
+
+        assert!(config.agent("claude").unwrap().gets_built_in_skills());
+    }
+
+    #[test]
+    fn an_agent_set_to_skip_the_built_in_skills_goes_without_them() {
+        let fixture = SourceFixture::with_text(
+            "[[agents]]\nname = \"claude\"\ncommand = \"claude\"\nbuilt_in_skills = false\n",
+        );
+
+        let config = fixture.source().load().unwrap();
+
+        assert!(!config.agent("claude").unwrap().gets_built_in_skills());
     }
 
     #[test]

@@ -6,9 +6,11 @@ mod domain;
 mod test_support;
 mod ui;
 
+use std::convert;
 use std::ffi::OsString;
 use std::fs;
 use std::io::{self, Write};
+use std::iter::once;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -21,7 +23,9 @@ use ratatui::backend::CrosstermBackend;
 use adapters::agent_launch::agent_handoff::AgentHandoff;
 use adapters::agent_launch::agent_launcher::{AgentLauncher, ProcessExec};
 use adapters::agent_launch::agent_probe::AgentProbe;
+use adapters::agent_launch::built_in_skill::BuiltInSkill;
 use adapters::agent_launch::launcher_command::LauncherCommand;
+use adapters::agent_launch::ringleader_shim::RingleaderShim;
 use adapters::claude::claude_usage_meter::ClaudeUsageMeter;
 use adapters::config_file::toml_config_source::TomlConfigSource;
 use adapters::direnv::direnv_directory_environment::DirenvDirectoryEnvironment;
@@ -30,8 +34,11 @@ use adapters::filesystem::directory_scratch_space::DirectoryScratchSpace;
 use adapters::filesystem::file_lock::FileLock;
 use adapters::filesystem::json_fold_store::JsonFoldStore;
 use adapters::filesystem::json_session_registry::JsonSessionRegistry;
+use adapters::gh::gh_program::GhProgram;
 use adapters::gh::gh_pull_requests::GhPullRequests;
+use adapters::gh::gh_repo_pages::GhRepoPages;
 use adapters::gh::null_pull_requests::NullPullRequests;
+use adapters::gh::null_repo_pages::NullRepoPages;
 use adapters::git::git_runner::GitRunner;
 use adapters::host::app_log::AppLog;
 use adapters::host::process_environment::{ProcessEnvironment, ProgramPaths};
@@ -46,20 +53,26 @@ use adapters::sqlite::sqlite_opencode_database::SqliteOpencodeDatabase;
 use adapters::terminal_emulator::system_terminal_emulator::SystemTerminalEmulator;
 use adapters::tmux::server_files::ServerFiles;
 use adapters::tmux::tmux_command::TmuxCommand;
+use adapters::tmux::tmux_finder_popup::TmuxFinderPopup;
 use adapters::tmux::tmux_multiplexer::TmuxMultiplexer;
 use adapters::web_browser::xdg_web_browser::XdgWebBrowser;
 use adapters::{BoundedCommand, Deadlines, GitWorkspace, HostDesktop, HostMounts};
-use application::ports::{ConfigSource, HostProbe, Lock, LockError, PullRequests, UsageMeter};
+use application::ports::{ConfigSource, HostProbe, PullRequests, RepoPages, UsageMeter};
 use application::{
-    AgentPorts, CorruptRegistry, DesktopPorts, DiagnosticPaths, LoadedConfig, RepoPorts,
-    ServiceContext, ServiceError, ServicePorts, SessionService, StatePorts, TmuxPorts,
+    AgentPorts, DesktopPorts, DiagnosticPaths, LoadedConfig, RepoPorts, ServiceContext,
+    ServiceError, ServicePorts, SessionService, StatePorts, TmuxPorts,
 };
-use cli::{Cli, CliExit, CliOutput, CliSession};
-use ui::{App, CrosstermInput, CrosstermScreenMode, EventLoop, TerminalGuard};
+use cli::{Cli, CliExit, CliOutput, CliSession, EntryPoints};
+use ui::{
+    App, CrosstermInput, CrosstermScreenMode, EventLoop, FinderPopupError, SessionFinderPopup,
+    TerminalGuard,
+};
 
 fn main() -> ExitCode {
     CompositionRoot::capture().run()
 }
+
+type OpenedLog = Result<AppLog, String>;
 
 struct CompositionRoot {
     environment: ProcessEnvironment,
@@ -67,6 +80,7 @@ struct CompositionRoot {
     paths: XdgPaths,
     server: ServerFiles,
     launch_directory: PathBuf,
+    executable: PathBuf,
     processes: ProcessTable,
 }
 
@@ -83,6 +97,7 @@ impl CompositionRoot {
             server: Self::server_files(&paths),
             paths,
             launch_directory: std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")),
+            executable: std::env::current_exe().unwrap_or_else(|_| PathBuf::from("ringleader")),
             environment,
             programs,
             processes: ProcessTable::new(),
@@ -94,73 +109,112 @@ impl CompositionRoot {
     }
 
     fn run(self) -> ExitCode {
-        let cli = match Cli::parse_arguments(std::env::args_os()) {
-            Ok(cli) => cli,
-            Err(code) => return code,
-        };
-        if let Some(handoff) = cli.exec_agent_handoff() {
-            return self.exec_agent(handoff);
-        }
-        if let Some(problem) = self.diagnostics().socket_problem()
-            && !cli.is_doctor()
-        {
-            return Self::fail(&problem);
-        }
-        if cli.runs_tui() {
-            return self.run_tui(&cli);
-        }
-        self.run_cli(&cli)
+        Cli::parse_arguments(std::env::args_os())
+            .map_or_else(convert::identity, |cli| cli.enter(&self))
     }
 
     fn run_cli(&self, cli: &Cli) -> ExitCode {
         let state_directory = self.paths.state_directory();
-        let state_ready = fs::create_dir_all(&state_directory);
-        if let (Err(error), true) = (&state_ready, cli.is_mutating()) {
-            return Self::fail(&format!(
-                "cannot create {}: {error}",
-                state_directory.display()
-            ));
-        }
-        let log = match &state_ready {
-            Ok(()) => self.start_log(cli),
-            Err(error) => Err(AppLog::disabled(
-                &AppLog::path_in(&state_directory),
-                &error.to_string(),
-            )),
-        };
-        self.handoff().delete_stale();
-        let signals = match cli.is_mutating() {
-            true => SignalHookInterrupts::register()
-                .unwrap_or_else(|_| SignalHookInterrupts::unregistered()),
-            false => SignalHookInterrupts::unregistered(),
-        };
-        let mut session = CliSession::new(CliOutput::standard(), Box::new(signals));
-        if let Err(message) = &log {
-            session.output().error(message);
-        }
-        let mut lock = FileLock::new(&state_directory.join("lock"));
-        if let Err(exit) = cli.take_write_lock(&mut lock, &mut session) {
-            return Self::exit_with(exit);
-        }
-        if let (Ok(log), true) = (&log, cli.is_mutating()) {
-            log.truncate_if_large();
-        }
-        let config_source = self.config_source(cli);
-        if cli.is_mutating()
-            && let Some(warning) = Self::write_template_if_missing(&config_source)
-        {
-            session.output().error(&warning);
-        }
-        let loaded = Self::load(&config_source);
-        let mut service = self.service(config_source, loaded);
-        Self::exit_with(cli.execute(&mut service, &mut session, &mut lock))
+        self.cli_log(cli, &state_directory)
+            .and_then(|log| self.run_cli_with_log(cli, &state_directory, &log))
+            .unwrap_or_else(convert::identity)
     }
 
-    fn start_log(&self, cli: &Cli) -> Result<AppLog, String> {
+    fn cli_log(&self, cli: &Cli, state_directory: &Path) -> Result<OpenedLog, ExitCode> {
+        if let Err(error) = fs::create_dir_all(state_directory) {
+            return Self::log_without_state_directory(cli, state_directory, &error);
+        }
+        Ok(self.start_log(cli))
+    }
+
+    fn log_without_state_directory(
+        cli: &Cli,
+        state_directory: &Path,
+        error: &io::Error,
+    ) -> Result<OpenedLog, ExitCode> {
+        if cli.is_mutating() {
+            Err(Self::fail(&format!(
+                "cannot create {}: {error}",
+                state_directory.display()
+            )))
+        } else {
+            Ok(Err(AppLog::disabled(
+                &AppLog::path_in(state_directory),
+                &error.to_string(),
+            )))
+        }
+    }
+
+    fn run_cli_with_log(
+        &self,
+        cli: &Cli,
+        state_directory: &Path,
+        log: &OpenedLog,
+    ) -> Result<ExitCode, ExitCode> {
+        self.handoff().delete_stale();
+        let mut session = CliSession::new(CliOutput::standard(), Box::new(Self::cli_signals(cli)));
+        Self::report_log_problem(log, &mut session);
+        let mut lock = FileLock::new(&state_directory.join("lock"));
+        cli.take_write_lock(&mut lock, &mut session)
+            .map_err(Self::exit_with)?;
+        Self::truncate_log_of_mutating(cli, log);
+        Ok(self.execute_cli(cli, &mut session, &mut lock))
+    }
+
+    fn cli_signals(cli: &Cli) -> SignalHookInterrupts {
+        if cli.is_mutating() {
+            SignalHookInterrupts::register()
+                .unwrap_or_else(|_| SignalHookInterrupts::unregistered())
+        } else {
+            SignalHookInterrupts::unregistered()
+        }
+    }
+
+    fn report_log_problem(log: &OpenedLog, session: &mut CliSession) {
+        if let Err(message) = log {
+            session.output().error(message);
+        }
+    }
+
+    fn truncate_log_of_mutating(cli: &Cli, log: &OpenedLog) {
+        if cli.is_mutating() {
+            Self::truncate_log(log);
+        }
+    }
+
+    fn execute_cli(&self, cli: &Cli, session: &mut CliSession, lock: &mut FileLock) -> ExitCode {
+        let config_source = self.config_source(cli);
+        Self::warn_of_mutating_template_problem(cli, &config_source, session);
+        let loaded = Self::load(&config_source);
+        let mut service = self.service(config_source, loaded);
+        Self::exit_with(cli.execute(&mut service, session, lock))
+    }
+
+    fn warn_of_mutating_template_problem(
+        cli: &Cli,
+        source: &TomlConfigSource,
+        session: &mut CliSession,
+    ) {
+        if cli.is_mutating() {
+            Self::warn_of_template_problem(source, session);
+        }
+    }
+
+    fn warn_of_template_problem(source: &TomlConfigSource, session: &mut CliSession) {
+        if let Some(warning) = Self::write_template_if_missing(source) {
+            session.output().error(&warning);
+        }
+    }
+
+    fn start_log(&self, cli: &Cli) -> OpenedLog {
         let log = AppLog::open(&self.paths.state_directory())?;
-        let level = cli.log_level().and_then(|level| level.parse().ok());
-        log.start(level.unwrap_or(LevelFilter::Info))?;
-        Ok(log)
+        log.start(Self::log_level(cli)).map(|()| log)
+    }
+
+    fn log_level(cli: &Cli) -> LevelFilter {
+        cli.log_level()
+            .and_then(|level| level.parse().ok())
+            .unwrap_or(LevelFilter::Info)
     }
 
     fn exit_with(exit: CliExit) -> ExitCode {
@@ -172,7 +226,7 @@ impl CompositionRoot {
 
     fn exec_agent(&self, handoff: &Path) -> ExitCode {
         let reentry = LauncherCommand::new(
-            Self::launcher_prefix(),
+            self.launcher_prefix(),
             AgentHandoff::beside(handoff, &self.environment, self.processes.clone()),
         );
         let mut launcher = AgentLauncher::new(&self.environment, Box::new(ProcessExec), reentry);
@@ -181,21 +235,41 @@ impl CompositionRoot {
 
     fn run_tui(&self, cli: &Cli) -> ExitCode {
         let state_directory = self.paths.state_directory();
-        if let Err(error) = fs::create_dir_all(&state_directory) {
-            return Self::fail(&format!(
+        let ran = Self::create_state_directory(&state_directory)
+            .and_then(|()| self.run_tui_in(cli, &state_directory));
+        ran.err().unwrap_or(ExitCode::SUCCESS)
+    }
+
+    fn create_state_directory(state_directory: &Path) -> Result<(), ExitCode> {
+        fs::create_dir_all(state_directory).map_err(|error| {
+            Self::fail(&format!(
                 "cannot create {}: {error}",
                 state_directory.display()
-            ));
-        }
+            ))
+        })
+    }
+
+    fn run_tui_in(&self, cli: &Cli, state_directory: &Path) -> Result<(), ExitCode> {
         let log = self.start_log(cli);
         self.handoff().delete_stale();
-        let mut lock = FileLock::new(&state_directory.join("lock"));
-        if let Err(error) = lock.acquire_lifetime() {
-            return Self::lock_failure(&error);
-        }
-        if let Ok(log) = &log {
+        Self::truncate_log(&log);
+        self.started_app(cli, state_directory, log.err())
+            .and_then(Self::run_app)
+            .map(|(app, signals)| Self::wait_for_startup_input(app, signals))
+    }
+
+    fn truncate_log(log: &OpenedLog) {
+        if let Ok(log) = log {
             log.truncate_if_large();
         }
+    }
+
+    fn started_app(
+        &self,
+        cli: &Cli,
+        state_directory: &Path,
+        log_problem: Option<String>,
+    ) -> Result<App, ExitCode> {
         let config_source = self.config_source(cli);
         let template_warning = Self::write_template_if_missing(&config_source);
         let loaded = Self::load(&config_source);
@@ -203,57 +277,46 @@ impl CompositionRoot {
             .error()
             .map(|error| format!("config error, running read-only: {error}"))
             .or(template_warning);
-        let mut service = self.service(config_source, loaded);
-        let socket_recovery = service.restore_server_socket();
-        let pane_warning = match service.refuse_own_pane() {
-            Ok(()) => None,
-            Err(error @ ServiceError::Conflict(_)) => return Self::refuse(&error),
-            Err(error) => Some(error.to_string()),
-        };
-        let registry_warning = match service.load_registry(CorruptRegistry::MoveAside) {
-            Ok(warning) => warning,
-            Err(error) => return Self::fail(&error.to_string()),
-        };
-        let config_warning = service.reapply_server_config().err().map(|error| {
-            format!("could not update the config of Ringleader's tmux server: {error}")
-        });
-        let warnings: Vec<String> = [
-            log.err(),
-            registry_warning,
-            startup_message,
-            socket_recovery.as_ref().err().map(ToString::to_string),
-            pane_warning,
-            config_warning,
-        ]
-        .into_iter()
-        .flatten()
-        .collect();
-        let folds = JsonFoldStore::new(&state_directory.join("folds.json"));
         let mut app = App::new(
-            service,
+            self.service(config_source, loaded),
+            Box::new(FileLock::new(&state_directory.join("lock"))),
             Box::new(io::stdout()),
-            Box::new(folds),
+            Box::new(JsonFoldStore::new(&state_directory.join("folds.json"))),
             Instant::now(),
-        )
-        .with_startup_messages(&warnings, socket_recovery.ok().flatten());
-        let signals = match SignalHookInterrupts::register() {
-            Ok(signals) => signals,
-            Err(error) => return Self::fail(&error.to_string()),
-        };
-        if let Err(error) = Self::run_event_loop(&mut app, signals.clone()) {
-            return Self::fail(&error.to_string());
-        }
+        );
+        let process_warnings = [log_problem, startup_message]
+            .into_iter()
+            .flatten()
+            .collect();
+        app.start_up(process_warnings)
+            .map(|()| app)
+            .map_err(|error| Self::refuse(&error))
+    }
+
+    fn run_app(mut app: App) -> Result<(App, SignalHookInterrupts), ExitCode> {
+        let signals =
+            SignalHookInterrupts::register().map_err(|error| Self::fail(&error.to_string()))?;
+        Self::run_event_loop(&mut app, signals.clone())
+            .map(|()| (app, signals))
+            .map_err(|error| Self::fail(&error.to_string()))
+    }
+
+    fn wait_for_startup_input(app: App, signals: SignalHookInterrupts) {
         let mut session = CliSession::new(CliOutput::standard(), Box::new(signals));
-        session.wait_for_startup_input(&app.into_service(), &mut lock);
-        ExitCode::SUCCESS
+        session.wait_for_startup_input(&app.into_service());
     }
 
     fn run_event_loop(app: &mut App, signals: SignalHookInterrupts) -> io::Result<()> {
         let screen = TerminalGuard::enter(Box::new(CrosstermScreenMode))?;
         screen.state().install_panic_hook();
+        Self::cleared_terminal().and_then(|terminal| {
+            EventLoop::new(terminal, CrosstermInput, Box::new(signals), screen.state()).run(app)
+        })
+    }
+
+    fn cleared_terminal() -> io::Result<Terminal<CrosstermBackend<io::Stdout>>> {
         let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
-        Self::clear_alternate_screen_leftovers(&mut terminal)?;
-        EventLoop::new(terminal, CrosstermInput, Box::new(signals), screen.state()).run(app)
+        Self::clear_alternate_screen_leftovers(&mut terminal).map(|()| terminal)
     }
 
     fn clear_alternate_screen_leftovers(
@@ -266,39 +329,44 @@ impl CompositionRoot {
         let path = cli
             .config_path()
             .map(Path::to_path_buf)
-            .or_else(|| self.environment.get("RINGLEADER_CONFIG").map(PathBuf::from))
+            .or_else(|| {
+                self.environment
+                    .get(TomlConfigSource::PATH_VARIABLE)
+                    .map(PathBuf::from)
+            })
             .unwrap_or_else(|| self.paths.config_file());
         TomlConfigSource::new(&path, &self.paths.worktree_root(), self.paths.home())
+            .resolved_from(&self.launch_directory)
     }
 
     fn write_template_if_missing(source: &TomlConfigSource) -> Option<String> {
         if source.exists() {
             return None;
         }
-        let error = source.write_first_run_template().err()?;
-        Some(format!(
-            "could not write the first-run config, using the defaults: {error}"
-        ))
+        source.write_first_run_template().err().map(|error| {
+            format!("could not write the first-run config, using the defaults: {error}")
+        })
     }
 
     fn load(source: &TomlConfigSource) -> LoadedConfig {
-        match source.load() {
-            Ok(config) => LoadedConfig::valid(config),
-            Err(error) => LoadedConfig::failed(source.defaults(), error),
-        }
+        source.load().map_or_else(
+            |error| LoadedConfig::failed(source.defaults(), error),
+            LoadedConfig::valid,
+        )
     }
 
     fn service(&self, config_source: TomlConfigSource, loaded: LoadedConfig) -> SessionService {
         let env_names = loaded.config().agent_env_union();
         let tmux = self.tmux(&env_names);
         let bounded = BoundedCommand::new(Deadlines::standard());
+        let config_path = config_source.path();
         let state = self.state_ports(config_source);
         let host = Arc::new(SystemHostProbe::new(
             &self.environment,
             self.programs.tmux(),
             self.processes.clone(),
         ));
-        let pull_requests = Self::pull_requests(&host, bounded);
+        let (pull_requests, repo_pages) = Self::github_ports(&host, bounded);
         let usage_meters = self.usage_meters(host.as_ref(), bounded);
         let directory_environment =
             DirenvDirectoryEnvironment::when_installed(host.as_ref(), &self.environment, bounded);
@@ -312,6 +380,7 @@ impl CompositionRoot {
             )),
             host,
             pull_requests,
+            repo_pages,
             directory_environment,
         )
         .with_diff_workspace(Arc::new(GitWorkspace::new(
@@ -320,7 +389,7 @@ impl CompositionRoot {
         )));
         let tmux_ports = TmuxPorts::new(Arc::new(TmuxMultiplexer::new(
             tmux,
-            self.launcher(),
+            self.launcher(&config_path),
             self.processes.clone(),
         )));
         let context = ServiceContext::new(loaded, &self.launch_directory)
@@ -386,11 +455,17 @@ impl CompositionRoot {
         )
     }
 
-    fn pull_requests(host: &SystemHostProbe, bounded: BoundedCommand) -> Arc<dyn PullRequests> {
-        match host.resolve_command("gh") {
-            Some(program) => Arc::new(GhPullRequests::new(program.as_os_str(), bounded)),
-            None => Arc::new(NullPullRequests),
-        }
+    fn github_ports(
+        host: &SystemHostProbe,
+        bounded: BoundedCommand,
+    ) -> (Arc<dyn PullRequests>, Arc<dyn RepoPages>) {
+        let Some(program) = host.resolve_command("gh") else {
+            return (Arc::new(NullPullRequests), Arc::new(NullRepoPages));
+        };
+        let gh = GhProgram::new(program.as_os_str());
+        let pages = Arc::new(GhRepoPages::new(gh.clone(), bounded));
+        let pull_requests = GhPullRequests::new(gh, bounded, Arc::clone(&pages));
+        (Arc::new(pull_requests), pages)
     }
 
     fn diagnostics(&self) -> DiagnosticPaths {
@@ -401,24 +476,53 @@ impl CompositionRoot {
         )
         .with_tmux_server(self.server.socket(), self.server.config())
         .with_log_file(&AppLog::path_in(&self.paths.state_directory()));
-        match self.paths.has_runtime_directory() {
-            true => paths,
-            false => paths.with_socket_in_state_directory(),
+        if self.paths.has_runtime_directory() {
+            paths
+        } else {
+            paths.with_socket_in_state_directory()
         }
     }
 
     fn tmux(&self, env_names: &[String]) -> TmuxCommand {
-        TmuxCommand::new(self.programs.tmux(), &self.server, &self.environment)
-            .removing_env_names(env_names)
+        TmuxCommand::new(
+            self.programs.tmux(),
+            &self.server,
+            &self.environment,
+            &self.finder_popup(),
+        )
+        .removing_env_names(env_names)
     }
 
-    fn launcher(&self) -> LauncherCommand {
-        LauncherCommand::new(Self::launcher_prefix(), self.handoff())
+    fn launcher(&self, config_path: &Path) -> LauncherCommand {
+        let handoff = self
+            .handoff()
+            .with_built_in_skill(BuiltInSkill::new(&self.paths.plugin_root()))
+            .with_shim(RingleaderShim::new(
+                &self.paths.shim_root(),
+                &self.executable,
+            ))
+            .with_config_path(config_path);
+        LauncherCommand::new(self.launcher_prefix(), handoff)
     }
 
-    fn launcher_prefix() -> Vec<OsString> {
-        let executable = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("ringleader"));
-        vec![executable.into_os_string(), OsString::from("__exec-agent")]
+    fn launcher_prefix(&self) -> Vec<OsString> {
+        vec![
+            self.executable.clone().into_os_string(),
+            OsString::from("__exec-agent"),
+        ]
+    }
+
+    fn finder_popup(&self) -> TmuxFinderPopup {
+        let finder_prefix = once(self.executable.clone().into_os_string())
+            .chain(Cli::finder_arguments())
+            .collect();
+        TmuxFinderPopup::new(finder_prefix, &self.programs.assignments())
+    }
+
+    fn show_finder(popup: SessionFinderPopup) -> Result<(), FinderPopupError> {
+        let screen = TerminalGuard::enter(Box::new(CrosstermScreenMode))?;
+        screen.state().install_panic_hook();
+        popup.run(CrosstermBackend::new(io::stdout()), CrosstermInput)
     }
 
     fn handoff(&self) -> AgentHandoff {
@@ -429,11 +533,6 @@ impl CompositionRoot {
         )
     }
 
-    fn lock_failure(error: &LockError) -> ExitCode {
-        let _ = writeln!(io::stderr(), "ringleader: {error}");
-        ExitCode::from(CliExit::lock_error_code(error))
-    }
-
     fn refuse(error: &ServiceError) -> ExitCode {
         let _ = writeln!(io::stderr(), "ringleader: {error}");
         ExitCode::from(CliExit::error_code(error))
@@ -442,6 +541,39 @@ impl CompositionRoot {
     fn fail(message: &str) -> ExitCode {
         let _ = writeln!(io::stderr(), "ringleader: {message}");
         ExitCode::from(CliExit::FAILURE)
+    }
+}
+
+impl EntryPoints for CompositionRoot {
+    fn launch_agent(&self, handoff: &Path) -> ExitCode {
+        self.exec_agent(handoff)
+    }
+
+    fn socket_problem(&self) -> Option<String> {
+        self.diagnostics().socket_problem()
+    }
+
+    fn refuse_to_start(&self, problem: &str) -> ExitCode {
+        Self::fail(problem)
+    }
+
+    fn find_session(&self, cli: &Cli, client: &str) -> ExitCode {
+        let _log = self.start_log(cli);
+        let config_source = self.config_source(cli);
+        let loaded = Self::load(&config_source);
+        let popup = SessionFinderPopup::new(self.service(config_source, loaded), client);
+        Self::show_finder(popup).map_or_else(
+            |error| Self::fail(&error.to_string()),
+            |()| ExitCode::SUCCESS,
+        )
+    }
+
+    fn open_tui(&self, cli: &Cli) -> ExitCode {
+        self.run_tui(cli)
+    }
+
+    fn run_command(&self, cli: &Cli) -> ExitCode {
+        self.run_cli(cli)
     }
 }
 
@@ -650,6 +782,23 @@ mod tests {
         ];
 
         let uses = LayerImports::of(&layers).uses_of(&["ProcessTable::new"]);
+
+        assert_eq!(uses, BTreeSet::new());
+    }
+
+    #[test]
+    fn no_layer_fixes_a_color_so_the_terminal_theme_decides_every_color() {
+        let layers = ["domain", "application", "adapters", "ui", "cli"];
+
+        let uses = LayerImports::of(&layers).uses_of(&[
+            "Color::Rgb",
+            "Color::Indexed",
+            "Color::from_u32",
+            "Color::from_hsl",
+            "Color::from_hsluv",
+            "Color::from",
+            "Color::from_str",
+        ]);
 
         assert_eq!(uses, BTreeSet::new());
     }

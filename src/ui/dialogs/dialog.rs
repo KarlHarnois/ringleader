@@ -1,18 +1,20 @@
+use std::path::PathBuf;
 use std::time::Instant;
 
 use crossterm::event::{Event, KeyEvent, KeyEventKind};
 use ratatui::Frame;
-use ratatui::layout::{Margin, Rect};
+use ratatui::layout::Rect;
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Clear, Padding, Paragraph};
 
 use super::delete_session_dialog::DeleteSessionDialog;
+use super::delete_sessions_dialog::DeleteSessionsDialog;
 use super::dialog_labels::DialogLabels;
 use super::home_path::HomePath;
 use super::rename_session_dialog::RenameSessionDialog;
 use super::session_finder::SessionFinder;
 use super::usage_view::UsageView;
-use crate::application::{DeleteImpact, SessionService};
+use crate::application::{BatchReport, DeleteImpact, SessionService};
 use crate::domain::{Session, SessionSummary};
 use crate::ui::app::AppRequest;
 use crate::ui::dialogs::new_session::new_session_dialog::NewSessionDialog;
@@ -23,6 +25,7 @@ use crate::ui::theme::Theme;
 pub enum Dialog {
     NewSession(Box<NewSessionDialog>),
     Delete(Box<DeleteSessionDialog>),
+    DeleteSessions(Box<DeleteSessionsDialog>),
     Rename(Box<RenameSessionDialog>),
     Help(Box<HelpView>),
     FindSession(Box<SessionFinder>),
@@ -32,12 +35,12 @@ pub enum Dialog {
 impl Dialog {
     const WIDTH: u16 = 76;
     const HEIGHT: u16 = 22;
-    const HELP_HEIGHT: u16 = 35;
+    const HELP_HEIGHT: u16 = 39;
 
     pub fn open(opening: DialogOpening, service: &SessionService) -> Self {
         match opening {
-            DialogOpening::NewSession => {
-                Self::NewSession(Box::new(NewSessionDialog::open(service)))
+            DialogOpening::NewSession(preferred_repo) => {
+                Self::NewSession(Box::new(NewSessionDialog::open(service, preferred_repo)))
             }
             DialogOpening::Rename(session) => {
                 Self::Rename(Box::new(RenameSessionDialog::open(*session)))
@@ -61,8 +64,12 @@ impl Dialog {
         }))
     }
 
-    pub fn find_session(names: Vec<String>) -> Self {
-        Self::FindSession(Box::new(SessionFinder::open(names)))
+    pub fn delete_sessions(measured: BatchReport<DeleteImpact>) -> Self {
+        Self::DeleteSessions(Box::new(DeleteSessionsDialog::new(measured)))
+    }
+
+    pub fn find_session(rows: &[SessionSummary]) -> Self {
+        Self::FindSession(Box::new(SessionFinder::open(rows)))
     }
 
     fn help(service: &SessionService) -> Self {
@@ -86,7 +93,11 @@ impl Dialog {
         match self {
             Self::NewSession(dialog) => dialog.poll(),
             Self::Usage(view) => view.poll(now, service),
-            Self::Delete(_) | Self::Rename(_) | Self::Help(_) | Self::FindSession(_) => {}
+            Self::Delete(_)
+            | Self::DeleteSessions(_)
+            | Self::Rename(_)
+            | Self::Help(_)
+            | Self::FindSession(_) => {}
         }
     }
 
@@ -109,6 +120,7 @@ impl Dialog {
         match self {
             Self::NewSession(dialog) => dialog.handle_key(key, service),
             Self::Delete(dialog) => dialog.handle_key(key),
+            Self::DeleteSessions(dialog) => dialog.handle_key(key),
             Self::Rename(dialog) => dialog.handle_key(key),
             Self::Help(help) => help.handle_key(key),
             Self::FindSession(finder) => finder.handle_key(key),
@@ -121,7 +133,7 @@ impl Dialog {
             Self::NewSession(dialog) => dialog.paste(text),
             Self::Rename(dialog) => dialog.paste(text),
             Self::FindSession(finder) => finder.paste(text),
-            Self::Delete(_) | Self::Help(_) | Self::Usage(_) => {}
+            Self::Delete(_) | Self::DeleteSessions(_) | Self::Help(_) | Self::Usage(_) => {}
         }
     }
 
@@ -129,12 +141,24 @@ impl Dialog {
         match self {
             Self::NewSession(dialog) => dialog.fail(error),
             Self::Rename(dialog) => dialog.fail(error),
-            Self::Delete(_) | Self::Help(_) | Self::FindSession(_) | Self::Usage(_) => {}
+            Self::Delete(_)
+            | Self::DeleteSessions(_)
+            | Self::Help(_)
+            | Self::FindSession(_)
+            | Self::Usage(_) => {}
         }
     }
 
     pub fn render(&self, frame: &mut Frame, theme: &Theme) {
-        let (area, labels) = Self::placement(frame.area(), self.preferred_height());
+        let placement = Self::placement(frame.area(), self.preferred_height());
+        self.render_at(frame, placement, theme);
+    }
+
+    pub fn fill(&self, frame: &mut Frame, theme: &Theme) {
+        self.render_at(frame, (frame.area(), DialogLabels::full()), theme);
+    }
+
+    fn render_at(&self, frame: &mut Frame, (area, labels): (Rect, DialogLabels), theme: &Theme) {
         let block = Block::default()
             .borders(Borders::ALL)
             .title(self.title())
@@ -147,6 +171,9 @@ impl Dialog {
             Self::NewSession(dialog) => dialog.render(frame, inner, labels, theme),
             Self::Delete(dialog) => {
                 Self::render_lines(frame, inner, dialog.lines(width, labels, theme))
+            }
+            Self::DeleteSessions(dialog) => {
+                Self::render_lines(frame, inner, dialog.lines(width, height, theme))
             }
             Self::Rename(dialog) => {
                 Self::render_lines(frame, inner, dialog.lines(width, labels, theme))
@@ -167,6 +194,7 @@ impl Dialog {
         match self {
             Self::NewSession(_) => NewSessionDialog::TITLE,
             Self::Delete(_) => DeleteSessionDialog::TITLE,
+            Self::DeleteSessions(_) => DeleteSessionsDialog::TITLE,
             Self::Rename(_) => RenameSessionDialog::TITLE,
             Self::Help(_) => HelpView::TITLE,
             Self::FindSession(_) => SessionFinder::TITLE,
@@ -178,9 +206,11 @@ impl Dialog {
         match self {
             Self::NewSession(_) => Padding::horizontal(1),
             Self::Usage(_) => Padding::left(1),
-            Self::Delete(_) | Self::Rename(_) | Self::Help(_) | Self::FindSession(_) => {
-                Padding::ZERO
-            }
+            Self::Delete(_)
+            | Self::DeleteSessions(_)
+            | Self::Rename(_)
+            | Self::Help(_)
+            | Self::FindSession(_) => Padding::ZERO,
         }
     }
 
@@ -189,6 +219,7 @@ impl Dialog {
             Self::Help(_) => Self::HELP_HEIGHT,
             Self::NewSession(_)
             | Self::Delete(_)
+            | Self::DeleteSessions(_)
             | Self::Rename(_)
             | Self::FindSession(_)
             | Self::Usage(_) => Self::HEIGHT,
@@ -197,8 +228,7 @@ impl Dialog {
 
     fn placement(frame: Rect, preferred_height: u16) -> (Rect, DialogLabels) {
         if LayoutTier::for_size(frame.width, frame.height) != LayoutTier::Full {
-            let margin = Margin::new(1, 1);
-            return (frame.inner(margin), DialogLabels::abbreviated());
+            return (frame, DialogLabels::abbreviated());
         }
         let width = Self::WIDTH.min(frame.width);
         let height = preferred_height.min(frame.height.saturating_sub(2));
@@ -210,7 +240,7 @@ impl Dialog {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DialogOpening {
-    NewSession,
+    NewSession(Option<PathBuf>),
     Rename(Box<Session>),
     Help,
     Usage,
@@ -228,8 +258,10 @@ pub enum DialogStep {
 mod tests {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
+    use ratatui::style::Modifier;
 
     use super::*;
+    use crate::domain::SessionState;
     use crate::test_support::ServiceFixture;
 
     struct PlacementFixture;
@@ -243,16 +275,32 @@ mod tests {
             terminal
         }
 
+        fn fill_finder(query: &str) -> Terminal<TestBackend> {
+            let mut dialog = Dialog::find_session(&[
+                ServiceFixture::summary_in("docs", "/repos/alpha", SessionState::Waiting),
+                ServiceFixture::summary_in("fix-auth", "/repos/beta", SessionState::Waiting),
+            ]);
+            let typed = Event::Paste(query.to_string());
+            dialog.handle_event(&typed, &ServiceFixture::new().service());
+            let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
+            terminal.draw(|frame| dialog.fill(frame, &Theme)).unwrap();
+            terminal
+        }
+
         fn symbol(terminal: &Terminal<TestBackend>, column: u16, row: u16) -> String {
             terminal.backend().buffer()[(column, row)]
                 .symbol()
                 .to_string()
         }
+
+        fn modifier(terminal: &Terminal<TestBackend>, column: u16, row: u16) -> Modifier {
+            terminal.backend().buffer()[(column, row)].modifier
+        }
     }
 
     #[test]
     fn the_full_tier_centers_the_dialog() {
-        let terminal = PlacementFixture::render(DialogOpening::NewSession, 100, 28);
+        let terminal = PlacementFixture::render(DialogOpening::NewSession(None), 100, 28);
 
         assert_eq!(PlacementFixture::symbol(&terminal, 12, 3), "┌");
         assert_eq!(PlacementFixture::symbol(&terminal, 13, 3), " ");
@@ -264,7 +312,7 @@ mod tests {
     #[test]
     fn the_help_stands_taller_than_the_other_dialogs() {
         let help = PlacementFixture::render(DialogOpening::Help, 100, 32);
-        let new_session = PlacementFixture::render(DialogOpening::NewSession, 100, 32);
+        let new_session = PlacementFixture::render(DialogOpening::NewSession(None), 100, 32);
 
         assert_eq!(PlacementFixture::symbol(&help, 12, 1), "┌");
         assert_eq!(PlacementFixture::symbol(&help, 12, 30), "└");
@@ -282,13 +330,41 @@ mod tests {
     }
 
     #[test]
-    fn a_compact_tier_uses_the_frame_with_a_margin_and_abbreviated_labels() {
-        let terminal = PlacementFixture::render(DialogOpening::NewSession, 60, 12);
+    fn a_filling_finder_draws_its_border_and_title_from_the_frame_corner() {
+        let terminal = PlacementFixture::fill_finder("");
 
-        assert_eq!(PlacementFixture::symbol(&terminal, 1, 1), "┌");
-        assert_eq!(PlacementFixture::symbol(&terminal, 2, 2), " ");
-        assert_eq!(PlacementFixture::symbol(&terminal, 3, 2), "N");
-        assert_eq!(PlacementFixture::symbol(&terminal, 4, 2), " ");
-        assert_eq!(PlacementFixture::symbol(&terminal, 3, 3), "R");
+        assert_eq!(PlacementFixture::symbol(&terminal, 0, 0), "┌");
+        assert_eq!(PlacementFixture::symbol(&terminal, 2, 0), "F");
+        assert_eq!(PlacementFixture::symbol(&terminal, 39, 11), "┘");
+    }
+
+    #[test]
+    fn the_selected_finder_row_is_reversed_with_nothing_faint_on_it() {
+        let terminal = PlacementFixture::fill_finder("ph");
+
+        assert_eq!(PlacementFixture::symbol(&terminal, 4, 3), "p");
+        assert_eq!(
+            PlacementFixture::modifier(&terminal, 4, 3),
+            Modifier::REVERSED | Modifier::BOLD | Modifier::UNDERLINED
+        );
+        assert_eq!(
+            PlacementFixture::modifier(&terminal, 2, 3),
+            Modifier::REVERSED
+        );
+        assert_eq!(
+            PlacementFixture::modifier(&terminal, 8, 3),
+            Modifier::REVERSED | Modifier::BOLD
+        );
+    }
+
+    #[test]
+    fn a_compact_tier_fills_the_frame_with_abbreviated_labels() {
+        let terminal = PlacementFixture::render(DialogOpening::NewSession(None), 60, 12);
+
+        assert_eq!(PlacementFixture::symbol(&terminal, 0, 0), "┌");
+        assert_eq!(PlacementFixture::symbol(&terminal, 59, 11), "┘");
+        assert_eq!(PlacementFixture::symbol(&terminal, 2, 1), "N");
+        assert_eq!(PlacementFixture::symbol(&terminal, 3, 1), " ");
+        assert_eq!(PlacementFixture::symbol(&terminal, 2, 2), "R");
     }
 }

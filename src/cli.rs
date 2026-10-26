@@ -2,6 +2,7 @@ mod cli_exit;
 mod cli_output;
 mod cli_session;
 mod delete_report;
+mod entry_points;
 mod list_report;
 mod repo_argument;
 mod repo_commands;
@@ -17,10 +18,11 @@ pub use cli_exit::CliExit;
 pub use cli_output::CliOutput;
 pub use cli_session::CliSession;
 use cli_session::CommandStop;
+pub use entry_points::EntryPoints;
 use repo_commands::RepoCommands;
 use session_commands::SessionCommands;
 
-use crate::application::ports::Lock;
+use crate::application::ports::{Lock, LockError};
 use crate::application::{CorruptRegistry, SessionService};
 
 #[derive(Debug, Parser)]
@@ -49,14 +51,20 @@ enum CliCommand {
     List(ListArgs),
     #[command(about = "Create a session in a new worktree or the main checkout")]
     New(NewArgs),
-    #[command(about = "Delete a session and the worktree and branch made for it")]
+    #[command(about = "Delete sessions and the worktrees and branches made for them")]
     Delete(DeleteArgs),
     #[command(about = "Attach to a session")]
     Attach(NameArgs),
+    #[command(about = "Type a prompt into a running session's agent and submit it")]
+    Send(SendArgs),
     #[command(about = "Rename a session and the branch made for it")]
     Rename(RenameArgs),
-    #[command(about = "Restart an exited or stopped session, or with --all every one")]
+    #[command(about = "Restart exited or stopped sessions, or with --all every one")]
     Restart(RestartArgs),
+    #[command(
+        about = "Stop waiting or exited sessions, or with --repo every one in a repo, restart resumes them"
+    )]
+    Stop(StopArgs),
     #[command(about = "Add, remove, or list repos")]
     Repo {
         #[command(subcommand)]
@@ -68,6 +76,11 @@ enum CliCommand {
     ExecAgent {
         #[arg(long, value_name = "PATH")]
         handoff: PathBuf,
+    },
+    #[command(name = Cli::FIND_SESSION, hide = true)]
+    FindSession {
+        #[arg(long = Cli::CLIENT_OPTION, value_name = "CLIENT")]
+        client: String,
     },
 }
 
@@ -111,12 +124,15 @@ struct NewArgs {
     #[arg(long, conflicts_with = "base_branch")]
     main_checkout: bool,
     #[arg(long)]
+    plan: bool,
+    #[arg(long)]
     prompt: Option<String>,
 }
 
 #[derive(Debug, Args)]
 struct DeleteArgs {
-    name: String,
+    #[arg(required = true)]
+    names: Vec<String>,
     #[arg(long)]
     force: bool,
     #[arg(long)]
@@ -129,11 +145,32 @@ struct NameArgs {
 }
 
 #[derive(Debug, Args)]
+struct NamesArgs {
+    #[arg(required = true)]
+    names: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+struct SendArgs {
+    name: String,
+    #[arg(allow_hyphen_values = true)]
+    prompt: String,
+}
+
+#[derive(Debug, Args)]
 #[group(required = true, multiple = false)]
 struct RestartArgs {
-    name: Option<String>,
+    names: Vec<String>,
     #[arg(long)]
     all: bool,
+}
+
+#[derive(Debug, Args)]
+#[group(required = true, multiple = false)]
+struct StopArgs {
+    names: Vec<String>,
+    #[arg(long)]
+    repo: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -143,6 +180,10 @@ struct RenameArgs {
 }
 
 impl Cli {
+    const LOCK_WAIT_NOTE: &'static str = "waiting for another Ringleader to finish a change";
+    const FIND_SESSION: &'static str = "__find-session";
+    const CLIENT_OPTION: &'static str = "client";
+
     pub fn parse_arguments<I, A>(arguments: I) -> Result<Self, ExitCode>
     where
         I: IntoIterator<Item = A>,
@@ -154,6 +195,31 @@ impl Cli {
         })
     }
 
+    pub fn finder_arguments() -> [OsString; 2] {
+        [
+            OsString::from(Self::FIND_SESSION),
+            OsString::from(format!("--{}", Self::CLIENT_OPTION)),
+        ]
+    }
+
+    pub fn enter(&self, entry_points: &dyn EntryPoints) -> ExitCode {
+        if let Some(handoff) = self.exec_agent_handoff() {
+            return entry_points.launch_agent(handoff);
+        }
+        if let Some(problem) = entry_points.socket_problem()
+            && !self.is_doctor()
+        {
+            return entry_points.refuse_to_start(&problem);
+        }
+        if let Some(client) = self.finder_client() {
+            return entry_points.find_session(self, client);
+        }
+        if self.runs_tui() {
+            return entry_points.open_tui(self);
+        }
+        entry_points.run_command(self)
+    }
+
     pub fn config_path(&self) -> Option<&Path> {
         self.config.as_deref()
     }
@@ -162,18 +228,25 @@ impl Cli {
         self.log_level.as_deref()
     }
 
-    pub fn exec_agent_handoff(&self) -> Option<&Path> {
+    fn exec_agent_handoff(&self) -> Option<&Path> {
         match &self.command {
             Some(CliCommand::ExecAgent { handoff }) => Some(handoff),
             _ => None,
         }
     }
 
-    pub fn runs_tui(&self) -> bool {
+    fn finder_client(&self) -> Option<&str> {
+        match &self.command {
+            Some(CliCommand::FindSession { client }) => Some(client),
+            _ => None,
+        }
+    }
+
+    fn runs_tui(&self) -> bool {
         self.command.is_none()
     }
 
-    pub fn is_doctor(&self) -> bool {
+    fn is_doctor(&self) -> bool {
         matches!(self.command, Some(CliCommand::Doctor(_)))
     }
 
@@ -185,6 +258,7 @@ impl Cli {
                     | CliCommand::Delete(_)
                     | CliCommand::Rename(_)
                     | CliCommand::Restart(_)
+                    | CliCommand::Stop(_)
                     | CliCommand::Repo {
                         action: RepoAction::Add(_) | RepoAction::Remove(_)
                     }
@@ -200,10 +274,24 @@ impl Cli {
         if !self.is_mutating() {
             return Ok(());
         }
-        lock.acquire_for_write().map_err(|error| {
-            session.output().error(&error.to_string());
-            CliExit::Code(CliExit::lock_error_code(&error))
-        })
+        let taken = match lock.try_acquire() {
+            Err(LockError::Held { .. }) => Self::wait_for_lock(lock, session),
+            attempt => attempt,
+        };
+        taken.map_err(|error| Self::lock_failure(&error, session))
+    }
+
+    fn wait_for_lock(lock: &mut dyn Lock, session: &mut CliSession) -> Result<(), LockError> {
+        session.output().note(Self::LOCK_WAIT_NOTE);
+        lock.acquire(&|| session.is_signaled())
+    }
+
+    fn lock_failure(error: &LockError, session: &mut CliSession) -> CliExit {
+        if let Err(stop) = session.stop_if_signaled() {
+            return session.finish(Err(stop));
+        }
+        session.output().error(&error.to_string());
+        CliExit::Code(CliExit::lock_error_code(error))
     }
 
     pub fn execute(
@@ -234,7 +322,8 @@ impl Cli {
             }
         }
         let result = self.dispatch(service, session);
-        session.wait_for_startup_input(service, lock);
+        lock.release();
+        session.wait_for_startup_input(service);
         session.finish(result)
     }
 
@@ -251,11 +340,15 @@ impl Cli {
         if args.json {
             session.output().line(&report.json());
         } else {
-            for line in report.lines() {
-                session.output().line(&line);
-            }
+            Self::print_lines(report.lines(), session);
         }
         u8::from(report.has_problems())
+    }
+
+    fn print_lines(lines: impl IntoIterator<Item = String>, session: &mut CliSession) {
+        for line in lines {
+            session.output().line(&line);
+        }
     }
 
     fn dispatch(
@@ -263,26 +356,46 @@ impl Cli {
         service: &mut SessionService,
         session: &mut CliSession,
     ) -> Result<u8, CommandStop> {
-        let mut commands = SessionCommands::new(service, session);
         match &self.command {
-            Some(CliCommand::List(args)) => commands.list(args),
-            Some(CliCommand::New(args)) => commands.create(args),
-            Some(CliCommand::Delete(args)) => commands.delete(args),
-            Some(CliCommand::Attach(args)) => commands.attach(&args.name),
-            Some(CliCommand::Rename(args)) => commands.rename(args),
-            Some(CliCommand::Restart(args)) => match &args.name {
-                Some(name) => commands.restart(name),
-                None => commands.restart_all(),
-            },
-            Some(CliCommand::Repo { action }) => {
-                let mut repos = RepoCommands::new(service, session);
-                match action {
-                    RepoAction::Add(args) => repos.add(args),
-                    RepoAction::Remove(args) => repos.remove(&args.name),
-                    RepoAction::List => repos.list(),
-                }
-            }
-            Some(CliCommand::Doctor(_) | CliCommand::ExecAgent { .. }) | None => Ok(0),
+            Some(CliCommand::Repo { action }) => Self::dispatch_repo(action, service, session),
+            Some(CliCommand::Send(args)) => SessionCommands::new(service, session).send(args),
+            Some(command) => Self::dispatch_session(command, service, session),
+            None => Ok(0),
+        }
+    }
+
+    fn dispatch_session(
+        command: &CliCommand,
+        service: &mut SessionService,
+        session: &mut CliSession,
+    ) -> Result<u8, CommandStop> {
+        let mut commands = SessionCommands::new(service, session);
+        match command {
+            CliCommand::List(args) => commands.list(args),
+            CliCommand::New(args) => commands.create(args),
+            CliCommand::Delete(args) => commands.delete(args),
+            CliCommand::Attach(args) => commands.attach(&args.name),
+            CliCommand::Rename(args) => commands.rename(args),
+            CliCommand::Restart(args) => commands.restart_named_or_all(args),
+            CliCommand::Stop(args) => commands.stop_named_or_repo(args),
+            CliCommand::Repo { .. }
+            | CliCommand::Send(_)
+            | CliCommand::Doctor(_)
+            | CliCommand::ExecAgent { .. }
+            | CliCommand::FindSession { .. } => Ok(0),
+        }
+    }
+
+    fn dispatch_repo(
+        action: &RepoAction,
+        service: &mut SessionService,
+        session: &mut CliSession,
+    ) -> Result<u8, CommandStop> {
+        let mut repos = RepoCommands::new(service, session);
+        match action {
+            RepoAction::Add(args) => repos.add(args),
+            RepoAction::Remove(args) => repos.remove(&args.name),
+            RepoAction::List => repos.list(),
         }
     }
 
@@ -345,8 +458,63 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct RecordingEntryPoints {
+        socket_problem: Option<String>,
+        entered: Mutex<Vec<String>>,
+    }
+
+    impl RecordingEntryPoints {
+        fn with_socket_problem() -> Self {
+            Self {
+                socket_problem: Some("the socket is gone".to_string()),
+                ..Self::default()
+            }
+        }
+
+        fn enter(&self, arguments: &[&str]) {
+            let cli = Cli::try_parse_from(["ringleader"].iter().chain(arguments)).unwrap();
+            cli.enter(self);
+        }
+
+        fn entered(&self) -> Vec<String> {
+            self.entered.lock().unwrap().clone()
+        }
+
+        fn record(&self, entry: String) -> ExitCode {
+            self.entered.lock().unwrap().push(entry);
+            ExitCode::SUCCESS
+        }
+    }
+
+    impl EntryPoints for RecordingEntryPoints {
+        fn launch_agent(&self, handoff: &Path) -> ExitCode {
+            self.record(format!("launch_agent {}", handoff.display()))
+        }
+
+        fn socket_problem(&self) -> Option<String> {
+            self.socket_problem.clone()
+        }
+
+        fn refuse_to_start(&self, problem: &str) -> ExitCode {
+            self.record(format!("refuse_to_start {problem}"))
+        }
+
+        fn find_session(&self, _cli: &Cli, client: &str) -> ExitCode {
+            self.record(format!("find_session {client}"))
+        }
+
+        fn open_tui(&self, _cli: &Cli) -> ExitCode {
+            self.record("open_tui".to_string())
+        }
+
+        fn run_command(&self, _cli: &Cli) -> ExitCode {
+            self.record("run_command".to_string())
+        }
+    }
+
     #[test]
-    fn a_mutating_command_against_a_held_lock_exits_three_and_names_the_lock() {
+    fn a_lock_held_past_the_patience_exits_three_and_names_the_lock() {
         let harness = CliHarness::new(ServiceFixture::new()).with_lock(FakeLock::held_elsewhere());
 
         let exit = harness.run(&["delete", "fix-auth"]);
@@ -355,8 +523,44 @@ mod tests {
         assert!(
             harness
                 .stderr()
-                .contains("another instance is running, it holds /state/ringleader/lock")
+                .contains("another Ringleader holds /state/ringleader/lock")
         );
+    }
+
+    #[test]
+    fn a_mutating_command_waits_for_another_ringleader_to_release_the_lock() {
+        let harness =
+            CliHarness::new(ServiceFixture::new()).with_lock(FakeLock::held_until_waited());
+
+        let exit = harness.run(&["new", "--name", "Fix Auth", "--repo", "example-project"]);
+
+        assert_eq!(exit, CliExit::Code(0));
+        assert_eq!(harness.lock_acquisitions(), ["try", "wait"]);
+    }
+
+    #[test]
+    fn a_wait_for_the_lock_tells_the_user_why_the_command_pauses() {
+        let harness =
+            CliHarness::new(ServiceFixture::new()).with_lock(FakeLock::held_until_waited());
+
+        harness.run(&["delete", "fix-auth"]);
+
+        assert!(
+            harness
+                .stderr()
+                .contains("waiting for another Ringleader to finish a change")
+        );
+    }
+
+    #[test]
+    fn a_signal_ends_the_wait_for_the_lock() {
+        let harness = CliHarness::new(ServiceFixture::new()).with_lock(FakeLock::held_elsewhere());
+        harness.signals().raise(SIGINT);
+
+        let exit = harness.run(&["delete", "fix-auth"]);
+
+        assert!(matches!(exit, CliExit::Interrupted { signal: SIGINT, .. }));
+        assert!(!harness.stderr().contains("another Ringleader holds"));
     }
 
     #[test]
@@ -374,7 +578,7 @@ mod tests {
 
         harness.run(&["delete", "fix-auth"]);
 
-        assert_eq!(harness.lock_acquisitions(), ["write"]);
+        assert_eq!(harness.lock_acquisitions(), ["try"]);
     }
 
     #[test]
@@ -554,6 +758,25 @@ mod tests {
     }
 
     #[test]
+    fn stop_with_both_a_name_and_a_repo_exits_one() {
+        assert_eq!(
+            ParseFixture::exit_code(&[
+                "ringleader",
+                "stop",
+                "fix-auth",
+                "--repo",
+                "example-project"
+            ]),
+            1
+        );
+    }
+
+    #[test]
+    fn stop_without_a_name_or_a_repo_exits_one() {
+        assert_eq!(ParseFixture::exit_code(&["ringleader", "stop"]), 1);
+    }
+
+    #[test]
     fn new_in_the_main_checkout_with_a_base_branch_exits_one() {
         assert_eq!(
             ParseFixture::exit_code(&[
@@ -582,11 +805,70 @@ mod tests {
     }
 
     #[test]
-    fn the_hidden_launcher_subcommand_takes_a_handoff_path() {
-        let cli = Cli::try_parse_from(["ringleader", "__exec-agent", "--handoff", "/run/h.json"])
-            .unwrap();
+    fn the_finder_arguments_followed_by_a_client_name_enter_the_finder() {
+        let entry_points = RecordingEntryPoints::default();
+        let words: Vec<String> = Cli::finder_arguments()
+            .iter()
+            .map(|word| word.to_string_lossy().into_owned())
+            .chain(["client-1234".to_string()])
+            .collect();
+        let arguments: Vec<&str> = words.iter().map(String::as_str).collect();
 
-        assert_eq!(cli.exec_agent_handoff(), Some(Path::new("/run/h.json")));
+        entry_points.enter(&arguments);
+
+        assert_eq!(entry_points.entered(), ["find_session client-1234"]);
+    }
+
+    #[test]
+    fn a_run_that_another_entry_point_takes_runs_no_command() {
+        for arguments in [
+            ["__find-session", "--client", "client-1234"].as_slice(),
+            &[],
+        ] {
+            let harness = CliHarness::new(ServiceFixture::new());
+
+            let exit = harness.run(arguments);
+
+            assert_eq!(exit, CliExit::Code(0), "{arguments:?}");
+            assert_eq!(harness.stdout(), "", "{arguments:?}");
+        }
+    }
+
+    #[test]
+    fn the_hidden_launcher_enters_before_the_socket_check() {
+        let entry_points = RecordingEntryPoints::with_socket_problem();
+
+        entry_points.enter(&["__exec-agent", "--handoff", "/run/h.json"]);
+
+        assert_eq!(entry_points.entered(), ["launch_agent /run/h.json"]);
+    }
+
+    #[test]
+    fn a_socket_problem_refuses_every_entry_but_doctor() {
+        let entry_points = RecordingEntryPoints::with_socket_problem();
+
+        entry_points.enter(&[]);
+        entry_points.enter(&["__find-session", "--client", "client-1234"]);
+        entry_points.enter(&["doctor"]);
+
+        assert_eq!(
+            entry_points.entered(),
+            [
+                "refuse_to_start the socket is gone",
+                "refuse_to_start the socket is gone",
+                "run_command"
+            ]
+        );
+    }
+
+    #[test]
+    fn no_subcommand_enters_the_tui_and_a_subcommand_the_cli() {
+        let entry_points = RecordingEntryPoints::default();
+
+        entry_points.enter(&[]);
+        entry_points.enter(&["list"]);
+
+        assert_eq!(entry_points.entered(), ["open_tui", "run_command"]);
     }
 
     #[test]
@@ -613,5 +895,30 @@ mod tests {
         let restart_all = Cli::try_parse_from(["ringleader", "restart", "--all"]).unwrap();
 
         assert!(restart_all.is_mutating());
+    }
+
+    #[test]
+    fn stop_of_a_repo_takes_the_write_lock() {
+        let stop =
+            Cli::try_parse_from(["ringleader", "stop", "--repo", "example-project"]).unwrap();
+
+        assert!(stop.is_mutating());
+    }
+
+    #[test]
+    fn stop_takes_the_write_lock() {
+        let stop = Cli::try_parse_from(["ringleader", "stop", "fix-auth"]).unwrap();
+
+        assert!(stop.is_mutating());
+    }
+
+    #[test]
+    fn stop_and_delete_need_at_least_one_name() {
+        for command in ["stop", "delete"] {
+            assert_eq!(
+                ParseFixture::exit_code(&["ringleader", command]),
+                CliExit::FAILURE
+            );
+        }
     }
 }

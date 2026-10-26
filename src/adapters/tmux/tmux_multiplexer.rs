@@ -1,10 +1,9 @@
-use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
 use super::private_server::PrivateServer;
-use super::tmux_agent_input::TmuxAgentInput;
+use super::tmux_agent_input::{InputError, TmuxAgentInput};
 use super::tmux_command::TmuxCommand;
 use super::tmux_error::TmuxError;
 use super::tmux_launch::{Launched, TmuxLaunch};
@@ -12,6 +11,7 @@ use super::tmux_listing::TmuxListing;
 use super::tmux_output::TmuxOutput;
 use super::tmux_scripts::TmuxScripts;
 use crate::adapters::agent_launch::launcher_command::{LauncherCommand, PreparedLaunch};
+use crate::adapters::child_process::foreground_child::ForegroundChild;
 use crate::adapters::host::process_table::ProcessTable;
 use crate::application::ports::{
     AgentLaunch, AttachTarget, Multiplexer, MultiplexerError, ServerConfig, ServerState,
@@ -124,9 +124,19 @@ impl TmuxMultiplexer {
         lines: &[String],
         patience: Duration,
     ) -> Result<(), MultiplexerError> {
+        self.reach_agent(tmux_name, patience, |input, pane| {
+            input.type_when_ready(pane, lines)
+        })
+    }
+
+    fn reach_agent(
+        &self,
+        tmux_name: &str,
+        patience: Duration,
+        deliver: impl FnOnce(&TmuxAgentInput, &str) -> Result<(), InputError>,
+    ) -> Result<(), MultiplexerError> {
         let pane = self.required_agent_pane(tmux_name)?;
-        TmuxAgentInput::new(&self.tmux, patience)
-            .type_when_ready(&pane, lines)
+        deliver(&TmuxAgentInput::new(&self.tmux, patience), &pane)
             .map_err(|error| error.in_session(tmux_name))
     }
 
@@ -151,13 +161,17 @@ impl TmuxMultiplexer {
     }
 
     fn attach_command(&self, target: &AttachTarget) -> Result<Command, MultiplexerError> {
-        let resolved = match target {
-            AttachTarget::Agent(tmux_name) => self.shown_pane(tmux_name)?,
-            AttachTarget::Shell(window) => window.clone(),
-        };
+        let resolved = self.resolved(target)?;
         Ok(self
             .tmux
             .foreground(&TmuxScripts::attach_session(&resolved)))
+    }
+
+    fn resolved(&self, target: &AttachTarget) -> Result<String, MultiplexerError> {
+        match target {
+            AttachTarget::Agent(tmux_name) => self.shown_pane(tmux_name),
+            AttachTarget::Shell(window) => Ok(window.clone()),
+        }
     }
 
     fn shown_pane(&self, tmux_name: &str) -> Result<String, MultiplexerError> {
@@ -180,38 +194,23 @@ impl TmuxMultiplexer {
     }
 
     fn attach_in_foreground(&self, mut attach: Command) -> Result<(), MultiplexerError> {
-        let child = attach.spawn().map_err(|error| MultiplexerError::Failed {
-            subcommand: "attach-session".to_string(),
-            detail: error.to_string(),
-        })?;
-        let Ok(pid) = libc::pid_t::try_from(child.id()) else {
-            return Ok(());
-        };
-        let mut status: libc::c_int = 0;
-        // SAFETY: waitpid and kill only take the attach child's own pid and this process's
-        // pid; status is a local the kernel fills, and the child is reaped exactly once here.
-        let waited = unsafe {
-            loop {
-                if libc::waitpid(pid, &mut status, libc::WUNTRACED) == -1 {
-                    if io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
-                        continue;
-                    }
-                    break -1;
-                }
-                if !libc::WIFSTOPPED(status) {
-                    break 0;
-                }
-                libc::kill(std::process::id() as libc::pid_t, libc::SIGSTOP);
-                libc::kill(pid, libc::SIGCONT);
-            }
-        };
-        if waited == 0 && libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0 {
-            return Ok(());
-        }
-        Err(MultiplexerError::Failed {
-            subcommand: "attach-session".to_string(),
-            detail: format!("tmux attach-session ended with wait status {status}"),
+        let child = attach
+            .spawn()
+            .map_err(|error| Self::attach_failed(error.to_string()))?;
+        ForegroundChild::of(&child).map_or(Ok(()), |foreground| {
+            foreground.wait().map_err(|status| {
+                Self::attach_failed(format!(
+                    "tmux attach-session ended with wait status {status}"
+                ))
+            })
         })
+    }
+
+    fn attach_failed(detail: String) -> MultiplexerError {
+        MultiplexerError::Failed {
+            subcommand: "attach-session".to_string(),
+            detail,
+        }
     }
 
     fn require_done(subcommand: &str, output: &TmuxOutput) -> Result<(), MultiplexerError> {
@@ -302,6 +301,17 @@ impl Multiplexer for TmuxMultiplexer {
         self.attach_in_foreground(attach)
     }
 
+    fn switch_client(&self, client: &str, target: &AttachTarget) -> Result<(), MultiplexerError> {
+        let resolved = self.resolved(target)?;
+        let output = self
+            .tmux
+            .change(&TmuxScripts::switch_client(client, &resolved))?;
+        match output.succeeded() {
+            true => Ok(()),
+            false => Err(TmuxError::failed("switch-client", &output).into()),
+        }
+    }
+
     fn capture_pane(&self, tmux_name: &str) -> Result<String, MultiplexerError> {
         let pane = self.shown_pane(tmux_name)?;
         let output = self.tmux.query(&TmuxScripts::capture(&pane))?;
@@ -332,6 +342,12 @@ impl Multiplexer for TmuxMultiplexer {
 
     fn type_if_ready(&self, tmux_name: &str, lines: &[String]) -> Result<(), MultiplexerError> {
         self.type_into_agent(tmux_name, lines, Duration::ZERO)
+    }
+
+    fn submit_when_ready(&self, tmux_name: &str, prompt: &str) -> Result<(), MultiplexerError> {
+        self.reach_agent(tmux_name, Self::STARTUP_PATIENCE, |input, pane| {
+            input.paste_when_ready(pane, prompt)
+        })
     }
 
     fn agent_at_prompt(&self, tmux_name: &str) -> Result<bool, MultiplexerError> {
@@ -1322,6 +1338,62 @@ mod tests {
     }
 
     #[test]
+    fn switching_a_client_shows_the_agent_pane_of_the_other_session() {
+        let fixture = MultiplexerFixture::new();
+        fixture.create("fix-auth").unwrap();
+        fixture.create("dark-mode").unwrap();
+        let agent = fixture.tagged_panes("ringleader-dark-mode").pop().unwrap();
+        let client = fixture.server.control_client("=ringleader-fix-auth:");
+        let name = fixture.server.client_name(&client);
+
+        fixture
+            .server
+            .multiplexer()
+            .switch_client(
+                &name,
+                &AttachTarget::Agent("ringleader-dark-mode".to_string()),
+            )
+            .unwrap();
+
+        assert_eq!(fixture.server.client_pane(&client), agent);
+    }
+
+    #[test]
+    fn switching_a_client_to_a_shell_window_shows_that_window() {
+        let fixture = MultiplexerFixture::new();
+        fixture.create("fix-auth").unwrap();
+        fixture.create("dark-mode").unwrap();
+        let shell = fixture
+            .server
+            .multiplexer()
+            .ensure_shell_window("ringleader-dark-mode", &fixture.worktree("dark-mode"), "sh")
+            .unwrap();
+        let client = fixture.server.control_client("=ringleader-fix-auth:");
+        let name = fixture.server.client_name(&client);
+
+        fixture
+            .server
+            .multiplexer()
+            .switch_client(&name, &AttachTarget::Shell(shell.clone()))
+            .unwrap();
+
+        let window = fixture.server.text(&["list-clients", "-F", "#{window_id}"]);
+        assert_eq!(window, shell);
+    }
+
+    #[test]
+    fn switching_a_client_that_is_gone_fails() {
+        let fixture = MultiplexerFixture::with_holder();
+
+        let switched = fixture
+            .server
+            .multiplexer()
+            .switch_client("client-0", &AttachTarget::Agent("holder".to_string()));
+
+        assert!(switched.is_err());
+    }
+
+    #[test]
     fn capture_reads_the_agent_pane() {
         let fixture = MultiplexerFixture::with_holder();
         let multiplexer = TmuxMultiplexer::new(
@@ -1480,6 +1552,34 @@ mod tests {
                 .is_ok_and(|text| text.contains("hello fix-auth"))
         });
         assert!(typed);
+    }
+
+    #[test]
+    fn a_submitted_prompt_reaches_the_agent_pane_at_its_prompt() {
+        let fixture = MultiplexerFixture::with_holder();
+        let multiplexer = TmuxMultiplexer::new(
+            fixture.server.command(),
+            fixture.server.launcher(
+                ["sh", "-c", "printf '> '; exec cat", "--"]
+                    .map(OsString::from)
+                    .to_vec(),
+            ),
+            fixture.server.process_table(),
+        );
+        multiplexer
+            .create_session(&fixture.spec("fix-auth"))
+            .unwrap();
+
+        multiplexer
+            .submit_when_ready("ringleader-fix-auth", "review fix-auth")
+            .unwrap();
+
+        let submitted = fixture.server.wait_for(|| {
+            multiplexer
+                .capture_pane("ringleader-fix-auth")
+                .is_ok_and(|text| text.contains("review fix-auth"))
+        });
+        assert!(submitted);
     }
 
     #[test]

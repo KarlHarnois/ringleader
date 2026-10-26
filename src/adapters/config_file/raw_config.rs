@@ -13,6 +13,7 @@ pub struct RawConfig {
     next_session_keys: Option<Vec<String>>,
     previous_session_keys: Option<Vec<String>>,
     shell_toggle_keys: Option<Vec<String>>,
+    finder_keys: Option<Vec<String>>,
     state_poll_ms: Option<u64>,
     preview_refresh_ms: Option<u64>,
     diff_refresh_ms: Option<u64>,
@@ -36,7 +37,8 @@ impl RawConfig {
     }
 
     fn expanded_draft(self, defaults: ConfigDraft, home: &HomeExpansion) -> ConfigDraft {
-        let mut draft = self.keys_into(self.timing_into(defaults));
+        let mut draft =
+            self.keys_into(self.session_options_into(self.refresh_intervals_into(defaults)));
         if let Some(root) = &self.worktree_root {
             draft = draft.worktree_root(&home.path(root));
         }
@@ -61,10 +63,13 @@ impl RawConfig {
         if let Some(keys) = &self.shell_toggle_keys {
             draft = draft.shell_toggle_keys(keys);
         }
+        if let Some(keys) = &self.finder_keys {
+            draft = draft.finder_keys(keys);
+        }
         draft
     }
 
-    fn timing_into(&self, mut draft: ConfigDraft) -> ConfigDraft {
+    fn refresh_intervals_into(&self, mut draft: ConfigDraft) -> ConfigDraft {
         if let Some(value) = self.state_poll_ms {
             draft = draft.state_poll_ms(value);
         }
@@ -77,6 +82,10 @@ impl RawConfig {
         if let Some(value) = self.pull_request_refresh_ms {
             draft = draft.pull_request_refresh_ms(value);
         }
+        draft
+    }
+
+    fn session_options_into(&self, mut draft: ConfigDraft) -> ConfigDraft {
         if let Some(value) = self.activity_idle_seconds {
             draft = draft.activity_idle_seconds(value);
         }
@@ -134,10 +143,24 @@ struct RawAgent {
     startup_input: Vec<String>,
     #[serde(default)]
     rename_input: Vec<String>,
+    #[serde(default = "RawAgent::built_in_skills_by_default")]
+    built_in_skills: bool,
 }
 
 impl RawAgent {
+    fn built_in_skills_by_default() -> bool {
+        true
+    }
+
     fn into_agent(self, home: &HomeExpansion) -> Agent {
+        let agent = self.configured_agent(home);
+        match self.built_in_skills {
+            true => agent,
+            false => agent.without_built_in_skills(),
+        }
+    }
+
+    fn configured_agent(&self, home: &HomeExpansion) -> Agent {
         Agent::new(&self.name, &home.command(&self.command))
             .with_args(&self.args)
             .with_env_names(&self.env)

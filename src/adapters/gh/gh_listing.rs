@@ -4,7 +4,7 @@ use serde::de::Error;
 use serde::{Deserialize, Deserializer};
 
 use super::gh_query::GhQuery;
-use crate::domain::{PullRequest, PullRequestState};
+use crate::domain::{PullRequest, PullRequestReview, PullRequestState};
 
 #[derive(Deserialize)]
 pub struct GhListing {
@@ -82,6 +82,8 @@ struct GhEntry {
     created_at: GhTimestamp,
     #[serde(rename = "headRepositoryOwner")]
     head_repository_owner: Option<GhAccount>,
+    #[serde(default, rename = "latestOpinionatedReviews")]
+    latest_reviews: Option<GhReviews>,
 }
 
 impl GhEntry {
@@ -93,18 +95,47 @@ impl GhEntry {
             "CLOSED" => PullRequestState::Closed,
             _ => return None,
         };
-        Some(PullRequest::new(
-            self.number,
-            state,
-            self.created_at.epoch_seconds,
-            &self.url,
-        ))
+        Some(
+            PullRequest::new(self.number, state, self.created_at.epoch_seconds, &self.url)
+                .with_review(self.review()),
+        )
+    }
+
+    fn review(&self) -> PullRequestReview {
+        PullRequestReview::strongest_of(self.reviews())
+    }
+
+    fn reviews(&self) -> impl Iterator<Item = PullRequestReview> + '_ {
+        self.latest_reviews
+            .iter()
+            .flat_map(|reviews| &reviews.nodes)
+            .filter_map(GhReview::pull_request_review)
     }
 
     fn has_head_owner(&self, login: &str) -> bool {
         self.head_repository_owner
             .as_ref()
             .is_some_and(|owner| owner.login == login)
+    }
+}
+
+#[derive(Deserialize)]
+struct GhReviews {
+    nodes: Vec<GhReview>,
+}
+
+#[derive(Deserialize)]
+struct GhReview {
+    state: String,
+}
+
+impl GhReview {
+    fn pull_request_review(&self) -> Option<PullRequestReview> {
+        match self.state.as_str() {
+            "APPROVED" => Some(PullRequestReview::Approved),
+            "CHANGES_REQUESTED" => Some(PullRequestReview::ChangesRequested),
+            _ => None,
+        }
     }
 }
 
@@ -157,9 +188,22 @@ mod tests {
             )
         }
 
+        fn reviewed_node(number: u64, reviews: &str) -> String {
+            format!(
+                r#"{{"number":{number},"url":"{}","state":"OPEN","isDraft":false,"createdAt":"{}","headRepositoryOwner":{{"login":"octocat"}},"latestOpinionatedReviews":{{"nodes":{reviews}}}}}"#,
+                ServiceFixture::pull_request_url(number),
+                Self::OPENED_AT_TEXT
+            )
+        }
+
         fn opened(number: u64, state: PullRequestState) -> Option<PullRequest> {
             let url = ServiceFixture::pull_request_url(number);
             Some(PullRequest::new(number, state, Self::OPENED_AT, &url))
+        }
+
+        fn reviewed(number: u64, review: PullRequestReview) -> Option<PullRequest> {
+            Self::opened(number, PullRequestState::Open)
+                .map(|pull_request| pull_request.with_review(review))
         }
     }
 
@@ -204,6 +248,55 @@ mod tests {
             ListingFixture::pull_request(&[ListingFixture::node(3, "CLOSED", false, "octocat")]);
 
         assert_eq!(found, ListingFixture::opened(3, PullRequestState::Closed));
+    }
+
+    #[test]
+    fn an_approved_pull_request_reads_as_approved() {
+        let found = ListingFixture::pull_request(&[ListingFixture::reviewed_node(
+            142,
+            r#"[{"state":"APPROVED"}]"#,
+        )]);
+
+        assert_eq!(
+            found,
+            ListingFixture::reviewed(142, PullRequestReview::Approved)
+        );
+    }
+
+    #[test]
+    fn a_pull_request_with_a_change_request_reads_as_changes_requested() {
+        let found = ListingFixture::pull_request(&[ListingFixture::reviewed_node(
+            142,
+            r#"[{"state":"CHANGES_REQUESTED"}]"#,
+        )]);
+
+        assert_eq!(
+            found,
+            ListingFixture::reviewed(142, PullRequestReview::ChangesRequested)
+        );
+    }
+
+    #[test]
+    fn a_change_request_beats_an_approval() {
+        let found = ListingFixture::pull_request(&[ListingFixture::reviewed_node(
+            142,
+            r#"[{"state":"APPROVED"},{"state":"CHANGES_REQUESTED"}]"#,
+        )]);
+
+        assert_eq!(
+            found,
+            ListingFixture::reviewed(142, PullRequestReview::ChangesRequested)
+        );
+    }
+
+    #[test]
+    fn a_comment_leaves_the_review_unreviewed() {
+        let found = ListingFixture::pull_request(&[ListingFixture::reviewed_node(
+            142,
+            r#"[{"state":"COMMENTED"}]"#,
+        )]);
+
+        assert_eq!(found, ListingFixture::opened(142, PullRequestState::Open));
     }
 
     #[test]

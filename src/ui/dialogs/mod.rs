@@ -1,6 +1,8 @@
 pub mod compact_count;
 pub mod compact_duration;
+pub mod confirmation_keys;
 pub mod delete_session_dialog;
+pub mod delete_sessions_dialog;
 pub mod dialog;
 pub mod dialog_labels;
 pub mod dialog_slot;
@@ -10,6 +12,7 @@ pub mod new_session;
 pub mod rename_session_dialog;
 pub mod repo_search;
 pub mod scroll_window;
+pub mod session_candidate;
 pub mod session_finder;
 pub mod text_field;
 pub mod usage_view;

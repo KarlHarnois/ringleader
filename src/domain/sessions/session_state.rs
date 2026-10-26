@@ -28,6 +28,10 @@ impl SessionState {
         matches!(self, SessionState::Exited | SessionState::Stopped)
     }
 
+    pub fn allows_stop(self) -> bool {
+        matches!(self, SessionState::Waiting | SessionState::Exited)
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             SessionState::Working => "working",
@@ -62,6 +66,16 @@ mod tests {
             .collect();
 
         assert_eq!(restartable, [Exited, Stopped]);
+    }
+
+    #[test]
+    fn only_waiting_and_exited_allow_stop_because_stopping_a_working_agent_drops_its_turn() {
+        let stoppable: Vec<SessionState> = SessionState::ALL
+            .into_iter()
+            .filter(|state| state.allows_stop())
+            .collect();
+
+        assert_eq!(stoppable, [Waiting, Exited]);
     }
 
     #[test]

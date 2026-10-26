@@ -1,93 +1,72 @@
 use std::collections::HashMap;
-use std::ffi::{OsStr, OsString};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::Arc;
 
 use super::gh_listing::GhListing;
+use super::gh_program::GhProgram;
 use super::gh_query::GhQuery;
+use super::gh_repo_pages::GhRepoPages;
 use crate::adapters::BoundedCommand;
 use crate::adapters::child_process::bounded_command::{Call, CommandError};
 use crate::adapters::child_process::command_output::CommandOutput;
 use crate::adapters::child_process::deadlines::CallKind;
-use crate::adapters::git::git_invocation::GitInvocation;
-use crate::application::ports::{PullRequestError, PullRequests};
+use crate::application::ports::{PullRequestError, PullRequests, RepoPageError, RepoPages};
 use crate::domain::PullRequest;
 
 pub struct GhPullRequests {
-    program: OsString,
+    gh: GhProgram,
     bounded: BoundedCommand,
-    hosts: Mutex<HashMap<PathBuf, String>>,
+    pages: Arc<GhRepoPages>,
 }
 
 impl GhPullRequests {
     const SUBCOMMAND: &'static str = "api graphql";
-    const BROWSE: &'static str = "browse";
-    const REPOSITORY_OVERRIDE: &'static str = "GH_REPO";
 
-    pub fn new(program: &OsStr, bounded: BoundedCommand) -> Self {
-        Self {
-            program: program.to_os_string(),
-            bounded,
-            hosts: Mutex::default(),
-        }
+    pub fn new(gh: GhProgram, bounded: BoundedCommand, pages: Arc<GhRepoPages>) -> Self {
+        Self { gh, bounded, pages }
     }
 
     fn host(&self, repo: &Path) -> Result<String, PullRequestError> {
-        if let Some(host) = self.known_hosts().get(repo) {
-            return Ok(host.clone());
+        let page = self
+            .pages
+            .main_page(repo)
+            .map_err(Self::page_error)?
+            .ok_or_else(Self::no_page)?;
+        Self::url_host(&page).ok_or_else(|| Self::browse_failure("unreadable url", page.clone()))
+    }
+
+    fn page_error(error: RepoPageError) -> PullRequestError {
+        match error {
+            RepoPageError::TimedOut { seconds } => PullRequestError::TimedOut {
+                subcommand: GhRepoPages::BROWSE.to_string(),
+                seconds,
+            },
+            RepoPageError::NotStarted => Self::browse_failure("not started", error.to_string()),
         }
-        let host = self.resolve_host(repo)?;
-        self.known_hosts().insert(repo.to_path_buf(), host.clone());
-        Ok(host)
     }
 
-    fn resolve_host(&self, repo: &Path) -> Result<String, PullRequestError> {
-        let call = Call::new(Self::BROWSE, CallKind::GhQuery);
-        let output = self
-            .bounded
-            .run(self.browse_command(repo), &call)
-            .map_err(|error| Self::error(Self::BROWSE, error))?;
-        if !output.succeeded() {
-            return Err(Self::failure(Self::BROWSE, &output));
+    fn no_page() -> PullRequestError {
+        Self::browse_failure(
+            "no GitHub repo",
+            "gh knows no GitHub repo for this checkout".to_string(),
+        )
+    }
+
+    fn browse_failure(status: &str, stderr: String) -> PullRequestError {
+        PullRequestError::Failed {
+            subcommand: GhRepoPages::BROWSE.to_string(),
+            status: status.to_string(),
+            stderr,
         }
-        let url = output.stdout_text();
-        Self::url_host(&url).ok_or_else(|| PullRequestError::Failed {
-            subcommand: Self::BROWSE.to_string(),
-            status: "unreadable url".to_string(),
-            stderr: url.clone(),
-        })
-    }
-
-    fn known_hosts(&self) -> MutexGuard<'_, HashMap<PathBuf, String>> {
-        self.hosts.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    fn browse_command(&self, repo: &Path) -> Command {
-        let mut command = self.gh(repo);
-        command.args(["browse", "--no-browser"]);
-        command
     }
 
     fn graphql_command(&self, repo: &Path, host: &str, query: &GhQuery) -> Command {
-        let mut command = self.gh(repo);
+        let mut command = self.gh.in_repo(repo);
         command
             .args(["api", "graphql", "--hostname", host])
             .args(["-F", "owner={owner}", "-F", "name={repo}"])
             .args(query.arguments());
-        command
-    }
-
-    fn gh(&self, repo: &Path) -> Command {
-        let mut command = Command::new(&self.program);
-        command
-            .current_dir(repo)
-            .env_remove(Self::REPOSITORY_OVERRIDE)
-            .env("GH_PROMPT_DISABLED", "1")
-            .env("NO_COLOR", "1");
-        for name in GitInvocation::REPOSITORY_LOCAL_VARIABLES {
-            command.env_remove(name);
-        }
         command
     }
 
@@ -102,7 +81,7 @@ impl GhPullRequests {
         query: &GhQuery,
     ) -> Result<HashMap<String, Option<PullRequest>>, PullRequestError> {
         if !output.succeeded() {
-            return Err(Self::failure(Self::SUBCOMMAND, output));
+            return Err(Self::failure(output));
         }
         GhListing::parse(&output.stdout_text())
             .map(|listing| listing.pull_requests(query))
@@ -113,22 +92,22 @@ impl GhPullRequests {
             })
     }
 
-    fn failure(subcommand: &str, output: &CommandOutput) -> PullRequestError {
+    fn failure(output: &CommandOutput) -> PullRequestError {
         PullRequestError::Failed {
-            subcommand: subcommand.to_string(),
+            subcommand: Self::SUBCOMMAND.to_string(),
             status: output.status_label(),
             stderr: output.stderr_text(),
         }
     }
 
-    fn error(subcommand: &str, error: CommandError) -> PullRequestError {
+    fn error(error: CommandError) -> PullRequestError {
         match error {
             CommandError::TimedOut { seconds, .. } => PullRequestError::TimedOut {
-                subcommand: subcommand.to_string(),
+                subcommand: Self::SUBCOMMAND.to_string(),
                 seconds,
             },
             CommandError::Spawn { detail, .. } => PullRequestError::Failed {
-                subcommand: subcommand.to_string(),
+                subcommand: Self::SUBCOMMAND.to_string(),
                 status: "not started".to_string(),
                 stderr: detail,
             },
@@ -151,21 +130,23 @@ impl PullRequests for GhPullRequests {
         let output = self
             .bounded
             .run(self.graphql_command(repo, &host, &query), &call)
-            .map_err(|error| Self::error(Self::SUBCOMMAND, error))?;
+            .map_err(Self::error)?;
         Self::pull_requests(&output, &query)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsStr;
     use std::fs;
     use std::os::unix::process::ExitStatusExt;
     use std::path::PathBuf;
     use std::process::ExitStatus;
+    use std::time::Duration;
 
     use super::*;
     use crate::adapters::Deadlines;
-    use crate::domain::PullRequestState;
+    use crate::domain::{PullRequestReview, PullRequestState};
     use crate::test_support::ExecutableScript;
 
     struct ParseFixture;
@@ -176,6 +157,8 @@ mod tests {
         const RECORDED: &'static str =
             include_str!("../../../tests/fixtures/gh-graphql-pull-requests.json");
         const HOST: &'static str = "github.example.com";
+        const SLOW_GH: &'static str = "#!/bin/sh\nexec sleep 5\n";
+        const SHORT_DEADLINE: Duration = Duration::from_millis(200);
         const STAND_IN: &'static str = r#"#!/bin/sh
 echo "$*" >> "$0.calls"
 if [ "$1" = "browse" ]; then
@@ -186,7 +169,7 @@ listing=''
 while [ $# -gt 0 ]; do
   if [ "$1" = "-f" ]; then
     case "$2" in
-      branch*=fix-auth) entry='{"nodes":[{"number":42,"url":"https://github.example.com/example-org/example-project/pull/42","state":"OPEN","isDraft":false,"createdAt":"2023-11-14T22:13:20Z","headRepositoryOwner":{"login":"octocat"}}]}' ;;
+      branch*=fix-auth) entry='{"nodes":[{"number":42,"url":"https://github.example.com/example-org/example-project/pull/42","state":"OPEN","isDraft":false,"createdAt":"2023-11-14T22:13:20Z","headRepositoryOwner":{"login":"octocat"},"latestOpinionatedReviews":{"nodes":[{"state":"APPROVED"}]}}]}' ;;
       branch*=*) entry='{"nodes":[]}' ;;
       *) entry='' ;;
     esac
@@ -204,6 +187,7 @@ printf '{"data":{"viewer":{"login":"octocat"},"repository":{"owner":{"login":"ex
 
         fn fix_auth_pull_request() -> PullRequest {
             PullRequest::new(42, PullRequestState::Open, Self::OPENED_AT, Self::URL)
+                .with_review(PullRequestReview::Approved)
         }
 
         fn output(code: i32, stdout: &str) -> CommandOutput {
@@ -216,7 +200,17 @@ printf '{"data":{"viewer":{"login":"octocat"},"repository":{"owner":{"login":"ex
 
         fn adapter(directory: &tempfile::TempDir, body: &str) -> GhPullRequests {
             let path = Self::executable(directory, body);
-            GhPullRequests::new(path.as_os_str(), BoundedCommand::new(Deadlines::standard()))
+            Self::over(GhProgram::new(path.as_os_str()))
+        }
+
+        fn over(gh: GhProgram) -> GhPullRequests {
+            Self::within(gh, Deadlines::standard())
+        }
+
+        fn within(gh: GhProgram, deadlines: Deadlines) -> GhPullRequests {
+            let bounded = BoundedCommand::new(deadlines);
+            let pages = Arc::new(GhRepoPages::new(gh.clone(), bounded));
+            GhPullRequests::new(gh, bounded, pages)
         }
 
         fn executable(directory: &tempfile::TempDir, body: &str) -> PathBuf {
@@ -235,7 +229,7 @@ printf '{"data":{"viewer":{"login":"octocat"},"repository":{"owner":{"login":"ex
         }
 
         fn named_gh() -> GhPullRequests {
-            GhPullRequests::new(OsStr::new("gh"), BoundedCommand::new(Deadlines::standard()))
+            Self::over(GhProgram::new(OsStr::new("gh")))
         }
     }
 
@@ -265,14 +259,22 @@ printf '{"data":{"viewer":{"login":"octocat"},"repository":{"owner":{"login":"ex
     }
 
     #[test]
+    fn an_unreadable_listing_is_an_error() {
+        let query = GhQuery::new(&ParseFixture::branches());
+        let output = ParseFixture::output(0, "not json");
+
+        assert!(matches!(
+            GhPullRequests::pull_requests(&output, &query),
+            Err(PullRequestError::Failed { status, .. }) if status == "unreadable json"
+        ));
+    }
+
+    #[test]
     fn a_timeout_maps_to_a_timeout_error() {
-        let mapped = GhPullRequests::error(
-            GhPullRequests::SUBCOMMAND,
-            CommandError::TimedOut {
-                subcommand: "gh api graphql".to_string(),
-                seconds: 20,
-            },
-        );
+        let mapped = GhPullRequests::error(CommandError::TimedOut {
+            subcommand: "gh api graphql".to_string(),
+            seconds: 20,
+        });
 
         assert!(matches!(
             mapped,
@@ -282,13 +284,10 @@ printf '{"data":{"viewer":{"login":"octocat"},"repository":{"owner":{"login":"ex
 
     #[test]
     fn a_spawn_failure_maps_to_a_failure() {
-        let mapped = GhPullRequests::error(
-            GhPullRequests::SUBCOMMAND,
-            CommandError::Spawn {
-                subcommand: "gh api graphql".to_string(),
-                detail: "not found".to_string(),
-            },
-        );
+        let mapped = GhPullRequests::error(CommandError::Spawn {
+            subcommand: "gh api graphql".to_string(),
+            detail: "not found".to_string(),
+        });
 
         assert!(matches!(mapped, PullRequestError::Failed { .. }));
     }
@@ -329,20 +328,6 @@ printf '{"data":{"viewer":{"login":"octocat"},"repository":{"owner":{"login":"ex
         );
         assert_eq!(command.get_current_dir(), Some(Path::new("/repos/example")));
         assert_eq!(prompt, Some(OsStr::new("1")));
-    }
-
-    #[test]
-    fn every_gh_call_ignores_inherited_repository_overrides() {
-        let command = ParseFixture::named_gh().gh(Path::new("/repos/example"));
-        let removed: Vec<&OsStr> = command
-            .get_envs()
-            .filter(|(_, value)| value.is_none())
-            .map(|(name, _)| name)
-            .collect();
-
-        assert!(removed.contains(&OsStr::new("GH_REPO")));
-        assert!(removed.contains(&OsStr::new("GIT_DIR")));
-        assert!(removed.contains(&OsStr::new("GIT_WORK_TREE")));
     }
 
     #[test]
@@ -403,6 +388,37 @@ printf '{"data":{"viewer":{"login":"octocat"},"repository":{"owner":{"login":"ex
         assert!(matches!(
             found,
             Err(PullRequestError::Failed { subcommand, .. }) if subcommand == "browse"
+        ));
+    }
+
+    #[test]
+    fn a_host_lookup_that_hangs_is_a_timeout() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = ParseFixture::executable(&directory, ParseFixture::SLOW_GH);
+        let adapter = ParseFixture::within(
+            GhProgram::new(path.as_os_str()),
+            Deadlines::uniform(ParseFixture::SHORT_DEADLINE),
+        );
+
+        let found = adapter.lookup(directory.path(), &ParseFixture::branches());
+
+        assert!(matches!(
+            found,
+            Err(PullRequestError::TimedOut { subcommand, .. }) if subcommand == "browse"
+        ));
+    }
+
+    #[test]
+    fn a_gh_that_cannot_start_fails_the_host_lookup() {
+        let directory = tempfile::tempdir().unwrap();
+        let adapter = ParseFixture::over(GhProgram::new(OsStr::new("/nonexistent/gh")));
+
+        let found = adapter.lookup(directory.path(), &ParseFixture::branches());
+
+        assert!(matches!(
+            found,
+            Err(PullRequestError::Failed { subcommand, status, .. })
+                if subcommand == "browse" && status == "not started"
         ));
     }
 

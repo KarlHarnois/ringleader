@@ -1,21 +1,24 @@
+use std::path::{Path, PathBuf};
+
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::back_key::BackKey;
+use super::key_map::KeyMap;
 use crate::application::ports::ConfigError;
-use crate::domain::{Session, SessionState, SessionSummary};
+use crate::domain::{RepoGroup, Session, SessionState, SessionSummary};
 use crate::ui::app::AppRequest;
-use crate::ui::blocking_operation::BlockingOperation;
-use crate::ui::delete_step::DeleteStep;
+use crate::ui::batch_operation::BatchOperation;
+use crate::ui::blocking_operation::{BlockingOperation, BrowserPage, DeleteStep};
 use crate::ui::dialogs::DialogOpening;
 
 pub struct ActionGate<'a> {
     selected: Option<&'a SessionSummary>,
     config_error: Option<&'a ConfigError>,
-    heading_selected: bool,
+    heading: Option<&'a RepoGroup>,
 }
 
 impl<'a> ActionGate<'a> {
-    const NO_SELECTION: &'static str = "No session is selected.";
+    pub const NO_SELECTION: &'static str = "No session is selected.";
 
     pub fn new(
         selected: Option<&'a SessionSummary>,
@@ -24,27 +27,30 @@ impl<'a> ActionGate<'a> {
         Self {
             selected,
             config_error,
-            heading_selected: false,
+            heading: None,
         }
     }
 
-    pub fn on_heading(config_error: Option<&'a ConfigError>) -> Self {
+    pub fn on_heading(heading: &'a RepoGroup, config_error: Option<&'a ConfigError>) -> Self {
         Self {
             selected: None,
             config_error,
-            heading_selected: true,
+            heading: Some(heading),
         }
     }
 
-    pub fn action_for(&self, key: &KeyEvent) -> KeyAction {
-        if BackKey::matches(key) {
-            return KeyAction::Ignore;
-        }
+    pub fn list_action(key: &KeyEvent) -> Option<KeyAction> {
         Self::screen_action(key)
             .or_else(|| Self::selection_move(key.code))
             .or_else(|| Self::repo_action(key.code))
-            .or_else(|| self.access_action(key.code))
-            .unwrap_or_else(|| self.session_change(key.code))
+            .or_else(|| Self::visual_toggle(key.code))
+    }
+
+    fn visual_toggle(code: KeyCode) -> Option<KeyAction> {
+        match code {
+            KeyCode::Char('v' | 'V') => Some(KeyAction::Visual(VisualChange::Toggle)),
+            _ => None,
+        }
     }
 
     fn screen_action(key: &KeyEvent) -> Option<KeyAction> {
@@ -90,8 +96,8 @@ impl<'a> ActionGate<'a> {
         let action = match code {
             KeyCode::Enter => self.enter(),
             KeyCode::Char('t') => KeyAction::from(self.shell().map(KeyAction::Request)),
-            KeyCode::Char('T') => KeyAction::from(self.terminal().map(KeyAction::OpenTerminal)),
-            KeyCode::Char('o') => self.open_pull_request(),
+            KeyCode::Char('T') => KeyAction::from(self.terminal().map(KeyAction::OpenOnDesktop)),
+            KeyCode::Char('o') => self.open_heading_or_pull_request(),
             _ => return None,
         };
         Some(action)
@@ -101,7 +107,7 @@ impl<'a> ActionGate<'a> {
         match code {
             KeyCode::Char('n') => KeyAction::from(
                 self.writable()
-                    .map(|()| KeyAction::Open(DialogOpening::NewSession)),
+                    .map(|()| KeyAction::Open(DialogOpening::NewSession(self.selected_repo()))),
             ),
             KeyCode::Char('R') => KeyAction::from(
                 self.rename()
@@ -109,6 +115,7 @@ impl<'a> ActionGate<'a> {
             ),
             KeyCode::Char('s') => KeyAction::from(self.restart().map(KeyAction::Request)),
             KeyCode::Char('S') => KeyAction::from(self.restart_all().map(KeyAction::Request)),
+            KeyCode::Char('x') => KeyAction::from(self.stop().map(KeyAction::Request)),
             KeyCode::Char('d') => KeyAction::from(self.delete().map(KeyAction::Request)),
             KeyCode::Char('p') => KeyAction::from(self.pull().map(KeyAction::Request)),
             _ => KeyAction::Ignore,
@@ -121,7 +128,7 @@ impl<'a> ActionGate<'a> {
     }
 
     fn enter(&self) -> KeyAction {
-        if self.heading_selected {
+        if self.heading.is_some() {
             return KeyAction::Fold;
         }
         KeyAction::from(self.attach().map(KeyAction::Request))
@@ -136,14 +143,24 @@ impl<'a> ActionGate<'a> {
             .map(AppRequest::Shell)
     }
 
-    pub fn terminal(&self) -> Result<String, String> {
+    pub fn terminal(&self) -> Result<DesktopOpening, String> {
+        if let Some(group) = self.heading {
+            return Ok(DesktopOpening::RepoTerminal(group.clone()));
+        }
         self.managed_name("T cannot open a terminal in it")
+            .map(DesktopOpening::SessionTerminal)
     }
 
-    pub fn open_pull_request(&self) -> KeyAction {
+    fn open_heading_or_pull_request(&self) -> KeyAction {
+        if let Some(group) = self.heading {
+            let operation = BlockingOperation::Open(BrowserPage::RepoPage(group.clone()));
+            return KeyAction::Request(AppRequest::Block(operation));
+        }
         let name = self.selected().map(|row| row.name().to_string());
         KeyAction::from(name.map(|name| {
-            KeyAction::Request(AppRequest::Block(BlockingOperation::OpenPullRequest(name)))
+            KeyAction::Request(AppRequest::Block(BlockingOperation::Open(
+                BrowserPage::PullRequest(name),
+            )))
         }))
     }
 
@@ -192,9 +209,20 @@ impl<'a> ActionGate<'a> {
         }
     }
 
+    pub fn stop(&self) -> Result<AppRequest, String> {
+        self.writable()?;
+        let operation = match self.heading {
+            Some(group) => BlockingOperation::Batch(BatchOperation::StopRepo(group.clone())),
+            None => BlockingOperation::Stop(self.managed_name("it cannot be stopped")?),
+        };
+        Ok(AppRequest::Block(operation))
+    }
+
     pub fn restart_all(&self) -> Result<AppRequest, String> {
         self.writable()?;
-        Ok(AppRequest::Block(BlockingOperation::RestartAll))
+        Ok(AppRequest::Block(BlockingOperation::Batch(
+            BatchOperation::RestartAll,
+        )))
     }
 
     pub fn pull(&self) -> Result<AppRequest, String> {
@@ -220,7 +248,7 @@ impl<'a> ActionGate<'a> {
         }
     }
 
-    fn writable(&self) -> Result<(), String> {
+    pub fn writable(&self) -> Result<(), String> {
         match self.config_error {
             Some(error) => Err(format!("config error, running read-only: {error}")),
             None => Ok(()),
@@ -230,6 +258,29 @@ impl<'a> ActionGate<'a> {
     fn selected(&self) -> Result<&'a SessionSummary, String> {
         self.selected.ok_or_else(|| Self::NO_SELECTION.to_string())
     }
+
+    fn selected_repo(&self) -> Option<PathBuf> {
+        let group = self
+            .heading
+            .cloned()
+            .or_else(|| self.selected.map(RepoGroup::of))?;
+        group.path().map(Path::to_path_buf)
+    }
+}
+
+impl KeyMap for ActionGate<'_> {
+    fn action_for(&self, key: &KeyEvent) -> KeyAction {
+        if BackKey::matches(key) {
+            return KeyAction::Ignore;
+        }
+        Self::list_action(key)
+            .or_else(|| self.access_action(key.code))
+            .unwrap_or_else(|| self.session_change(key.code))
+    }
+
+    fn open_in_browser(&self) -> KeyAction {
+        self.open_heading_or_pull_request()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -237,12 +288,25 @@ pub enum KeyAction {
     Request(AppRequest),
     Navigate(Navigation),
     Fold,
+    Visual(VisualChange),
     Open(DialogOpening),
     FindSession,
     Reload,
-    OpenTerminal(String),
+    OpenOnDesktop(DesktopOpening),
     Refuse(String),
     Ignore,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VisualChange {
+    Toggle,
+    Leave,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DesktopOpening {
+    SessionTerminal(String),
+    RepoTerminal(RepoGroup),
 }
 
 impl From<Result<KeyAction, String>> for KeyAction {
@@ -283,6 +347,10 @@ mod tests {
                 "mystery",
                 ServiceFixture::waiting(&stranger).without_metadata(),
             ))
+        }
+
+        fn heading() -> RepoGroup {
+            ServiceFixture::repo_group("/repos/alpha")
         }
 
         fn config_error() -> ConfigError {
@@ -339,23 +407,80 @@ mod tests {
     }
 
     #[test]
+    fn x_asks_to_stop_the_selected_session() {
+        let row = GateFixture::row(SessionState::Waiting);
+        let gate = ActionGate::new(Some(&row), None);
+
+        assert_eq!(
+            gate.action_for(&KeyEvent::from(KeyCode::Char('x'))),
+            KeyAction::Request(AppRequest::Block(BlockingOperation::Stop(
+                "fix-auth".to_string()
+            )))
+        );
+    }
+
+    #[test]
+    fn an_unmanaged_session_cannot_stop() {
+        let stranger = ServiceFixture::session("mystery");
+        let row = SessionSummary::unmanaged(UnmanagedSession::new(
+            "mystery",
+            ServiceFixture::waiting(&stranger).without_metadata(),
+        ));
+
+        assert_eq!(
+            ActionGate::new(Some(&row), None).stop(),
+            Err("mystery is unmanaged, so it cannot be stopped.".to_string())
+        );
+    }
+
+    #[test]
+    fn a_read_only_tui_refuses_a_stop_with_the_config_error() {
+        let row = GateFixture::row(SessionState::Waiting);
+        let error = GateFixture::config_error();
+
+        let refusal = ActionGate::new(Some(&row), Some(&error))
+            .stop()
+            .unwrap_err();
+
+        assert!(refusal.starts_with("config error, running read-only: "));
+    }
+
+    #[test]
     fn shift_s_asks_to_restart_every_exited_or_stopped_session() {
         let row = GateFixture::row(SessionState::Waiting);
         let gate = ActionGate::new(Some(&row), None);
 
         assert_eq!(
             gate.action_for(&KeyEvent::from(KeyCode::Char('S'))),
-            KeyAction::Request(AppRequest::Block(BlockingOperation::RestartAll))
+            KeyAction::Request(AppRequest::Block(BlockingOperation::Batch(
+                BatchOperation::RestartAll
+            )))
+        );
+    }
+
+    #[test]
+    fn x_on_a_heading_asks_to_stop_every_session_of_its_repo() {
+        let heading = GateFixture::heading();
+        let gate = ActionGate::on_heading(&heading, None);
+
+        assert_eq!(
+            gate.action_for(&KeyEvent::from(KeyCode::Char('x'))),
+            KeyAction::Request(AppRequest::Block(BlockingOperation::Batch(
+                BatchOperation::StopRepo(GateFixture::heading())
+            )))
         );
     }
 
     #[test]
     fn shift_s_on_a_heading_still_asks_to_restart_every_session() {
-        let gate = ActionGate::on_heading(None);
+        let heading = GateFixture::heading();
+        let gate = ActionGate::on_heading(&heading, None);
 
         assert_eq!(
             gate.action_for(&KeyEvent::from(KeyCode::Char('S'))),
-            KeyAction::Request(AppRequest::Block(BlockingOperation::RestartAll))
+            KeyAction::Request(AppRequest::Block(BlockingOperation::Batch(
+                BatchOperation::RestartAll
+            )))
         );
     }
 
@@ -494,7 +619,43 @@ mod tests {
 
         assert_eq!(
             ActionGate::new(None, None).action_for(&key),
-            KeyAction::Open(DialogOpening::NewSession)
+            KeyAction::Open(DialogOpening::NewSession(None))
+        );
+    }
+
+    #[test]
+    fn n_on_a_session_opens_the_dialog_in_its_repo() {
+        let row = GateFixture::row(SessionState::Waiting);
+        let key = KeyEvent::from(KeyCode::Char('n'));
+
+        assert_eq!(
+            ActionGate::new(Some(&row), None).action_for(&key),
+            KeyAction::Open(DialogOpening::NewSession(Some(PathBuf::from(
+                ServiceFixture::REPO
+            ))))
+        );
+    }
+
+    #[test]
+    fn n_on_a_repo_heading_opens_the_dialog_in_that_repo() {
+        let key = KeyEvent::from(KeyCode::Char('n'));
+
+        assert_eq!(
+            ActionGate::on_heading(&GateFixture::heading(), None).action_for(&key),
+            KeyAction::Open(DialogOpening::NewSession(Some(PathBuf::from(
+                "/repos/alpha"
+            ))))
+        );
+    }
+
+    #[test]
+    fn n_on_an_other_row_opens_the_dialog_without_a_repo() {
+        let row = GateFixture::unmanaged_row();
+        let key = KeyEvent::from(KeyCode::Char('n'));
+
+        assert_eq!(
+            ActionGate::new(Some(&row), None).action_for(&key),
+            KeyAction::Open(DialogOpening::NewSession(None))
         );
     }
 
@@ -542,6 +703,15 @@ mod tests {
         assert_eq!(action(KeyCode::Right), next);
         assert_eq!(action(KeyCode::Char('h')), previous);
         assert_eq!(action(KeyCode::Left), previous);
+    }
+
+    #[test]
+    fn v_and_capital_v_toggle_visual_mode() {
+        let gate = ActionGate::new(None, None);
+        let action = |character| gate.action_for(&KeyEvent::from(KeyCode::Char(character)));
+
+        assert_eq!(action('v'), KeyAction::Visual(VisualChange::Toggle));
+        assert_eq!(action('V'), KeyAction::Visual(VisualChange::Toggle));
     }
 
     #[test]
@@ -630,7 +800,7 @@ mod tests {
         let key = KeyEvent::from(KeyCode::Enter);
 
         assert_eq!(
-            ActionGate::on_heading(None).action_for(&key),
+            ActionGate::on_heading(&GateFixture::heading(), None).action_for(&key),
             KeyAction::Fold
         );
     }
@@ -651,7 +821,7 @@ mod tests {
         let key = KeyEvent::from(KeyCode::Char(' '));
 
         assert_eq!(
-            ActionGate::on_heading(None).action_for(&key),
+            ActionGate::on_heading(&GateFixture::heading(), None).action_for(&key),
             KeyAction::Fold
         );
     }
@@ -667,10 +837,11 @@ mod tests {
 
     #[test]
     fn a_heading_refuses_the_session_actions() {
-        let gate = ActionGate::on_heading(None);
+        let heading = GateFixture::heading();
+        let gate = ActionGate::on_heading(&heading, None);
         let refusal = |character| gate.action_for(&KeyEvent::from(KeyCode::Char(character)));
 
-        for character in ['d', 'R', 's', 't', 'T', 'o'] {
+        for character in ['d', 'R', 's', 't'] {
             assert_eq!(
                 refusal(character),
                 KeyAction::Refuse("No session is selected.".to_string())
@@ -688,7 +859,7 @@ mod tests {
         assert_eq!(gate.restart(), refusal);
         assert_eq!(gate.terminal(), Err("No session is selected.".to_string()));
         assert_eq!(
-            gate.open_pull_request(),
+            gate.open_in_browser(),
             KeyAction::Refuse("No session is selected.".to_string())
         );
     }
@@ -701,8 +872,8 @@ mod tests {
         assert_eq!(
             ActionGate::new(Some(&row), Some(&error))
                 .action_for(&KeyEvent::from(KeyCode::Char('o'))),
-            KeyAction::Request(AppRequest::Block(BlockingOperation::OpenPullRequest(
-                "fix-auth".to_string()
+            KeyAction::Request(AppRequest::Block(BlockingOperation::Open(
+                BrowserPage::PullRequest("fix-auth".to_string())
             )))
         );
     }
@@ -722,9 +893,35 @@ mod tests {
 
             assert_eq!(
                 ActionGate::new(Some(&row), Some(&error)).action_for(&key),
-                KeyAction::OpenTerminal("fix-auth".to_string())
+                KeyAction::OpenOnDesktop(DesktopOpening::SessionTerminal("fix-auth".to_string()))
             );
         }
+    }
+
+    #[test]
+    fn capital_t_on_a_heading_opens_a_terminal_in_its_repo_even_read_only() {
+        let heading = GateFixture::heading();
+        let error = GateFixture::config_error();
+        let key = KeyEvent::from(KeyCode::Char('T'));
+
+        assert_eq!(
+            ActionGate::on_heading(&heading, Some(&error)).action_for(&key),
+            KeyAction::OpenOnDesktop(DesktopOpening::RepoTerminal(GateFixture::heading()))
+        );
+    }
+
+    #[test]
+    fn o_on_a_heading_looks_up_its_repo_page_behind_a_busy_message_even_read_only() {
+        let heading = GateFixture::heading();
+        let error = GateFixture::config_error();
+        let key = KeyEvent::from(KeyCode::Char('o'));
+
+        assert_eq!(
+            ActionGate::on_heading(&heading, Some(&error)).action_for(&key),
+            KeyAction::Request(AppRequest::Block(BlockingOperation::Open(
+                BrowserPage::RepoPage(GateFixture::heading())
+            )))
+        );
     }
 
     #[test]

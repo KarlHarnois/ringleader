@@ -56,7 +56,7 @@ Each way comes from an ecosystem users already know, and keeps the meaning it ha
 | A text field | readline |
 | A fuzzy picker | fzf |
 | The key that opens a finder | the `Ctrl-K` quick switcher, as in Slack, Discord, and GitHub |
-| The key that opens a pull request in the browser | the `o` open key, as in gh-dash, newsboat, and GitHub |
+| The key that opens a pull request or the GitHub page of a repo in the browser | the `o` open key, as in gh-dash, newsboat, and GitHub |
 | The new-session dialog's prompt box and status line | Claude Code, where the mode and the model show under the prompt box |
 
 - The arrow keys work wherever an ecosystem's movement keys work.
@@ -69,6 +69,7 @@ Each way comes from an ecosystem users already know, and keeps the meaning it ha
   - rename
   - restart
   - restart all
+  - stop
   - attach
 
 ### Side work never blocks or breaks the main action
@@ -219,8 +220,8 @@ Create each fixture repo with `git init -b <branch>`. Never rely on `init.defaul
 
 ```sh
 nix develop -c cargo fmt --check
-nix develop -c cargo clippy --all-targets -- -D warnings
-nix develop -c cargo test
+nix develop -c cargo clippy --workspace --all-targets -- -D warnings
+nix develop -c cargo xtask crap
 nix build --no-link ".#checks.$(nix eval --impure --raw --expr builtins.currentSystem).readme-version-badge"
 nix build .#
 nix flake check
@@ -228,7 +229,7 @@ nix flake check
 
 **The Commands are the six commands above.** CI runs them on Linux and macOS.
 
-**A change is done when the Commands pass.** If the change edits a file under `src/`, the change is done only after the completion steps also pass. If one of the Commands also fails without the change, stop and show its output to the project owner.
+**A change is done when the Commands pass.** If one of the Commands also fails without the change, stop and show its output to the project owner.
 
 ## Reference files
 
@@ -236,18 +237,19 @@ nix flake check
 
 | Reference file | Read the file before you |
 | --- | --- |
-| `docs/agents/completion-steps.md` | run a metrics tool or the completion steps |
 | `docs/agents/manual-runs.md` | make a manual run |
-| `docs/agents/uml-viewer.md` | open uml-viewer |
 | `docs/agents/source-folders.md` | add a file under `src/`, move a file there, or make a folder there |
 | `docs/agents/platform-code.md` | change a file or a re-export that a `target_os` cfg attribute limits, or write such an attribute |
 | `docs/agents/tmux-tests.md` | write or change a test that runs tmux |
 | `docs/agents/hint-lines.md` | write or change a dialog's hint line, or add a text-editing key |
+| `docs/agents/tmux-commands.md` | write or change a tmux command that Ringleader runs or writes into the generated config |
 | `docs/agents/features/pull.md` | change the pull that the `p` key starts |
 | `docs/agents/features/direnv.md` | change how create or restart launches an agent, or which variables the agent gets |
-| `docs/agents/features/agent-hooks.md` | change how `AgentHooks` types into an agent, or the check that an agent is at its prompt |
+| `docs/agents/features/agent-hooks.md` | change how Ringleader types or pastes into an agent, or the check that an agent is at its prompt |
 | `docs/agents/features/scratch-directories.md` | change a session's scratch directory |
 | `docs/agents/features/background-jobs.md` | change one of the TUI's background jobs |
+| `docs/agents/features/write-lock.md` | change what a process saves, or when a process takes a lock |
+| `docs/agents/skills.md` | add or change a skill, change how a launch gets the built-in skills, or change the CLI |
 | `docs/agents/features/usage.md` | change how Ringleader measures an agent's usage, or the usage view that the `u` key opens |
 
 ## Architecture
@@ -309,7 +311,7 @@ nix flake check
 | #58 | The core's messages spell out tool command lines. |
 | #59 | Port errors carry tool details, and two TUI types branch on those details. |
 | #60 | `ActionGate` decides which actions each session state allows. |
-| #61 | `CompositionRoot::run_tui` calls the TUI's startup use cases. |
+| #61 | `CompositionRoot::run` checks the socket before either driving adapter starts. |
 | #70 | The core encodes tmux's config quoting and socket limits. |
 | #71 | `Doctor` repeats the config writability check that the adapter owns. |
 | #72 | The core reasons about whether a worktree's `.git` is a file or a directory. |
@@ -334,12 +336,16 @@ nix flake check
 - Put the channel's fake in `src/test_support/`.
 - A test seam inside `adapters` has the same shape. Its fake lives in the adapter's own tests.
 
-## Metrics
+## CRAP gate
 
-**The metrics tools are `dryer`, `crapper`, and `mutator`.** They are local code-health tools that you run in the completion steps.
+**The CRAP gate is `cargo xtask crap`.** It runs every workspace test under coverage. If a production function scores over 8, the gate fails.
 
-- CI never builds or runs the metrics tools. Never add them to `checks`, to the default dev shell, or to `.github/workflows/ci.yml`.
-- `nix flake check` still downloads the four upstream inputs. If an upstream input can no longer be fetched, CI's flake check fails until someone repins or removes the input.
+- Never raise `CrapGate::MAXIMUM_CRAP` without the project owner's approval.
+- Never move a branch into a macro to lower a score: the gate cannot see inside a macro.
+- If no test can reach a function, keep its complexity at 2 or less.
+- Move such a function's logic into functions that tests reach.
+- A function that needs a terminal is a function that no test can reach.
+- If a change edits a macOS-only function, only the macOS CI job scores the function.
 
 ## Layout rules
 
@@ -386,34 +392,17 @@ nix flake check
 
 Confine each `unsafe` block to one adapter method.
 
-### tmux targets
-
-**Every tmux target is exact.** An exact target is one of these:
-
-- `=<session>:` from `TmuxScripts::exact`
-- a session id
-- a window id
-- a pane id
-
-**Never pass a bare `-t <name>`:** tmux resolves a name with no exact match by prefix. A bare `-t fix` would reach `fix-auth`.
-
-- If a session's name starts with `$`, target the session by its id. tmux reads `=$0:` as the session whose id is `$0`.
-
-### tmux start directories
-
-**Every `new-session`, `new-window`, and `respawn-window` passes `-c` with the worktree.** Without `-c`, tmux starts the pane in the caller's directory and still exits 0.
-
-- A binding in the generated config passes `-c '#{session_path}'`. Ringleader renders the config before any session exists, and `create_session` starts each session in its worktree.
-
 ## Wiring
 
 ### Entry points
 
-The hidden `__exec-agent` path loads no config, opens no log, and takes no lock.
+The hidden `__exec-agent` path loads no config. It opens no log. It takes no lock.
+
+The hidden `__find-session` path runs in the popup that a key in `finder_keys` opens on the private tmux server. It takes no lock. It writes no first-run config.
 
 ### Locks
 
-**A CLI command that changes a session or a repo takes the write lock.** Every other CLI command takes no lock.
+**A change to a session, a repo, or the generated config runs under the write lock.** No other command takes the write lock.
 
 ### Sessions and branches
 
@@ -435,7 +424,8 @@ The hidden `__exec-agent` path loads no config, opens no log, and takes no lock.
 **Key bindings come only from the generated config of the private tmux server.** `create_session` writes the generated config.
 
 - If the server runs, `r` re-sources the generated config, even when the server's `@ringleader_config` hash matches the current render. A `tmux source-file` run from a pane can change the server without changing that hash.
-- Only a lock holder writes or re-sources the generated config, so only one process ever writes the generated config.
+- Only the write lock's holder writes or re-sources the generated config.
+- The binding of each `finder_keys` key names the paths of Ringleader's executable and its tmux and git programs. The config hash covers those paths. A config that another build applied therefore reads as stale. Two builds that share one private tmux server rebind each `finder_keys` key in turn.
 
 ### Private tmux server
 
@@ -460,7 +450,7 @@ Ringleader checks a registry entry recorded on another socket only through `Proc
 - UI tests drive `EventLoop` with scripted input, a recording screen mode, and a recording shell runner.
 - No test calls crossterm or needs a terminal.
 - No test reads wall-clock time to classify a session.
-- Mark a constructor, accessor, or helper that only tests call with `#[cfg(test)]`: `cargo clippy --all-targets -- -D warnings` then stays clean without any dead-code allowance.
+- Mark a constructor, accessor, or helper that only tests call with `#[cfg(test)]`: `cargo clippy --workspace --all-targets -- -D warnings` then stays clean without any dead-code allowance.
 
 ## Commits
 
@@ -478,11 +468,9 @@ Ringleader checks a registry entry recorded on another socket only through `Proc
   - first run
   - the CLI synopsis
   - the exit codes
+  - the built-in skills
 - Never put architecture or the rules of this file in `README.md`.
 - Put a rule that every task needs in this file. Put a rule that only one kind of task needs in a reference file under `docs/agents/`.
 - Name each reference file in the Reference files table.
-- Put a procedure that an agent invokes on demand in a skill at `.agents/skills/<name>/SKILL.md`.
-- Link each skill from `.claude/skills/<name>` with a relative symlink: Claude Code reads a repository's skills only from `.claude/skills/`.
-- Never name a Ringleader type, path, or rule in a skill: each skill ports unchanged to other repos.
 - This repository holds no `CLAUDE.md` or `CLAUDE.local.md`: either file would hide this file from Claude Code.
 - If one of those files is ever needed, make its first line `@AGENTS.md`.

@@ -1,5 +1,7 @@
-use std::slice;
+use std::{iter, slice};
 
+use super::tmux_finder_popup::TmuxFinderPopup;
+use super::tmux_listing::TmuxListing;
 use super::tmux_sequence::TmuxSequence;
 use super::tmux_shell_toggle::TmuxShellToggle;
 use crate::adapters::filesystem::fnv_hash::FnvHash;
@@ -7,6 +9,7 @@ use crate::domain::{HotKey, KeyBindings};
 
 pub struct TmuxServerConfig {
     key_bindings: KeyBindings,
+    finder_popup: TmuxFinderPopup,
 }
 
 impl TmuxServerConfig {
@@ -36,19 +39,25 @@ impl TmuxServerConfig {
     const NEXT_SESSION: &'static str = "switch-client -n";
     const PREVIOUS_SESSION: &'static str = "switch-client -p";
     const RETURN: &'static str = "detach-client";
+    const SUSPEND_KEY: &'static str = "C-z";
     const EMACS_COPY_MODE: &'static str = "copy-mode";
-    const EMACS_COPY_MODE_DEFAULTS: [(&'static str, &'static str); 2] =
-        [("M-Up", "halfpage-up"), ("M-Down", "halfpage-down")];
+    const EMACS_COPY_MODE_DEFAULTS: [(&'static str, &'static str); 3] = [
+        ("M-Up", "halfpage-up"),
+        ("M-Down", "halfpage-down"),
+        ("C-k", "copy-pipe-end-of-line-and-cancel"),
+    ];
 
     pub const RETURN_KEY_OPTION: &'static str = "@ringleader_return_key";
     pub const NEXT_SESSION_KEYS_OPTION: &'static str = "@ringleader_next_session_keys";
     pub const PREVIOUS_SESSION_KEYS_OPTION: &'static str = "@ringleader_previous_session_keys";
     pub const SHELL_TOGGLE_KEYS_OPTION: &'static str = "@ringleader_shell_toggle_keys";
+    pub const FINDER_KEYS_OPTION: &'static str = "@ringleader_finder_keys";
     pub const HASH_OPTION: &'static str = "@ringleader_config";
 
-    pub fn new(key_bindings: &KeyBindings) -> Self {
+    pub fn new(key_bindings: &KeyBindings, finder_popup: &TmuxFinderPopup) -> Self {
         Self {
             key_bindings: key_bindings.clone(),
+            finder_popup: finder_popup.clone(),
         }
     }
 
@@ -78,7 +87,7 @@ impl TmuxServerConfig {
         lines
     }
 
-    fn recorded_keys(&self) -> [String; 4] {
+    fn recorded_keys(&self) -> [String; 5] {
         let bindings = &self.key_bindings;
         [
             Self::option_line(
@@ -96,6 +105,10 @@ impl TmuxServerConfig {
             Self::option_line(
                 Self::SHELL_TOGGLE_KEYS_OPTION,
                 &Self::key_list(bindings.shell_toggle_keys()),
+            ),
+            Self::option_line(
+                Self::FINDER_KEYS_OPTION,
+                &Self::key_list(bindings.finder_keys()),
             ),
         ]
     }
@@ -142,10 +155,21 @@ impl TmuxServerConfig {
     }
 
     fn bindings(&self) -> Vec<String> {
-        Self::BINDING_TABLES
+        let configured = Self::BINDING_TABLES
             .iter()
-            .flat_map(|table| self.table_bindings(table))
+            .flat_map(|table| self.table_bindings(table));
+        iter::once(Self::suspend_binding())
+            .chain(configured)
             .collect()
+    }
+
+    fn suspend_binding() -> String {
+        let command = format!(
+            "if-shell -F '#{{{}}}' '' 'send-keys {}'",
+            TmuxListing::AGENT_TAG,
+            Self::SUSPEND_KEY
+        );
+        Self::binding(Self::ROOT_TABLE, Self::SUSPEND_KEY, &command)
     }
 
     fn table_bindings(&self, table: &str) -> Vec<String> {
@@ -163,6 +187,7 @@ impl TmuxServerConfig {
                 bindings.shell_toggle_keys(),
                 &TmuxShellToggle::command(),
             ),
+            Self::bound(table, bindings.finder_keys(), &self.finder_popup.command()),
             Self::bound(table, return_key, Self::RETURN),
         ]
         .concat()
@@ -170,15 +195,19 @@ impl TmuxServerConfig {
 
     fn bound(table: &str, keys: &[HotKey], command: &str) -> Vec<String> {
         keys.iter()
-            .map(|key| format!("bind-key -T {table} {} {command}", key.tmux_spelling()))
+            .map(|key| Self::binding(table, &key.tmux_spelling(), command))
             .collect()
+    }
+
+    fn binding(table: &str, key: &str, command: &str) -> String {
+        format!("bind-key -T {table} {key} {command}")
     }
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
-    use std::ffi::OsStr;
+    use std::ffi::{OsStr, OsString};
     use std::fs;
     use std::path::Path;
     use std::time::Duration;
@@ -186,20 +215,26 @@ mod tests {
     use super::*;
     use crate::adapters::tmux::server_files::ServerFiles;
     use crate::adapters::tmux::tmux_command::TmuxCommand;
+    use crate::adapters::tmux::tmux_multiplexer::TmuxMultiplexer;
     use crate::adapters::tmux::tmux_sequence::TmuxSequence;
     use crate::application::ports::Multiplexer;
-    use crate::test_support::TmuxTestServer;
+    use crate::test_support::{ExecutableScript, TmuxTestServer};
 
     const GOLDEN: &str = include_str!("../../../tests/fixtures/tmux-server.conf");
     const KEY_CLASSES: [&str; 6] = ["C-q", "M-x", "F12", "~", "}", "M-}"];
     const DETACH_LIMIT: Duration = Duration::from_secs(2);
+    const ECHOING_AGENT: [&str; 4] = ["sh", "-c", "exec cat -v", "--"];
+    const ECHOING_SHELL: &str = "#!/bin/sh\nexec cat -v\n";
+    const ECHOED_SUSPEND_KEY: &str = "^Z";
+    const SENTINEL_KEY: &str = "C-b";
+    const ECHOED_SENTINEL_KEY: &str = "^B";
 
     struct ConfigFixture;
 
     impl ConfigFixture {
         fn render(key: &str) -> String {
             let bindings = KeyBindings::default().with_return_key(HotKey::parse(key).unwrap());
-            TmuxServerConfig::new(&bindings).render()
+            TmuxServerConfig::new(&bindings, &TmuxTestServer::stand_in_finder()).render()
         }
 
         fn binding(key: &str) -> String {
@@ -283,11 +318,47 @@ mod tests {
         fn option(server: &TmuxTestServer, name: &str) -> String {
             server.text(&["show-options", "-g", "-q", "-v", name])
         }
+
+        fn echoing_agent_session(server: &TmuxTestServer) -> &'static str {
+            let launcher = server.launcher(ECHOING_AGENT.map(OsString::from).to_vec());
+            let multiplexer =
+                TmuxMultiplexer::new(server.command(), launcher, server.process_table());
+            server.managed_session_through(&multiplexer, "fix-auth");
+            "=ringleader-fix-auth:"
+        }
+
+        fn echoing_shell_window(server: &TmuxTestServer) -> String {
+            let worktree = server.managed_session("fix-auth");
+            let shell = server.directory().join("echoing-shell");
+            ExecutableScript::write(&shell, ECHOING_SHELL);
+            server
+                .multiplexer()
+                .ensure_shell_window(
+                    "ringleader-fix-auth",
+                    &worktree,
+                    &shell.display().to_string(),
+                )
+                .unwrap()
+        }
+
+        fn screen_after_ctrl_z(server: &TmuxTestServer, target: &str) -> String {
+            let client = server.control_client(target);
+            server.press(&client, "C-z");
+            server.press(&client, SENTINEL_KEY);
+            let screen = || server.text(&["capture-pane", "-p", "-t", target]);
+            assert!(
+                server.wait_for(|| screen().contains(ECHOED_SENTINEL_KEY)),
+                "the key after Ctrl+Z reached the pane"
+            );
+            screen()
+        }
     }
 
     #[test]
     fn the_default_render_matches_the_golden_fixture() {
-        let render = TmuxServerConfig::new(&KeyBindings::default()).render();
+        let render =
+            TmuxServerConfig::new(&KeyBindings::default(), &TmuxTestServer::stand_in_finder())
+                .render();
 
         assert_eq!(render, GOLDEN);
     }
@@ -569,6 +640,26 @@ mod tests {
     }
 
     #[test]
+    fn ctrl_z_never_reaches_an_agent_pane_where_it_would_freeze_the_agent() {
+        let server = TmuxTestServer::new();
+        let session = ConfigFixture::echoing_agent_session(&server);
+
+        let screen = ConfigFixture::screen_after_ctrl_z(&server, session);
+
+        assert!(!screen.contains(ECHOED_SUSPEND_KEY), "{screen}");
+    }
+
+    #[test]
+    fn ctrl_z_reaches_the_shell_window_so_its_jobs_can_be_suspended() {
+        let server = TmuxTestServer::new();
+        let window = ConfigFixture::echoing_shell_window(&server);
+
+        let screen = ConfigFixture::screen_after_ctrl_z(&server, &window);
+
+        assert!(screen.contains(ECHOED_SUSPEND_KEY), "{screen}");
+    }
+
+    #[test]
     fn a_config_path_with_brackets_loads() {
         let server = TmuxTestServer::new();
         let config = server.directory().join("conf[1]").join("tmux.conf");
@@ -576,7 +667,12 @@ mod tests {
         files
             .prepare(&ConfigFixture::render(KeyBindings::RETURN_KEY))
             .unwrap();
-        let tmux = TmuxCommand::new(OsStr::new("tmux"), &files, &server.environment());
+        let tmux = TmuxCommand::new(
+            OsStr::new("tmux"),
+            &files,
+            &server.environment(),
+            &TmuxTestServer::stand_in_finder(),
+        );
 
         tmux.create(
             &TmuxSequence::new().command(["new-session", "-d", "-s", "holder", "sleep", "30"]),
