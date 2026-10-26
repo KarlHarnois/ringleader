@@ -681,11 +681,19 @@ mod tests {
         }
 
         fn captures(fixture: &ServiceFixture) -> Vec<String> {
+            Self::calls_to(fixture, "capture_pane")
+        }
+
+        fn fits(fixture: &ServiceFixture) -> Vec<String> {
+            Self::calls_to(fixture, "fit_agent_window")
+        }
+
+        fn calls_to(fixture: &ServiceFixture, operation: &str) -> Vec<String> {
             fixture
                 .multiplexer()
                 .calls()
                 .into_iter()
-                .filter(|call| call.starts_with("capture_pane"))
+                .filter(|call| call.starts_with(operation))
                 .collect()
         }
 
@@ -1059,6 +1067,48 @@ mod tests {
         UiHarness::settle(&mut app);
 
         assert_eq!(AppFixture::captures(&fixture).len(), before + 1);
+    }
+
+    #[test]
+    fn a_selection_change_fits_the_new_agent_to_the_preview_body() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press(&mut app, 'j');
+        UiHarness::settle(&mut app);
+
+        let fits = AppFixture::fits(&fixture);
+        assert_eq!(
+            fits.last().map(String::as_str),
+            Some("fit_agent_window ringleader-fix-auth 46x22")
+        );
+    }
+
+    #[test]
+    fn the_timed_refresh_captures_without_fitting_again() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let start = Instant::now();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        let fits_before = AppFixture::fits(&fixture).len();
+
+        app.on_tick(start + Duration::from_millis(800));
+        UiHarness::settle(&mut app);
+
+        assert_eq!(AppFixture::fits(&fixture).len(), fits_before);
+    }
+
+    #[test]
+    fn returning_from_an_attach_fits_the_agent_again_because_the_client_resized_it() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let start = Instant::now();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        let fits_before = AppFixture::fits(&fixture).len();
+
+        app.attach("dark-mode");
+        app.on_tick(start + Duration::from_millis(800));
+        UiHarness::settle(&mut app);
+
+        assert_eq!(AppFixture::fits(&fixture).len(), fits_before + 1);
     }
 
     #[test]

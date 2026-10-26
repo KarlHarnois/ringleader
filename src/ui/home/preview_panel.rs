@@ -4,7 +4,7 @@ use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Padding, Paragraph};
 
 use super::preview_text::PreviewText;
-use crate::domain::SessionSummary;
+use crate::domain::{SessionSize, SessionSummary};
 use crate::ui::text_fit::TextFit;
 use crate::ui::theme::Theme;
 
@@ -17,6 +17,7 @@ pub struct PreviewPanel<'a> {
 impl<'a> PreviewPanel<'a> {
     const SEPARATOR: char = '─';
     const UNKNOWN_AGENT: &'static str = "unknown agent";
+    const HEADER_ROWS: u16 = 3;
 
     pub fn new(
         row: Option<&'a SessionSummary>,
@@ -30,16 +31,25 @@ impl<'a> PreviewPanel<'a> {
         }
     }
 
+    pub fn body_size(area: Rect) -> SessionSize {
+        let inner = Self::frame().inner(area);
+        SessionSize::new(inner.width, inner.height.saturating_sub(Self::HEADER_ROWS))
+    }
+
     pub fn render(&self, frame: &mut Frame, area: Rect) {
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(" Preview ")
-            .padding(Padding::horizontal(1));
+        let block = Self::frame();
         let inner = block.inner(area);
         frame.render_widget(block, area);
         if let Some(row) = self.row {
             self.render_row(row, frame, inner);
         }
+    }
+
+    fn frame() -> Block<'static> {
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Preview ")
+            .padding(Padding::horizontal(1))
     }
 
     fn render_row(&self, row: &SessionSummary, frame: &mut Frame, area: Rect) {
@@ -53,13 +63,13 @@ impl<'a> PreviewPanel<'a> {
             Line::styled(Self::SEPARATOR.to_string().repeat(width), self.theme.dim()),
         ];
         let room = usize::from(area.height).saturating_sub(lines.len());
-        lines.extend(self.body(row, room, width));
+        lines.extend(self.body(row, room));
         frame.render_widget(Paragraph::new(lines), area);
     }
 
-    fn body(&self, row: &SessionSummary, room: usize, width: usize) -> Vec<Line<'static>> {
+    fn body(&self, row: &SessionSummary, room: usize) -> Vec<Line<'static>> {
         match self.capture {
-            Some(PreviewCapture::Text(text)) => text.wrapped_to(width).bottom_lines(room),
+            Some(PreviewCapture::Text(text)) => text.bottom_lines(room),
             Some(PreviewCapture::Unavailable(reason)) => Self::metadata_lines(row, reason)
                 .into_iter()
                 .map(Line::from)
@@ -179,15 +189,12 @@ mod tests {
     }
 
     #[test]
-    fn a_row_wider_than_the_panel_wraps_onto_the_rows_below() {
-        let capture = PanelFixture::text(&format!("{}\nnext", "x".repeat(40)));
+    fn a_long_captured_row_is_clipped_without_wrapping() {
+        let capture = PanelFixture::text(&format!("{}\nnext", "x".repeat(80)));
 
-        let lines = PanelFixture::lines(Some(&capture), 30, 9);
+        let lines = PanelFixture::lines(Some(&capture), 30, 8);
 
-        assert_eq!(
-            lines[5..8],
-            ["x".repeat(26), "x".repeat(14), "next".to_string()]
-        );
+        assert_eq!(lines[5..7], ["x".repeat(26), "next".to_string()]);
     }
 
     #[test]
@@ -197,6 +204,21 @@ mod tests {
         let lines = PanelFixture::lines(Some(&capture), 50, 10);
 
         assert_eq!(lines[4..9], ["", "", "", "", "sh-5.3$"]);
+    }
+
+    #[test]
+    fn the_body_size_is_the_room_left_under_the_header() {
+        let capture = PanelFixture::text(
+            &(1..=20)
+                .map(|row| format!("row {row}\n"))
+                .collect::<String>(),
+        );
+        let body = PreviewPanel::body_size(Rect::new(0, 0, 30, 9));
+
+        let lines = PanelFixture::lines(Some(&capture), 30, 9);
+
+        assert_eq!((body.width(), body.height()), (26, 4));
+        assert_eq!(lines[4..8], ["row 17", "row 18", "row 19", "row 20"]);
     }
 
     #[test]

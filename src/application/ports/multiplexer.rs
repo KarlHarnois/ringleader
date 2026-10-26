@@ -17,6 +17,7 @@ pub trait Multiplexer: Send + Sync {
     fn attach(&self, target: &AttachTarget) -> Result<(), MultiplexerError>;
     fn switch_client(&self, client: &str, target: &AttachTarget) -> Result<(), MultiplexerError>;
     fn capture_pane(&self, tmux_name: &str) -> Result<String, MultiplexerError>;
+    fn fit_agent_window(&self, tmux_name: &str, size: SessionSize) -> Result<(), MultiplexerError>;
     fn rename_session(
         &self,
         old: &str,
@@ -184,6 +185,8 @@ pub enum MultiplexerError {
     ServerFiles { path: PathBuf, detail: String },
     #[error("cannot find the agent pane of tmux session {tmux_name}")]
     NoAgentPane { tmux_name: String },
+    #[error("cannot fit the agent window of tmux session {tmux_name} to the preview")]
+    WindowNotFitted { tmux_name: String },
     #[error("the agent in tmux session {tmux_name} is not at its prompt")]
     AgentNotReady { tmux_name: String },
     #[error("cannot write the agent handoff file: {detail}")]
