@@ -86,6 +86,19 @@
           touch $out
         '';
 
+      ciToolVersions =
+        pkgs:
+        pkgs.runCommand "ci-tool-versions" { } ''
+          workflow=${./.github/workflows/ci.yml}
+          for pin in "RUST_VERSION: ${pkgs.rustc.version}" "CARGO_LLVM_COV_VERSION: ${pkgs.cargo-llvm-cov.version}"; do
+            grep --fixed-strings --quiet "$pin" "$workflow" || {
+              echo "The CI workflow does not pin $pin, the version in the dev shell" >&2
+              exit 1
+            }
+          done
+          touch $out
+        '';
+
       devShellTools =
         pkgs: defaultShell:
         pkgs.runCommand "dev-shell-tools" { } ''
@@ -160,6 +173,7 @@
         default = self.packages.${system}.default;
         readme-version-badge = readmeVersionBadge nixpkgs.legacyPackages.${system};
         agent-docs = agentDocs nixpkgs.legacyPackages.${system};
+        ci-tool-versions = ciToolVersions nixpkgs.legacyPackages.${system};
         dev-shell-tools = devShellTools nixpkgs.legacyPackages.${system} self.devShells.${system}.default;
       });
     };
