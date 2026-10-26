@@ -223,7 +223,7 @@ Create each fixture repo with `git init -b <branch>`. Never rely on `init.defaul
 ```sh
 nix develop -c cargo fmt --check
 nix develop -c cargo clippy --workspace --all-targets -- -D warnings
-nix develop -c cargo test --lib <module::path>
+nix develop -c cargo test --bin ringleader <module::path>
 ```
 
 - Use the narrowest `<module::path>` that covers the change.
