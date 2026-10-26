@@ -1,6 +1,6 @@
 # Homebrew
 
-**Every rule in this file binds each change to `pinnedTools` in `flake.nix`, to the release workflow, and to the version.** The `KarlHarnois/homebrew-tap` repository holds the Homebrew formula. The formula bundles its own build of each tool in `pinnedTools`, at the version the flake pins.
+**Every rule in this file binds each change to `pinnedTools` in `flake.nix` and each change to `.github/workflows/release.yml`.** The `KarlHarnois/homebrew-tap` repository holds the Homebrew formula. The formula bundles its own build of each tool in `pinnedTools`, at the version the flake pins.
 
 ## Pinned tools
 
