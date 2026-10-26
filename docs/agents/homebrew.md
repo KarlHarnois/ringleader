@@ -1,6 +1,6 @@
 # Homebrew
 
-**Every rule in this file binds each change to `pinnedTools` in `flake.nix`, and each release.** The `KarlHarnois/homebrew-tap` repository holds the Homebrew formula. The formula bundles its own build of each tool in `pinnedTools`, at the version the flake pins.
+**Every rule in this file binds each change to `pinnedTools` in `flake.nix`, to the release workflow, and to the version.** The `KarlHarnois/homebrew-tap` repository holds the Homebrew formula. The formula bundles its own build of each tool in `pinnedTools`, at the version the flake pins.
 
 ## Pinned tools
 
@@ -8,10 +8,8 @@
 
 ## Releases
 
-**A release is a tag `v<version>` on a commit of `master`.** The formula installs only a release.
+**A release is a tag `v<version>` on a commit of `master`.** The release workflow tags each `master` commit that passes CI, and then tells the tap about the tag. The tap publishes the formula for the tag.
 
-1. If no tag names the version in `Cargo.toml` yet, skip this step. Otherwise, ask the project owner for the new version. Write the new version into `Cargo.toml`, `Cargo.lock`, and the README version badge. The formula builds with `cargo install --locked`, which rejects a `Cargo.lock` that names another version.
-2. Once `master` names the version, ask the project owner to push the tag `v<version>` on the newest commit of `master`.
-3. In the tap, open a PR that sets the formula's URL and sha256 to the new tag. In the same PR, set each bundled tool to the version that `pinnedTools` pins at the tag.
-4. If the tap's CI fails, fix the formula and push again. If the same check fails three times, stop and show its output to the project owner.
-5. Once the tap's CI passes, ask the project owner to add the `pr-pull` label. The label publishes the bottles.
+- NEVER change the version in `Cargo.toml`: the tap writes each tag's version into `Cargo.toml` and `Cargo.lock` before it builds.
+- NEVER push a release tag by hand: the release workflow computes each tag from the latest one.
+- If the release workflow fails, show its log to the project owner.

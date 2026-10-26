@@ -60,16 +60,6 @@
           variable: tool: "--set-default ${variable} ${nixpkgs.lib.getExe tool}"
         ) tools;
 
-      readmeVersionBadge =
-        pkgs:
-        pkgs.runCommand "readme-version-badge" { } ''
-          grep --fixed-strings --quiet 'badge/version-${crateVersion}-' ${./README.md} || {
-            echo "The README version badge does not show ${crateVersion} from Cargo.toml" >&2
-            exit 1
-          }
-          touch $out
-        '';
-
       pinnedToolsWrapper =
         pkgs: package:
         pkgs.runCommand "pinned-tools-wrapper"
@@ -183,7 +173,6 @@
 
       checks = nixpkgs.lib.genAttrs supportedSystems (system: {
         default = self.packages.${system}.default;
-        readme-version-badge = readmeVersionBadge nixpkgs.legacyPackages.${system};
         agent-docs = agentDocs nixpkgs.legacyPackages.${system};
         pinned-tools-wrapper =
           pinnedToolsWrapper nixpkgs.legacyPackages.${system}
