@@ -238,7 +238,7 @@ nix develop -c cargo test --lib <module::path>
 
 **If a change touches what a small flake check checks, build that check alone with `nix build --no-link .#checks.<system>.<name>`.** The small flake checks are `agent-docs`, `readme-version-badge`, and `dev-shell-tools`.
 
-**A change is done when CI passes on Linux and macOS.** If CI also fails on `master` without the change, stop and show its output to the project owner.
+**A change is done when CI passes on Linux and macOS.**
 
 ## Reference files
 
@@ -260,6 +260,7 @@ nix develop -c cargo test --lib <module::path>
 | `docs/agents/features/write-lock.md` | change what a process saves, or when a process takes a lock |
 | `docs/agents/skills.md` | add or change a skill, change how a launch gets the built-in skills, or change the CLI |
 | `docs/agents/features/usage.md` | change how Ringleader measures an agent's usage, or the usage view that the `u` key opens |
+| `docs/agents/pull-requests.md` | open a pull request, push to one, or fix a CI failure |
 
 ## Architecture
 
@@ -463,10 +464,10 @@ Ringleader checks a registry entry recorded on another socket only through `Proc
 
 ## Commits
 
-- Give each change one commit. Make the commit after the change is done, as the Commands section defines done.
+- Give each change one commit. Make the commit after the working commands pass.
 - Start the title with a capital letter, write it in the imperative mood, and keep it under 72 characters.
 - Write the body in plain language, and say what changed.
-- Push only when the project owner asks.
+- Push only to a pull request that the project owner asked for.
 
 ## Documentation
 
