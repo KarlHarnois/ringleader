@@ -107,6 +107,10 @@ impl HomeState {
         self.diffs.refresh_soon();
     }
 
+    pub fn adopt_latest_pull_request(&mut self, name: &str, service: &SessionService) {
+        self.pull_requests.adopt_latest(name, service);
+    }
+
     pub fn focus_gained(&mut self) {
         self.focused = true;
     }
@@ -159,6 +163,7 @@ impl HomeState {
 
     pub fn returned_from(&mut self, name: &str) {
         self.bell.forget(name);
+        self.pull_requests.refresh_soon();
     }
 
     pub fn select(&mut self, name: &str, service: &SessionService) {

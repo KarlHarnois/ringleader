@@ -4,7 +4,9 @@ use std::sync::Arc;
 
 use super::batch_report::BatchReport;
 use super::pending::Pending;
-use super::ports::{Clock, ConfigError, ConfigSource, HostProbe, RegistryError, SessionRegistry};
+use super::ports::{
+    Clock, ConfigError, ConfigSource, HostProbe, PullRequestError, RegistryError, SessionRegistry,
+};
 use super::pull_request_catalog::PullRequestCatalog;
 use super::reconciliation::Reconciliation;
 use super::repo_stop_plan::RepoStopPlan;
@@ -418,13 +420,22 @@ impl SessionService {
         self.access.open_repo_page(group)
     }
 
+    pub fn latest_pull_request(&self, name: &str) -> Option<PullRequest> {
+        let session = self.entry(name)?;
+        self.pull_request_catalog.latest(session)
+    }
+
     pub fn open_pull_request(&self, name: &str) -> Result<(), ServiceError> {
-        let pull_request = self
+        let session = self
             .entry(name)
-            .and_then(|session| self.pull_request_catalog.latest(session))
-            .ok_or_else(|| {
-                ServiceError::NotFound(format!("no pull request is known for {name}"))
-            })?;
+            .ok_or_else(|| Self::no_known_pull_request(name))?;
+        self.pull_request_catalog
+            .look_up_unless_known(session)
+            .map_err(|error| Self::failed_pull_request_lookup(name, &error))?;
+        let pull_request = self
+            .pull_request_catalog
+            .latest(session)
+            .ok_or_else(|| Self::no_known_pull_request(name))?;
         self.access.open_pull_request(&pull_request)
     }
 
@@ -479,6 +490,16 @@ impl SessionService {
         self.entries
             .iter()
             .find(|entry| entry.name().as_str() == name)
+    }
+
+    fn no_known_pull_request(name: &str) -> ServiceError {
+        ServiceError::NotFound(format!("no pull request is known for {name}"))
+    }
+
+    fn failed_pull_request_lookup(name: &str, error: &PullRequestError) -> ServiceError {
+        ServiceError::Failed(format!(
+            "could not look up the pull request of {name}: {error}"
+        ))
     }
 }
 

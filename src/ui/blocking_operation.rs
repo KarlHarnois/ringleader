@@ -13,17 +13,21 @@ pub enum BlockingOperation {
     Delete(DeleteStep),
     Rename { old: String, new: String },
     Merge(String),
-    OpenRepoPage(RepoGroup),
+    Open(BrowserPage),
     Batch(BatchOperation),
 }
 
 impl BlockingOperation {
     pub fn changes_state(&self) -> bool {
         match self {
-            Self::Delete(DeleteStep::Measure(_)) | Self::OpenRepoPage(_) => false,
+            Self::Delete(DeleteStep::Measure(_)) | Self::Open(_) => false,
             Self::Batch(batch) => batch.changes_state(),
             _ => true,
         }
+    }
+
+    pub fn reads_sessions(&self) -> bool {
+        !matches!(self, Self::Open(BrowserPage::PullRequest(_)))
     }
 
     pub fn busy_message(&self) -> String {
@@ -34,7 +38,7 @@ impl BlockingOperation {
             Self::Delete(step) => step.busy_message(),
             Self::Rename { old, .. } => format!("Renaming {old}…"),
             Self::Merge(name) => format!("Fetching origin and merging it into {name}…"),
-            Self::OpenRepoPage(group) => format!("Looking up the GitHub page of {group}…"),
+            Self::Open(page) => page.busy_message(),
             Self::Batch(batch) => batch.busy_message(),
         }
     }
@@ -47,18 +51,8 @@ impl BlockingOperation {
             Self::Delete(step) => step.run(service),
             Self::Rename { old, new } => Self::rename(service, &old, &new),
             Self::Merge(name) => Self::merge(service, name),
-            Self::OpenRepoPage(group) => Self::open_repo_page(service, &group),
+            Self::Open(page) => page.run(service),
             Self::Batch(batch) => batch.run(service),
-        }
-    }
-
-    fn open_repo_page(service: &SessionService, group: &RepoGroup) -> OperationOutcome {
-        match service.open_repo_page(group) {
-            Ok(()) => OperationOutcome::done(
-                format!("Asked the browser to open the GitHub page of {group}."),
-                None,
-            ),
-            Err(error) => OperationOutcome::Failed(error),
         }
     }
 
@@ -116,6 +110,48 @@ impl BlockingOperation {
                 format!("Renamed {old} to {}.", session.name()),
                 Some(session.name().to_string()),
             ),
+            Err(error) => OperationOutcome::Failed(error),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BrowserPage {
+    RepoPage(RepoGroup),
+    PullRequest(String),
+}
+
+impl BrowserPage {
+    fn busy_message(&self) -> String {
+        match self {
+            Self::RepoPage(group) => format!("Looking up the GitHub page of {group}…"),
+            Self::PullRequest(name) => format!("Finding the pull request of {name}…"),
+        }
+    }
+
+    fn run(self, service: &SessionService) -> OperationOutcome {
+        match self {
+            Self::RepoPage(group) => Self::open_repo_page(service, &group),
+            Self::PullRequest(name) => Self::open_pull_request(service, &name),
+        }
+    }
+
+    fn open_repo_page(service: &SessionService, group: &RepoGroup) -> OperationOutcome {
+        match service.open_repo_page(group) {
+            Ok(()) => OperationOutcome::done(
+                format!("Asked the browser to open the GitHub page of {group}."),
+                None,
+            ),
+            Err(error) => OperationOutcome::Failed(error),
+        }
+    }
+
+    fn open_pull_request(service: &SessionService, name: &str) -> OperationOutcome {
+        match service.open_pull_request(name) {
+            Ok(()) => OperationOutcome::Opened {
+                name: name.to_string(),
+                message: format!("Asked the browser to open the pull request of {name}."),
+            },
             Err(error) => OperationOutcome::Failed(error),
         }
     }
@@ -198,6 +234,10 @@ pub enum OperationOutcome {
         changed: bool,
     },
     ConfirmDeleteSessions(BatchReport<DeleteImpact>),
+    Opened {
+        name: String,
+        message: String,
+    },
     Failed(ServiceError),
 }
 
@@ -311,6 +351,16 @@ mod tests {
                 OperationOutcome::ConfirmDelete { changed: false, .. }
             ),
             "{outcome:?}"
+        );
+    }
+
+    #[test]
+    fn opening_a_pull_request_announces_the_lookup_while_it_runs() {
+        let operation = BlockingOperation::Open(BrowserPage::PullRequest("fix-auth".to_string()));
+
+        assert_eq!(
+            operation.busy_message(),
+            "Finding the pull request of fix-auth…"
         );
     }
 

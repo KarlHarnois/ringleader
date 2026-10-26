@@ -29,9 +29,8 @@ mod tests {
     use crate::domain::{SessionState, SessionSummary};
     use crate::test_support::ServiceFixture;
     use crate::ui::app::AppRequest;
-    use crate::ui::blocking_operation::BlockingOperation;
+    use crate::ui::blocking_operation::{BlockingOperation, BrowserPage};
     use crate::ui::keys::action_gate::ActionGate;
-    use crate::ui::keys::action_gate::DesktopOpening;
 
     struct SequenceFixture;
 
@@ -105,7 +104,9 @@ mod tests {
             SequenceFixture::actions_on(&SequenceFixture::row(), "gx"),
             [
                 KeyAction::Ignore,
-                KeyAction::OpenOnDesktop(DesktopOpening::PullRequest("fix-auth".to_string()))
+                KeyAction::Request(AppRequest::Block(BlockingOperation::Open(
+                    BrowserPage::PullRequest("fix-auth".to_string())
+                )))
             ]
         );
     }

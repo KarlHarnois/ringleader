@@ -8,7 +8,7 @@ use crate::application::ports::ConfigError;
 use crate::domain::{RepoGroup, Session, SessionState, SessionSummary};
 use crate::ui::app::AppRequest;
 use crate::ui::batch_operation::BatchOperation;
-use crate::ui::blocking_operation::{BlockingOperation, DeleteStep};
+use crate::ui::blocking_operation::{BlockingOperation, BrowserPage, DeleteStep};
 use crate::ui::dialogs::DialogOpening;
 
 pub struct ActionGate<'a> {
@@ -153,13 +153,15 @@ impl<'a> ActionGate<'a> {
 
     fn open_heading_or_pull_request(&self) -> KeyAction {
         if let Some(group) = self.heading {
-            let operation = BlockingOperation::OpenRepoPage(group.clone());
+            let operation = BlockingOperation::Open(BrowserPage::RepoPage(group.clone()));
             return KeyAction::Request(AppRequest::Block(operation));
         }
         let name = self.selected().map(|row| row.name().to_string());
-        KeyAction::from(
-            name.map(|name| KeyAction::OpenOnDesktop(DesktopOpening::PullRequest(name))),
-        )
+        KeyAction::from(name.map(|name| {
+            KeyAction::Request(AppRequest::Block(BlockingOperation::Open(
+                BrowserPage::PullRequest(name),
+            )))
+        }))
     }
 
     fn managed_name(&self, refusal: &str) -> Result<String, String> {
@@ -305,7 +307,6 @@ pub enum VisualChange {
 pub enum DesktopOpening {
     SessionTerminal(String),
     RepoTerminal(RepoGroup),
-    PullRequest(String),
 }
 
 impl From<Result<KeyAction, String>> for KeyAction {
@@ -871,7 +872,9 @@ mod tests {
         assert_eq!(
             ActionGate::new(Some(&row), Some(&error))
                 .action_for(&KeyEvent::from(KeyCode::Char('o'))),
-            KeyAction::OpenOnDesktop(DesktopOpening::PullRequest("fix-auth".to_string()))
+            KeyAction::Request(AppRequest::Block(BlockingOperation::Open(
+                BrowserPage::PullRequest("fix-auth".to_string())
+            )))
         );
     }
 
@@ -915,8 +918,8 @@ mod tests {
 
         assert_eq!(
             ActionGate::on_heading(&heading, Some(&error)).action_for(&key),
-            KeyAction::Request(AppRequest::Block(BlockingOperation::OpenRepoPage(
-                GateFixture::heading()
+            KeyAction::Request(AppRequest::Block(BlockingOperation::Open(
+                BrowserPage::RepoPage(GateFixture::heading())
             )))
         );
     }

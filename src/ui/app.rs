@@ -187,8 +187,11 @@ impl App {
     }
 
     fn perform_check(&mut self, operation: BlockingOperation) -> OperationOutcome {
+        let reads_sessions = operation.reads_sessions();
         let outcome = operation.run(&mut self.service);
-        self.observe();
+        if reads_sessions {
+            self.observe();
+        }
         outcome
     }
 
@@ -215,6 +218,10 @@ impl App {
             OperationOutcome::ConfirmDeleteSessions(measured) => {
                 self.dialogs.open(Dialog::delete_sessions(measured));
                 self.status.show(None);
+            }
+            OperationOutcome::Opened { name, message } => {
+                self.home.adopt_latest_pull_request(&name, &self.service);
+                self.status.info(message);
             }
             OperationOutcome::Failed(error) => self.report_failure(error),
         }
@@ -346,7 +353,6 @@ impl App {
         match opening {
             DesktopOpening::SessionTerminal(name) => self.open_terminal(&name),
             DesktopOpening::RepoTerminal(group) => self.open_repo_terminal(&group),
-            DesktopOpening::PullRequest(name) => self.open_pull_request(&name),
         }
     }
 
@@ -360,12 +366,6 @@ impl App {
         let outcome = self.service.open_repo_terminal(group);
         let opened = format!("Opened a terminal window in the main checkout of {group}.");
         self.status.outcome(outcome, opened);
-    }
-
-    fn open_pull_request(&mut self, name: &str) {
-        let outcome = self.service.open_pull_request(name);
-        let asked = format!("Asked the browser to open the pull request of {name}.");
-        self.status.outcome(outcome, asked);
     }
 
     fn settle(&mut self, select: Option<String>) {
@@ -484,7 +484,7 @@ mod tests {
         HeldCalls, LogCapture, ServiceFixture, UiHarness,
     };
     use crate::ui::batch_operation::{BatchOperation, DeleteSessionsStep};
-    use crate::ui::blocking_operation::DeleteStep;
+    use crate::ui::blocking_operation::{BrowserPage, DeleteStep};
 
     struct AppFixture;
 
@@ -705,6 +705,32 @@ mod tests {
             app.handle_event(&UiHarness::character(character));
         }
 
+        fn perform_key(app: &mut App, character: char) {
+            let request = app.handle_event(&UiHarness::character(character));
+            Self::perform(app, request);
+        }
+
+        fn looks_up_pull_requests_again(fixture: &ServiceFixture, app: &mut App) -> bool {
+            let next = fixture.pull_requests().calls().len() + 1;
+            Self::looks_up_pull_requests(fixture, app, next)
+        }
+
+        fn looks_up_pull_requests(fixture: &ServiceFixture, app: &mut App, times: usize) -> bool {
+            Deadline::for_background_work().wait_until(|| {
+                app.on_tick(Instant::now());
+                fixture.pull_requests().calls().len() >= times
+            })
+        }
+
+        fn open_pull_request_later(fixture: &ServiceFixture) {
+            let session = ServiceFixture::session("fix-auth");
+            fixture.pull_requests().add_pull_request(
+                Path::new(ServiceFixture::REPO),
+                session.branch(),
+                ServiceFixture::pull_request(142, PullRequestState::Open),
+            );
+        }
+
         fn help_scrolled_past_its_end(app: &mut App, width: u16, height: u16) -> String {
             Self::press(app, '?');
             Self::screen(app, width, height);
@@ -865,6 +891,14 @@ mod tests {
                 subcommand: "list-panes".to_string(),
                 seconds: 2,
             }
+        }
+
+        fn diff_measurements(fixture: &ServiceFixture) -> usize {
+            let calls = fixture.workspace().calls();
+            calls
+                .iter()
+                .filter(|call| call.starts_with("diff_stat"))
+                .count()
         }
 
         fn observe_calls(fixture: &ServiceFixture) -> usize {
@@ -1839,6 +1873,41 @@ mod tests {
     }
 
     #[test]
+    fn o_sends_nothing_to_tmux() {
+        let fixture = AppFixture::with_pull_request();
+        let mut app = AppFixture::showing(&fixture, "#142");
+        let before = fixture.multiplexer().calls();
+
+        AppFixture::perform_key(&mut app, 'o');
+
+        assert_eq!(fixture.multiplexer().calls(), before);
+    }
+
+    #[test]
+    fn a_failed_o_sends_nothing_to_tmux() {
+        let fixture = AppFixture::deletable();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        let before = fixture.multiplexer().calls();
+
+        AppFixture::perform_key(&mut app, 'o');
+
+        assert_eq!(fixture.multiplexer().calls(), before);
+    }
+
+    #[test]
+    fn o_measures_no_diff_again() {
+        let fixture = AppFixture::with_pull_request();
+        let mut app = AppFixture::showing(&fixture, "#142");
+        UiHarness::settle(&mut app);
+        let before = AppFixture::diff_measurements(&fixture);
+
+        AppFixture::perform_key(&mut app, 'o');
+        UiHarness::settle(&mut app);
+
+        assert_eq!(AppFixture::diff_measurements(&fixture), before);
+    }
+
+    #[test]
     fn capital_t_sends_nothing_to_tmux() {
         let fixture = AppFixture::deletable();
         let mut app = AppFixture::started(&fixture, 100, 28);
@@ -1941,7 +2010,9 @@ mod tests {
 
         assert_eq!(
             request,
-            AppRequest::Block(BlockingOperation::OpenRepoPage(UiHarness::docs_repo_group()))
+            AppRequest::Block(BlockingOperation::Open(BrowserPage::RepoPage(
+                UiHarness::docs_repo_group()
+            )))
         );
         assert_eq!(
             AppFixture::status_line(&app, 100),
@@ -2469,13 +2540,27 @@ mod tests {
     }
 
     #[test]
-    fn o_opens_the_pull_request_of_the_selected_session_and_stays_on_the_list() {
+    fn o_asks_to_open_the_pull_request_as_a_blocking_operation() {
         let fixture = AppFixture::with_pull_request();
         let mut app = AppFixture::showing(&fixture, "#142");
 
         let request = app.handle_event(&UiHarness::character('o'));
 
-        assert_eq!(request, AppRequest::Continue);
+        assert_eq!(
+            request,
+            AppRequest::Block(BlockingOperation::Open(BrowserPage::PullRequest(
+                "fix-auth".to_string()
+            )))
+        );
+    }
+
+    #[test]
+    fn o_opens_the_pull_request_of_the_selected_session_in_the_browser() {
+        let fixture = AppFixture::with_pull_request();
+        let mut app = AppFixture::showing(&fixture, "#142");
+
+        AppFixture::perform_key(&mut app, 'o');
+
         assert_eq!(
             fixture.web_browser().opened(),
             [ServiceFixture::pull_request_url(142)]
@@ -2489,12 +2574,38 @@ mod tests {
     }
 
     #[test]
+    fn o_finds_a_pull_request_the_list_does_not_show_yet() {
+        let fixture = AppFixture::with_pull_request();
+        let mut app = AppFixture::observed(&fixture);
+
+        AppFixture::perform_key(&mut app, 'o');
+
+        assert_eq!(
+            fixture.web_browser().opened(),
+            [ServiceFixture::pull_request_url(142)]
+        );
+    }
+
+    #[test]
+    fn a_pull_request_that_o_finds_shows_in_the_list_on_the_next_tick() {
+        let fixture = AppFixture::deletable();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        assert!(AppFixture::looks_up_pull_requests(&fixture, &mut app, 1));
+        AppFixture::open_pull_request_later(&fixture);
+
+        AppFixture::perform_key(&mut app, 'o');
+        app.on_tick(Instant::now());
+
+        assert!(AppFixture::screen(&app, 100, 28).contains("#142"));
+    }
+
+    #[test]
     fn g_then_x_opens_the_pull_request_like_o() {
         let fixture = AppFixture::with_pull_request();
         let mut app = AppFixture::showing(&fixture, "#142");
 
         AppFixture::press(&mut app, 'g');
-        AppFixture::press(&mut app, 'x');
+        AppFixture::perform_key(&mut app, 'x');
 
         assert_eq!(
             fixture.web_browser().opened(),
@@ -2507,7 +2618,7 @@ mod tests {
         let fixture = AppFixture::deletable();
         let mut app = AppFixture::started(&fixture, 100, 28);
 
-        AppFixture::press(&mut app, 'o');
+        AppFixture::perform_key(&mut app, 'o');
 
         assert_eq!(
             app.status.message(),
@@ -2525,12 +2636,32 @@ mod tests {
             .with_web_browser(FakeWebBrowser::failing(missing.clone()));
         let mut app = AppFixture::showing(&fixture, "#142");
 
-        AppFixture::press(&mut app, 'o');
+        AppFixture::perform_key(&mut app, 'o');
 
         assert_eq!(
             app.status.message(),
             Some(&StatusMessage::Error(missing.to_string()))
         );
+    }
+
+    #[test]
+    fn returning_from_an_attach_looks_up_the_pull_requests_again() {
+        let fixture = AppFixture::with_pull_request();
+        let mut app = AppFixture::showing(&fixture, "#142");
+
+        app.attach("fix-auth");
+
+        assert!(AppFixture::looks_up_pull_requests_again(&fixture, &mut app));
+    }
+
+    #[test]
+    fn returning_from_a_shell_window_looks_up_the_pull_requests_again() {
+        let fixture = AppFixture::with_pull_request();
+        let mut app = AppFixture::showing(&fixture, "#142");
+
+        app.open_shell("fix-auth");
+
+        assert!(AppFixture::looks_up_pull_requests_again(&fixture, &mut app));
     }
 
     #[test]
