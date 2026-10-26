@@ -50,9 +50,10 @@ jobs:
       - name: Lint
         run: nix develop .#ci -c cargo clippy --workspace --all-targets -- -D warnings
       - name: Test with the CRAP gate
+        id: crap
         run: nix develop .#ci -c cargo xtask crap
       - name: Save cargo cache
-        if: ${{ !cancelled() && steps.cargo-cache.outputs.cache-hit != 'true' }}
+        if: ${{ !cancelled() && steps.crap.outcome != 'skipped' && steps.cargo-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
