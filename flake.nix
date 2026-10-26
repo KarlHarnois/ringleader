@@ -3,12 +3,14 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
+    crane.url = "github:ipetkov/crane";
   };
 
   outputs =
     {
       self,
       nixpkgs,
+      crane,
     }:
     let
       supportedSystems = [
@@ -20,18 +22,25 @@
       forEachSystem =
         build: nixpkgs.lib.genAttrs supportedSystems (system: build nixpkgs.legacyPackages.${system});
 
-      developmentPackages = pkgs: [
+      ciPackages = pkgs: [
         pkgs.rustc
         pkgs.cargo
         pkgs.clippy
         pkgs.rustfmt
         pkgs.tmux
         pkgs.git
-        pkgs.nixfmt
-        pkgs.util-linux
         pkgs.direnv
         pkgs.cargo-llvm-cov
       ];
+
+      developmentPackages =
+        pkgs:
+        ciPackages pkgs
+        ++ [
+          pkgs.nixfmt
+          pkgs.util-linux
+          pkgs.rust-analyzer
+        ];
 
       llvmCoverageEnv = pkgs: {
         LLVM_COV = "${pkgs.rustc.llvmPackages.llvm}/bin/llvm-cov";
@@ -98,36 +107,49 @@
     in
     {
       packages = forEachSystem (pkgs: {
-        default = pkgs.rustPlatform.buildRustPackage {
-          pname = "ringleader";
-          version = crateVersion;
-          src = self;
-          cargoLock.lockFile = ./Cargo.lock;
-          nativeBuildInputs = [ pkgs.makeWrapper ];
-          doCheck = true;
-          __darwinAllowLocalNetworking = true;
-          nativeCheckInputs = [
-            pkgs.gitMinimal
-            pkgs.tmux
-            pkgs.direnv
-          ];
-          postInstall = ''
-            wrapProgram $out/bin/ringleader \
-              --set-default RINGLEADER_TMUX ${pkgs.tmux}/bin/tmux \
-              --set-default RINGLEADER_GIT ${pkgs.gitMinimal}/bin/git
-          '';
-          meta = {
-            description = "A tmux session manager for AI coding agents";
-            license = pkgs.lib.licenses.mit;
-            mainProgram = "ringleader";
-            platforms = supportedSystems;
-          };
-        };
+        default =
+          let
+            craneLib = crane.mkLib pkgs;
+            buildArgs = {
+              pname = "ringleader";
+              version = crateVersion;
+              src = self;
+              cargoExtraArgs = "--locked --package ringleader";
+              doCheck = false;
+            };
+          in
+          craneLib.buildPackage (
+            buildArgs
+            // {
+              cargoArtifacts = craneLib.buildDepsOnly (buildArgs // { cargoCheckCommand = "true"; });
+              nativeBuildInputs = [ pkgs.makeWrapper ];
+              postInstall = ''
+                wrapProgram $out/bin/ringleader \
+                  --set-default RINGLEADER_TMUX ${pkgs.tmux}/bin/tmux \
+                  --set-default RINGLEADER_GIT ${pkgs.gitMinimal}/bin/git
+              '';
+              meta = {
+                description = "A tmux session manager for AI coding agents";
+                license = pkgs.lib.licenses.mit;
+                mainProgram = "ringleader";
+                platforms = supportedSystems;
+              };
+            }
+          );
       });
 
       devShells = forEachSystem (pkgs: {
         default = pkgs.mkShell {
-          packages = developmentPackages pkgs ++ [ pkgs.rust-analyzer ];
+          packages = developmentPackages pkgs;
+          env = llvmCoverageEnv pkgs;
+          shellHook = ''
+            if [[ -z ''${CI:-} ]]; then
+              export CARGO_BUILD_JOBS=''${CARGO_BUILD_JOBS:-2}
+            fi
+          '';
+        };
+        ci = pkgs.mkShell {
+          packages = ciPackages pkgs;
           env = llvmCoverageEnv pkgs;
         };
       });
