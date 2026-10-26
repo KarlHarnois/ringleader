@@ -38,8 +38,10 @@ jobs:
         run: |
           existing=$(git tag --points-at "$COMMIT" --list 'v*' | head -n 1)
           latest=$(git tag --list 'v*' --sort=-v:refname | head -n 1)
-          if [ -n "$existing" ]; then
+          if [ "$existing" = "$latest" ]; then
             echo "tag=$existing" >> "$GITHUB_OUTPUT"
+          elif [ -n "$existing" ]; then
+            echo "$latest supersedes $existing"
           elif git merge-base --is-ancestor "$COMMIT" "$latest"; then
             echo "$latest already releases $COMMIT"
           else
