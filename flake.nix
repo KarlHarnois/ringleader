@@ -129,6 +129,11 @@
         default = pkgs.mkShell {
           packages = developmentPackages pkgs ++ [ pkgs.rust-analyzer ];
           env = llvmCoverageEnv pkgs;
+          shellHook = ''
+            if [[ -z ''${CI:-} ]]; then
+              export CARGO_BUILD_JOBS=''${CARGO_BUILD_JOBS:-2}
+            fi
+          '';
         };
       });
 
