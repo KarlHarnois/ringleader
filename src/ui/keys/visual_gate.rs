@@ -177,10 +177,8 @@ mod tests {
     #[test]
     fn a_key_for_one_session_is_refused_with_how_to_leave() {
         assert_eq!(
-            VisualFixture::action(VisualFixture::names(), KeyCode::Enter),
-            KeyAction::Refuse(
-                "Enter acts on one session. Press Esc to leave visual mode.".to_string()
-            )
+            VisualFixture::press('t'),
+            KeyAction::Refuse("t acts on one session. Press Esc to leave visual mode.".to_string())
         );
     }
 
