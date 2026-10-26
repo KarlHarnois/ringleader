@@ -29,7 +29,7 @@ use crate::application::{CorruptRegistry, SessionService};
 #[command(
     name = "ringleader",
     version,
-    about = "A tmux session manager for Claude and opencode"
+    about = "A tmux session manager for AI coding agents"
 )]
 pub struct Cli {
     #[arg(long, global = true, value_name = "PATH")]
