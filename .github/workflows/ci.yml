@@ -14,49 +14,24 @@ concurrency:
 permissions:
   contents: read
 
-env:
-  RUST_VERSION: 1.95.0
-  CARGO_LLVM_COV_VERSION: 0.8.7
-
 jobs:
   cargo:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            toolchain: nix develop .#ci -c
-          - os: macos-latest
-            toolchain: ""
+        os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: ${{ matrix.os == 'macos-latest' && 15 || 10 }}
+    timeout-minutes: ${{ matrix.os == 'macos-latest' && 20 || 10 }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - if: runner.os == 'Linux'
-        uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
-      - if: runner.os == 'Linux'
-        uses: DeterminateSystems/magic-nix-cache-action@84c0677f58dcedf3b91f8223ce36a9ea5b3c84b7 # v15
+      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+      - uses: DeterminateSystems/magic-nix-cache-action@84c0677f58dcedf3b91f8223ce36a9ea5b3c84b7 # v15
         with:
           use-flakehub: false
           use-gha-cache: true
-      - if: runner.os == 'macOS'
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-          components: clippy, rustfmt, llvm-tools-preview
-      - if: runner.os == 'macOS'
-        uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
-        with:
-          tool: cargo-llvm-cov@${{ env.CARGO_LLVM_COV_VERSION }}
-      - name: Install tmux and direnv
-        if: runner.os == 'macOS'
-        run: brew install tmux direnv
-        env:
-          HOMEBREW_NO_AUTO_UPDATE: 1
-          HOMEBREW_NO_INSTALL_CLEANUP: 1
       - name: Restore cargo cache
         id: cargo-cache
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -68,11 +43,11 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('flake.lock') }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-${{ hashFiles('flake.lock') }}-
       - name: Format
-        run: ${{ matrix.toolchain }} cargo fmt --check
+        run: nix develop .#ci -c cargo fmt --check
       - name: Lint
-        run: ${{ matrix.toolchain }} cargo clippy --workspace --all-targets -- -D warnings
+        run: nix develop .#ci -c cargo clippy --workspace --all-targets -- -D warnings
       - name: Test with the CRAP gate
-        run: ${{ matrix.toolchain }} cargo xtask crap
+        run: nix develop .#ci -c cargo xtask crap
       - name: Save cargo cache
         if: ${{ !cancelled() && steps.cargo-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
