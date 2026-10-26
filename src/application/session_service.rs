@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use super::batch_report::BatchReport;
 use super::pending::Pending;
-use super::ports::{Clock, ConfigError, ConfigSource, RegistryError, SessionRegistry};
+use super::ports::{Clock, ConfigError, ConfigSource, HostProbe, RegistryError, SessionRegistry};
 use super::pull_request_catalog::PullRequestCatalog;
 use super::reconciliation::Reconciliation;
 use super::repo_stop_plan::RepoStopPlan;
@@ -48,6 +48,7 @@ pub struct SessionService {
     pull_request_catalog: PullRequestCatalog,
     usage_catalog: UsageCatalog,
     clock: Arc<dyn Clock>,
+    host: Arc<dyn HostProbe>,
     doctor: Doctor,
     paths: DiagnosticPaths,
 }
@@ -62,6 +63,7 @@ impl SessionService {
             pull_request_catalog: PullRequestCatalog::new(ports.repos().pull_requests()),
             usage_catalog: UsageCatalog::new(ports.agents().usage_meters(), ports.state().clock()),
             clock: ports.state().clock(),
+            host: ports.repos().host(),
             doctor: Doctor::new(&ports, context.diagnostics().clone()),
             paths: context.diagnostics().clone(),
             config: context.into_config(),
@@ -316,7 +318,8 @@ impl SessionService {
         repo: &RepoGroup,
         cancelled: impl Fn() -> bool,
     ) -> Result<StopReport, ServiceError> {
-        let plan = RepoStopPlan::new(&self.reconcile()?.live_entries_in(repo));
+        let reconciliation = self.reconcile()?;
+        let plan = RepoStopPlan::new(&reconciliation.live_entries_in(repo, self.host.as_ref()));
         let stops = self.stop_sessions(plan.targets(), cancelled);
         Ok(StopReport::new(repo.clone(), stops, plan.into_skips()))
     }
@@ -1287,6 +1290,21 @@ mod tests {
             .unwrap();
 
         assert_eq!(RepoStopFixture::stopped_names(&report), ["alpha"]);
+    }
+
+    #[test]
+    fn stop_repo_matches_a_repo_named_through_a_link_to_its_recorded_path() {
+        let link = Path::new("/links/example-project");
+        let sessions = RepoStopFixture::sessions();
+        let all: Vec<&Session> = sessions.iter().collect();
+        let host =
+            ServiceFixture::host_for(&all).with_canonical(link, Path::new(ServiceFixture::REPO));
+        let fixture = RepoStopFixture::mixed().with_host(host);
+        let linked_repo = ServiceFixture::repo_group("/links/example-project");
+
+        let report = fixture.service().stop_repo(&linked_repo, || false).unwrap();
+
+        assert_eq!(RepoStopFixture::stopped_names(&report), ["alpha", "bravo"]);
     }
 
     #[test]
