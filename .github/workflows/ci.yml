@@ -80,7 +80,7 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
         run: |
-          if [ "$EVENT" = pull_request ] && [ "$RUNNER_OS" = macOS ] && git diff --quiet HEAD^1 HEAD -- flake.nix flake.lock Cargo.lock '*Cargo.toml'; then
+          if [ "$EVENT" = pull_request ] && [ "$RUNNER_OS" = macOS ] && git diff --quiet HEAD^1 HEAD -- flake.nix flake.lock Cargo.lock '*Cargo.toml' .cargo; then
             echo "build=false" >> "$GITHUB_OUTPUT"
           else
             echo "build=true" >> "$GITHUB_OUTPUT"
