@@ -53,13 +53,13 @@ impl<'a> PreviewPanel<'a> {
             Line::styled(Self::SEPARATOR.to_string().repeat(width), self.theme.dim()),
         ];
         let room = usize::from(area.height).saturating_sub(lines.len());
-        lines.extend(self.body(row, room));
+        lines.extend(self.body(row, room, width));
         frame.render_widget(Paragraph::new(lines), area);
     }
 
-    fn body(&self, row: &SessionSummary, room: usize) -> Vec<Line<'static>> {
+    fn body(&self, row: &SessionSummary, room: usize, width: usize) -> Vec<Line<'static>> {
         match self.capture {
-            Some(PreviewCapture::Text(text)) => text.bottom_lines(room),
+            Some(PreviewCapture::Text(text)) => text.wrapped_to(width).bottom_lines(room),
             Some(PreviewCapture::Unavailable(reason)) => Self::metadata_lines(row, reason)
                 .into_iter()
                 .map(Line::from)
@@ -179,12 +179,15 @@ mod tests {
     }
 
     #[test]
-    fn a_long_captured_row_is_clipped_without_wrapping() {
-        let capture = PanelFixture::text(&format!("{}\nnext", "x".repeat(80)));
+    fn a_row_wider_than_the_panel_wraps_onto_the_rows_below() {
+        let capture = PanelFixture::text(&format!("{}\nnext", "x".repeat(40)));
 
-        let lines = PanelFixture::lines(Some(&capture), 30, 8);
+        let lines = PanelFixture::lines(Some(&capture), 30, 9);
 
-        assert_eq!(lines[5..7], ["x".repeat(26), "next".to_string()]);
+        assert_eq!(
+            lines[5..8],
+            ["x".repeat(26), "x".repeat(14), "next".to_string()]
+        );
     }
 
     #[test]

@@ -1,5 +1,7 @@
 use ansi_to_tui::IntoText;
-use ratatui::text::Line;
+use ratatui::style::Style;
+use ratatui::text::{Line, Span};
+use unicode_width::UnicodeWidthChar;
 
 use crate::domain::TerminalText;
 
@@ -14,6 +16,15 @@ impl PreviewText {
         while lines.last().is_some_and(Self::is_blank) {
             lines.pop();
         }
+        Self { lines }
+    }
+
+    pub fn wrapped_to(&self, width: usize) -> Self {
+        let lines = self
+            .lines
+            .iter()
+            .flat_map(|line| RowWrap::split(line, width))
+            .collect();
         Self { lines }
     }
 
@@ -75,6 +86,85 @@ impl PreviewText {
     }
 }
 
+struct RowWrap {
+    width: usize,
+    rows: Vec<Line<'static>>,
+    row: Vec<Span<'static>>,
+    row_width: usize,
+}
+
+impl RowWrap {
+    const BOX_DRAWING: std::ops::RangeInclusive<char> = '\u{2500}'..='\u{257F}';
+
+    fn split(line: &Line<'static>, width: usize) -> Vec<Line<'static>> {
+        let mut wrap = Self {
+            width,
+            rows: Vec::new(),
+            row: Vec::new(),
+            row_width: 0,
+        };
+        for span in &line.spans {
+            wrap.push_span(span);
+        }
+        wrap.finish(line)
+    }
+
+    fn push_span(&mut self, span: &Span<'static>) {
+        for character in span.content.chars() {
+            self.push_char(character, span.style);
+        }
+    }
+
+    fn push_char(&mut self, character: char, style: Style) {
+        let character_width = character.width().unwrap_or(0);
+        let overflows = self.row_width + character_width > self.width;
+        if overflows && self.row_width > 0 {
+            self.break_row();
+        }
+        self.row_width += character_width;
+        match self.row.last_mut() {
+            Some(span) if span.style == style => span.content.to_mut().push(character),
+            _ => self.row.push(Span::styled(character.to_string(), style)),
+        }
+    }
+
+    fn break_row(&mut self) {
+        self.rows.push(Line::from(std::mem::take(&mut self.row)));
+        self.row_width = 0;
+    }
+
+    fn finish(mut self, line: &Line<'static>) -> Vec<Line<'static>> {
+        self.break_row();
+        let kept = if Self::is_rule(line) {
+            1
+        } else {
+            self.rows.len() - self.trailing_blank_rows()
+        };
+        self.rows.truncate(kept.max(1));
+        self.rows
+            .into_iter()
+            .map(|row| row.style(line.style))
+            .collect()
+    }
+
+    fn trailing_blank_rows(&self) -> usize {
+        self.rows
+            .iter()
+            .rev()
+            .take_while(|row| PreviewText::is_blank(row))
+            .count()
+    }
+
+    fn is_rule(line: &Line) -> bool {
+        let mut visible = line
+            .spans
+            .iter()
+            .flat_map(|span| span.content.chars())
+            .filter(|character| !character.is_whitespace());
+        visible.all(|character| Self::BOX_DRAWING.contains(&character))
+    }
+}
+
 struct BlankRun {
     start: usize,
     length: usize,
@@ -122,6 +212,18 @@ mod tests {
                         .map(|span| span.content.as_ref())
                         .collect()
                 })
+                .collect()
+        }
+
+        fn wrapped(raw: &str, width: usize) -> Vec<String> {
+            let rows = PreviewText::parse(raw).wrapped_to(width).lines;
+            rows.iter().map(Self::plain).collect()
+        }
+
+        fn plain(line: &Line) -> String {
+            line.spans
+                .iter()
+                .map(|span| span.content.as_ref())
                 .collect()
         }
 
@@ -174,5 +276,54 @@ mod tests {
         let shown = TextFixture::shown(&rows, 3);
 
         assert_eq!(shown, ["three", "", "four"]);
+    }
+
+    #[test]
+    fn a_row_wider_than_the_width_continues_on_the_next_row() {
+        let wrapped = TextFixture::wrapped("I found the cause and fixed it.", 12);
+
+        assert_eq!(wrapped, ["I found the ", "cause and fi", "xed it."]);
+    }
+
+    #[test]
+    fn a_wide_character_that_would_straddle_the_edge_moves_to_the_next_row() {
+        let wrapped = TextFixture::wrapped("abc漢字", 4);
+
+        assert_eq!(wrapped, ["abc", "漢字"]);
+    }
+
+    #[test]
+    fn wrapping_keeps_the_style_of_each_character() {
+        let text = PreviewText::parse("\u{1b}[32mgreen\u{1b}[0mplain").wrapped_to(3);
+
+        let second_row = &text.lines[1];
+        let styles: Vec<_> = second_row.spans.iter().map(|span| span.style.fg).collect();
+        assert_eq!(
+            (TextFixture::plain(second_row), styles[0]),
+            ("enp".to_string(), Some(ratatui::style::Color::Green))
+        );
+    }
+
+    #[test]
+    fn trailing_spaces_past_the_width_add_no_blank_rows() {
+        let row = format!("prompt{}", " ".repeat(40));
+
+        let wrapped = TextFixture::wrapped(&format!("{row}\nnext"), 10);
+
+        assert_eq!(wrapped, ["prompt    ", "next"]);
+    }
+
+    #[test]
+    fn a_horizontal_rule_wider_than_the_width_is_cut_to_one_row_because_it_holds_no_text() {
+        let wrapped = TextFixture::wrapped(&"─".repeat(200), 10);
+
+        assert_eq!(wrapped, ["─".repeat(10)]);
+    }
+
+    #[test]
+    fn a_row_that_only_starts_with_a_rule_still_wraps() {
+        let wrapped = TextFixture::wrapped("──── summary", 6);
+
+        assert_eq!(wrapped, ["──── s", "ummary"]);
     }
 }
