@@ -236,7 +236,7 @@ nix develop -c cargo test --bin ringleader <module::path>
 - `nix flake check`
 - `nix build`, except the command below
 
-**If a change touches what a small flake check checks, build that check alone with `nix build --no-link .#checks.<system>.<name>`.** The small flake checks are `agent-docs`, `readme-version-badge`, and `dev-shell-tools`.
+**If a change touches what a small flake check checks, build that check alone with `nix build --no-link .#checks.<system>.<name>`.** Every flake check except `default` is small.
 
 **A change is done when CI passes on Linux and macOS.**
 
