@@ -17,6 +17,10 @@ permissions:
 env:
   CACHIX_CACHE: ringleader
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   tag:
     if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
@@ -47,10 +51,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           COMMITS: ${{ steps.since.outputs.commits }}
         run: |
-          labels=$(for commit in $COMMITS; do
-            gh api "repos/$GITHUB_REPOSITORY/commits/$commit/pulls" --jq '.[].labels[].name'
-          done | sort -u | tr '\n' ' ')
-          echo "labels=$labels" >> "$GITHUB_OUTPUT"
+          for commit in $COMMITS; do
+            gh api "repos/$GITHUB_REPOSITORY/commits/$commit/pulls" --jq '.[].labels[].name' || exit 1
+          done > labels.txt
+          echo "labels=$(sort -u labels.txt | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
       - if: steps.since.outputs.latest != ''
         uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
       - if: steps.since.outputs.latest != ''
