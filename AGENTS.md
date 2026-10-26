@@ -218,18 +218,29 @@ Create each fixture repo with `git init -b <branch>`. Never rely on `init.defaul
 
 ## Commands
 
+**The working commands are the four commands below.** Run them while you work.
+
+```sh
+nix develop -c cargo fmt --check
+nix develop -c cargo clippy --workspace --all-targets -- -D warnings
+nix develop -c cargo test
+nix develop -c cargo xtask crap
+```
+
+**The gate is the four commands below.** Run the gate once, before the last commit of a task. CI runs the gate on Linux and macOS.
+
 ```sh
 nix develop -c cargo fmt --check
 nix develop -c cargo clippy --workspace --all-targets -- -D warnings
 nix develop -c cargo xtask crap
-nix build --no-link ".#checks.$(nix eval --impure --raw --expr builtins.currentSystem).readme-version-badge"
-nix build .#
 nix flake check
 ```
 
-**The Commands are the six commands above.** CI runs them on Linux and macOS.
+**The gate runs no `nix build`:** `nix flake check` builds the package and the `readme-version-badge` check.
 
-**A change is done when the Commands pass.** If one of the Commands also fails without the change, stop and show its output to the project owner.
+**NEVER run `nix flake check` or `nix build` while you iterate.** Each run rebuilds Ringleader and every dependency on all cores.
+
+**A change is done when the gate passes.** If a command of the gate also fails without the change, stop and show its output to the project owner.
 
 ## Reference files
 
