@@ -252,7 +252,7 @@ nix develop -c cargo test --bin ringleader <module::path>
 | `docs/agents/tmux-tests.md` | write or change a test that runs tmux |
 | `docs/agents/hint-lines.md` | add or change a TUI key, a dialog's hint line, or the hint bar |
 | `docs/agents/tmux-commands.md` | write or change a tmux command that Ringleader runs or writes into the generated config |
-| `docs/agents/homebrew.md` | release, or change `pinnedTools` |
+| `docs/agents/homebrew.md` | work on `pinnedTools` or releases |
 | `docs/agents/features/pull.md` | change the pull that the `p` key starts |
 | `docs/agents/features/direnv.md` | change how create or restart launches an agent, or which variables the agent gets |
 | `docs/agents/features/agent-hooks.md` | change how Ringleader types or pastes into an agent, or the check that an agent is at its prompt |
