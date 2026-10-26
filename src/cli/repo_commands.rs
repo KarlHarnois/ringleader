@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use super::{CliSession, CommandStop, RepoAddArgs};
 use crate::application::{AddRepoRequest, RepoAddition, ServiceError, SessionService};
 use crate::domain::BaseBranch;
@@ -16,15 +18,25 @@ impl<'a> RepoCommands<'a> {
         let path = self
             .session
             .wait(&self.service.read_typed_path(&args.path))?;
-        let mut request = AddRepoRequest::new(&path);
+        let request = Self::add_request(&path, args);
+        self.session.stop_if_signaled()?;
+        let addition = self.session.wait(&self.service.add_repo(request))?;
+        self.report_addition(addition)
+    }
+
+    fn add_request(path: &Path, args: &RepoAddArgs) -> AddRepoRequest {
+        let mut request = AddRepoRequest::new(path);
         if let Some(name) = &args.name {
             request = request.named(name);
         }
         if let Some(base) = args.base_branch.as_deref().and_then(BaseBranch::new) {
             request = request.based_on(base);
         }
-        self.session.stop_if_signaled()?;
-        match self.session.wait(&self.service.add_repo(request))? {
+        request
+    }
+
+    fn report_addition(&mut self, addition: RepoAddition) -> Result<u8, CommandStop> {
+        match addition {
             RepoAddition::Added(repo) => {
                 self.session.output().line(&format!(
                     "added {} for {}",

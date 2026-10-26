@@ -24,12 +24,16 @@ impl FakePullRequests {
     }
 
     pub fn with_pull_request(self, repo: &Path, branch: &str, pull_request: PullRequest) -> Self {
+        self.add_pull_request(repo, branch, pull_request);
+        self
+    }
+
+    pub fn add_pull_request(&self, repo: &Path, branch: &str, pull_request: PullRequest) {
         self.state
             .lock()
             .unwrap()
             .pull_requests
             .insert((repo.to_path_buf(), branch.to_string()), pull_request);
-        self
     }
 
     pub fn remove_pull_request(&self, repo: &Path, branch: &str) {

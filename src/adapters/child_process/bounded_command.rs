@@ -72,9 +72,13 @@ impl BoundedCommand {
 
     fn wait_until(child: &mut Child, deadline: Instant) -> Option<ExitStatus> {
         match ExitWatch::block_until_exit(child, deadline) {
-            Ok(()) => child.try_wait().ok().flatten(),
+            Ok(()) => Self::reap_once_reapable(child, deadline),
             Err(error) => Self::check_without_exit_watch(child, deadline, &error),
         }
+    }
+
+    fn reap_once_reapable(child: &mut Child, deadline: Instant) -> Option<ExitStatus> {
+        Self::check_until(child, deadline)
     }
 
     fn check_without_exit_watch(

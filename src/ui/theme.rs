@@ -14,6 +14,10 @@ impl Theme {
         self.base().add_modifier(Modifier::REVERSED)
     }
 
+    pub fn selected_out_of_focus(&self) -> Style {
+        self.base().add_modifier(Modifier::UNDERLINED)
+    }
+
     pub fn on_selection(&self, mut style: Style) -> Style {
         style.add_modifier.remove(Modifier::DIM);
         style
@@ -68,5 +72,9 @@ impl Theme {
             PullRequestState::Merged => self.base().fg(Color::Magenta),
             PullRequestState::Closed => self.base().fg(Color::Red),
         }
+    }
+
+    pub fn approved(&self) -> Style {
+        self.insertions().add_modifier(Modifier::BOLD)
     }
 }

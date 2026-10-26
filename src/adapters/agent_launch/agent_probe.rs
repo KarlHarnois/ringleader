@@ -189,9 +189,10 @@ mod tests {
 
         fixture.probe().run(&agent, &[]).unwrap();
 
+        let usage_directory = std::fs::canonicalize(fixture.usage_directory()).unwrap();
         assert_eq!(
             fixture.recorded("cwd").trim_end(),
-            fixture.usage_directory().to_string_lossy()
+            usage_directory.to_string_lossy()
         );
     }
 

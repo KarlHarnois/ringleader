@@ -1,3 +1,4 @@
+pub mod atomic_file;
 pub mod directory_repo_scanner;
 pub mod directory_scratch_space;
 pub mod durable_file;

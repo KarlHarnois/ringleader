@@ -32,8 +32,7 @@ impl<'a> HomeView<'a> {
             return;
         }
         let status_rows = self.status.height(area.width, area.height);
-        let [main, status] =
-            Layout::vertical([Constraint::Min(1), Constraint::Length(status_rows)]).areas(area);
+        let [main, status] = Self::rows(area, status_rows);
         self.status.render(frame, status);
         let table = self.table.for_tier(tier);
         if tier.shows_preview() && table.has_rows() {
@@ -49,11 +48,23 @@ impl<'a> HomeView<'a> {
         frame: &mut Frame,
         area: Rect,
     ) {
-        let [left, right] =
-            Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
-                .areas(area);
+        let [left, right] = Self::columns(area);
         table.render(frame, left);
         preview.render(frame, right);
+    }
+
+    pub fn preview_area(screen: Rect, status_rows: u16) -> Rect {
+        let [main, _] = Self::rows(screen, status_rows);
+        let [_, right] = Self::columns(main);
+        right
+    }
+
+    fn rows(area: Rect, status_rows: u16) -> [Rect; 2] {
+        Layout::vertical([Constraint::Min(1), Constraint::Length(status_rows)]).areas(area)
+    }
+
+    fn columns(area: Rect) -> [Rect; 2] {
+        Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).areas(area)
     }
 }
 

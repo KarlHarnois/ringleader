@@ -20,10 +20,8 @@ pub struct CrosstermInput;
 
 impl InputSource for CrosstermInput {
     fn next_event(&mut self, timeout: Duration) -> io::Result<Option<Event>> {
-        if event::poll(timeout)? {
-            return event::read().map(Some);
-        }
-        Ok(None)
+        let ready = event::poll(timeout)?;
+        ready.then(event::read).transpose()
     }
 }
 
@@ -130,15 +128,19 @@ where
     }
 
     fn handle(&mut self, app: &mut App, event: &Event) -> io::Result<Flow> {
-        match app.handle_event(event) {
-            AppRequest::Quit => return Ok(Flow::Stop),
-            AppRequest::Redraw => self.clear()?,
-            AppRequest::Attach(name) => self.attach(app, &name)?,
-            AppRequest::Shell(name) => self.open_shell(app, &name)?,
-            AppRequest::Block(operation) => self.perform(app, operation)?,
-            AppRequest::Continue => {}
+        let request = app.handle_event(event);
+        let flow = Flow::after(&request);
+        self.serve_request(app, request).map(|()| flow)
+    }
+
+    fn serve_request(&mut self, app: &mut App, request: AppRequest) -> io::Result<()> {
+        match request {
+            AppRequest::Redraw => self.clear(),
+            AppRequest::Attach(name) => self.attach(app, &name),
+            AppRequest::Shell(name) => self.open_shell(app, &name),
+            AppRequest::Block(operation) => self.perform(app, operation),
+            AppRequest::Quit | AppRequest::Continue => Ok(()),
         }
-        Ok(Flow::Continue)
     }
 
     fn perform(&mut self, app: &mut App, operation: BlockingOperation) -> io::Result<()> {
@@ -149,13 +151,16 @@ where
 
     fn drop_queued_input(&mut self, app: &mut App) -> io::Result<()> {
         let mut last_resize = None;
+        let mut last_focus_change = None;
         while let Some(event) = self.input.next_event(Duration::ZERO)? {
-            if matches!(event, Event::Resize(_, _)) {
-                last_resize = Some(event);
+            match event {
+                Event::Resize(_, _) => last_resize = Some(event),
+                Event::FocusGained | Event::FocusLost => last_focus_change = Some(event),
+                _ => {}
             }
         }
-        if let Some(resize) = last_resize {
-            self.handle(app, &resize)?;
+        for window_change in [last_resize, last_focus_change].into_iter().flatten() {
+            self.handle(app, &window_change)?;
         }
         Ok(())
     }
@@ -202,6 +207,16 @@ where
 enum Flow {
     Continue,
     Stop,
+}
+
+impl Flow {
+    fn after(request: &AppRequest) -> Self {
+        if matches!(request, AppRequest::Quit) {
+            Self::Stop
+        } else {
+            Self::Continue
+        }
+    }
 }
 
 #[cfg(test)]
@@ -442,6 +457,26 @@ mod tests {
         event_loop.run(&mut app).unwrap();
 
         assert_eq!(event_loop.backend().clears(), 1);
+    }
+
+    #[test]
+    fn a_focus_loss_queued_during_a_restart_still_pauses_the_diffs() {
+        const PAST_THE_DIFF_REFRESH: Duration = Duration::from_secs(4);
+        let fixture = UiHarness::exited_session_fixture("fix-auth");
+        let harness = UiHarness::new();
+        let mut app = UiHarness::app(&fixture);
+        let mut event_loop = harness.event_loop(ScriptedInput::events(vec![
+            UiHarness::character('s'),
+            crossterm::event::Event::FocusLost,
+        ]));
+        event_loop.run(&mut app).unwrap();
+        UiHarness::settle(&mut app);
+        let measured_before = fixture.workspace().diff_bases().len();
+
+        app.on_tick(Instant::now() + PAST_THE_DIFF_REFRESH);
+        UiHarness::settle(&mut app);
+
+        assert_eq!(fixture.workspace().diff_bases().len(), measured_before);
     }
 
     #[test]

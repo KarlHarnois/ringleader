@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 
 use super::list_selection::ListSelection;
 use super::repo_heading::RepoHeading;
@@ -12,6 +13,8 @@ use crate::ui::theme::Theme;
 pub struct SessionList {
     rows: Vec<SessionSummary>,
     selection: Option<ListSelection>,
+    visual_anchor: Option<ListSelection>,
+    visual_range: Vec<ListSelection>,
     folded: HashSet<RepoGroup>,
     viewport: Viewport,
 }
@@ -24,6 +27,33 @@ impl SessionList {
     pub fn table(&self, tick: u64, theme: Theme) -> SessionTable<'_> {
         SessionTable::new(self.tree(), self.selection.as_ref(), tick, theme)
             .with_viewport(self.viewport)
+            .with_marked(self.visual_range.clone())
+    }
+
+    pub fn in_visual_mode(&self) -> bool {
+        self.visual_anchor.is_some()
+    }
+
+    pub fn toggle_visual(&mut self) {
+        match self.visual_anchor {
+            Some(_) => self.leave_visual(),
+            None => self.enter_visual(),
+        }
+    }
+
+    pub fn leave_visual(&mut self) {
+        self.visual_anchor = None;
+        self.visual_range.clear();
+    }
+
+    pub fn visual_names(&self) -> Vec<String> {
+        let tree = self.tree();
+        tree.lines()
+            .iter()
+            .filter(|line| self.visual_range.contains(&line.selection()))
+            .flat_map(TreeLine::covered_rows)
+            .map(|row| row.name().to_string())
+            .collect()
     }
 
     pub fn selected_name(&self) -> Option<&str> {
@@ -98,6 +128,7 @@ impl SessionList {
         self.rows = rows;
         self.forget_folds_without_a_heading();
         self.selection = self.repaired_selection();
+        self.forget_a_hidden_anchor();
         self.scroll_to_selection();
     }
 
@@ -142,6 +173,7 @@ impl SessionList {
         if !self.folded.remove(group) {
             self.folded.insert(group.clone());
         }
+        self.forget_a_hidden_anchor();
         self.scroll_to_selection();
     }
 
@@ -157,6 +189,42 @@ impl SessionList {
 
     fn tree(&self) -> SessionTree<'_> {
         SessionTree::new(&self.rows, &self.folded)
+    }
+
+    fn enter_visual(&mut self) {
+        self.visual_anchor = self.selection.clone();
+        self.mark_visual_range();
+    }
+
+    fn mark_visual_range(&mut self) {
+        let tree = self.tree();
+        let range: Vec<ListSelection> = tree.lines()[self.visual_lines(&tree)]
+            .iter()
+            .map(TreeLine::selection)
+            .collect();
+        self.visual_range = range;
+    }
+
+    fn visual_lines(&self, tree: &SessionTree) -> Range<usize> {
+        let Some(anchor) = self.visual_anchor.as_ref() else {
+            return 0..0;
+        };
+        let anchor_line = tree.selected_line(Some(anchor));
+        let cursor_line = tree.selected_line(self.selection.as_ref());
+        anchor_line.min(cursor_line)..anchor_line.max(cursor_line) + 1
+    }
+
+    fn forget_a_hidden_anchor(&mut self) {
+        if !self.anchor_is_shown() {
+            self.leave_visual();
+        }
+    }
+
+    fn anchor_is_shown(&self) -> bool {
+        let Some(anchor) = self.visual_anchor.as_ref() else {
+            return true;
+        };
+        self.tree().position_of(anchor).is_some()
     }
 
     fn line_count(&self) -> usize {
@@ -179,6 +247,9 @@ impl SessionList {
     fn move_selection_to(&mut self, selection: ListSelection) {
         self.selection = Some(selection);
         self.scroll_to_selection();
+        if self.in_visual_mode() {
+            self.mark_visual_range();
+        }
     }
 
     fn scroll_to_selection(&mut self) {
@@ -405,6 +476,95 @@ mod tests {
         list.select("c-three");
 
         assert_eq!(list.visible_managed(), ["c-three"]);
+    }
+
+    #[test]
+    fn visual_mode_covers_every_session_from_the_anchor_to_the_cursor() {
+        let mut list = ListFixture::six_rows_in_three_lines();
+        list.move_selection(1);
+
+        list.toggle_visual();
+        list.move_selection(2);
+
+        assert_eq!(list.visual_names(), ["b-two", "c-three", "d-four"]);
+    }
+
+    #[test]
+    fn visual_mode_covers_a_range_that_grows_upward() {
+        let mut list = ListFixture::six_rows_in_three_lines();
+        list.select_last();
+
+        list.toggle_visual();
+        list.move_selection(-1);
+
+        assert_eq!(list.visual_names(), ["e-five", "f-six"]);
+    }
+
+    #[test]
+    fn a_folded_repo_in_the_range_brings_its_hidden_sessions_as_a_vim_fold_does() {
+        let mut list = ListFixture::showing(ListFixture::two_repos());
+        list.toggle_fold();
+
+        list.toggle_visual();
+        list.select_last();
+
+        assert_eq!(list.visual_names(), ["a-one", "b-two", "c-three"]);
+    }
+
+    #[test]
+    fn a_session_that_sorts_into_the_range_stays_out_because_the_user_never_chose_it() {
+        let mut list = ListFixture::showing(vec![
+            ListFixture::row("b-two", SessionState::Waiting),
+            ListFixture::row("bb-extra", SessionState::Working),
+            ListFixture::row("c-three", SessionState::Waiting),
+        ]);
+        list.select("b-two");
+        list.toggle_visual();
+        list.select("c-three");
+
+        list.show(vec![
+            ListFixture::row("b-two", SessionState::Waiting),
+            ListFixture::row("bb-extra", SessionState::Waiting),
+            ListFixture::row("c-three", SessionState::Waiting),
+        ]);
+
+        assert_eq!(list.visual_names(), ["b-two", "c-three"]);
+    }
+
+    #[test]
+    fn toggling_twice_leaves_visual_mode() {
+        let mut list = ListFixture::six_rows_in_three_lines();
+
+        list.toggle_visual();
+        list.toggle_visual();
+
+        assert!(!list.in_visual_mode());
+        assert!(list.visual_names().is_empty());
+    }
+
+    #[test]
+    fn visual_mode_ends_when_its_anchor_leaves_the_list() {
+        let mut list = ListFixture::showing(vec![
+            ListFixture::row("a-one", SessionState::Waiting),
+            ListFixture::row("b-two", SessionState::Waiting),
+        ]);
+        list.toggle_visual();
+
+        list.show(vec![ListFixture::row("b-two", SessionState::Waiting)]);
+
+        assert!(!list.in_visual_mode());
+    }
+
+    #[test]
+    fn folding_the_repo_of_the_anchor_ends_visual_mode() {
+        let mut list = ListFixture::showing(ListFixture::two_repos());
+        list.move_selection(1);
+        list.toggle_visual();
+        list.move_selection(-1);
+
+        list.toggle_fold();
+
+        assert!(!list.in_visual_mode());
     }
 
     #[test]

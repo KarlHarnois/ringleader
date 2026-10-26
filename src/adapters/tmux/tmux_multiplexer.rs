@@ -1,4 +1,3 @@
-use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
@@ -12,12 +11,13 @@ use super::tmux_listing::TmuxListing;
 use super::tmux_output::TmuxOutput;
 use super::tmux_scripts::TmuxScripts;
 use crate::adapters::agent_launch::launcher_command::{LauncherCommand, PreparedLaunch};
+use crate::adapters::child_process::foreground_child::ForegroundChild;
 use crate::adapters::host::process_table::ProcessTable;
 use crate::application::ports::{
     AgentLaunch, AttachTarget, Multiplexer, MultiplexerError, ServerConfig, ServerState,
     SessionSpec,
 };
-use crate::domain::{KeyBindings, SessionMetadata, SessionObservation};
+use crate::domain::{KeyBindings, SessionMetadata, SessionObservation, SessionSize};
 
 pub struct TmuxMultiplexer {
     tmux: TmuxCommand,
@@ -194,38 +194,23 @@ impl TmuxMultiplexer {
     }
 
     fn attach_in_foreground(&self, mut attach: Command) -> Result<(), MultiplexerError> {
-        let child = attach.spawn().map_err(|error| MultiplexerError::Failed {
-            subcommand: "attach-session".to_string(),
-            detail: error.to_string(),
-        })?;
-        let Ok(pid) = libc::pid_t::try_from(child.id()) else {
-            return Ok(());
-        };
-        let mut status: libc::c_int = 0;
-        // SAFETY: waitpid and kill only take the attach child's own pid and this process's
-        // pid; status is a local the kernel fills, and the child is reaped exactly once here.
-        let waited = unsafe {
-            loop {
-                if libc::waitpid(pid, &mut status, libc::WUNTRACED) == -1 {
-                    if io::Error::last_os_error().kind() == io::ErrorKind::Interrupted {
-                        continue;
-                    }
-                    break -1;
-                }
-                if !libc::WIFSTOPPED(status) {
-                    break 0;
-                }
-                libc::kill(std::process::id() as libc::pid_t, libc::SIGSTOP);
-                libc::kill(pid, libc::SIGCONT);
-            }
-        };
-        if waited == 0 && libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0 {
-            return Ok(());
-        }
-        Err(MultiplexerError::Failed {
-            subcommand: "attach-session".to_string(),
-            detail: format!("tmux attach-session ended with wait status {status}"),
+        let child = attach
+            .spawn()
+            .map_err(|error| Self::attach_failed(error.to_string()))?;
+        ForegroundChild::of(&child).map_or(Ok(()), |foreground| {
+            foreground.wait().map_err(|status| {
+                Self::attach_failed(format!(
+                    "tmux attach-session ended with wait status {status}"
+                ))
+            })
         })
+    }
+
+    fn attach_failed(detail: String) -> MultiplexerError {
+        MultiplexerError::Failed {
+            subcommand: "attach-session".to_string(),
+            detail,
+        }
     }
 
     fn require_done(subcommand: &str, output: &TmuxOutput) -> Result<(), MultiplexerError> {
@@ -334,6 +319,18 @@ impl Multiplexer for TmuxMultiplexer {
             return Err(TmuxError::failed("capture-pane", &output).into());
         }
         Ok(output.stdout().to_string())
+    }
+
+    fn fit_agent_window(&self, tmux_name: &str, size: SessionSize) -> Result<(), MultiplexerError> {
+        let pane = self.shown_pane(tmux_name)?;
+        let output = self.tmux.change(&TmuxScripts::fit_window(&pane, size))?;
+        if output.has(TmuxLaunch::DONE_LABEL) {
+            return Ok(());
+        }
+        log::warn!("{}", TmuxError::failed("resize-window", &output));
+        Err(MultiplexerError::WindowNotFitted {
+            tmux_name: tmux_name.to_string(),
+        })
     }
 
     fn rename_session(
@@ -476,6 +473,16 @@ mod tests {
             let fixture = Self::with_holder();
             fixture.server.multiplexer().server_state().unwrap();
             fixture
+        }
+
+        fn window_size(&self, target: &str) -> String {
+            self.server.text(&[
+                "display-message",
+                "-p",
+                "-t",
+                target,
+                "#{window_width}x#{window_height}",
+            ])
         }
 
         fn worktree(&self, name: &str) -> PathBuf {
@@ -1444,6 +1451,39 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(error, MultiplexerError::Failed { .. }));
+    }
+
+    #[test]
+    fn fitting_the_agent_window_resizes_it_to_the_given_size() {
+        let fixture = MultiplexerFixture::new();
+        fixture.server.managed_session("fix-auth");
+
+        fixture
+            .server
+            .multiplexer()
+            .fit_agent_window("ringleader-fix-auth", SessionSize::new(60, 20))
+            .unwrap();
+
+        assert_eq!(fixture.window_size("=ringleader-fix-auth:"), "60x20");
+    }
+
+    #[test]
+    fn an_attached_client_keeps_its_own_size_when_the_window_is_fitted() {
+        let fixture = MultiplexerFixture::new();
+        fixture.server.managed_session("fix-auth");
+        let client = fixture.server.control_client("=ringleader-fix-auth:");
+        let client_name = fixture.server.client_name(&client);
+        fixture
+            .server
+            .text(&["refresh-client", "-t", &client_name, "-C", "90x30"]);
+
+        fixture
+            .server
+            .multiplexer()
+            .fit_agent_window("ringleader-fix-auth", SessionSize::new(60, 20))
+            .unwrap();
+
+        assert_eq!(fixture.window_size("=ringleader-fix-auth:"), "90x30");
     }
 
     #[test]

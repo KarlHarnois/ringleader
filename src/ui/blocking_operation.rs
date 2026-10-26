@@ -1,5 +1,6 @@
+use super::batch_operation::BatchOperation;
 use crate::application::{
-    CreateRequest, DeleteConfirmation, DeleteImpact, DeleteOutcome, RestartReport, ServiceError,
+    BatchReport, CreateRequest, DeleteConfirmation, DeleteImpact, DeleteOutcome, ServiceError,
     SessionService, StartOutcome,
 };
 use crate::domain::RepoGroup;
@@ -7,53 +8,51 @@ use crate::domain::RepoGroup;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BlockingOperation {
     Restart(String),
-    RestartAll,
+    Stop(String),
     Create(CreateRequest),
     Delete(DeleteStep),
     Rename { old: String, new: String },
     Merge(String),
-    OpenRepoPage(RepoGroup),
+    Open(BrowserPage),
+    Batch(BatchOperation),
 }
 
 impl BlockingOperation {
     pub fn changes_state(&self) -> bool {
-        !matches!(
-            self,
-            Self::Delete(DeleteStep::Measure(_)) | Self::OpenRepoPage(_)
-        )
+        match self {
+            Self::Delete(DeleteStep::Measure(_)) | Self::Open(_) => false,
+            Self::Batch(batch) => batch.changes_state(),
+            _ => true,
+        }
+    }
+
+    pub fn reads_sessions(&self) -> bool {
+        !matches!(self, Self::Open(BrowserPage::PullRequest(_)))
     }
 
     pub fn busy_message(&self) -> String {
         match self {
             Self::Restart(name) => format!("Restarting {name}…"),
-            Self::RestartAll => "Restarting every exited or stopped session…".to_string(),
+            Self::Stop(name) => format!("Stopping {name}…"),
             Self::Create(request) => format!("Creating {}…", request.name()),
             Self::Delete(step) => step.busy_message(),
             Self::Rename { old, .. } => format!("Renaming {old}…"),
             Self::Merge(name) => format!("Fetching origin and merging it into {name}…"),
-            Self::OpenRepoPage(group) => format!("Looking up the GitHub page of {group}…"),
+            Self::Open(page) => page.busy_message(),
+            Self::Batch(batch) => batch.busy_message(),
         }
     }
 
     pub fn run(self, service: &mut SessionService) -> OperationOutcome {
         match self {
             Self::Restart(name) => Self::restart(service, name),
-            Self::RestartAll => Self::restart_all(service),
+            Self::Stop(name) => Self::stop(service, name),
             Self::Create(request) => Self::create(service, &request),
             Self::Delete(step) => step.run(service),
             Self::Rename { old, new } => Self::rename(service, &old, &new),
             Self::Merge(name) => Self::merge(service, name),
-            Self::OpenRepoPage(group) => Self::open_repo_page(service, &group),
-        }
-    }
-
-    fn open_repo_page(service: &SessionService, group: &RepoGroup) -> OperationOutcome {
-        match service.open_repo_page(group) {
-            Ok(()) => OperationOutcome::done(
-                format!("Asked the browser to open the GitHub page of {group}."),
-                None,
-            ),
-            Err(error) => OperationOutcome::Failed(error),
+            Self::Open(page) => page.run(service),
+            Self::Batch(batch) => batch.run(service),
         }
     }
 
@@ -96,22 +95,13 @@ impl BlockingOperation {
         }
     }
 
-    fn restart_all(service: &mut SessionService) -> OperationOutcome {
-        match service.restart_all(|| false) {
-            Ok(report) => Self::restarted_all(&report),
+    fn stop(service: &mut SessionService, name: String) -> OperationOutcome {
+        match service.stop_session(&name) {
+            Ok(()) => {
+                OperationOutcome::done(format!("Stopped {name}. Press s to resume it."), Some(name))
+            }
             Err(error) => OperationOutcome::Failed(error),
         }
-    }
-
-    fn restarted_all(report: &RestartReport) -> OperationOutcome {
-        let message = report.summary();
-        if report.needs_attention() {
-            return OperationOutcome::Warned {
-                message,
-                select: None,
-            };
-        }
-        OperationOutcome::done(message, None)
     }
 
     fn rename(service: &mut SessionService, old: &str, new: &str) -> OperationOutcome {
@@ -120,6 +110,48 @@ impl BlockingOperation {
                 format!("Renamed {old} to {}.", session.name()),
                 Some(session.name().to_string()),
             ),
+            Err(error) => OperationOutcome::Failed(error),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BrowserPage {
+    RepoPage(RepoGroup),
+    PullRequest(String),
+}
+
+impl BrowserPage {
+    fn busy_message(&self) -> String {
+        match self {
+            Self::RepoPage(group) => format!("Looking up the GitHub page of {group}…"),
+            Self::PullRequest(name) => format!("Finding the pull request of {name}…"),
+        }
+    }
+
+    fn run(self, service: &SessionService) -> OperationOutcome {
+        match self {
+            Self::RepoPage(group) => Self::open_repo_page(service, &group),
+            Self::PullRequest(name) => Self::open_pull_request(service, &name),
+        }
+    }
+
+    fn open_repo_page(service: &SessionService, group: &RepoGroup) -> OperationOutcome {
+        match service.open_repo_page(group) {
+            Ok(()) => OperationOutcome::done(
+                format!("Asked the browser to open the GitHub page of {group}."),
+                None,
+            ),
+            Err(error) => OperationOutcome::Failed(error),
+        }
+    }
+
+    fn open_pull_request(service: &SessionService, name: &str) -> OperationOutcome {
+        match service.open_pull_request(name) {
+            Ok(()) => OperationOutcome::Opened {
+                name: name.to_string(),
+                message: format!("Asked the browser to open the pull request of {name}."),
+            },
             Err(error) => OperationOutcome::Failed(error),
         }
     }
@@ -201,12 +233,31 @@ pub enum OperationOutcome {
         impact: DeleteImpact,
         changed: bool,
     },
+    ConfirmDeleteSessions(BatchReport<DeleteImpact>),
+    Opened {
+        name: String,
+        message: String,
+    },
     Failed(ServiceError),
 }
 
 impl OperationOutcome {
-    fn done(message: String, select: Option<String>) -> Self {
+    pub fn done(message: String, select: Option<String>) -> Self {
         Self::Done { message, select }
+    }
+
+    pub fn reported<T>(report: &BatchReport<T>, past_tense: &str) -> Self {
+        Self::batch(report.summary(past_tense), report.has_failures())
+    }
+
+    pub fn batch(message: String, needs_attention: bool) -> Self {
+        match needs_attention {
+            true => Self::Warned {
+                message,
+                select: None,
+            },
+            false => Self::done(message, None),
+        }
     }
 
     fn started(message: String, outcome: &StartOutcome) -> Self {
@@ -300,6 +351,16 @@ mod tests {
                 OperationOutcome::ConfirmDelete { changed: false, .. }
             ),
             "{outcome:?}"
+        );
+    }
+
+    #[test]
+    fn opening_a_pull_request_announces_the_lookup_while_it_runs() {
+        let operation = BlockingOperation::Open(BrowserPage::PullRequest("fix-auth".to_string()));
+
+        assert_eq!(
+            operation.busy_message(),
+            "Finding the pull request of fix-auth…"
         );
     }
 

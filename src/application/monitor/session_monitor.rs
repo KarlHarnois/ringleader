@@ -11,7 +11,7 @@ use crate::application::reconciliation::Reconciliation;
 use crate::application::repo_merge::RepoMerge;
 use crate::application::session_reconciler::SessionReconciler;
 use crate::domain::{
-    BaseBranch, Branch, Config, DiffStat, KeyBindings, Session, SessionObservation,
+    BaseBranch, Branch, Config, DiffStat, KeyBindings, Session, SessionObservation, SessionSize,
 };
 
 pub struct SessionMonitor {
@@ -76,6 +76,17 @@ impl SessionMonitor {
         Pending::start(move || Ok(multiplexer.capture_pane(&tmux_name)?))
     }
 
+    pub fn start_fitted_preview(&self, tmux_name: &str, size: SessionSize) -> Pending<String> {
+        let multiplexer = Arc::clone(&self.multiplexer);
+        let tmux_name = tmux_name.to_string();
+        Pending::start(move || {
+            if let Err(error) = multiplexer.fit_agent_window(&tmux_name, size) {
+                log::warn!("{error}");
+            }
+            Ok(multiplexer.capture_pane(&tmux_name)?)
+        })
+    }
+
     pub fn server_key_bindings(&self) -> Option<KeyBindings> {
         let running = self
             .multiplexer
@@ -132,9 +143,11 @@ impl DiffMeasurement {
 mod tests {
     use std::path::Path;
 
-    use crate::application::ports::StartPoint;
-    use crate::domain::{BaseBranch, BaseBranchLadder, Branch, Config, DiffStat, Repo, RepoName};
-    use crate::test_support::{FakeWorkspace, ServiceFixture};
+    use crate::application::ports::{MultiplexerError, StartPoint};
+    use crate::domain::{
+        BaseBranch, BaseBranchLadder, Branch, Config, DiffStat, Repo, RepoName, SessionSize,
+    };
+    use crate::test_support::{FakeMultiplexer, FakeWorkspace, ServiceFixture};
 
     struct MonitorFixture;
 
@@ -188,6 +201,26 @@ mod tests {
             let base_branch = BaseBranch::new(Self::BASE_BRANCH).unwrap();
             vec![base_branch.branches_and_origin_copy()]
         }
+    }
+
+    #[test]
+    fn a_window_that_cannot_be_fitted_is_still_captured() {
+        let multiplexer = FakeMultiplexer::new()
+            .with_capture("ringleader-alpha", "agent output")
+            .failing(
+                "fit_agent_window",
+                MultiplexerError::WindowNotFitted {
+                    tmux_name: "ringleader-alpha".to_string(),
+                },
+            );
+        let fixture = ServiceFixture::new().with_multiplexer(multiplexer);
+
+        let preview = fixture
+            .service()
+            .start_fitted_preview("ringleader-alpha", SessionSize::new(46, 22));
+
+        let captured = preview.wait_unless(|| false).unwrap().unwrap();
+        assert_eq!(captured, "agent output");
     }
 
     #[test]

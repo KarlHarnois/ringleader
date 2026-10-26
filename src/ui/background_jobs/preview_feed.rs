@@ -1,15 +1,15 @@
 use std::time::Instant;
 
 use crate::application::{Pending, ServiceError, SessionService};
-use crate::domain::{SessionState, SessionSummary};
-use crate::ui::home::home_view::LayoutTier;
+use crate::domain::{SessionSize, SessionState, SessionSummary};
 use crate::ui::home::preview_panel::PreviewCapture;
 use crate::ui::home::preview_text::PreviewText;
 
 pub struct PreviewFeed {
     shown: Option<SessionCapture>,
     capturing: Option<CaptureJob>,
-    tier: LayoutTier,
+    panel: Option<SessionSize>,
+    unfitted: bool,
     next_refresh: Instant,
 }
 
@@ -20,7 +20,8 @@ impl PreviewFeed {
         Self {
             shown: None,
             capturing: None,
-            tier: LayoutTier::TooSmall,
+            panel: None,
+            unfitted: true,
             next_refresh: now,
         }
     }
@@ -35,11 +36,17 @@ impl PreviewFeed {
         self.capturing.is_some()
     }
 
-    pub fn resize(&mut self, tier: LayoutTier) {
-        self.tier = tier;
+    pub fn resize(&mut self, panel: Option<SessionSize>) {
+        self.panel = panel;
+        self.unfitted = true;
+    }
+
+    pub fn refit(&mut self) {
+        self.unfitted = true;
     }
 
     pub fn refresh(&mut self, service: &SessionService, row: Option<&SessionSummary>) {
+        self.unfitted = true;
         if self.capturing.is_none() {
             self.start(service, row);
         }
@@ -79,11 +86,11 @@ impl PreviewFeed {
     }
 
     fn misses(&self, row: Option<&SessionSummary>) -> bool {
-        self.tier.shows_preview() && row.is_some() && self.capture(row).is_none()
+        self.panel.is_some() && row.is_some() && self.capture(row).is_none()
     }
 
     fn start(&mut self, service: &SessionService, row: Option<&SessionSummary>) {
-        let Some(row) = row.filter(|_| self.tier.shows_preview()) else {
+        let (Some(row), Some(panel)) = (row, self.panel) else {
             self.shown = None;
             return;
         };
@@ -94,8 +101,20 @@ impl PreviewFeed {
         }
         self.capturing = Some(CaptureJob {
             tmux_name: row.tmux_name().to_string(),
-            pending: service.start_preview(row.tmux_name()),
+            pending: self.start_capture(row.tmux_name(), panel, service),
         });
+    }
+
+    fn start_capture(
+        &mut self,
+        tmux_name: &str,
+        panel: SessionSize,
+        service: &SessionService,
+    ) -> Pending<String> {
+        match std::mem::take(&mut self.unfitted) {
+            true => service.start_fitted_preview(tmux_name, panel),
+            false => service.start_preview(tmux_name),
+        }
     }
 }
 

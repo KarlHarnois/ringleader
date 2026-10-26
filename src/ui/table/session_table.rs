@@ -12,7 +12,7 @@ use super::session_tree::{SessionTree, TreeBranch, TreeLine};
 use super::state_indicator::StateIndicator;
 use super::table_columns::{RowCells, TableColumns};
 use super::viewport::Viewport;
-use crate::domain::{DiffStat, SessionMetadata, SessionSummary};
+use crate::domain::{DiffStat, PullRequest, PullRequestState, SessionMetadata, SessionSummary};
 use crate::ui::home::empty_state::EmptyState;
 use crate::ui::home::home_view::LayoutTier;
 use crate::ui::theme::Theme;
@@ -20,13 +20,16 @@ use crate::ui::theme::Theme;
 pub struct SessionTable<'a> {
     tree: SessionTree<'a>,
     selection: Option<&'a ListSelection>,
+    marked: Vec<ListSelection>,
     viewport: Viewport,
     tick: u64,
     theme: Theme,
     tier: LayoutTier,
+    out_of_focus: bool,
 }
 
 impl<'a> SessionTable<'a> {
+    pub const APPROVED_CHECK: char = '✓';
     const NO_DIFF: &'static str = "—";
 
     pub fn new(
@@ -38,10 +41,12 @@ impl<'a> SessionTable<'a> {
         Self {
             tree,
             selection,
+            marked: Vec::new(),
             viewport: Viewport::default(),
             tick,
             theme,
             tier: LayoutTier::Full,
+            out_of_focus: false,
         }
     }
 
@@ -49,8 +54,19 @@ impl<'a> SessionTable<'a> {
         Self { viewport, ..self }
     }
 
+    pub fn with_marked(self, marked: Vec<ListSelection>) -> Self {
+        Self { marked, ..self }
+    }
+
     pub fn for_tier(self, tier: LayoutTier) -> Self {
         Self { tier, ..self }
+    }
+
+    pub fn out_of_focus(self) -> Self {
+        Self {
+            out_of_focus: true,
+            ..self
+        }
     }
 
     pub fn render(&self, frame: &mut Frame, area: Rect) {
@@ -149,22 +165,43 @@ impl<'a> SessionTable<'a> {
             TreeLine::Heading(heading) => heading.spans(self.tick, &self.theme, width),
             TreeLine::Session { row, branch } => self.row_spans(row, *branch, columns),
         };
-        if self.is_selected(line) {
-            return self.reversed(&spans, width);
+        if self.is_cursor(line) {
+            return self.cursor_line(spans, width);
+        }
+        if self.is_marked(line) {
+            return self.bar(&spans, width);
         }
         Line::from(spans)
     }
 
-    fn is_selected(&self, line: &TreeLine) -> bool {
+    fn is_cursor(&self, line: &TreeLine) -> bool {
         self.selection == Some(&line.selection())
     }
 
-    fn reversed(&self, spans: &[Span], width: usize) -> Line<'static> {
+    fn is_marked(&self, line: &TreeLine) -> bool {
+        self.marked.contains(&line.selection())
+    }
+
+    fn cursor_line(&self, spans: Vec<Span<'static>>, width: usize) -> Line<'static> {
+        match self.out_of_focus {
+            true => self.underlined(spans, width),
+            false => self.bar(&spans, width),
+        }
+    }
+
+    fn bar(&self, spans: &[Span], width: usize) -> Line<'static> {
         let text: String = spans.iter().map(|span| span.content.as_ref()).collect();
         Line::from(Span::styled(
             format!("{text:<width$}"),
             self.theme.selected(),
         ))
+    }
+
+    fn underlined(&self, spans: Vec<Span<'static>>, width: usize) -> Line<'static> {
+        let mut line = Line::from(spans);
+        let padding = width.saturating_sub(line.width());
+        line.push_span(Span::raw(" ".repeat(padding)));
+        line.patch_style(self.theme.selected_out_of_focus())
     }
 
     fn row_spans(
@@ -190,9 +227,8 @@ impl<'a> SessionTable<'a> {
             .skip(&columns.name_cell(row.name()))
             .color_first(cells.agent(), agent);
         if let Some(pull_request) = row.pull_request() {
-            let style = self.theme.pull_request(pull_request.state());
-            let cell = vec![Span::styled(cells.pull_request().to_string(), style)];
-            colored = colored.color_first(cells.pull_request(), cell);
+            colored =
+                colored.color_first(cells.pull_request(), self.pull_request_spans(pull_request));
         }
         if let Some(diff) = row.diff() {
             colored = colored.color_last(cells.diff(), self.diff_spans(diff));
@@ -226,7 +262,29 @@ impl<'a> SessionTable<'a> {
 
     fn pull_request_text(row: &SessionSummary) -> String {
         row.pull_request()
-            .map_or(String::new(), |pull_request| pull_request.to_string())
+            .map_or(String::new(), Self::pull_request_cell_text)
+    }
+
+    fn pull_request_cell_text(pull_request: &PullRequest) -> String {
+        match Self::shows_approval(pull_request) {
+            true => format!("{pull_request}{}", Self::APPROVED_CHECK),
+            false => pull_request.to_string(),
+        }
+    }
+
+    fn pull_request_spans(&self, pull_request: &PullRequest) -> Vec<Span<'static>> {
+        let style = match Self::shows_approval(pull_request) {
+            true => self.theme.approved(),
+            false => self.theme.pull_request(pull_request.state()),
+        };
+        vec![Span::styled(
+            Self::pull_request_cell_text(pull_request),
+            style,
+        )]
+    }
+
+    fn shows_approval(pull_request: &PullRequest) -> bool {
+        pull_request.state() == PullRequestState::Open && pull_request.is_approved()
     }
 
     fn diff_text(row: &SessionSummary) -> String {
@@ -244,7 +302,7 @@ mod tests {
     use ratatui::style::{Color, Modifier};
 
     use super::*;
-    use crate::domain::{DiffStat, PullRequestState, RepoGroup, SessionState, UnmanagedSession};
+    use crate::domain::{DiffStat, PullRequestReview, RepoGroup, SessionState, UnmanagedSession};
     use crate::test_support::ServiceFixture;
 
     struct TableFixture;
@@ -265,6 +323,13 @@ mod tests {
         fn running(name: &str, agent: &str) -> SessionSummary {
             let session = ServiceFixture::session_with_agent(name, agent);
             SessionSummary::managed(session, SessionState::Waiting, false)
+        }
+
+        fn approved(number: u64, state: PullRequestState) -> SessionSummary {
+            Self::managed("fix-auth", SessionState::Waiting).with_pull_request(
+                ServiceFixture::pull_request(number, state)
+                    .with_review(PullRequestReview::Approved),
+            )
         }
 
         fn unmanaged() -> SessionSummary {
@@ -306,11 +371,30 @@ mod tests {
             tick: u64,
             height: u16,
         ) -> Terminal<TestBackend> {
+            Self::draw_table(SessionTable::new(tree, selection, tick, Theme), height)
+        }
+
+        fn render_out_of_focus(
+            rows: &[SessionSummary],
+            cursor: &str,
+            marked: &[&str],
+        ) -> Terminal<TestBackend> {
+            let cursor = ListSelection::Session(cursor.to_string());
+            let marked = marked
+                .iter()
+                .map(|name| ListSelection::Session(name.to_string()))
+                .collect();
+            let tree = SessionTree::new(rows, &HashSet::new());
+            let table = SessionTable::new(tree, Some(&cursor), 0, Theme)
+                .with_marked(marked)
+                .out_of_focus();
+            Self::draw_table(table, 6)
+        }
+
+        fn draw_table(table: SessionTable, height: u16) -> Terminal<TestBackend> {
             let mut terminal = Terminal::new(TestBackend::new(50, height)).unwrap();
             terminal
-                .draw(|frame| {
-                    SessionTable::new(tree, selection, tick, Theme).render(frame, frame.area())
-                })
+                .draw(|frame| table.render(frame, frame.area()))
                 .unwrap();
             terminal
         }
@@ -332,6 +416,11 @@ mod tests {
             let line = Self::line(terminal, row);
             let byte = line.find(text).unwrap();
             line[..byte].chars().count()
+        }
+
+        fn header_starts_over(rows: &[SessionSummary], number: &str) -> bool {
+            let terminal = Self::render(rows, None, 0, 6);
+            Self::column(&terminal, 1, "PR") == Self::column(&terminal, 2, number)
         }
     }
 
@@ -490,6 +579,69 @@ mod tests {
     }
 
     #[test]
+    fn an_approved_pull_request_shows_a_green_checkmark_after_its_number() {
+        let row = TableFixture::approved(142, PullRequestState::Open);
+
+        let terminal = TableFixture::render(&[row], None, 0, 6);
+        let line = TableFixture::line(&terminal, 2);
+        let number = u16::try_from(TableFixture::column(&terminal, 2, "#142")).unwrap();
+        let check = u16::try_from(TableFixture::column(&terminal, 2, "✓")).unwrap();
+        let buffer = terminal.backend().buffer();
+
+        assert!(line.contains("#142✓"));
+        assert_eq!(buffer[(number, 2)].fg, Color::Green);
+        assert!(buffer[(number, 2)].modifier.contains(Modifier::BOLD));
+        assert_eq!(buffer[(check, 2)].fg, Color::Green);
+        assert!(buffer[(check, 2)].modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn an_unapproved_pull_request_shows_only_its_number() {
+        let row = TableFixture::managed("fix-auth", SessionState::Waiting)
+            .with_pull_request(ServiceFixture::pull_request(142, PullRequestState::Open));
+
+        let terminal = TableFixture::render(&[row], None, 0, 6);
+        let line = TableFixture::line(&terminal, 2);
+        let number = u16::try_from(TableFixture::column(&terminal, 2, "#142")).unwrap();
+        let buffer = terminal.backend().buffer();
+
+        assert!(line.contains("#142"));
+        assert!(!line.contains('✓'));
+        assert_eq!(buffer[(number, 2)].fg, Color::Green);
+        assert!(!buffer[(number, 2)].modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn the_pull_request_header_starts_over_an_approved_number() {
+        assert!(TableFixture::header_starts_over(
+            &[TableFixture::approved(142, PullRequestState::Open)],
+            "#142",
+        ));
+    }
+
+    #[test]
+    fn the_pull_request_header_starts_over_an_unapproved_number() {
+        let row = TableFixture::managed("fix-auth", SessionState::Waiting)
+            .with_pull_request(ServiceFixture::pull_request(142, PullRequestState::Open));
+
+        assert!(TableFixture::header_starts_over(&[row], "#142"));
+    }
+
+    #[test]
+    fn only_an_open_pull_request_shows_its_approval() {
+        let states = [
+            PullRequestState::Draft,
+            PullRequestState::Merged,
+            PullRequestState::Closed,
+        ];
+
+        for state in states {
+            let terminal = TableFixture::render(&[TableFixture::approved(5, state)], None, 0, 6);
+            assert!(!TableFixture::line(&terminal, 2).contains('✓'));
+        }
+    }
+
+    #[test]
     fn only_the_selected_row_is_reversed_across_the_whole_width() {
         let rows = [
             TableFixture::managed("dark-mode", SessionState::Waiting),
@@ -502,6 +654,52 @@ mod tests {
         assert!(!buffer[(1, 2)].modifier.contains(Modifier::REVERSED));
         assert!(buffer[(1, 3)].modifier.contains(Modifier::REVERSED));
         assert!(buffer[(48, 3)].modifier.contains(Modifier::REVERSED));
+    }
+
+    #[test]
+    fn an_out_of_focus_cursor_row_is_underlined_instead_of_reversed() {
+        let rows = [TableFixture::managed("fix-auth", SessionState::Waiting)];
+
+        let terminal = TableFixture::render_out_of_focus(&rows, "fix-auth", &[]);
+        let cell = &terminal.backend().buffer()[(1, 2)];
+
+        assert!(cell.modifier.contains(Modifier::UNDERLINED));
+        assert!(!cell.modifier.contains(Modifier::REVERSED));
+    }
+
+    #[test]
+    fn an_out_of_focus_underline_spans_the_whole_width() {
+        let rows = [TableFixture::managed("fix-auth", SessionState::Waiting)];
+
+        let terminal = TableFixture::render_out_of_focus(&rows, "fix-auth", &[]);
+        let last_cell = &terminal.backend().buffer()[(48, 2)];
+
+        assert!(last_cell.modifier.contains(Modifier::UNDERLINED));
+    }
+
+    #[test]
+    fn an_out_of_focus_cursor_row_keeps_its_colors() {
+        let rows = [TableFixture::managed("fix-auth", SessionState::Waiting)];
+
+        let terminal = TableFixture::render_out_of_focus(&rows, "fix-auth", &[]);
+        let indicator = &terminal.backend().buffer()[(1, 2)];
+
+        assert_eq!(indicator.fg, Color::Green);
+    }
+
+    #[test]
+    fn an_out_of_focus_marked_row_stays_reversed_so_only_the_cursor_shows_focus() {
+        let rows = [
+            TableFixture::managed("dark-mode", SessionState::Waiting),
+            TableFixture::managed("fix-auth", SessionState::Waiting),
+        ];
+
+        let terminal =
+            TableFixture::render_out_of_focus(&rows, "fix-auth", &["dark-mode", "fix-auth"]);
+        let cell = &terminal.backend().buffer()[(1, 2)];
+
+        assert!(cell.modifier.contains(Modifier::REVERSED));
+        assert!(!cell.modifier.contains(Modifier::UNDERLINED));
     }
 
     #[test]

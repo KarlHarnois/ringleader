@@ -4,8 +4,11 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.95"
 license = "MIT"
-description = "A tmux session manager for coding agents"
+description = "A tmux session manager for AI coding agents"
 repository = "https://github.com/KarlHarnois/ringleader"
+
+[workspace]
+members = ["xtask"]
 
 [dependencies]
 ansi-to-tui = "8.0.1"

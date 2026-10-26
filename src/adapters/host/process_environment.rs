@@ -136,9 +136,10 @@ impl ProcessEnvironment {
         // SAFETY: ttyname_r writes at most buffer.len() bytes, including the terminating
         // NUL, into a buffer this function owns, and reads only descriptor 0.
         let status = unsafe { libc::ttyname_r(0, buffer.as_mut_ptr().cast(), buffer.len()) };
-        if status != 0 {
-            return None;
-        }
+        (status == 0).then_some(buffer).and_then(Self::before_nul)
+    }
+
+    fn before_nul(mut buffer: Vec<u8>) -> Option<OsString> {
         let end = buffer.iter().position(|byte| *byte == 0)?;
         buffer.truncate(end);
         Some(OsString::from_vec(buffer))

@@ -266,15 +266,36 @@ mod tests {
         const NUMBER: u64 = 142;
 
         fn with_pull_request() -> ServiceFixture {
-            let session = ServiceFixture::session(Self::NAME);
+            Self::with_pull_request_for(&ServiceFixture::session(Self::NAME))
+        }
+
+        fn in_main_checkout_with_pull_request() -> ServiceFixture {
+            Self::with_pull_request_for(&ServiceFixture::main_checkout_session(Self::NAME))
+        }
+
+        fn with_pull_request_for(session: &Session) -> ServiceFixture {
             let pull_request = ServiceFixture::pull_request(Self::NUMBER, PullRequestState::Open);
             ServiceFixture::new()
-                .with_sessions(std::slice::from_ref(&session))
+                .with_sessions(std::slice::from_ref(session))
                 .with_pull_requests(FakePullRequests::new().with_pull_request(
                     Path::new(ServiceFixture::REPO),
                     session.branch(),
                     pull_request,
                 ))
+        }
+
+        fn without_pull_request() -> ServiceFixture {
+            ServiceFixture::new().with_sessions(&[ServiceFixture::session(Self::NAME)])
+        }
+
+        fn failing_lookup() -> ServiceFixture {
+            let pull_requests = FakePullRequests::new();
+            pull_requests.fail();
+            Self::without_pull_request().with_pull_requests(pull_requests)
+        }
+
+        fn open_error(fixture: &ServiceFixture) -> ServiceError {
+            fixture.service().open_pull_request(Self::NAME).unwrap_err()
         }
 
         fn looked_up(fixture: &ServiceFixture) -> SessionService {
@@ -770,15 +791,52 @@ mod tests {
     }
 
     #[test]
-    fn a_session_not_yet_looked_up_has_no_known_pull_request_to_open() {
+    fn a_session_not_yet_looked_up_has_its_pull_request_looked_up_and_opened() {
         let fixture = PullRequestFixture::with_pull_request();
 
-        let error = fixture
+        fixture
             .service()
             .open_pull_request(PullRequestFixture::NAME)
-            .unwrap_err();
+            .unwrap();
+
+        assert_eq!(
+            fixture.web_browser().opened(),
+            [ServiceFixture::pull_request_url(PullRequestFixture::NUMBER)]
+        );
+    }
+
+    #[test]
+    fn a_branch_without_a_pull_request_has_no_known_pull_request_to_open() {
+        let fixture = PullRequestFixture::without_pull_request();
+
+        let error = PullRequestFixture::open_error(&fixture);
 
         assert!(matches!(error, ServiceError::NotFound(_)));
+        assert_eq!(error.to_string(), "no pull request is known for fix-auth");
+        assert!(fixture.web_browser().opened().is_empty());
+    }
+
+    #[test]
+    fn a_failed_lookup_says_the_pull_request_could_not_be_looked_up() {
+        let fixture = PullRequestFixture::failing_lookup();
+
+        let error = PullRequestFixture::open_error(&fixture);
+
+        assert!(matches!(error, ServiceError::Failed(_)));
+        assert!(
+            error
+                .to_string()
+                .starts_with("could not look up the pull request of fix-auth: ")
+        );
+        assert!(fixture.web_browser().opened().is_empty());
+    }
+
+    #[test]
+    fn a_main_checkout_session_has_no_known_pull_request_to_open() {
+        let fixture = PullRequestFixture::in_main_checkout_with_pull_request();
+
+        let error = PullRequestFixture::open_error(&fixture);
+
         assert_eq!(error.to_string(), "no pull request is known for fix-auth");
         assert!(fixture.web_browser().opened().is_empty());
     }

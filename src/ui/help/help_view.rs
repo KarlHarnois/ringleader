@@ -11,6 +11,7 @@ use crate::domain::{HotKey, KeyBindings, PullRequestState, SessionState};
 use crate::ui::dialogs::DialogStep;
 use crate::ui::dialogs::home_path::HomePath;
 use crate::ui::dialogs::scroll_window::ScrollWindow;
+use crate::ui::table::session_table::SessionTable;
 use crate::ui::table::state_indicator::StateIndicator;
 use crate::ui::text_fit::TextFit;
 use crate::ui::theme::Theme;
@@ -24,7 +25,7 @@ pub struct HelpView {
 impl HelpView {
     pub const TITLE: &'static str = concat!(" Help · ringleader ", env!("CARGO_PKG_VERSION"), " ");
     const KEYS_HEADING: &'static str = "Keys";
-    const KEYS: [(&'static str, &'static str); 19] = [
+    const KEYS: [(&'static str, &'static str); 21] = [
         ("n", "create a session"),
         ("d", "delete the selected session"),
         (
@@ -49,6 +50,10 @@ impl HelpView {
         ("s", "restart an exited or stopped session"),
         ("S", "restart every exited or stopped session"),
         (
+            "x",
+            "stop a session or the selected repo, s resumes each one",
+        ),
+        (
             "p",
             "pull the base branch from origin, the agent fixes conflicts",
         ),
@@ -61,6 +66,7 @@ impl HelpView {
         ("gg G", "select the first or the last row"),
         ("H M L", "select the top, middle, or bottom row on screen"),
         ("1-9", "jump to a repo"),
+        ("v V", "select a range of sessions, then x s d p act on it"),
         ("q", "quit, the sessions keep running"),
     ];
     const RETURN_ACTION: &'static str = "detach from a session and return here";
@@ -174,14 +180,30 @@ impl HelpView {
     }
 
     fn pull_request_legend(theme: &Theme) -> Legend {
-        let entries = PullRequestState::ALL.iter().map(|&state| {
-            LegendEntry::new(
-                Self::PULL_REQUEST_SYMBOL,
-                theme.pull_request(state),
-                state.label(),
-            )
-        });
-        Legend::new("PRs", entries.collect())
+        let mut entries: Vec<LegendEntry> = PullRequestState::ALL
+            .iter()
+            .map(|&state| {
+                LegendEntry::new(
+                    Self::PULL_REQUEST_SYMBOL,
+                    theme.pull_request(state),
+                    state.label(),
+                )
+            })
+            .collect();
+        entries.push(LegendEntry::new(
+            Self::approved_pull_request_symbol(),
+            theme.approved(),
+            "approved",
+        ));
+        Legend::new("PRs", entries)
+    }
+
+    fn approved_pull_request_symbol() -> String {
+        format!(
+            "{}{}",
+            Self::PULL_REQUEST_SYMBOL,
+            SessionTable::APPROVED_CHECK
+        )
     }
 
     fn diff_legend(theme: &Theme) -> Legend {
@@ -231,8 +253,8 @@ mod tests {
         const SHORT_WIDTH: usize = 56;
         const SHORT_HEIGHT: usize = 8;
         const PAST_THE_END: usize = 50;
-        const ROWS_ABOVE_THE_SMALLEST_FULL_SIZE: u16 = 15;
-        const TALL_NARROW_SIZE: (u16, u16) = (79, 39);
+        const ROWS_ABOVE_THE_SMALLEST_FULL_SIZE: u16 = 17;
+        const TALL_NARROW_SIZE: (u16, u16) = (79, 40);
         const TMUX_CONFIG_ROW: &'static str = "tmux config  ~/.local/state/ringleader/tmux.conf";
 
         fn help() -> HelpView {
@@ -366,7 +388,7 @@ mod tests {
 
         assert!(screen.lines().nth(1).unwrap().contains("┌ Help "));
         assert!(screen.contains("n            create a session"));
-        assert!(screen.contains("q            quit, the sessions keep running"));
+        assert!(screen.contains("1-9          jump to a repo"));
     }
 
     #[test]
@@ -613,6 +635,17 @@ mod tests {
         let text = HelpFixture::text(&HelpFixture::help());
 
         assert!(text.contains("PRs          #n open  #n draft  #n merged  #n closed"));
+        assert!(text.contains(&format!(
+            "{} approved",
+            HelpView::approved_pull_request_symbol()
+        )));
+    }
+
+    #[test]
+    fn the_legend_colors_approved_like_the_session_table() {
+        let symbol = HelpView::approved_pull_request_symbol();
+
+        assert_eq!(HelpFixture::span_style(&symbol), Theme.approved());
     }
 
     #[test]

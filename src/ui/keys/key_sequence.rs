@@ -1,6 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
-use super::action_gate::{ActionGate, KeyAction, Navigation};
+use super::action_gate::{KeyAction, Navigation};
+use super::key_map::KeyMap;
 
 #[derive(Debug, Default)]
 pub struct KeySequence {
@@ -8,7 +9,7 @@ pub struct KeySequence {
 }
 
 impl KeySequence {
-    pub fn handle_key(&mut self, key: &KeyEvent, gate: &ActionGate) -> KeyAction {
+    pub fn handle_key(&mut self, key: &KeyEvent, gate: &dyn KeyMap) -> KeyAction {
         let pending_g = std::mem::take(&mut self.pending_g);
         match key.code {
             KeyCode::Char('g') if pending_g => KeyAction::Navigate(Navigation::SelectFirst),
@@ -27,7 +28,9 @@ mod tests {
     use super::*;
     use crate::domain::{SessionState, SessionSummary};
     use crate::test_support::ServiceFixture;
-    use crate::ui::keys::action_gate::DesktopOpening;
+    use crate::ui::app::AppRequest;
+    use crate::ui::blocking_operation::{BlockingOperation, BrowserPage};
+    use crate::ui::keys::action_gate::ActionGate;
 
     struct SequenceFixture;
 
@@ -101,16 +104,20 @@ mod tests {
             SequenceFixture::actions_on(&SequenceFixture::row(), "gx"),
             [
                 KeyAction::Ignore,
-                KeyAction::OpenOnDesktop(DesktopOpening::PullRequest("fix-auth".to_string()))
+                KeyAction::Request(AppRequest::Block(BlockingOperation::Open(
+                    BrowserPage::PullRequest("fix-auth".to_string())
+                )))
             ]
         );
     }
 
     #[test]
-    fn a_lone_x_does_nothing() {
+    fn a_lone_x_stops_the_selected_session_instead_of_opening_its_pull_request() {
         assert_eq!(
             SequenceFixture::actions_on(&SequenceFixture::row(), "x"),
-            [KeyAction::Ignore]
+            [KeyAction::Request(AppRequest::Block(
+                BlockingOperation::Stop("fix-auth".to_string())
+            ))]
         );
     }
 }
