@@ -8,7 +8,7 @@ use crate::application::ports::{
     SessionSpec,
 };
 use crate::domain::{
-    AgentPane, HotKey, KeyBindings, SessionMetadata, SessionObservation, TmuxAddress,
+    AgentPane, HotKey, KeyBindings, SessionMetadata, SessionObservation, SessionSize, TmuxAddress,
 };
 use crate::test_support::{CallHooks, Deadline, Gate};
 
@@ -432,6 +432,11 @@ impl Multiplexer for FakeMultiplexer {
     fn capture_pane(&self, tmux_name: &str) -> Result<String, MultiplexerError> {
         self.call("capture_pane", tmux_name)?;
         Ok(self.edit(|state| state.captures.get(tmux_name).cloned().unwrap_or_default()))
+    }
+
+    fn fit_agent_window(&self, tmux_name: &str, size: SessionSize) -> Result<(), MultiplexerError> {
+        let detail = format!("{tmux_name} {}x{}", size.width(), size.height());
+        self.call("fit_agent_window", &detail)
     }
 
     fn rename_session(

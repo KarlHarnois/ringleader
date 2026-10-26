@@ -1,15 +1,17 @@
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
+use ratatui::layout::Rect;
+
 use super::bell::Bell;
 use super::fold_change::FoldChange;
-use super::home_view::LayoutTier;
+use super::home_view::{HomeView, LayoutTier};
 use super::key_hints::KeyHints;
 use super::preview_panel::PreviewPanel;
 use super::status_bar::{StatusBar, StatusNote};
 use crate::application::ports::FoldStore;
 use crate::application::{ServiceError, SessionCount, SessionService, Tool};
-use crate::domain::{RepoGroup, SessionSummary};
+use crate::domain::{RepoGroup, SessionSize, SessionSummary};
 use crate::ui::background_jobs::diff_queue::DiffQueue;
 use crate::ui::background_jobs::observation_feed::ObservationFeed;
 use crate::ui::background_jobs::preview_feed::PreviewFeed;
@@ -108,8 +110,16 @@ impl HomeState {
     ) {
         self.screen = (width, height);
         self.fit_rows(status);
-        self.preview.resize(LayoutTier::for_size(width, height));
+        self.preview
+            .resize(Self::preview_body(width, height, status));
         self.refresh_preview(service);
+    }
+
+    fn preview_body(width: u16, height: u16, status: &StatusBar) -> Option<SessionSize> {
+        let shown = LayoutTier::for_size(width, height).shows_preview();
+        let screen = Rect::new(0, 0, width, height);
+        let area = HomeView::preview_area(screen, status.height(width, height));
+        shown.then(|| PreviewPanel::body_size(area))
     }
 
     pub fn refresh_now(&mut self) {
@@ -179,6 +189,7 @@ impl HomeState {
     pub fn returned_from(&mut self, name: &str) {
         self.bell.forget(name);
         self.pull_requests.refresh_soon();
+        self.preview.refit();
     }
 
     pub fn select(&mut self, name: &str, service: &SessionService) {

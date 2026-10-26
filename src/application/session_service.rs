@@ -34,7 +34,7 @@ use crate::application::{AddRepoRequest, RepoAddition};
 use crate::application::{DeleteConfirmation, DeleteImpact};
 use crate::domain::{
     Config, DiffStat, KeyBindings, PullRequest, Repo, RepoGroup, Session, SessionObservation,
-    SessionSummary,
+    SessionSize, SessionSummary,
 };
 
 pub struct SessionService {
@@ -229,6 +229,10 @@ impl SessionService {
 
     pub fn start_preview(&self, tmux_name: &str) -> Pending<String> {
         self.monitor.start_preview(tmux_name)
+    }
+
+    pub fn start_fitted_preview(&self, tmux_name: &str, size: SessionSize) -> Pending<String> {
+        self.monitor.start_fitted_preview(tmux_name, size)
     }
 
     pub fn find_pull_requests(

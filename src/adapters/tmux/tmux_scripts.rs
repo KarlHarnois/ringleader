@@ -6,7 +6,7 @@ use super::tmux_launch::TmuxLaunch;
 use super::tmux_listing::TmuxListing;
 use super::tmux_sequence::TmuxSequence;
 use crate::application::ports::{AgentLaunch, SessionSpec};
-use crate::domain::SessionMetadata;
+use crate::domain::{SessionMetadata, SessionSize};
 
 pub struct TmuxScripts;
 
@@ -223,6 +223,21 @@ impl TmuxScripts {
 
     pub fn capture(pane: &str) -> TmuxSequence {
         TmuxSequence::new().command(["capture-pane", "-e", "-p", "-t", pane])
+    }
+
+    pub fn fit_window(pane: &str, size: SessionSize) -> TmuxSequence {
+        TmuxSequence::new()
+            .command([
+                "resize-window",
+                "-t",
+                pane,
+                "-x",
+                &size.width().to_string(),
+                "-y",
+                &size.height().to_string(),
+            ])
+            .command(["set-option", "-w", "-u", "-t", pane, "window-size"])
+            .command(["display-message", "-p", "-t", pane, TmuxLaunch::DONE_LABEL])
     }
 
     pub fn root_keys() -> TmuxSequence {

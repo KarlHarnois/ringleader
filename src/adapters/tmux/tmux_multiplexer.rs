@@ -17,7 +17,7 @@ use crate::application::ports::{
     AgentLaunch, AttachTarget, Multiplexer, MultiplexerError, ServerConfig, ServerState,
     SessionSpec,
 };
-use crate::domain::{KeyBindings, SessionMetadata, SessionObservation};
+use crate::domain::{KeyBindings, SessionMetadata, SessionObservation, SessionSize};
 
 pub struct TmuxMultiplexer {
     tmux: TmuxCommand,
@@ -321,6 +321,18 @@ impl Multiplexer for TmuxMultiplexer {
         Ok(output.stdout().to_string())
     }
 
+    fn fit_agent_window(&self, tmux_name: &str, size: SessionSize) -> Result<(), MultiplexerError> {
+        let pane = self.shown_pane(tmux_name)?;
+        let output = self.tmux.change(&TmuxScripts::fit_window(&pane, size))?;
+        if output.has(TmuxLaunch::DONE_LABEL) {
+            return Ok(());
+        }
+        log::warn!("{}", TmuxError::failed("resize-window", &output));
+        Err(MultiplexerError::WindowNotFitted {
+            tmux_name: tmux_name.to_string(),
+        })
+    }
+
     fn rename_session(
         &self,
         old: &str,
@@ -461,6 +473,16 @@ mod tests {
             let fixture = Self::with_holder();
             fixture.server.multiplexer().server_state().unwrap();
             fixture
+        }
+
+        fn window_size(&self, target: &str) -> String {
+            self.server.text(&[
+                "display-message",
+                "-p",
+                "-t",
+                target,
+                "#{window_width}x#{window_height}",
+            ])
         }
 
         fn worktree(&self, name: &str) -> PathBuf {
@@ -1429,6 +1451,39 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(error, MultiplexerError::Failed { .. }));
+    }
+
+    #[test]
+    fn fitting_the_agent_window_resizes_it_to_the_given_size() {
+        let fixture = MultiplexerFixture::new();
+        fixture.server.managed_session("fix-auth");
+
+        fixture
+            .server
+            .multiplexer()
+            .fit_agent_window("ringleader-fix-auth", SessionSize::new(60, 20))
+            .unwrap();
+
+        assert_eq!(fixture.window_size("=ringleader-fix-auth:"), "60x20");
+    }
+
+    #[test]
+    fn an_attached_client_keeps_its_own_size_when_the_window_is_fitted() {
+        let fixture = MultiplexerFixture::new();
+        fixture.server.managed_session("fix-auth");
+        let client = fixture.server.control_client("=ringleader-fix-auth:");
+        let client_name = fixture.server.client_name(&client);
+        fixture
+            .server
+            .text(&["refresh-client", "-t", &client_name, "-C", "90x30"]);
+
+        fixture
+            .server
+            .multiplexer()
+            .fit_agent_window("ringleader-fix-auth", SessionSize::new(60, 20))
+            .unwrap();
+
+        assert_eq!(fixture.window_size("=ringleader-fix-auth:"), "90x30");
     }
 
     #[test]
