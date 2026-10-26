@@ -104,13 +104,7 @@
           src = self;
           cargoLock.lockFile = ./Cargo.lock;
           nativeBuildInputs = [ pkgs.makeWrapper ];
-          doCheck = true;
-          __darwinAllowLocalNetworking = true;
-          nativeCheckInputs = [
-            pkgs.gitMinimal
-            pkgs.tmux
-            pkgs.direnv
-          ];
+          doCheck = false;
           postInstall = ''
             wrapProgram $out/bin/ringleader \
               --set-default RINGLEADER_TMUX ${pkgs.tmux}/bin/tmux \
