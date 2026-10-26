@@ -37,7 +37,8 @@ impl RawConfig {
     }
 
     fn expanded_draft(self, defaults: ConfigDraft, home: &HomeExpansion) -> ConfigDraft {
-        let mut draft = self.keys_into(self.timing_into(defaults));
+        let mut draft =
+            self.keys_into(self.session_options_into(self.refresh_intervals_into(defaults)));
         if let Some(root) = &self.worktree_root {
             draft = draft.worktree_root(&home.path(root));
         }
@@ -68,7 +69,7 @@ impl RawConfig {
         draft
     }
 
-    fn timing_into(&self, mut draft: ConfigDraft) -> ConfigDraft {
+    fn refresh_intervals_into(&self, mut draft: ConfigDraft) -> ConfigDraft {
         if let Some(value) = self.state_poll_ms {
             draft = draft.state_poll_ms(value);
         }
@@ -81,6 +82,10 @@ impl RawConfig {
         if let Some(value) = self.pull_request_refresh_ms {
             draft = draft.pull_request_refresh_ms(value);
         }
+        draft
+    }
+
+    fn session_options_into(&self, mut draft: ConfigDraft) -> ConfigDraft {
         if let Some(value) = self.activity_idle_seconds {
             draft = draft.activity_idle_seconds(value);
         }

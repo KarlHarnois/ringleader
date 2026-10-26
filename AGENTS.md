@@ -56,7 +56,7 @@ Each way comes from an ecosystem users already know, and keeps the meaning it ha
 | A text field | readline |
 | A fuzzy picker | fzf |
 | The key that opens a finder | the `Ctrl-K` quick switcher, as in Slack, Discord, and GitHub |
-| The key that opens a pull request in the browser | the `o` open key, as in gh-dash, newsboat, and GitHub |
+| The key that opens a pull request or the GitHub page of a repo in the browser | the `o` open key, as in gh-dash, newsboat, and GitHub |
 | The new-session dialog's prompt box and status line | Claude Code, where the mode and the model show under the prompt box |
 
 - The arrow keys work wherever an ecosystem's movement keys work.
@@ -69,6 +69,7 @@ Each way comes from an ecosystem users already know, and keeps the meaning it ha
   - rename
   - restart
   - restart all
+  - stop
   - attach
 
 ### Side work never blocks or breaks the main action
@@ -219,8 +220,8 @@ Create each fixture repo with `git init -b <branch>`. Never rely on `init.defaul
 
 ```sh
 nix develop -c cargo fmt --check
-nix develop -c cargo clippy --all-targets -- -D warnings
-nix develop -c cargo test
+nix develop -c cargo clippy --workspace --all-targets -- -D warnings
+nix develop -c cargo xtask crap
 nix build --no-link ".#checks.$(nix eval --impure --raw --expr builtins.currentSystem).readme-version-badge"
 nix build .#
 nix flake check
@@ -228,7 +229,7 @@ nix flake check
 
 **The Commands are the six commands above.** CI runs them on Linux and macOS.
 
-**A change is done when the Commands pass.** If the change edits a file under `src/`, the change is done only after the completion steps also pass. If one of the Commands also fails without the change, stop and show its output to the project owner.
+**A change is done when the Commands pass.** If one of the Commands also fails without the change, stop and show its output to the project owner.
 
 ## Reference files
 
@@ -236,9 +237,7 @@ nix flake check
 
 | Reference file | Read the file before you |
 | --- | --- |
-| `docs/agents/completion-steps.md` | run a metrics tool or the completion steps |
 | `docs/agents/manual-runs.md` | make a manual run |
-| `docs/agents/uml-viewer.md` | open uml-viewer |
 | `docs/agents/source-folders.md` | add a file under `src/`, move a file there, or make a folder there |
 | `docs/agents/platform-code.md` | change a file or a re-export that a `target_os` cfg attribute limits, or write such an attribute |
 | `docs/agents/tmux-tests.md` | write or change a test that runs tmux |
@@ -337,12 +336,16 @@ nix flake check
 - Put the channel's fake in `src/test_support/`.
 - A test seam inside `adapters` has the same shape. Its fake lives in the adapter's own tests.
 
-## Metrics
+## CRAP gate
 
-**The metrics tools are `dryer`, `crapper`, and `mutator`.** They are local code-health tools that you run in the completion steps.
+**The CRAP gate is `cargo xtask crap`.** It runs every workspace test under coverage. If a production function scores over 8, the gate fails.
 
-- CI never builds or runs the metrics tools. Never add them to `checks`, to the default dev shell, or to `.github/workflows/ci.yml`.
-- `nix flake check` still downloads the four upstream inputs. If an upstream input can no longer be fetched, CI's flake check fails until someone repins or removes the input.
+- Never raise `CrapGate::MAXIMUM_CRAP` without the project owner's approval.
+- Never move a branch into a macro to lower a score: the gate cannot see inside a macro.
+- If no test can reach a function, keep its complexity at 2 or less.
+- Move such a function's logic into functions that tests reach.
+- A function that needs a terminal is a function that no test can reach.
+- If a change edits a macOS-only function, only the macOS CI job scores the function.
 
 ## Layout rules
 
@@ -447,7 +450,7 @@ Ringleader checks a registry entry recorded on another socket only through `Proc
 - UI tests drive `EventLoop` with scripted input, a recording screen mode, and a recording shell runner.
 - No test calls crossterm or needs a terminal.
 - No test reads wall-clock time to classify a session.
-- Mark a constructor, accessor, or helper that only tests call with `#[cfg(test)]`: `cargo clippy --all-targets -- -D warnings` then stays clean without any dead-code allowance.
+- Mark a constructor, accessor, or helper that only tests call with `#[cfg(test)]`: `cargo clippy --workspace --all-targets -- -D warnings` then stays clean without any dead-code allowance.
 
 ## Commits
 

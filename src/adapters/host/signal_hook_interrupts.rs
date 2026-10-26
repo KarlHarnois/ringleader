@@ -16,10 +16,13 @@ impl SignalHookInterrupts {
 
     pub fn register() -> io::Result<Self> {
         let flags = Self::unregistered();
-        for (signal, flag) in &flags.flags {
-            signal_hook::flag::register(*signal, Arc::clone(flag))?;
-        }
-        Ok(flags)
+        flags
+            .flags
+            .iter()
+            .try_for_each(|(signal, flag)| {
+                signal_hook::flag::register(*signal, Arc::clone(flag)).map(drop)
+            })
+            .map(|()| flags)
     }
 
     pub fn unregistered() -> Self {

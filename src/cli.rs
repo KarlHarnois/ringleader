@@ -51,7 +51,7 @@ enum CliCommand {
     List(ListArgs),
     #[command(about = "Create a session in a new worktree or the main checkout")]
     New(NewArgs),
-    #[command(about = "Delete a session and the worktree and branch made for it")]
+    #[command(about = "Delete sessions and the worktrees and branches made for them")]
     Delete(DeleteArgs),
     #[command(about = "Attach to a session")]
     Attach(NameArgs),
@@ -59,8 +59,12 @@ enum CliCommand {
     Send(SendArgs),
     #[command(about = "Rename a session and the branch made for it")]
     Rename(RenameArgs),
-    #[command(about = "Restart an exited or stopped session, or with --all every one")]
+    #[command(about = "Restart exited or stopped sessions, or with --all every one")]
     Restart(RestartArgs),
+    #[command(
+        about = "Stop waiting or exited sessions, or with --repo every one in a repo, restart resumes them"
+    )]
+    Stop(StopArgs),
     #[command(about = "Add, remove, or list repos")]
     Repo {
         #[command(subcommand)]
@@ -127,7 +131,8 @@ struct NewArgs {
 
 #[derive(Debug, Args)]
 struct DeleteArgs {
-    name: String,
+    #[arg(required = true)]
+    names: Vec<String>,
     #[arg(long)]
     force: bool,
     #[arg(long)]
@@ -140,6 +145,12 @@ struct NameArgs {
 }
 
 #[derive(Debug, Args)]
+struct NamesArgs {
+    #[arg(required = true)]
+    names: Vec<String>,
+}
+
+#[derive(Debug, Args)]
 struct SendArgs {
     name: String,
     #[arg(allow_hyphen_values = true)]
@@ -149,9 +160,17 @@ struct SendArgs {
 #[derive(Debug, Args)]
 #[group(required = true, multiple = false)]
 struct RestartArgs {
-    name: Option<String>,
+    names: Vec<String>,
     #[arg(long)]
     all: bool,
+}
+
+#[derive(Debug, Args)]
+#[group(required = true, multiple = false)]
+struct StopArgs {
+    names: Vec<String>,
+    #[arg(long)]
+    repo: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -239,6 +258,7 @@ impl Cli {
                     | CliCommand::Delete(_)
                     | CliCommand::Rename(_)
                     | CliCommand::Restart(_)
+                    | CliCommand::Stop(_)
                     | CliCommand::Repo {
                         action: RepoAction::Add(_) | RepoAction::Remove(_)
                     }
@@ -302,7 +322,8 @@ impl Cli {
             }
         }
         let result = self.dispatch(service, session);
-        session.wait_for_startup_input(service, lock);
+        lock.release();
+        session.wait_for_startup_input(service);
         session.finish(result)
     }
 
@@ -319,11 +340,15 @@ impl Cli {
         if args.json {
             session.output().line(&report.json());
         } else {
-            for line in report.lines() {
-                session.output().line(&line);
-            }
+            Self::print_lines(report.lines(), session);
         }
         u8::from(report.has_problems())
+    }
+
+    fn print_lines(lines: impl IntoIterator<Item = String>, session: &mut CliSession) {
+        for line in lines {
+            session.output().line(&line);
+        }
     }
 
     fn dispatch(
@@ -351,7 +376,8 @@ impl Cli {
             CliCommand::Delete(args) => commands.delete(args),
             CliCommand::Attach(args) => commands.attach(&args.name),
             CliCommand::Rename(args) => commands.rename(args),
-            CliCommand::Restart(args) => commands.restart_one_or_all(args),
+            CliCommand::Restart(args) => commands.restart_named_or_all(args),
+            CliCommand::Stop(args) => commands.stop_named_or_repo(args),
             CliCommand::Repo { .. }
             | CliCommand::Send(_)
             | CliCommand::Doctor(_)
@@ -732,6 +758,25 @@ mod tests {
     }
 
     #[test]
+    fn stop_with_both_a_name_and_a_repo_exits_one() {
+        assert_eq!(
+            ParseFixture::exit_code(&[
+                "ringleader",
+                "stop",
+                "fix-auth",
+                "--repo",
+                "example-project"
+            ]),
+            1
+        );
+    }
+
+    #[test]
+    fn stop_without_a_name_or_a_repo_exits_one() {
+        assert_eq!(ParseFixture::exit_code(&["ringleader", "stop"]), 1);
+    }
+
+    #[test]
     fn new_in_the_main_checkout_with_a_base_branch_exits_one() {
         assert_eq!(
             ParseFixture::exit_code(&[
@@ -850,5 +895,30 @@ mod tests {
         let restart_all = Cli::try_parse_from(["ringleader", "restart", "--all"]).unwrap();
 
         assert!(restart_all.is_mutating());
+    }
+
+    #[test]
+    fn stop_of_a_repo_takes_the_write_lock() {
+        let stop =
+            Cli::try_parse_from(["ringleader", "stop", "--repo", "example-project"]).unwrap();
+
+        assert!(stop.is_mutating());
+    }
+
+    #[test]
+    fn stop_takes_the_write_lock() {
+        let stop = Cli::try_parse_from(["ringleader", "stop", "fix-auth"]).unwrap();
+
+        assert!(stop.is_mutating());
+    }
+
+    #[test]
+    fn stop_and_delete_need_at_least_one_name() {
+        for command in ["stop", "delete"] {
+            assert_eq!(
+                ParseFixture::exit_code(&["ringleader", command]),
+                CliExit::FAILURE
+            );
+        }
     }
 }

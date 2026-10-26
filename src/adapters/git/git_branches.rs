@@ -121,6 +121,14 @@ impl<'a> GitBranches<'a> {
         if self.has_live_upstream(repo, branch)? {
             return Ok(true);
         }
+        self.remote_copy_holds_pushed_work(repo, branch)
+    }
+
+    fn remote_copy_holds_pushed_work(
+        &self,
+        repo: &Path,
+        branch: &str,
+    ) -> Result<bool, WorkspaceError> {
         for remote_ref in self.remote_copies(repo, branch)? {
             if self.holds_work_pushed_from(repo, branch, &remote_ref)? {
                 return Ok(true);

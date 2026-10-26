@@ -18,7 +18,9 @@ use crate::ui::home::home_view::HomeView;
 use crate::ui::home::status_bar::{StatusBar, StatusMessage};
 use crate::ui::home::status_report::StatusReport;
 use crate::ui::keys::action_gate::{ActionGate, DesktopOpening, KeyAction, Navigation};
+use crate::ui::keys::key_map::KeyMap;
 use crate::ui::keys::key_sequence::KeySequence;
+use crate::ui::keys::visual_gate::VisualGate;
 
 pub struct App {
     service: SessionService,
@@ -74,14 +76,24 @@ impl App {
                 self.resize(*width, *height);
                 AppRequest::Redraw
             }
-            _ if self.dialogs.is_open() => match self.dialogs.handle_event(event, &self.service) {
-                DialogStep::Request(request) | DialogStep::CloseWith(request) => {
-                    self.request(request)
-                }
-                DialogStep::Stay | DialogStep::Close => AppRequest::Continue,
-            },
+            Event::FocusGained => {
+                self.home.focus_gained();
+                AppRequest::Continue
+            }
+            Event::FocusLost => {
+                self.home.focus_lost();
+                AppRequest::Continue
+            }
+            _ if self.dialogs.is_open() => self.handle_dialog_event(event),
             Event::Key(key) if key.kind != KeyEventKind::Release => self.handle_key(key),
             _ => AppRequest::Continue,
+        }
+    }
+
+    fn handle_dialog_event(&mut self, event: &Event) -> AppRequest {
+        match self.dialogs.handle_event(event, &self.service) {
+            DialogStep::Request(request) | DialogStep::CloseWith(request) => self.request(request),
+            DialogStep::Stay | DialogStep::Close => AppRequest::Continue,
         }
     }
 
@@ -175,8 +187,11 @@ impl App {
     }
 
     fn perform_check(&mut self, operation: BlockingOperation) -> OperationOutcome {
+        let reads_sessions = operation.reads_sessions();
         let outcome = operation.run(&mut self.service);
-        self.observe();
+        if reads_sessions {
+            self.observe();
+        }
         outcome
     }
 
@@ -200,6 +215,14 @@ impl App {
                     .open(Dialog::delete(row, &name, impact, changed));
                 self.status.show(None);
             }
+            OperationOutcome::ConfirmDeleteSessions(measured) => {
+                self.dialogs.open(Dialog::delete_sessions(measured));
+                self.status.show(None);
+            }
+            OperationOutcome::Opened { name, message } => {
+                self.home.adopt_latest_pull_request(&name, &self.service);
+                self.status.info(message);
+            }
             OperationOutcome::Failed(error) => self.report_failure(error),
         }
     }
@@ -220,11 +243,14 @@ impl App {
 
     fn handle_key(&mut self, key: &KeyEvent) -> AppRequest {
         self.status.show(None);
-        let gate = Self::gate(&self.home, &self.service);
-        match self.key_sequence.handle_key(key, &gate) {
+        match self.key_action(key) {
             KeyAction::Request(request) => self.request(request),
             KeyAction::Refuse(refusal) => {
                 self.status.error(refusal);
+                AppRequest::Continue
+            }
+            KeyAction::Visual(change) => {
+                self.home.change_visual(change);
                 AppRequest::Continue
             }
             action => {
@@ -232,6 +258,11 @@ impl App {
                 AppRequest::Continue
             }
         }
+    }
+
+    fn key_action(&mut self, key: &KeyEvent) -> KeyAction {
+        let key_map = Self::key_map(&self.home, &self.service);
+        self.key_sequence.handle_key(key, key_map.as_ref())
     }
 
     fn act_on(&mut self, action: KeyAction) {
@@ -247,7 +278,10 @@ impl App {
             }
             KeyAction::Reload => self.reload(),
             KeyAction::OpenOnDesktop(opening) => self.open_on_desktop(opening),
-            KeyAction::Request(_) | KeyAction::Refuse(_) | KeyAction::Ignore => {}
+            KeyAction::Request(_)
+            | KeyAction::Refuse(_)
+            | KeyAction::Visual(_)
+            | KeyAction::Ignore => {}
         }
     }
 
@@ -263,6 +297,15 @@ impl App {
         }
     }
 
+    fn key_map<'a>(home: &'a HomeState, service: &'a SessionService) -> Box<dyn KeyMap + 'a> {
+        let gate = Self::gate(home, service);
+        let sessions = home.sessions();
+        if sessions.in_visual_mode() {
+            return Box::new(VisualGate::new(gate, sessions.visual_names()));
+        }
+        Box::new(gate)
+    }
+
     fn gate<'a>(home: &'a HomeState, service: &'a SessionService) -> ActionGate<'a> {
         let sessions = home.sessions();
         let config_error = service.read_only_reason();
@@ -273,6 +316,7 @@ impl App {
     }
 
     fn request(&mut self, request: AppRequest) -> AppRequest {
+        self.home.leave_visual();
         if let AppRequest::Block(operation) = &request {
             self.status.info(operation.busy_message());
         }
@@ -310,7 +354,6 @@ impl App {
         match opening {
             DesktopOpening::SessionTerminal(name) => self.open_terminal(&name),
             DesktopOpening::RepoTerminal(group) => self.open_repo_terminal(&group),
-            DesktopOpening::PullRequest(name) => self.open_pull_request(&name),
         }
     }
 
@@ -324,12 +367,6 @@ impl App {
         let outcome = self.service.open_repo_terminal(group);
         let opened = format!("Opened a terminal window in the main checkout of {group}.");
         self.status.outcome(outcome, opened);
-    }
-
-    fn open_pull_request(&mut self, name: &str) {
-        let outcome = self.service.open_pull_request(name);
-        let asked = format!("Asked the browser to open the pull request of {name}.");
-        self.status.outcome(outcome, asked);
     }
 
     fn settle(&mut self, select: Option<String>) {
@@ -431,7 +468,7 @@ mod tests {
     use ratatui::backend::TestBackend;
 
     use super::*;
-    use ratatui::style::Color;
+    use ratatui::style::{Color, Modifier};
 
     use crate::application::ports::{
         ConfigError, MergeOutcome, MultiplexerError, RegistryError, TerminalEmulatorError,
@@ -444,9 +481,11 @@ mod tests {
     };
     use crate::test_support::{
         CapturedWriter, Deadline, FakeFoldStore, FakeLock, FakeMultiplexer, FakePullRequests,
-        FakeSessionRegistry, FakeTerminalEmulator, FakeUsageMeter, FakeWebBrowser, HeldCalls,
-        LogCapture, ServiceFixture, UiHarness,
+        FakeRepoPages, FakeSessionRegistry, FakeTerminalEmulator, FakeUsageMeter, FakeWebBrowser,
+        HeldCalls, LogCapture, ServiceFixture, UiHarness,
     };
+    use crate::ui::batch_operation::{BatchOperation, DeleteSessionsStep};
+    use crate::ui::blocking_operation::{BrowserPage, DeleteStep};
 
     struct AppFixture;
 
@@ -454,6 +493,7 @@ mod tests {
         const HELP_PAST_THE_END: usize = 50;
         const SPINNER_FRAMES: &'static str = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
         const LOG_FILE_OUTSIDE_THE_STATE_DIRECTORY: &'static str = "/logs/ringleader/app.log";
+        const DOCS_PAGE: &'static str = "https://github.example.com/example-org/alpha";
         const RESTORED_SOCKET: &'static str = "recreated the socket";
 
         fn two_waiting_sessions() -> ServiceFixture {
@@ -666,6 +706,32 @@ mod tests {
             app.handle_event(&UiHarness::character(character));
         }
 
+        fn perform_key(app: &mut App, character: char) {
+            let request = app.handle_event(&UiHarness::character(character));
+            Self::perform(app, request);
+        }
+
+        fn looks_up_pull_requests_again(fixture: &ServiceFixture, app: &mut App) -> bool {
+            let next = fixture.pull_requests().calls().len() + 1;
+            Self::looks_up_pull_requests(fixture, app, next)
+        }
+
+        fn looks_up_pull_requests(fixture: &ServiceFixture, app: &mut App, times: usize) -> bool {
+            Deadline::for_background_work().wait_until(|| {
+                app.on_tick(Instant::now());
+                fixture.pull_requests().calls().len() >= times
+            })
+        }
+
+        fn open_pull_request_later(fixture: &ServiceFixture) {
+            let session = ServiceFixture::session("fix-auth");
+            fixture.pull_requests().add_pull_request(
+                Path::new(ServiceFixture::REPO),
+                session.branch(),
+                ServiceFixture::pull_request(142, PullRequestState::Open),
+            );
+        }
+
         fn help_scrolled_past_its_end(app: &mut App, width: u16, height: u16) -> String {
             Self::press(app, '?');
             Self::screen(app, width, height);
@@ -689,6 +755,25 @@ mod tests {
                 app.on_tick(Instant::now());
                 !Self::screen(app, 100, 28).contains("Finding the repo")
             });
+        }
+
+        fn two_repos_with_the_docs_checkout() -> ServiceFixture {
+            let docs_repo = UiHarness::docs_repo_group();
+            let main_checkout = docs_repo.path().unwrap();
+            UiHarness::two_repos()
+                .with_host(ServiceFixture::host_for(&[]).with_directory(main_checkout))
+        }
+
+        fn docs_on_github() -> ServiceFixture {
+            let docs_repo = UiHarness::docs_repo_group();
+            let pages =
+                FakeRepoPages::default().with_page(docs_repo.path().unwrap(), Self::DOCS_PAGE);
+            Self::two_repos_with_the_docs_checkout().with_repo_pages(pages)
+        }
+
+        fn press_and_perform(app: &mut App, character: char) {
+            let request = app.handle_event(&UiHarness::character(character));
+            Self::perform(app, request);
         }
 
         fn beside_a_stranger() -> ServiceFixture {
@@ -767,12 +852,31 @@ mod tests {
             ))
         }
 
-        fn showing(fixture: &ServiceFixture, text: &str) -> App {
-            let mut app = Self::started(fixture, 100, 28);
+        fn with_diff() -> ServiceFixture {
+            let session = ServiceFixture::session("fix-auth");
+            let workspace = ServiceFixture::workspace_for(&[&session])
+                .with_diff(session.worktree_path(), DiffStat::from_changes([], 3));
+            Self::deletable().with_workspace(workspace)
+        }
+
+        fn unfocused(fixture: &ServiceFixture) -> App {
+            let mut app = UiHarness::app(fixture);
+            app.handle_event(&Event::FocusLost);
+            app.resize(100, 28);
+            UiHarness::settle(&mut app);
+            app
+        }
+
+        fn wait_for_text(app: &mut App, text: &str) -> bool {
             Deadline::for_background_work().wait_until(|| {
                 app.on_tick(Instant::now());
-                Self::screen(&app, 100, 28).contains(text)
-            });
+                Self::screen(app, 100, 28).contains(text)
+            })
+        }
+
+        fn showing(fixture: &ServiceFixture, text: &str) -> App {
+            let mut app = Self::started(fixture, 100, 28);
+            Self::wait_for_text(&mut app, text);
             app
         }
 
@@ -788,6 +892,14 @@ mod tests {
                 subcommand: "list-panes".to_string(),
                 seconds: 2,
             }
+        }
+
+        fn diff_measurements(fixture: &ServiceFixture) -> usize {
+            let calls = fixture.workspace().calls();
+            calls
+                .iter()
+                .filter(|call| call.starts_with("diff_stat"))
+                .count()
         }
 
         fn observe_calls(fixture: &ServiceFixture) -> usize {
@@ -1096,6 +1208,42 @@ mod tests {
     }
 
     #[test]
+    fn a_fold_keeps_the_folds_another_window_saved_since_this_one_started() {
+        let fixture = UiHarness::two_repos();
+        let folds = FakeFoldStore::default();
+        let mut app = AppFixture::restored(&fixture, &folds);
+        let other_window_fold = ServiceFixture::repo_group("/repos/other-window");
+        folds
+            .save(&HashSet::from([other_window_fold.clone()]))
+            .unwrap();
+
+        AppFixture::press(&mut app, ' ');
+
+        assert_eq!(
+            folds.folded(),
+            HashSet::from([UiHarness::docs_repo_group(), other_window_fold])
+        );
+    }
+
+    #[test]
+    fn a_fold_over_an_unreadable_fold_file_saves_this_window_s_folds_and_logs_the_reread() {
+        const DETAIL: &str = "the disk refused the fold reread";
+        let log = LogCapture::installed();
+        let fixture = UiHarness::two_repos();
+        let folds = FakeFoldStore::failing_loads(DETAIL);
+        let mut app = AppFixture::restored(&fixture, &folds);
+
+        AppFixture::press(&mut app, ' ');
+
+        assert_eq!(
+            folds.folded(),
+            HashSet::from([UiHarness::docs_repo_group()])
+        );
+        assert_eq!(log.count_containing("could not reread the folded repos"), 1);
+        assert_eq!(log.count_containing(DETAIL), 2);
+    }
+
+    #[test]
     fn folds_saved_by_an_earlier_run_show_at_start() {
         let fixture = UiHarness::two_repos();
 
@@ -1322,7 +1470,10 @@ mod tests {
 
         let request = app.handle_event(&UiHarness::character('S'));
 
-        assert_eq!(request, AppRequest::Block(BlockingOperation::RestartAll));
+        assert_eq!(
+            request,
+            AppRequest::Block(BlockingOperation::Batch(BatchOperation::RestartAll))
+        );
         assert_eq!(
             AppFixture::status_line(&app, 100),
             " Restarting every exited or stopped session…"
@@ -1330,11 +1481,146 @@ mod tests {
     }
 
     #[test]
+    fn x_asks_to_stop_the_selected_session_behind_a_busy_message() {
+        let fixture = UiHarness::exited_session_fixture("fix-auth");
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        let request = app.handle_event(&UiHarness::character('x'));
+
+        assert_eq!(
+            request,
+            AppRequest::Block(BlockingOperation::Stop("fix-auth".to_string()))
+        );
+        assert_eq!(AppFixture::status_line(&app, 100), " Stopping fix-auth…");
+    }
+
+    #[test]
+    fn x_in_visual_mode_asks_to_stop_the_range_and_leaves_visual_mode() {
+        let fixture = AppFixture::three_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, 'V');
+        AppFixture::press(&mut app, 'j');
+
+        let request = app.handle_event(&UiHarness::character('x'));
+
+        assert_eq!(
+            request,
+            AppRequest::Block(BlockingOperation::Batch(BatchOperation::Stop(
+                ["dark-mode", "fix-auth"].map(String::from).to_vec()
+            )))
+        );
+        assert_eq!(AppFixture::status_line(&app, 100), " Stopping 2 sessions…");
+    }
+
+    #[test]
+    fn a_request_from_a_dialog_leaves_visual_mode() {
+        let fixture = AppFixture::three_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, 'V');
+        AppFixture::press(&mut app, '/');
+
+        app.handle_event(&UiHarness::key(KeyCode::Enter));
+
+        assert!(!app.home.sessions().in_visual_mode());
+    }
+
+    #[test]
+    fn the_status_bar_names_visual_mode_and_its_keys() {
+        let fixture = AppFixture::three_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press(&mut app, 'v');
+        AppFixture::press(&mut app, 'j');
+
+        assert!(
+            AppFixture::status_line(&app, 100).contains("-- VISUAL -- 2 sessions · x stop"),
+            "{}",
+            AppFixture::status_line(&app, 100)
+        );
+    }
+
+    #[test]
+    fn every_session_in_the_range_is_reversed() {
+        let fixture = AppFixture::three_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, 'V');
+        AppFixture::press(&mut app, 'j');
+        let mut terminal = Terminal::new(TestBackend::new(100, 28)).unwrap();
+
+        terminal.draw(|frame| app.render(frame)).unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let reversed_rows = (0..28)
+            .filter(|row| buffer[(5, *row)].modifier.contains(Modifier::REVERSED))
+            .count();
+        assert_eq!(reversed_rows, 2);
+    }
+
+    #[test]
+    fn performing_a_stop_of_several_sessions_counts_them() {
+        let fixture = AppFixture::three_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        let names = ["dark-mode", "fix-auth"].map(String::from).to_vec();
+
+        app.perform(BlockingOperation::Batch(BatchOperation::Stop(names)));
+
+        assert_eq!(AppFixture::status_line(&app, 100), " Stopped 2 sessions.");
+    }
+
+    #[test]
+    fn d_in_visual_mode_opens_one_dialog_for_the_whole_range() {
+        let fixture = AppFixture::three_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, 'V');
+        AppFixture::press(&mut app, 'j');
+
+        AppFixture::press_and_perform(&mut app, 'd');
+
+        let screen = AppFixture::flattened_screen(&app, 100, 28);
+        assert!(screen.contains("Delete sessions"), "{screen}");
+    }
+
+    #[test]
+    fn enter_in_the_batch_delete_dialog_asks_to_delete_the_range() {
+        let fixture = AppFixture::three_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, 'V');
+        AppFixture::press_and_perform(&mut app, 'd');
+
+        let request = app.handle_event(&UiHarness::key(KeyCode::Enter));
+
+        assert!(
+            matches!(
+                request,
+                AppRequest::Block(BlockingOperation::Batch(BatchOperation::Delete(
+                    DeleteSessionsStep::Confirmed(_)
+                )))
+            ),
+            "{request:?}"
+        );
+    }
+
+    #[test]
+    fn performing_a_stop_shows_the_session_as_stopped_and_how_to_resume_it() {
+        let fixture = UiHarness::exited_session_fixture("fix-auth");
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        app.perform(BlockingOperation::Stop("fix-auth".to_string()));
+
+        assert!(fixture.multiplexer().live_names().is_empty());
+        assert_eq!(
+            AppFixture::status_line(&app, 100),
+            " Stopped fix-auth. Press s to resume it."
+        );
+        assert!(AppFixture::flattened_screen(&app, 100, 28).contains("stopped"));
+    }
+
+    #[test]
     fn performing_a_restart_of_every_session_reports_the_count() {
         let fixture = UiHarness::exited_session_fixture("fix-auth");
         let mut app = AppFixture::started(&fixture, 100, 28);
 
-        app.perform(BlockingOperation::RestartAll);
+        app.perform(BlockingOperation::Batch(BatchOperation::RestartAll));
 
         assert_eq!(fixture.multiplexer().launches().len(), 1);
         assert_eq!(AppFixture::status_line(&app, 100), " Restarted 1 session.");
@@ -1345,7 +1631,7 @@ mod tests {
         let fixture = ServiceFixture::new().with_sessions(&[ServiceFixture::session("fix-auth")]);
         let mut app = AppFixture::started(&fixture, 100, 28);
 
-        app.perform(BlockingOperation::RestartAll);
+        app.perform(BlockingOperation::Batch(BatchOperation::RestartAll));
 
         assert!(
             AppFixture::status_line(&app, 200)
@@ -1606,6 +1892,41 @@ mod tests {
     }
 
     #[test]
+    fn o_sends_nothing_to_tmux() {
+        let fixture = AppFixture::with_pull_request();
+        let mut app = AppFixture::showing(&fixture, "#142");
+        let before = fixture.multiplexer().calls();
+
+        AppFixture::perform_key(&mut app, 'o');
+
+        assert_eq!(fixture.multiplexer().calls(), before);
+    }
+
+    #[test]
+    fn a_failed_o_sends_nothing_to_tmux() {
+        let fixture = AppFixture::deletable();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        let before = fixture.multiplexer().calls();
+
+        AppFixture::perform_key(&mut app, 'o');
+
+        assert_eq!(fixture.multiplexer().calls(), before);
+    }
+
+    #[test]
+    fn o_measures_no_diff_again() {
+        let fixture = AppFixture::with_pull_request();
+        let mut app = AppFixture::showing(&fixture, "#142");
+        UiHarness::settle(&mut app);
+        let before = AppFixture::diff_measurements(&fixture);
+
+        AppFixture::perform_key(&mut app, 'o');
+        UiHarness::settle(&mut app);
+
+        assert_eq!(AppFixture::diff_measurements(&fixture), before);
+    }
+
+    #[test]
     fn capital_t_sends_nothing_to_tmux() {
         let fixture = AppFixture::deletable();
         let mut app = AppFixture::started(&fixture, 100, 28);
@@ -1697,6 +2018,109 @@ mod tests {
             ))
         );
         assert!(fixture.terminal_emulator().opened().is_empty());
+    }
+
+    #[test]
+    fn o_on_a_repo_heading_looks_up_its_github_page_behind_a_busy_message() {
+        let fixture = AppFixture::docs_on_github();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        let request = app.handle_event(&UiHarness::character('o'));
+
+        assert_eq!(
+            request,
+            AppRequest::Block(BlockingOperation::Open(BrowserPage::RepoPage(
+                UiHarness::docs_repo_group()
+            )))
+        );
+        assert_eq!(
+            AppFixture::status_line(&app, 100),
+            " Looking up the GitHub page of alpha…"
+        );
+    }
+
+    #[test]
+    fn x_on_a_repo_heading_asks_to_stop_its_sessions_behind_a_busy_message() {
+        let fixture = UiHarness::two_repos();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        let request = app.handle_event(&UiHarness::character('x'));
+
+        assert_eq!(
+            request,
+            AppRequest::Block(BlockingOperation::Batch(BatchOperation::StopRepo(
+                UiHarness::docs_repo_group()
+            )))
+        );
+        assert_eq!(
+            AppFixture::status_line(&app, 100),
+            " Stopping every waiting or exited session in alpha…"
+        );
+    }
+
+    #[test]
+    fn x_on_a_repo_heading_stops_only_the_sessions_of_that_repo() {
+        let fixture = UiHarness::two_repos();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press_and_perform(&mut app, 'x');
+
+        assert_eq!(fixture.multiplexer().live_names(), ["ringleader-fix-auth"]);
+        assert_eq!(
+            app.status.message(),
+            Some(&StatusMessage::Info("Stopped 1 session.".to_string()))
+        );
+    }
+
+    #[test]
+    fn o_on_a_repo_heading_opens_its_github_page() {
+        let fixture = AppFixture::docs_on_github();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press_and_perform(&mut app, 'o');
+
+        assert_eq!(fixture.web_browser().opened(), [AppFixture::DOCS_PAGE]);
+        assert_eq!(
+            app.status.message(),
+            Some(&StatusMessage::Info(
+                "Asked the browser to open the GitHub page of alpha.".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn o_on_a_repo_heading_without_a_github_page_says_so() {
+        let fixture = AppFixture::two_repos_with_the_docs_checkout();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press_and_perform(&mut app, 'o');
+
+        assert_eq!(
+            app.status.message(),
+            Some(&StatusMessage::Error(
+                "no GitHub page is known for alpha".to_string()
+            ))
+        );
+        assert!(fixture.web_browser().opened().is_empty());
+    }
+
+    #[test]
+    fn o_on_the_other_heading_says_it_has_no_github_page() {
+        let fixture = AppFixture::beside_a_stranger();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, 'G');
+        AppFixture::press(&mut app, 'k');
+
+        AppFixture::press_and_perform(&mut app, 'o');
+
+        assert_eq!(
+            app.status.message(),
+            Some(&StatusMessage::Error(
+                "the sessions under other belong to no repo, so there is no GitHub page to open"
+                    .to_string()
+            ))
+        );
+        assert!(fixture.web_browser().opened().is_empty());
     }
 
     #[test]
@@ -1875,10 +2299,10 @@ mod tests {
             .with_host(ServiceFixture::host_for(&[&session]).with_tmux_server_on(recorded));
         let mut app = AppFixture::started(&fixture, 100, 28);
 
-        app.perform(BlockingOperation::Delete {
+        app.perform(BlockingOperation::Delete(DeleteStep::Confirmed {
             name: "fix-auth".to_string(),
             seen: DeleteImpact::default(),
-        });
+        }));
 
         assert!(matches!(
             app.status.message(),
@@ -2043,6 +2467,61 @@ mod tests {
     }
 
     #[test]
+    fn an_unfocused_window_measures_no_diff_so_an_idle_window_runs_no_git() {
+        let fixture = AppFixture::with_diff();
+
+        let app = AppFixture::unfocused(&fixture);
+
+        assert!(fixture.workspace().diff_bases().is_empty());
+        assert!(!AppFixture::screen(&app, 100, 28).contains("?3"));
+    }
+
+    #[test]
+    fn a_window_that_regains_focus_measures_its_diffs() {
+        let fixture = AppFixture::with_diff();
+        let mut app = AppFixture::unfocused(&fixture);
+
+        app.handle_event(&Event::FocusGained);
+
+        assert!(AppFixture::wait_for_text(&mut app, "+0 -0 ?3"));
+    }
+
+    #[test]
+    fn an_unfocused_window_looks_up_no_pull_request_so_idle_windows_spare_the_github_quota() {
+        const LOOKUP_GRACE: Duration = Duration::from_millis(300);
+        let fixture = AppFixture::with_pull_request();
+
+        AppFixture::unfocused(&fixture);
+
+        let looked_up = Deadline::after(LOOKUP_GRACE)
+            .wait_until(|| !fixture.pull_requests().calls().is_empty());
+        assert!(!looked_up);
+    }
+
+    #[test]
+    fn a_window_that_regains_focus_looks_up_its_pull_requests() {
+        let fixture = AppFixture::with_pull_request();
+        let mut app = AppFixture::unfocused(&fixture);
+
+        app.handle_event(&Event::FocusGained);
+
+        assert!(AppFixture::wait_for_text(&mut app, "#142"));
+    }
+
+    #[test]
+    fn a_focus_change_reaches_the_window_while_a_dialog_is_open() {
+        let fixture = AppFixture::with_diff();
+        let mut app = UiHarness::app(&fixture);
+        AppFixture::press(&mut app, '?');
+
+        app.handle_event(&Event::FocusLost);
+        app.resize(100, 28);
+        UiHarness::settle(&mut app);
+
+        assert!(fixture.workspace().diff_bases().is_empty());
+    }
+
+    #[test]
     fn rows_hidden_under_a_wrapped_status_bar_get_no_pull_request_lookup() {
         let sessions =
             ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot"].map(ServiceFixture::session);
@@ -2080,13 +2559,27 @@ mod tests {
     }
 
     #[test]
-    fn o_opens_the_pull_request_of_the_selected_session_and_stays_on_the_list() {
+    fn o_asks_to_open_the_pull_request_as_a_blocking_operation() {
         let fixture = AppFixture::with_pull_request();
         let mut app = AppFixture::showing(&fixture, "#142");
 
         let request = app.handle_event(&UiHarness::character('o'));
 
-        assert_eq!(request, AppRequest::Continue);
+        assert_eq!(
+            request,
+            AppRequest::Block(BlockingOperation::Open(BrowserPage::PullRequest(
+                "fix-auth".to_string()
+            )))
+        );
+    }
+
+    #[test]
+    fn o_opens_the_pull_request_of_the_selected_session_in_the_browser() {
+        let fixture = AppFixture::with_pull_request();
+        let mut app = AppFixture::showing(&fixture, "#142");
+
+        AppFixture::perform_key(&mut app, 'o');
+
         assert_eq!(
             fixture.web_browser().opened(),
             [ServiceFixture::pull_request_url(142)]
@@ -2100,12 +2593,38 @@ mod tests {
     }
 
     #[test]
+    fn o_finds_a_pull_request_the_list_does_not_show_yet() {
+        let fixture = AppFixture::with_pull_request();
+        let mut app = AppFixture::observed(&fixture);
+
+        AppFixture::perform_key(&mut app, 'o');
+
+        assert_eq!(
+            fixture.web_browser().opened(),
+            [ServiceFixture::pull_request_url(142)]
+        );
+    }
+
+    #[test]
+    fn a_pull_request_that_o_finds_shows_in_the_list_on_the_next_tick() {
+        let fixture = AppFixture::deletable();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        assert!(AppFixture::looks_up_pull_requests(&fixture, &mut app, 1));
+        AppFixture::open_pull_request_later(&fixture);
+
+        AppFixture::perform_key(&mut app, 'o');
+        app.on_tick(Instant::now());
+
+        assert!(AppFixture::screen(&app, 100, 28).contains("#142"));
+    }
+
+    #[test]
     fn g_then_x_opens_the_pull_request_like_o() {
         let fixture = AppFixture::with_pull_request();
         let mut app = AppFixture::showing(&fixture, "#142");
 
         AppFixture::press(&mut app, 'g');
-        AppFixture::press(&mut app, 'x');
+        AppFixture::perform_key(&mut app, 'x');
 
         assert_eq!(
             fixture.web_browser().opened(),
@@ -2118,7 +2637,7 @@ mod tests {
         let fixture = AppFixture::deletable();
         let mut app = AppFixture::started(&fixture, 100, 28);
 
-        AppFixture::press(&mut app, 'o');
+        AppFixture::perform_key(&mut app, 'o');
 
         assert_eq!(
             app.status.message(),
@@ -2136,12 +2655,32 @@ mod tests {
             .with_web_browser(FakeWebBrowser::failing(missing.clone()));
         let mut app = AppFixture::showing(&fixture, "#142");
 
-        AppFixture::press(&mut app, 'o');
+        AppFixture::perform_key(&mut app, 'o');
 
         assert_eq!(
             app.status.message(),
             Some(&StatusMessage::Error(missing.to_string()))
         );
+    }
+
+    #[test]
+    fn returning_from_an_attach_looks_up_the_pull_requests_again() {
+        let fixture = AppFixture::with_pull_request();
+        let mut app = AppFixture::showing(&fixture, "#142");
+
+        app.attach("fix-auth");
+
+        assert!(AppFixture::looks_up_pull_requests_again(&fixture, &mut app));
+    }
+
+    #[test]
+    fn returning_from_a_shell_window_looks_up_the_pull_requests_again() {
+        let fixture = AppFixture::with_pull_request();
+        let mut app = AppFixture::showing(&fixture, "#142");
+
+        app.open_shell("fix-auth");
+
+        assert!(AppFixture::looks_up_pull_requests_again(&fixture, &mut app));
     }
 
     #[test]
@@ -2321,6 +2860,26 @@ mod tests {
         app.handle_event(&UiHarness::control('k'));
 
         assert!(AppFixture::screen(&app, 100, 28).contains("┌ Find session "));
+    }
+
+    #[test]
+    fn a_dialog_replaces_the_home_view_in_a_small_terminal() {
+        let openers = [
+            (UiHarness::key(KeyCode::Char('n')), "┌ New session "),
+            (UiHarness::key(KeyCode::Char('?')), "┌ Help · ringleader "),
+            (UiHarness::control('k'), "┌ Find session "),
+        ];
+        for (opener, title) in openers {
+            let fixture = AppFixture::two_waiting_sessions();
+            let mut app = AppFixture::started(&fixture, 60, 12);
+
+            app.handle_event(&opener);
+            let screen = AppFixture::screen(&app, 60, 12);
+
+            assert!(screen.starts_with(title), "{screen}");
+            assert!(!screen.contains("Sessions"), "{screen}");
+            assert!(screen.ends_with('┘'), "{screen}");
+        }
     }
 
     #[test]
@@ -2511,6 +3070,20 @@ mod tests {
         AppFixture::perform(&mut app, measure);
 
         assert!(app.dialogs.is_open());
+        assert!(!lock.acquisitions().contains(&"wait"));
+    }
+
+    #[test]
+    fn o_on_a_repo_heading_opens_its_github_page_while_another_ringleader_holds_the_lock() {
+        let fixture = AppFixture::docs_on_github();
+        let lock = FakeLock::held_elsewhere();
+        let mut app = UiHarness::app_with_lock(&fixture, &lock);
+        app.resize(100, 28);
+        UiHarness::settle(&mut app);
+
+        AppFixture::press_and_perform(&mut app, 'o');
+
+        assert_eq!(fixture.web_browser().opened(), [AppFixture::DOCS_PAGE]);
         assert!(!lock.acquisitions().contains(&"wait"));
     }
 

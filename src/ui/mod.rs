@@ -1,5 +1,6 @@
 pub mod app;
 pub mod background_jobs;
+pub mod batch_operation;
 pub mod blocking_operation;
 pub mod dialogs;
 pub mod event_loop;

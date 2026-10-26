@@ -1,55 +1,5 @@
 {
   "nodes": {
-    "crapper": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1791066479,
-        "narHash": "sha256-/CpxnO0UDD6IPtGQtaOnJ98zOpaGZt4tMjmRJa3Bz58=",
-        "owner": "unclebob",
-        "repo": "crapper",
-        "rev": "9f1bead298b5a9d576bdd6319289fcf426e5b18a",
-        "type": "github"
-      },
-      "original": {
-        "owner": "unclebob",
-        "repo": "crapper",
-        "rev": "9f1bead298b5a9d576bdd6319289fcf426e5b18a",
-        "type": "github"
-      }
-    },
-    "dryer": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1791068633,
-        "narHash": "sha256-EwoP89k6YllcN6dmn/rxbeqDoAMOQsKfjpzfykD6PKA=",
-        "owner": "unclebob",
-        "repo": "dryer",
-        "rev": "66ff6d21a42c04afcad89c78a80066176d1294b0",
-        "type": "github"
-      },
-      "original": {
-        "owner": "unclebob",
-        "repo": "dryer",
-        "type": "github"
-      }
-    },
-    "mutator": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1791068633,
-        "narHash": "sha256-P2QlgkLQsSAFbdfozYDVaG3lb/izlhyaM/mAF+P7/VY=",
-        "owner": "unclebob",
-        "repo": "mutator",
-        "rev": "c57f03879a08d2afe8c7e044e86c80bb164afd30",
-        "type": "github"
-      },
-      "original": {
-        "owner": "unclebob",
-        "repo": "mutator",
-        "rev": "c57f03879a08d2afe8c7e044e86c80bb164afd30",
-        "type": "github"
-      }
-    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1790920529,
@@ -68,27 +18,7 @@
     },
     "root": {
       "inputs": {
-        "crapper": "crapper",
-        "dryer": "dryer",
-        "mutator": "mutator",
-        "nixpkgs": "nixpkgs",
-        "uml-viewer": "uml-viewer"
-      }
-    },
-    "uml-viewer": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1791408154,
-        "narHash": "sha256-Fb/i3neXytrgOJGe7HD7UwENHIzB/d2ZadapxMglx2Q=",
-        "owner": "unclebob",
-        "repo": "uml-viewer",
-        "rev": "f65dafe93b3cb1b4e6bb02dbe41503ed05bd9ebf",
-        "type": "github"
-      },
-      "original": {
-        "owner": "unclebob",
-        "repo": "uml-viewer",
-        "type": "github"
+        "nixpkgs": "nixpkgs"
       }
     }
   },

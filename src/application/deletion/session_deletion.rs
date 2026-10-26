@@ -4,7 +4,6 @@ use super::delete_impact::{DeleteConfirmation, DeleteImpact};
 use super::delete_outcome::DeleteOutcome;
 use super::deletion_guards::{DeletionGuards, Measurement};
 use super::main_checkout_deletion::MainCheckoutDeletion;
-use super::tmux_teardown::{TeardownContexts, TmuxTeardown};
 use crate::application::ServiceError;
 use crate::application::ServicePorts;
 use crate::application::checks::unseen_session::UnseenSession;
@@ -12,6 +11,7 @@ use crate::application::checks::worktree_inspection::WorktreeInspection;
 use crate::application::ports::{HostProbe, Multiplexer, ProcessInfo, SessionRegistry, Workspace};
 use crate::application::reconciliation::ManagedRow;
 use crate::application::session_scratch::SessionScratch;
+use crate::application::tmux_teardown::{TeardownContexts, TmuxTeardown};
 use crate::domain::{Session, SessionState};
 
 pub struct SessionDeletion {

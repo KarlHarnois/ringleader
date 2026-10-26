@@ -16,6 +16,7 @@ use crate::application::merge::merge_report::MergeReport;
 use crate::application::merge::session_merge::SessionMerge;
 use crate::application::renaming::rename_request::RenameRequest;
 use crate::application::renaming::session_renaming::SessionRenaming;
+use crate::application::session_stop::SessionStop;
 use crate::application::start::session_creation::SessionCreation;
 use crate::application::start::session_restart::SessionRestart;
 use crate::application::{DeleteConfirmation, DeleteImpact};
@@ -29,6 +30,7 @@ pub struct SessionLifecycle {
     renaming: SessionRenaming,
     deletion: SessionDeletion,
     restart: SessionRestart,
+    stopping: SessionStop,
     merging: SessionMerge,
     hooks: Arc<AgentHooks>,
 }
@@ -47,6 +49,7 @@ impl SessionLifecycle {
             renaming: SessionRenaming::new(ports, Arc::clone(&hooks)),
             deletion: SessionDeletion::new(ports),
             restart: SessionRestart::new(ports, Arc::clone(&hooks)),
+            stopping: SessionStop::new(ports),
             merging: SessionMerge::new(ports),
             hooks,
         }
@@ -134,6 +137,12 @@ impl SessionLifecycle {
             .restart(&row, reconciliation, config, config_path)
     }
 
+    pub fn stop(&self, reconciliation: &Reconciliation, name: &str) -> Result<(), ServiceError> {
+        let row = self.managed_target(reconciliation, name)?;
+        self.refuse_own_session(&row, "stop")?;
+        self.stopping.stop(&row)
+    }
+
     pub fn merge_upstream(
         &self,
         reconciliation: &Reconciliation,
@@ -160,12 +169,19 @@ impl SessionLifecycle {
         name: &str,
     ) -> Result<ManagedRow<'r>, ServiceError> {
         let row = self.managed_target(reconciliation, name)?;
-        if self.multiplexer.caller_session()?.as_deref() == Some(row.session().tmux_name()) {
-            return Err(ServiceError::Conflict(format!(
-                "session {name} runs this Ringleader, delete it from another terminal"
-            )));
-        }
+        self.refuse_own_session(&row, "delete")?;
         Ok(row)
+    }
+
+    fn refuse_own_session(&self, row: &ManagedRow, action: &str) -> Result<(), ServiceError> {
+        let session = row.session();
+        if self.multiplexer.caller_session()?.as_deref() != Some(session.tmux_name()) {
+            return Ok(());
+        }
+        Err(ServiceError::Conflict(format!(
+            "session {} runs this Ringleader, {action} it from another terminal",
+            session.name()
+        )))
     }
 
     fn refuse_launch_inside(&self, session: &Session) -> Result<(), ServiceError> {

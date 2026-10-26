@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
 use super::ports::{
-    Clock, ConfigSource, DirectoryEnvironment, HostProbe, Multiplexer, PullRequests, RepoScanner,
-    ScratchSpace, SessionRegistry, TerminalEmulator, UsageMeter, WebBrowser, Workspace,
+    Clock, ConfigSource, DirectoryEnvironment, HostProbe, Multiplexer, PullRequests, RepoPages,
+    RepoScanner, ScratchSpace, SessionRegistry, TerminalEmulator, UsageMeter, WebBrowser,
+    Workspace,
 };
 
 pub struct ServicePorts {
@@ -96,6 +97,7 @@ pub struct RepoPorts {
     scanner: Arc<dyn RepoScanner>,
     host: Arc<dyn HostProbe>,
     pull_requests: Arc<dyn PullRequests>,
+    repo_pages: Arc<dyn RepoPages>,
     directory_environment: Arc<dyn DirectoryEnvironment>,
 }
 
@@ -105,6 +107,7 @@ impl RepoPorts {
         scanner: Arc<dyn RepoScanner>,
         host: Arc<dyn HostProbe>,
         pull_requests: Arc<dyn PullRequests>,
+        repo_pages: Arc<dyn RepoPages>,
         directory_environment: Arc<dyn DirectoryEnvironment>,
     ) -> Self {
         Self {
@@ -113,6 +116,7 @@ impl RepoPorts {
             scanner,
             host,
             pull_requests,
+            repo_pages,
             directory_environment,
         }
     }
@@ -142,6 +146,10 @@ impl RepoPorts {
 
     pub fn pull_requests(&self) -> Arc<dyn PullRequests> {
         Arc::clone(&self.pull_requests)
+    }
+
+    pub fn repo_pages(&self) -> Arc<dyn RepoPages> {
+        Arc::clone(&self.repo_pages)
     }
 
     pub fn directory_environment(&self) -> Arc<dyn DirectoryEnvironment> {

@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use super::checks::agent_readiness::AgentReadiness;
 use super::ports::{
-    AttachTarget, HostProbe, Multiplexer, MultiplexerError, TerminalEmulator, WebBrowser,
+    AttachTarget, HostProbe, Multiplexer, MultiplexerError, RepoPages, TerminalEmulator, WebBrowser,
 };
 use super::reconciliation::ManagedRow;
 use super::service_error::ServiceError;
@@ -15,6 +15,7 @@ pub struct SessionAccess {
     host: Arc<dyn HostProbe>,
     terminal_emulator: Arc<dyn TerminalEmulator>,
     web_browser: Arc<dyn WebBrowser>,
+    repo_pages: Arc<dyn RepoPages>,
     shell: String,
 }
 
@@ -27,6 +28,7 @@ impl SessionAccess {
             host: ports.repos().host(),
             terminal_emulator: ports.desktop().terminal_emulator(),
             web_browser: ports.desktop().web_browser(),
+            repo_pages: ports.repos().repo_pages(),
             shell: shell.to_string(),
         }
     }
@@ -113,13 +115,17 @@ impl SessionAccess {
     }
 
     pub fn open_repo_terminal(&self, group: &RepoGroup) -> Result<(), ServiceError> {
-        let main_checkout = group.path().ok_or_else(|| {
-            ServiceError::Invalid(format!(
-                "the sessions under {group} belong to no repo, so there is no main checkout to open"
-            ))
-        })?;
-        self.check_main_checkout(main_checkout)?;
+        let main_checkout = self.main_checkout_of(group, "main checkout")?;
         self.terminal_emulator.open_window(main_checkout)?;
+        Ok(())
+    }
+
+    pub fn open_repo_page(&self, group: &RepoGroup) -> Result<(), ServiceError> {
+        let main_checkout = self.main_checkout_of(group, "GitHub page")?;
+        let page = self.repo_pages.main_page(main_checkout)?.ok_or_else(|| {
+            ServiceError::NotFound(format!("no GitHub page is known for {group}"))
+        })?;
+        self.web_browser.open(&page)?;
         Ok(())
     }
 
@@ -155,6 +161,20 @@ impl SessionAccess {
             worktree.display()
         );
         self.check_present(worktree, missing)
+    }
+
+    fn main_checkout_of<'g>(
+        &self,
+        group: &'g RepoGroup,
+        target: &str,
+    ) -> Result<&'g Path, ServiceError> {
+        let main_checkout = group.path().ok_or_else(|| {
+            ServiceError::Invalid(format!(
+                "the sessions under {group} belong to no repo, so there is no {target} to open"
+            ))
+        })?;
+        self.check_main_checkout(main_checkout)?;
+        Ok(main_checkout)
     }
 
     fn check_main_checkout(&self, main_checkout: &Path) -> Result<(), ServiceError> {
@@ -203,10 +223,13 @@ impl EphemeralShell {
 mod tests {
     use super::*;
     use crate::application::SessionService;
-    use crate::application::ports::{ConfigError, TerminalEmulatorError, WebBrowserError};
+    use crate::application::ports::{
+        ConfigError, RepoPageError, TerminalEmulatorError, WebBrowserError,
+    };
     use crate::domain::PullRequestState;
     use crate::test_support::{
-        FakeMultiplexer, FakePullRequests, FakeTerminalEmulator, FakeWebBrowser, ServiceFixture,
+        FakeMultiplexer, FakePullRequests, FakeRepoPages, FakeTerminalEmulator, FakeWebBrowser,
+        ServiceFixture,
     };
 
     struct AttachFixture;
@@ -243,15 +266,36 @@ mod tests {
         const NUMBER: u64 = 142;
 
         fn with_pull_request() -> ServiceFixture {
-            let session = ServiceFixture::session(Self::NAME);
+            Self::with_pull_request_for(&ServiceFixture::session(Self::NAME))
+        }
+
+        fn in_main_checkout_with_pull_request() -> ServiceFixture {
+            Self::with_pull_request_for(&ServiceFixture::main_checkout_session(Self::NAME))
+        }
+
+        fn with_pull_request_for(session: &Session) -> ServiceFixture {
             let pull_request = ServiceFixture::pull_request(Self::NUMBER, PullRequestState::Open);
             ServiceFixture::new()
-                .with_sessions(std::slice::from_ref(&session))
+                .with_sessions(std::slice::from_ref(session))
                 .with_pull_requests(FakePullRequests::new().with_pull_request(
                     Path::new(ServiceFixture::REPO),
                     session.branch(),
                     pull_request,
                 ))
+        }
+
+        fn without_pull_request() -> ServiceFixture {
+            ServiceFixture::new().with_sessions(&[ServiceFixture::session(Self::NAME)])
+        }
+
+        fn failing_lookup() -> ServiceFixture {
+            let pull_requests = FakePullRequests::new();
+            pull_requests.fail();
+            Self::without_pull_request().with_pull_requests(pull_requests)
+        }
+
+        fn open_error(fixture: &ServiceFixture) -> ServiceError {
+            fixture.service().open_pull_request(Self::NAME).unwrap_err()
         }
 
         fn looked_up(fixture: &ServiceFixture) -> SessionService {
@@ -282,6 +326,26 @@ mod tests {
                 .with_multiplexer(
                     FakeMultiplexer::new().with_live(ServiceFixture::waiting(&session)),
                 )
+        }
+
+        fn repo() -> RepoGroup {
+            ServiceFixture::repo_group(ServiceFixture::REPO)
+        }
+    }
+
+    struct RepoPageFixture;
+
+    impl RepoPageFixture {
+        const VANISHED: &'static str = "/repos/vanished";
+
+        fn on_github() -> ServiceFixture {
+            ServiceFixture::new().with_repo_pages(Self::pages())
+        }
+
+        fn pages() -> FakeRepoPages {
+            FakeRepoPages::default()
+                .with_page(Path::new(ServiceFixture::REPO), ServiceFixture::REPO_PAGE)
+                .with_page(Path::new(Self::VANISHED), ServiceFixture::REPO_PAGE)
         }
 
         fn repo() -> RepoGroup {
@@ -626,6 +690,94 @@ mod tests {
     }
 
     #[test]
+    fn a_repo_page_opens_in_the_browser() {
+        let fixture = RepoPageFixture::on_github();
+
+        fixture
+            .service()
+            .open_repo_page(&RepoPageFixture::repo())
+            .unwrap();
+
+        assert_eq!(fixture.web_browser().opened(), [ServiceFixture::REPO_PAGE]);
+    }
+
+    #[test]
+    fn a_repo_without_a_known_github_page_opens_nothing() {
+        let fixture = ServiceFixture::new();
+
+        let error = fixture
+            .service()
+            .open_repo_page(&RepoPageFixture::repo())
+            .unwrap_err();
+
+        assert!(matches!(error, ServiceError::NotFound(_)));
+        assert_eq!(
+            error.to_string(),
+            "no GitHub page is known for example-project"
+        );
+        assert!(fixture.web_browser().opened().is_empty());
+    }
+
+    #[test]
+    fn sessions_outside_any_repo_have_no_github_page_to_open() {
+        let fixture = RepoPageFixture::on_github();
+
+        let error = fixture
+            .service()
+            .open_repo_page(&RepoGroup::Other)
+            .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "the sessions under other belong to no repo, so there is no GitHub page to open"
+        );
+        assert!(fixture.web_browser().opened().is_empty());
+    }
+
+    #[test]
+    fn a_missing_main_checkout_opens_no_github_page() {
+        let fixture = RepoPageFixture::on_github();
+        let vanished = ServiceFixture::repo_group(RepoPageFixture::VANISHED);
+
+        let error = fixture.service().open_repo_page(&vanished).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "main checkout /repos/vanished is missing"
+        );
+        assert!(fixture.web_browser().opened().is_empty());
+    }
+
+    #[test]
+    fn a_failed_github_page_lookup_says_why() {
+        let timeout = RepoPageError::TimedOut { seconds: 20 };
+        let fixture =
+            ServiceFixture::new().with_repo_pages(FakeRepoPages::failing(timeout.clone()));
+
+        let error = fixture
+            .service()
+            .open_repo_page(&RepoPageFixture::repo())
+            .unwrap_err();
+
+        assert!(matches!(error, ServiceError::Failed(_)));
+        assert_eq!(error.to_string(), timeout.to_string());
+    }
+
+    #[test]
+    fn opening_a_repo_page_sends_nothing_to_tmux_or_git_and_changes_nothing() {
+        let fixture = TerminalFixture::live().with_repo_pages(RepoPageFixture::pages());
+
+        fixture
+            .service()
+            .open_repo_page(&RepoPageFixture::repo())
+            .unwrap();
+
+        assert!(fixture.multiplexer().calls().is_empty());
+        assert!(fixture.workspace().calls().is_empty());
+        assert_eq!(fixture.registry().save_count(), 0);
+    }
+
+    #[test]
     fn a_looked_up_pull_request_opens_at_its_url_in_the_browser() {
         let fixture = PullRequestFixture::with_pull_request();
         let service = PullRequestFixture::looked_up(&fixture);
@@ -639,15 +791,52 @@ mod tests {
     }
 
     #[test]
-    fn a_session_not_yet_looked_up_has_no_known_pull_request_to_open() {
+    fn a_session_not_yet_looked_up_has_its_pull_request_looked_up_and_opened() {
         let fixture = PullRequestFixture::with_pull_request();
 
-        let error = fixture
+        fixture
             .service()
             .open_pull_request(PullRequestFixture::NAME)
-            .unwrap_err();
+            .unwrap();
+
+        assert_eq!(
+            fixture.web_browser().opened(),
+            [ServiceFixture::pull_request_url(PullRequestFixture::NUMBER)]
+        );
+    }
+
+    #[test]
+    fn a_branch_without_a_pull_request_has_no_known_pull_request_to_open() {
+        let fixture = PullRequestFixture::without_pull_request();
+
+        let error = PullRequestFixture::open_error(&fixture);
 
         assert!(matches!(error, ServiceError::NotFound(_)));
+        assert_eq!(error.to_string(), "no pull request is known for fix-auth");
+        assert!(fixture.web_browser().opened().is_empty());
+    }
+
+    #[test]
+    fn a_failed_lookup_says_the_pull_request_could_not_be_looked_up() {
+        let fixture = PullRequestFixture::failing_lookup();
+
+        let error = PullRequestFixture::open_error(&fixture);
+
+        assert!(matches!(error, ServiceError::Failed(_)));
+        assert!(
+            error
+                .to_string()
+                .starts_with("could not look up the pull request of fix-auth: ")
+        );
+        assert!(fixture.web_browser().opened().is_empty());
+    }
+
+    #[test]
+    fn a_main_checkout_session_has_no_known_pull_request_to_open() {
+        let fixture = PullRequestFixture::in_main_checkout_with_pull_request();
+
+        let error = PullRequestFixture::open_error(&fixture);
+
         assert_eq!(error.to_string(), "no pull request is known for fix-auth");
         assert!(fixture.web_browser().opened().is_empty());
     }

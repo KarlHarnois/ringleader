@@ -1,8 +1,8 @@
 use thiserror::Error;
 
 use super::ports::{
-    ConfigError, HostProbeError, LockError, MultiplexerError, RegistryError, TerminalEmulatorError,
-    WebBrowserError, WorkspaceError,
+    ConfigError, HostProbeError, LockError, MultiplexerError, RegistryError, RepoPageError,
+    TerminalEmulatorError, WebBrowserError, WorkspaceError,
 };
 use crate::application::DeleteImpact;
 use crate::domain::InvalidName;
@@ -37,6 +37,13 @@ pub enum ServiceError {
 impl ServiceError {
     pub fn is_timeout_of(&self, expected: Tool) -> bool {
         matches!(self, ServiceError::TimedOut { tool, .. } if *tool == expected)
+    }
+
+    pub fn is_refusal(&self) -> bool {
+        matches!(
+            self,
+            ServiceError::Conflict(_) | ServiceError::GuardsChanged { .. }
+        )
     }
 
     pub fn adding_context(self, context: &str) -> Self {
@@ -128,8 +135,53 @@ impl From<WebBrowserError> for ServiceError {
     }
 }
 
+impl From<RepoPageError> for ServiceError {
+    fn from(error: RepoPageError) -> Self {
+        ServiceError::Failed(error.to_string())
+    }
+}
+
 impl From<InvalidName> for ServiceError {
     fn from(error: InvalidName) -> Self {
         ServiceError::Invalid(error.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ServiceError, Tool};
+
+    #[test]
+    fn adding_context_keeps_the_kind_and_appends_the_context() {
+        let kinds = [
+            ServiceError::Invalid("bad".to_string()),
+            ServiceError::NotFound("bad".to_string()),
+            ServiceError::Conflict("bad".to_string()),
+            ServiceError::Unmeasurable("bad".to_string()),
+            ServiceError::Failed("bad".to_string()),
+            ServiceError::TimedOut {
+                tool: Tool::Git,
+                message: "bad".to_string(),
+            },
+        ];
+        for error in kinds {
+            let kind = std::mem::discriminant(&error);
+            let extended = error.adding_context("while renaming");
+            assert_eq!(std::mem::discriminant(&extended), kind);
+            assert_eq!(extended.to_string(), "bad; while renaming");
+        }
+    }
+
+    #[test]
+    fn adding_context_keeps_the_timed_out_tool() {
+        let error = ServiceError::TimedOut {
+            tool: Tool::Tmux,
+            message: "slow".to_string(),
+        };
+        assert!(
+            error
+                .adding_context("while listing")
+                .is_timeout_of(Tool::Tmux)
+        );
     }
 }

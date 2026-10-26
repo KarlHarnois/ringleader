@@ -124,6 +124,13 @@ impl<'a> TreeLine<'a> {
         }
     }
 
+    pub fn covered_rows(&self) -> &'a [SessionSummary] {
+        match self {
+            Self::Session { row, .. } => std::slice::from_ref(*row),
+            Self::Heading(heading) => heading.hidden_rows(),
+        }
+    }
+
     pub fn selection(&self) -> ListSelection {
         match self {
             Self::Session { row, .. } => ListSelection::Session(row.name().to_string()),

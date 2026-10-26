@@ -41,9 +41,9 @@ jobs:
       - name: Format
         run: nix develop -c cargo fmt --check
       - name: Lint
-        run: nix develop -c cargo clippy --all-targets -- -D warnings
-      - name: Test
-        run: nix develop -c cargo test
+        run: nix develop -c cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test with the CRAP gate
+        run: nix develop -c cargo xtask crap
       - name: Check version badge
         run: nix build --no-link ".#checks.$(nix eval --impure --raw --expr builtins.currentSystem).readme-version-badge"
       - name: Check agent docs
