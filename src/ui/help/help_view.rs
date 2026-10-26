@@ -51,7 +51,7 @@ impl HelpView {
         ("S", "restart every exited or stopped session"),
         (
             "x",
-            "stop a waiting session to free its memory, s resumes it",
+            "stop a session or the selected repo, s resumes each one",
         ),
         (
             "p",

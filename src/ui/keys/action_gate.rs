@@ -209,8 +209,11 @@ impl<'a> ActionGate<'a> {
 
     pub fn stop(&self) -> Result<AppRequest, String> {
         self.writable()?;
-        let name = self.managed_name("it cannot be stopped")?;
-        Ok(AppRequest::Block(BlockingOperation::Stop(name)))
+        let operation = match self.heading {
+            Some(group) => BlockingOperation::Batch(BatchOperation::StopRepo(group.clone())),
+            None => BlockingOperation::Stop(self.managed_name("it cannot be stopped")?),
+        };
+        Ok(AppRequest::Block(operation))
     }
 
     pub fn restart_all(&self) -> Result<AppRequest, String> {
@@ -450,6 +453,19 @@ mod tests {
             gate.action_for(&KeyEvent::from(KeyCode::Char('S'))),
             KeyAction::Request(AppRequest::Block(BlockingOperation::Batch(
                 BatchOperation::RestartAll
+            )))
+        );
+    }
+
+    #[test]
+    fn x_on_a_heading_asks_to_stop_every_session_of_its_repo() {
+        let heading = GateFixture::heading();
+        let gate = ActionGate::on_heading(&heading, None);
+
+        assert_eq!(
+            gate.action_for(&KeyEvent::from(KeyCode::Char('x'))),
+            KeyAction::Request(AppRequest::Block(BlockingOperation::Batch(
+                BatchOperation::StopRepo(GateFixture::heading())
             )))
         );
     }

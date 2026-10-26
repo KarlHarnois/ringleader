@@ -84,6 +84,7 @@ mod tests {
 
     use super::*;
     use crate::application::ports::ConfigError;
+    use crate::test_support::ServiceFixture;
     use crate::ui::dialogs::DialogOpening;
     use crate::ui::keys::action_gate::Navigation;
 
@@ -126,6 +127,22 @@ mod tests {
         assert_eq!(
             VisualFixture::press('p'),
             VisualFixture::block(BlockingOperation::Batch(BatchOperation::Merge(names)))
+        );
+    }
+
+    #[test]
+    fn x_on_a_heading_stops_the_range_instead_of_every_session_of_the_repo() {
+        let heading = ServiceFixture::repo_group(ServiceFixture::REPO);
+        let gate = VisualGate::new(
+            ActionGate::on_heading(&heading, None),
+            VisualFixture::names(),
+        );
+
+        assert_eq!(
+            gate.action_for(&KeyEvent::from(KeyCode::Char('x'))),
+            VisualFixture::block(BlockingOperation::Batch(BatchOperation::Stop(
+                VisualFixture::names()
+            )))
         );
     }
 

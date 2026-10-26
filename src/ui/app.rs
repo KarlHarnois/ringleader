@@ -1950,6 +1950,39 @@ mod tests {
     }
 
     #[test]
+    fn x_on_a_repo_heading_asks_to_stop_its_sessions_behind_a_busy_message() {
+        let fixture = UiHarness::two_repos();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        let request = app.handle_event(&UiHarness::character('x'));
+
+        assert_eq!(
+            request,
+            AppRequest::Block(BlockingOperation::Batch(BatchOperation::StopRepo(
+                UiHarness::docs_repo_group()
+            )))
+        );
+        assert_eq!(
+            AppFixture::status_line(&app, 100),
+            " Stopping every waiting or exited session in alpha…"
+        );
+    }
+
+    #[test]
+    fn x_on_a_repo_heading_stops_only_the_sessions_of_that_repo() {
+        let fixture = UiHarness::two_repos();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press_and_perform(&mut app, 'x');
+
+        assert_eq!(fixture.multiplexer().live_names(), ["ringleader-fix-auth"]);
+        assert_eq!(
+            app.status.message(),
+            Some(&StatusMessage::Info("Stopped 1 session.".to_string()))
+        );
+    }
+
+    #[test]
     fn o_on_a_repo_heading_opens_its_github_page() {
         let fixture = AppFixture::docs_on_github();
         let mut app = AppFixture::started(&fixture, 100, 28);

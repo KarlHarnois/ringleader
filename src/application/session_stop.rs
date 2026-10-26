@@ -3,6 +3,7 @@ use super::ServicePorts;
 use super::ports::ProcessInfo;
 use super::reconciliation::ManagedRow;
 use super::tmux_teardown::{TeardownContexts, TmuxTeardown};
+use crate::domain::StopSkip;
 
 pub struct SessionStop {
     teardown: TmuxTeardown,
@@ -26,32 +27,23 @@ impl SessionStop {
     }
 
     pub fn stop(&self, row: &ManagedRow) -> Result<(), ServiceError> {
-        Self::refuse_main_checkout(row)?;
-        Self::refuse_state(row)?;
+        Self::refuse_ineligible(row)?;
         let survivors = self.teardown.stop(row, &[])?;
         Self::refuse_survivors(&survivors)
     }
 
-    fn refuse_main_checkout(row: &ManagedRow) -> Result<(), ServiceError> {
-        if !row.session().runs_in_main_checkout() {
-            return Ok(());
+    fn refuse_ineligible(row: &ManagedRow) -> Result<(), ServiceError> {
+        let name = row.session().name();
+        match StopSkip::of(row.session(), row.state()) {
+            None => Ok(()),
+            Some(StopSkip::State(state)) => Err(ServiceError::Conflict(format!(
+                "session {name} is {}, stop only ends a waiting or exited agent",
+                state.label()
+            ))),
+            Some(StopSkip::MainCheckout) => Err(ServiceError::Conflict(format!(
+                "session {name} runs in the main checkout, where a restart cannot resume its conversation, so it cannot be stopped"
+            ))),
         }
-        Err(ServiceError::Conflict(format!(
-            "session {} runs in the main checkout, where a restart cannot resume its conversation, so it cannot be stopped",
-            row.session().name()
-        )))
-    }
-
-    fn refuse_state(row: &ManagedRow) -> Result<(), ServiceError> {
-        let state = row.state();
-        if state.allows_stop() {
-            return Ok(());
-        }
-        Err(ServiceError::Conflict(format!(
-            "session {} is {}, stop only ends a waiting or exited agent",
-            row.session().name(),
-            state.label()
-        )))
     }
 
     fn refuse_survivors(survivors: &[ProcessInfo]) -> Result<(), ServiceError> {

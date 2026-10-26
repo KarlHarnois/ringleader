@@ -1,19 +1,20 @@
 use super::blocking_operation::OperationOutcome;
 use crate::application::{
-    DeleteConfirmation, DeleteImpact, RestartReport, SessionCount, SessionService,
+    DeleteConfirmation, DeleteImpact, RestartReport, SessionCount, SessionService, StopReport,
 };
+use crate::domain::RepoGroup;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BatchOperation {
     RestartAll,
     Restart(Vec<String>),
     Stop(Vec<String>),
+    StopRepo(RepoGroup),
     Merge(Vec<String>),
     Delete(DeleteSessionsStep),
 }
 
 impl BatchOperation {
-    const STOPPED: &'static str = "Stopped";
     const MERGED: &'static str = "Merged origin into";
 
     pub fn changes_state(&self) -> bool {
@@ -25,6 +26,9 @@ impl BatchOperation {
             Self::RestartAll => "Restarting every exited or stopped session…".to_string(),
             Self::Restart(names) => format!("Restarting {}…", SessionCount::new(names.len())),
             Self::Stop(names) => format!("Stopping {}…", SessionCount::new(names.len())),
+            Self::StopRepo(group) => {
+                format!("Stopping every waiting or exited session in {group}…")
+            }
             Self::Merge(names) => format!(
                 "Fetching origin and merging it into {}…",
                 SessionCount::new(names.len())
@@ -37,9 +41,11 @@ impl BatchOperation {
         match self {
             Self::RestartAll => Self::restart_all(service),
             Self::Restart(names) => Self::restarted(&service.restart_sessions(&names, || false)),
-            Self::Stop(names) => {
-                OperationOutcome::reported(&service.stop_sessions(&names, || false), Self::STOPPED)
-            }
+            Self::Stop(names) => OperationOutcome::reported(
+                &service.stop_sessions(&names, || false),
+                StopReport::STOPPED,
+            ),
+            Self::StopRepo(group) => Self::stop_repo(service, &group),
             Self::Merge(names) => Self::merge(service, &names),
             Self::Delete(step) => step.run(service),
         }
@@ -54,6 +60,13 @@ impl BatchOperation {
 
     fn restarted(report: &RestartReport) -> OperationOutcome {
         OperationOutcome::batch(report.summary(), report.needs_attention())
+    }
+
+    fn stop_repo(service: &mut SessionService, group: &RepoGroup) -> OperationOutcome {
+        match service.stop_repo(group, || false) {
+            Ok(report) => OperationOutcome::batch(report.summary(), report.needs_attention()),
+            Err(error) => OperationOutcome::Failed(error),
+        }
     }
 
     fn merge(service: &mut SessionService, names: &[String]) -> OperationOutcome {

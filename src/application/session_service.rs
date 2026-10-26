@@ -4,15 +4,17 @@ use std::sync::Arc;
 
 use super::batch_report::BatchReport;
 use super::pending::Pending;
-use super::ports::{Clock, ConfigError, ConfigSource, RegistryError, SessionRegistry};
+use super::ports::{Clock, ConfigError, ConfigSource, HostProbe, RegistryError, SessionRegistry};
 use super::pull_request_catalog::PullRequestCatalog;
 use super::reconciliation::Reconciliation;
+use super::repo_stop_plan::RepoStopPlan;
 use super::restart_report::RestartReport;
 use super::service_context::{LoadedConfig, ServiceContext};
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
 use super::session_access::{SessionAccess, ShellOutcome};
 use super::session_lifecycle::SessionLifecycle;
+use super::stop_report::StopReport;
 use super::usage_catalog::UsageCatalog;
 use super::usage_reading::UsageReading;
 use crate::application::CreateRequest;
@@ -46,6 +48,7 @@ pub struct SessionService {
     pull_request_catalog: PullRequestCatalog,
     usage_catalog: UsageCatalog,
     clock: Arc<dyn Clock>,
+    host: Arc<dyn HostProbe>,
     doctor: Doctor,
     paths: DiagnosticPaths,
 }
@@ -60,6 +63,7 @@ impl SessionService {
             pull_request_catalog: PullRequestCatalog::new(ports.repos().pull_requests()),
             usage_catalog: UsageCatalog::new(ports.agents().usage_meters(), ports.state().clock()),
             clock: ports.state().clock(),
+            host: ports.repos().host(),
             doctor: Doctor::new(&ports, context.diagnostics().clone()),
             paths: context.diagnostics().clone(),
             config: context.into_config(),
@@ -309,6 +313,17 @@ impl SessionService {
         self.lifecycle.stop(&reconciliation, name)
     }
 
+    pub fn stop_repo(
+        &mut self,
+        repo: &RepoGroup,
+        cancelled: impl Fn() -> bool,
+    ) -> Result<StopReport, ServiceError> {
+        let reconciliation = self.reconcile()?;
+        let plan = RepoStopPlan::new(&reconciliation.live_entries_in(repo, self.host.as_ref()));
+        let stops = self.stop_sessions(plan.targets(), cancelled);
+        Ok(StopReport::new(repo.clone(), stops, plan.into_skips()))
+    }
+
     pub fn restart_all(&mut self, stop: impl Fn() -> bool) -> Result<RestartReport, ServiceError> {
         let names = self.reconcile()?.restartable_names();
         Ok(self.restart_sessions(&names, stop))
@@ -477,6 +492,8 @@ pub enum CorruptRegistry {
 mod tests {
     use super::*;
     use crate::application::ports::Multiplexer;
+    use crate::domain::SessionState;
+    use crate::domain::StopSkip;
     use crate::domain::{Agent, AgentUsage};
     use crate::test_support::{
         Deadline, FakeMultiplexer, FakeSessionRegistry, FakeUsageMeter, LogCapture, ServiceFixture,
@@ -1160,5 +1177,146 @@ mod tests {
             .map(|outcome| outcome.recovery().is_some())
             .collect();
         assert_eq!(recoveries, [true, false, false]);
+    }
+
+    struct RepoStopFixture;
+
+    impl RepoStopFixture {
+        const OTHER_REPO: &'static str = "/repos/other-project";
+
+        fn sessions() -> Vec<Session> {
+            let mut sessions = ["alpha", "bravo", "charlie", "echo"]
+                .map(ServiceFixture::session)
+                .to_vec();
+            sessions.push(ServiceFixture::session_at(
+                "delta",
+                Self::OTHER_REPO,
+                ServiceFixture::CREATED_AT,
+            ));
+            sessions
+        }
+
+        fn mixed() -> ServiceFixture {
+            let sessions = Self::sessions();
+            let all: Vec<&Session> = sessions.iter().collect();
+            ServiceFixture::new()
+                .with_sessions(&sessions)
+                .with_workspace(ServiceFixture::workspace_for(&all))
+                .with_host(ServiceFixture::host_for(&all))
+                .with_multiplexer(Self::live_sessions())
+        }
+
+        fn live_sessions() -> FakeMultiplexer {
+            let session = ServiceFixture::session;
+            FakeMultiplexer::new()
+                .with_live(ServiceFixture::waiting(&session("alpha")))
+                .with_live(ServiceFixture::exited(&session("bravo")))
+                .with_live(ServiceFixture::working(&session("charlie")))
+                .with_live(ServiceFixture::waiting(&ServiceFixture::session_at(
+                    "delta",
+                    Self::OTHER_REPO,
+                    ServiceFixture::CREATED_AT,
+                )))
+        }
+
+        fn repo() -> RepoGroup {
+            ServiceFixture::repo_group(ServiceFixture::REPO)
+        }
+
+        fn stopped_names(report: &StopReport) -> Vec<&str> {
+            report
+                .outcomes()
+                .filter(|(_, stop)| stop.is_ok())
+                .map(|(name, _)| name)
+                .collect()
+        }
+    }
+
+    #[test]
+    fn stop_repo_stops_the_waiting_and_exited_sessions_of_that_repo_only() {
+        let fixture = RepoStopFixture::mixed();
+
+        let report = fixture
+            .service()
+            .stop_repo(&RepoStopFixture::repo(), || false)
+            .unwrap();
+
+        assert_eq!(RepoStopFixture::stopped_names(&report), ["alpha", "bravo"]);
+        assert_eq!(
+            fixture.multiplexer().live_names(),
+            ["ringleader-charlie", "ringleader-delta"]
+        );
+    }
+
+    #[test]
+    fn stop_repo_skips_a_working_session_and_leaves_out_a_stopped_one() {
+        let fixture = RepoStopFixture::mixed();
+
+        let report = fixture
+            .service()
+            .stop_repo(&RepoStopFixture::repo(), || false)
+            .unwrap();
+
+        let skips: Vec<(&str, StopSkip)> = report.skips().collect();
+        assert_eq!(skips, [("charlie", StopSkip::State(SessionState::Working))]);
+    }
+
+    #[test]
+    fn stop_repo_keeps_going_past_a_refused_stop_and_reports_it() {
+        let fixture = RepoStopFixture::mixed()
+            .with_multiplexer(RepoStopFixture::live_sessions().with_caller("ringleader-alpha"));
+
+        let report = fixture
+            .service()
+            .stop_repo(&RepoStopFixture::repo(), || false)
+            .unwrap();
+
+        let failures: Vec<&str> = report.failures().map(|(name, _)| name).collect();
+        assert_eq!(failures, ["alpha"]);
+        assert_eq!(RepoStopFixture::stopped_names(&report), ["bravo"]);
+    }
+
+    #[test]
+    fn stop_repo_skips_the_rest_once_cancelled() {
+        let fixture = RepoStopFixture::mixed();
+        let checks = std::cell::Cell::new(0);
+
+        let report = fixture
+            .service()
+            .stop_repo(&RepoStopFixture::repo(), || {
+                checks.set(checks.get() + 1);
+                checks.get() > 1
+            })
+            .unwrap();
+
+        assert_eq!(RepoStopFixture::stopped_names(&report), ["alpha"]);
+    }
+
+    #[test]
+    fn stop_repo_matches_a_repo_named_through_a_link_to_its_recorded_path() {
+        let link = Path::new("/links/example-project");
+        let sessions = RepoStopFixture::sessions();
+        let all: Vec<&Session> = sessions.iter().collect();
+        let host =
+            ServiceFixture::host_for(&all).with_canonical(link, Path::new(ServiceFixture::REPO));
+        let fixture = RepoStopFixture::mixed().with_host(host);
+        let linked_repo = ServiceFixture::repo_group("/links/example-project");
+
+        let report = fixture.service().stop_repo(&linked_repo, || false).unwrap();
+
+        assert_eq!(RepoStopFixture::stopped_names(&report), ["alpha", "bravo"]);
+    }
+
+    #[test]
+    fn stop_repo_of_the_other_group_finds_nothing_to_stop() {
+        let fixture = RepoStopFixture::mixed();
+
+        let report = fixture
+            .service()
+            .stop_repo(&RepoGroup::Other, || false)
+            .unwrap();
+
+        assert_eq!(report.outcomes().count(), 0);
+        assert_eq!(fixture.multiplexer().live_names().len(), 4);
     }
 }
