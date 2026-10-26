@@ -1,4 +1,5 @@
-use crate::domain::{Session, SessionState};
+use super::session::Session;
+use super::session_state::SessionState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StopSkip {

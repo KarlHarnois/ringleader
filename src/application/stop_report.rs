@@ -1,7 +1,6 @@
 use super::batch_report::BatchReport;
 use super::service_error::ServiceError;
-use super::stop_skip::StopSkip;
-use crate::domain::RepoGroup;
+use crate::domain::{RepoGroup, StopSkip};
 
 pub struct StopReport {
     repo: RepoGroup,

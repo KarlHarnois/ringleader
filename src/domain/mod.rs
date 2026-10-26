@@ -48,6 +48,7 @@ pub use sessions::session_name::{InvalidName, SessionName};
 pub use sessions::session_observation::{AgentPane, SessionObservation};
 pub use sessions::session_state::SessionState;
 pub use sessions::session_summary::SessionSummary;
+pub use sessions::stop_skip::StopSkip;
 pub use sessions::unmanaged_session::{PairMismatch, UnmanagedSession};
 pub use spend::{Spend, SpendKind};
 pub use terminal_text::TerminalText;

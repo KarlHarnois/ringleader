@@ -1,5 +1,4 @@
-use super::stop_skip::StopSkip;
-use crate::domain::{Session, SessionState};
+use crate::domain::{Session, SessionState, StopSkip};
 
 pub struct RepoStopPlan {
     targets: Vec<String>,

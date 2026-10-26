@@ -2,8 +2,8 @@ use super::ServiceError;
 use super::ServicePorts;
 use super::ports::ProcessInfo;
 use super::reconciliation::ManagedRow;
-use super::stop_skip::StopSkip;
 use super::tmux_teardown::{TeardownContexts, TmuxTeardown};
+use crate::domain::StopSkip;
 
 pub struct SessionStop {
     teardown: TmuxTeardown,

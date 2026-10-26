@@ -5,4 +5,5 @@ pub mod session_name;
 pub mod session_observation;
 pub mod session_state;
 pub mod session_summary;
+pub mod stop_skip;
 pub mod unmanaged_session;
