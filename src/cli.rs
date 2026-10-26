@@ -62,7 +62,7 @@ enum CliCommand {
     #[command(about = "Restart exited or stopped sessions, or with --all every one")]
     Restart(RestartArgs),
     #[command(
-        about = "Stop waiting or exited sessions to free their memory, or with --repo every one in a repo"
+        about = "Stop waiting or exited sessions, or with --repo every one in a repo, restart resumes them"
     )]
     Stop(StopArgs),
     #[command(about = "Add, remove, or list repos")]
