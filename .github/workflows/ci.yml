@@ -15,14 +15,14 @@ permissions:
   contents: read
 
 jobs:
-  check:
+  cargo:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: ${{ matrix.os == 'macos-latest' && 45 || 20 }}
+    timeout-minutes: ${{ matrix.os == 'macos-latest' && 20 || 10 }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -47,12 +47,6 @@ jobs:
         run: nix develop -c cargo clippy --workspace --all-targets -- -D warnings
       - name: Test with the CRAP gate
         run: nix develop -c cargo xtask crap
-      - name: Check version badge
-        run: nix build --no-link ".#checks.$(nix eval --impure --raw --expr builtins.currentSystem).readme-version-badge"
-      - name: Check agent docs
-        run: nix build --no-link ".#checks.$(nix eval --impure --raw --expr builtins.currentSystem).agent-docs"
-      - name: Check flake
-        run: nix flake check
       - name: Save cargo cache
         if: github.ref == 'refs/heads/master' && !cancelled()
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -62,3 +56,23 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('flake.lock') }}-${{ hashFiles('Cargo.lock') }}
+
+  flake:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: ${{ matrix.os == 'macos-latest' && 30 || 15 }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+      - uses: DeterminateSystems/magic-nix-cache-action@84c0677f58dcedf3b91f8223ce36a9ea5b3c84b7 # v15
+        with:
+          use-flakehub: false
+          use-gha-cache: true
+      - name: Check flake
+        run: nix flake check
