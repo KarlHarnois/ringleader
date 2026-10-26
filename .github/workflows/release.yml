@@ -6,10 +6,6 @@ on:
     types: [completed]
     branches: [master]
 
-concurrency:
-  group: release
-  cancel-in-progress: false
-
 permissions:
   contents: write
   pull-requests: read
@@ -26,6 +22,9 @@ jobs:
     if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    concurrency:
+      group: release
+      cancel-in-progress: false
     env:
       COMMIT: ${{ github.event.workflow_run.head_sha }}
     steps:
