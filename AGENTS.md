@@ -338,12 +338,14 @@ nix flake check
 
 ## CRAP gate
 
-**`cargo xtask crap` runs every workspace test under coverage, then fails if a production function scores over 8.**
+**The CRAP gate is `cargo xtask crap`.** It runs every workspace test under coverage. If a production function scores over 8, the gate fails.
 
 - Never raise `CrapGate::MAXIMUM_CRAP` without the project owner's approval.
-- Never hide a branch from the gate, such as by moving it into a macro: the gate cannot see inside a macro.
-- A function that no test can reach, such as one that needs a terminal, scores 8 or less only at complexity 2 or less. Move its logic into functions that tests reach.
-- The gate scores only the code that compiles on the host. A macOS-only function therefore fails only the macOS CI job.
+- Never move a branch into a macro to lower a score: the gate cannot see inside a macro.
+- If no test can reach a function, keep its complexity at 2 or less.
+- Move such a function's logic into functions that tests reach.
+- A function that needs a terminal is a function that no test can reach.
+- If a change edits a macOS-only function, only the macOS CI job scores the function.
 
 ## Layout rules
 
