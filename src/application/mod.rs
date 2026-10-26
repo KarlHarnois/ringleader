@@ -28,6 +28,7 @@ pub mod session_service;
 pub mod session_stop;
 pub mod start;
 pub mod stop_report;
+pub mod stop_skip;
 pub mod tmux_teardown;
 pub mod usage_catalog;
 pub mod usage_reading;

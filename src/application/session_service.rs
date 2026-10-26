@@ -489,7 +489,7 @@ pub enum CorruptRegistry {
 mod tests {
     use super::*;
     use crate::application::ports::Multiplexer;
-    use crate::application::repo_stop_plan::StopSkip;
+    use crate::application::stop_skip::StopSkip;
     use crate::domain::SessionState;
     use crate::domain::{Agent, AgentUsage};
     use crate::test_support::{

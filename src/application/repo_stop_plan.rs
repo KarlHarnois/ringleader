@@ -1,3 +1,4 @@
+use super::stop_skip::StopSkip;
 use crate::domain::{Session, SessionState};
 
 pub struct RepoStopPlan {
@@ -31,32 +32,6 @@ impl RepoStopPlan {
 
     pub fn into_skips(self) -> Vec<(String, StopSkip)> {
         self.skips
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StopSkip {
-    State(SessionState),
-    MainCheckout,
-}
-
-impl StopSkip {
-    const MAIN_CHECKOUT: &'static str = "in the main checkout";
-
-    fn of(session: &Session, state: SessionState) -> Option<Self> {
-        if !state.allows_stop() {
-            return Some(Self::State(state));
-        }
-        session
-            .runs_in_main_checkout()
-            .then_some(Self::MainCheckout)
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::State(state) => state.label(),
-            Self::MainCheckout => Self::MAIN_CHECKOUT,
-        }
     }
 }
 
