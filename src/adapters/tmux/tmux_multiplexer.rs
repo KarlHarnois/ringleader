@@ -198,12 +198,12 @@ impl TmuxMultiplexer {
     fn attach_in_foreground(
         &self,
         mut attach: Command,
-        fit: &ClientSizeFit,
+        fit: ClientSizeFit,
     ) -> Result<(), MultiplexerError> {
         let child = attach
             .spawn()
             .map_err(|error| Self::attach_failed(error.to_string()))?;
-        fit.fit_once_a_client_joins();
+        fit.fit_in_background_once_a_client_joins();
         ForegroundChild::of(&child).map_or(Ok(()), |foreground| {
             foreground.wait().map_err(|status| {
                 Self::attach_failed(format!(
@@ -306,7 +306,7 @@ impl Multiplexer for TmuxMultiplexer {
     fn attach(&self, target: &AttachTarget) -> Result<(), MultiplexerError> {
         let pane = self.resolved(target)?;
         let fit = ClientSizeFit::before_a_client_arrives(&self.tmux, &pane);
-        self.attach_in_foreground(self.attach_command(&pane), &fit)
+        self.attach_in_foreground(self.attach_command(&pane), fit)
     }
 
     fn switch_client(&self, client: &str, target: &AttachTarget) -> Result<(), MultiplexerError> {

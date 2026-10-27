@@ -6,19 +6,26 @@ use super::tmux_error::TmuxError;
 use super::tmux_listing::TmuxListing;
 use super::tmux_scripts::TmuxScripts;
 
-pub struct ClientSizeFit<'a> {
-    tmux: &'a TmuxCommand,
-    pane: &'a str,
+pub struct ClientSizeFit {
+    tmux: TmuxCommand,
+    pane: String,
     before: WindowWatch,
 }
 
-impl<'a> ClientSizeFit<'a> {
+impl ClientSizeFit {
     const CLIENT_PATIENCE: Duration = Duration::from_secs(1);
     const CLIENT_POLL: Duration = Duration::from_millis(10);
 
-    pub fn before_a_client_arrives(tmux: &'a TmuxCommand, pane: &'a str) -> Self {
-        let before = WindowWatch::read(tmux, pane);
-        Self { tmux, pane, before }
+    pub fn before_a_client_arrives(tmux: &TmuxCommand, pane: &str) -> Self {
+        Self {
+            tmux: tmux.clone(),
+            pane: pane.to_string(),
+            before: WindowWatch::read(tmux, pane),
+        }
+    }
+
+    pub fn fit_in_background_once_a_client_joins(self) {
+        thread::spawn(move || self.fit_once_a_client_joins());
     }
 
     pub fn fit_once_a_client_joins(&self) {
@@ -49,7 +56,7 @@ impl<'a> ClientSizeFit<'a> {
     }
 
     fn watch(&self) -> WindowWatch {
-        WindowWatch::read(self.tmux, self.pane)
+        WindowWatch::read(&self.tmux, &self.pane)
     }
 
     fn fit(&self) {
@@ -62,7 +69,7 @@ impl<'a> ClientSizeFit<'a> {
     // An agent that the preview narrowed lays out its rows for the wide window only after
     // a second resize at the client's size.
     fn redraw_at_client_size(&self) -> Result<(), TmuxError> {
-        for step in TmuxScripts::redraw_at_client_size(self.pane) {
+        for step in TmuxScripts::redraw_at_client_size(&self.pane) {
             let output = self.tmux.change(&step)?;
             if !output.succeeded() {
                 return Err(TmuxError::failed("resize-window", &output));
