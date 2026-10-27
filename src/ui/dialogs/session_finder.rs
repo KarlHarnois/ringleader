@@ -20,6 +20,7 @@ pub struct SessionFinder {
     candidates: Vec<SessionCandidate>,
     ranker: FuzzyRanker,
     matches: MatchList,
+    error: Option<String>,
 }
 
 impl SessionFinder {
@@ -35,12 +36,18 @@ impl SessionFinder {
             candidates: Self::candidates(rows),
             ranker: FuzzyRanker::for_names(),
             matches: MatchList::default(),
+            error: None,
         };
         finder.rank();
         finder
     }
 
+    pub fn fail(&mut self, error: String) {
+        self.error = Some(error);
+    }
+
     pub fn handle_key(&mut self, key: &KeyEvent) -> DialogStep {
+        self.error = None;
         match key.code {
             KeyCode::Esc => DialogStep::Close,
             KeyCode::Enter => self.attach(),
@@ -52,6 +59,7 @@ impl SessionFinder {
     }
 
     pub fn paste(&mut self, text: &str) {
+        self.error = None;
         if self.query.paste(text).is_ok() {
             self.rank();
         }
@@ -59,6 +67,7 @@ impl SessionFinder {
 
     pub fn lines(&self, width: usize, height: usize, theme: &Theme) -> Vec<Line<'static>> {
         let mut lines = vec![self.query_line(width, theme), Self::rule(width, theme)];
+        lines.extend(self.error_lines(width, theme));
         let rows = height.saturating_sub(lines.len()).max(1);
         lines.extend(self.match_rows(width, rows, theme));
         lines
@@ -131,6 +140,20 @@ impl SessionFinder {
 
     fn rule(width: usize, theme: &Theme) -> Line<'static> {
         Line::styled(Self::RULE.to_string().repeat(width), theme.dim())
+    }
+
+    fn error_lines(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
+        let indented = |error| Self::indented_error(error, width, theme);
+        self.error.as_deref().map(indented).unwrap_or_default()
+    }
+
+    fn indented_error(error: &str, width: usize, theme: &Theme) -> Vec<Line<'static>> {
+        let indent = " ".repeat(Self::SIDE_PADDING);
+        let wrapped = TextFit::new(error).wrapped(width.saturating_sub(Self::SIDE_PADDING));
+        wrapped
+            .into_iter()
+            .map(|line| Line::styled(format!("{indent}{line}"), theme.error()))
+            .collect()
     }
 
     fn count(&self) -> String {
@@ -303,6 +326,35 @@ mod tests {
         FinderFixture::type_text(&mut finder, "zzz");
 
         assert_eq!(FinderFixture::enter(&mut finder), DialogStep::Stay);
+    }
+
+    #[test]
+    fn a_failure_shows_between_the_rule_and_the_matches() {
+        let mut finder = FinderFixture::finder();
+
+        finder.fail("session fix-auth is stopped".to_string());
+
+        assert_eq!(
+            FinderFixture::rows(&finder)[FinderFixture::FIRST_MATCH..][..3],
+            [
+                " session fix-auth is".to_string(),
+                " stopped".to_string(),
+                FinderFixture::full_width(" fix-auth"),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_next_key_clears_a_failure() {
+        let mut finder = FinderFixture::finder();
+        finder.fail("session fix-auth is stopped".to_string());
+
+        FinderFixture::press(&mut finder, KeyCode::Down, KeyModifiers::NONE);
+
+        assert_eq!(
+            FinderFixture::matches(&finder)[0],
+            FinderFixture::full_width(" fix-auth")
+        );
     }
 
     #[test]
