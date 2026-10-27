@@ -83,6 +83,11 @@ impl<'a> TmuxListing<'a> {
         self.output.first("ringleader-server-pid")?.parse().ok()
     }
 
+    pub fn window_resized(&self) -> bool {
+        let mut sizes = self.output.labeled("ringleader-window-size");
+        sizes.next() != sizes.next()
+    }
+
     pub fn shows_terminal(&self, terminal: &OsStr) -> bool {
         self.output
             .labeled("ringleader-tty")
@@ -209,6 +214,8 @@ mod tests {
     struct ListingFixture;
 
     impl ListingFixture {
+        const SIZE_PLACEHOLDER: &str = "#{window_width}x#{window_height}";
+
         fn observations() -> Vec<SessionObservation> {
             let output = TmuxOutput::new(true, PANES, "");
             TmuxListing::new(&output).observations()
@@ -219,6 +226,13 @@ mod tests {
                 .into_iter()
                 .find(|observation| observation.tmux_name() == name)
                 .unwrap()
+        }
+
+        fn window_sizes(before: &str, after: &str) -> TmuxOutput {
+            let stdout = [before, after]
+                .map(|size| TmuxListing::WINDOW_SIZE_FORMAT.replace(Self::SIZE_PLACEHOLDER, size))
+                .join("\n");
+            TmuxOutput::new(true, &stdout, "")
         }
     }
 
@@ -306,5 +320,19 @@ mod tests {
             TmuxListing::new(&output).shell_window(),
             Some("@7".to_string())
         );
+    }
+
+    #[test]
+    fn a_window_whose_size_changed_reads_as_resized() {
+        let output = ListingFixture::window_sizes("170x50", "46x22");
+
+        assert!(TmuxListing::new(&output).window_resized());
+    }
+
+    #[test]
+    fn a_window_that_kept_its_size_reads_as_not_resized() {
+        let output = ListingFixture::window_sizes("46x22", "46x22");
+
+        assert!(!TmuxListing::new(&output).window_resized());
     }
 }

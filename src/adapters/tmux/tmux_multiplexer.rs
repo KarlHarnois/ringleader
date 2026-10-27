@@ -30,7 +30,6 @@ impl TmuxMultiplexer {
     const MISSING_SESSION: &'static str = "can't find session";
     const STARTUP_PATIENCE: Duration = Duration::from_secs(60);
     const AGENT_REDRAW_TIME: Duration = Duration::from_millis(60);
-    const WINDOW_SIZE_LABEL: &'static str = "ringleader-window-size";
 
     pub fn new(tmux: TmuxCommand, launcher: LauncherCommand, processes: ProcessTable) -> Self {
         Self {
@@ -216,11 +215,6 @@ impl TmuxMultiplexer {
         }
     }
 
-    fn resized(output: &TmuxOutput) -> bool {
-        let mut sizes = output.labeled(Self::WINDOW_SIZE_LABEL);
-        sizes.next() != sizes.next()
-    }
-
     fn require_done(subcommand: &str, output: &TmuxOutput) -> Result<(), MultiplexerError> {
         if output.has(TmuxLaunch::DONE_LABEL) {
             return Ok(());
@@ -338,7 +332,7 @@ impl Multiplexer for TmuxMultiplexer {
                 tmux_name: tmux_name.to_string(),
             });
         }
-        if Self::resized(&output) {
+        if TmuxListing::new(&output).window_resized() {
             thread::sleep(Self::AGENT_REDRAW_TIME);
         }
         Ok(())
