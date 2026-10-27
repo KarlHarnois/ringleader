@@ -10,6 +10,7 @@ pub struct ClientSizeFit {
     tmux: TmuxCommand,
     pane: String,
     before: WindowWatch,
+    patience: Duration,
 }
 
 impl ClientSizeFit {
@@ -21,7 +22,13 @@ impl ClientSizeFit {
             tmux: tmux.clone(),
             pane: pane.to_string(),
             before: WindowWatch::read(tmux, pane),
+            patience: Self::CLIENT_PATIENCE,
         }
+    }
+
+    #[cfg(test)]
+    pub fn with_patience(self, patience: Duration) -> Self {
+        Self { patience, ..self }
     }
 
     pub fn fit_in_background_once_a_client_joins(self) {
@@ -41,7 +48,7 @@ impl ClientSizeFit {
     }
 
     fn client_joined(&self) -> bool {
-        let deadline = Instant::now() + Self::CLIENT_PATIENCE;
+        let deadline = Instant::now() + self.patience;
         while self.watch().clients() <= self.before.clients() {
             if Instant::now() >= deadline {
                 return false;
@@ -108,6 +115,8 @@ impl WindowWatch {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::ClientSizeFit;
     use crate::test_support::TmuxTestServer;
     use crate::test_support::tmux_test_server::ControlClient;
@@ -176,7 +185,8 @@ mod tests {
     fn a_window_that_no_client_joins_keeps_its_size() {
         let fixture = FitFixture::narrowed();
         let tmux = fixture.server.command();
-        let fit = ClientSizeFit::before_a_client_arrives(&tmux, FitFixture::WINDOW);
+        let fit = ClientSizeFit::before_a_client_arrives(&tmux, FitFixture::WINDOW)
+            .with_patience(Duration::ZERO);
 
         fit.fit_once_a_client_joins();
 
