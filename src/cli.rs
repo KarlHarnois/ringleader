@@ -202,8 +202,16 @@ impl Cli {
     }
 
     pub fn finder_arguments() -> [OsString; 2] {
+        Self::popup_arguments(Self::FIND_SESSION)
+    }
+
+    pub fn menu_arguments() -> [OsString; 2] {
+        Self::popup_arguments(Self::SESSION_MENU)
+    }
+
+    fn popup_arguments(subcommand: &str) -> [OsString; 2] {
         [
-            OsString::from(Self::FIND_SESSION),
+            OsString::from(subcommand),
             OsString::from(format!("--{}", Self::CLIENT_OPTION)),
         ]
     }
@@ -841,10 +849,16 @@ mod tests {
     }
 
     #[test]
-    fn the_session_menu_arguments_enter_the_session_menu() {
+    fn the_menu_arguments_followed_by_a_client_name_enter_the_session_menu() {
         let entry_points = RecordingEntryPoints::default();
+        let words: Vec<String> = Cli::menu_arguments()
+            .iter()
+            .map(|word| word.to_string_lossy().into_owned())
+            .chain(["client-1234".to_string()])
+            .collect();
+        let arguments: Vec<&str> = words.iter().map(String::as_str).collect();
 
-        entry_points.enter(&["__session-menu", "--client", "client-1234"]);
+        entry_points.enter(&arguments);
 
         assert_eq!(entry_points.entered(), ["show_session_menu client-1234"]);
     }

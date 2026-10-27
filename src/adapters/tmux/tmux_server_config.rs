@@ -193,6 +193,7 @@ impl TmuxServerConfig {
                 &TmuxShellToggle::command(),
             ),
             Self::bound(table, bindings.finder_keys(), &self.popups.finder_command()),
+            Self::bound(table, bindings.menu_keys(), &self.popups.menu_command()),
             Self::bound(table, return_key, Self::RETURN),
         ]
         .concat()

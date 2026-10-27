@@ -57,6 +57,7 @@ Each way comes from an ecosystem users already know, and keeps the meaning it ha
 | A fuzzy picker | fzf |
 | The key that opens a finder | the `Ctrl-K` quick switcher, as in Slack, Discord, and GitHub |
 | The key that opens a pull request or the GitHub page of a repo in the browser | the `o` open key, as in gh-dash, newsboat, and GitHub |
+| The key that opens the session menu, and its panel | the leader key and which-key, as in Spacemacs and LazyVim |
 | The new-session dialog's prompt box and status line | Claude Code, where the mode and the model show under the prompt box |
 
 - The arrow keys work wherever an ecosystem's movement keys work.
@@ -438,7 +439,7 @@ The hidden `__session-menu` path runs in the popup that a key in `menu_keys` ope
 
 - If the server runs, `r` re-sources the generated config, even when the server's `@ringleader_config` hash matches the current render. A `tmux source-file` run from a pane can change the server without changing that hash.
 - Only the write lock's holder writes or re-sources the generated config.
-- The binding of each `finder_keys` key names the paths of Ringleader's executable and its tmux and git programs. The config hash covers those paths. A config that another build applied therefore reads as stale. Two builds that share one private tmux server rebind each `finder_keys` key in turn.
+- The binding of each `finder_keys` and `menu_keys` key names the paths of Ringleader's executable and its tmux and git programs. The config hash covers those paths. A config that another build applied therefore reads as stale. Two builds that share one private tmux server rebind each such key in turn.
 
 ### Private tmux server
 

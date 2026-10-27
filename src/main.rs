@@ -514,10 +514,17 @@ impl CompositionRoot {
     }
 
     fn popups(&self) -> TmuxPopups {
-        let finder_prefix = once(self.executable.clone().into_os_string())
-            .chain(Cli::finder_arguments())
-            .collect();
-        TmuxPopups::new(finder_prefix, &self.programs.assignments())
+        TmuxPopups::new(
+            self.popup_prefix(Cli::finder_arguments()),
+            self.popup_prefix(Cli::menu_arguments()),
+            &self.programs.assignments(),
+        )
+    }
+
+    fn popup_prefix(&self, arguments: [OsString; 2]) -> Vec<OsString> {
+        once(self.executable.clone().into_os_string())
+            .chain(arguments)
+            .collect()
     }
 
     fn run_popup<E: Display>(

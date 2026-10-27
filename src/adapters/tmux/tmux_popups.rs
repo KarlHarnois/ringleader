@@ -4,6 +4,7 @@ use std::iter::once;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TmuxPopups {
     finder_prefix: Vec<OsString>,
+    menu_prefix: Vec<OsString>,
     assignments: Vec<OsString>,
 }
 
@@ -11,6 +12,9 @@ impl TmuxPopups {
     const POPUP: &'static str = "display-popup";
     const KEEP_OPEN_ON_FAILURE: &'static str = "-EE";
     const BORDERLESS: &'static str = "-B";
+    const PANE_BOTTOM_LEFT: [&'static str; 4] = ["-x", "P", "-y", "P"];
+    const PANE_WIDE: [&'static str; 2] = ["-w", "'#{pane_width}'"];
+    const MENU_ROWS: [&'static str; 2] = ["-h", "5"];
     const ASSIGNMENT_FLAG: &'static str = "-e";
     const CLIENT_NAME: &'static str = "#{client_name}";
     const FORMAT_MARK: &'static str = "#";
@@ -19,31 +23,52 @@ impl TmuxPopups {
     const ESCAPED_QUOTE: &'static str = r"'\''";
     const DOUBLE_QUOTED_SPECIALS: [char; 3] = ['\\', '"', '$'];
 
-    pub fn new(finder_prefix: Vec<OsString>, assignments: &[OsString]) -> Self {
+    pub fn new(
+        finder_prefix: Vec<OsString>,
+        menu_prefix: Vec<OsString>,
+        assignments: &[OsString],
+    ) -> Self {
         Self {
             finder_prefix,
+            menu_prefix,
             assignments: assignments.to_vec(),
         }
     }
 
     pub fn finder_command(&self) -> String {
-        format!("run-shell -C \"{}\"", Self::double_quoted(&self.popup()))
+        Self::run_shell(&self.popup(&[], &self.finder_prefix))
     }
 
-    fn popup(&self) -> String {
-        let flags = [Self::POPUP, Self::KEEP_OPEN_ON_FAILURE, Self::BORDERLESS].map(String::from);
+    pub fn menu_command(&self) -> String {
+        let placement = [
+            Self::PANE_BOTTOM_LEFT.as_slice(),
+            &Self::PANE_WIDE,
+            &Self::MENU_ROWS,
+        ]
+        .concat();
+        Self::run_shell(&self.popup(&placement, &self.menu_prefix))
+    }
+
+    fn run_shell(command: &str) -> String {
+        format!("run-shell -C \"{}\"", Self::double_quoted(command))
+    }
+
+    fn popup(&self, placement: &[&str], program_prefix: &[OsString]) -> String {
+        let flags = [Self::POPUP, Self::KEEP_OPEN_ON_FAILURE, Self::BORDERLESS]
+            .iter()
+            .chain(placement)
+            .map(|flag| flag.to_string());
         let assignments = self.assignments.iter().flat_map(|assignment| {
             [
                 Self::ASSIGNMENT_FLAG.to_string(),
                 Self::verbatim(assignment),
             ]
         });
-        let finder = self.finder_prefix.iter().map(|word| Self::verbatim(word));
+        let program = program_prefix.iter().map(|word| Self::verbatim(word));
         let client = Self::single_quoted(Self::CLIENT_NAME);
         let words: Vec<String> = flags
-            .into_iter()
             .chain(assignments)
-            .chain(finder)
+            .chain(program)
             .chain(once(client))
             .collect();
         words.join(" ")
@@ -86,10 +111,12 @@ mod tests {
     struct PopupFixture {
         server: TmuxTestServer,
         finder: PathBuf,
+        menu: PathBuf,
     }
 
     impl PopupFixture {
         const FINDER_KEY: &'static str = "C-k";
+        const MENU_KEY: &'static str = "C-Space";
         const LINES_PER_RUN: usize = 3;
         const RECORDING_FINDER: &'static str = "#!/bin/sh\n\
             printf '%s\\n' \"$@\" \"$RINGLEADER_TMUX\" \"$RINGLEADER_GIT\" >> \"$0.runs\"\n\
@@ -105,12 +132,19 @@ mod tests {
 
         fn with_finder_in(directory: &str) -> Self {
             let server = TmuxTestServer::with_session("holder");
-            let finder = server.directory().join(directory).join("finder");
-            fs::create_dir_all(finder.parent().unwrap()).unwrap();
+            let scripts = server.directory().join(directory);
+            let (finder, menu) = (scripts.join("finder"), scripts.join("menu"));
+            fs::create_dir_all(&scripts).unwrap();
             ExecutableScript::write(&finder, Self::RECORDING_FINDER);
-            let sourced = server.source(&Self::render(&Self::popup(&finder, &[])));
+            ExecutableScript::write(&menu, Self::RECORDING_FINDER);
+            let popups = Self::popups(Self::prefix(&finder, &[]), Self::prefix(&menu, &[]));
+            let sourced = server.source(&Self::render(&popups));
             assert!(sourced.status.success(), "{sourced:?}");
-            Self { server, finder }
+            Self {
+                server,
+                finder,
+                menu,
+            }
         }
 
         fn failing() -> Self {
@@ -121,12 +155,27 @@ mod tests {
             fixture
         }
 
-        fn popup(finder: &Path, extra: &[&str]) -> TmuxPopups {
-            let prefix = once(finder.as_os_str())
+        fn ringleader() -> TmuxPopups {
+            let ringleader = Path::new("/bin/ringleader");
+            Self::popups(
+                Self::prefix(ringleader, &["__find-session"]),
+                Self::prefix(ringleader, &["__session-menu"]),
+            )
+        }
+
+        fn prefix(program: &Path, extra: &[&str]) -> Vec<OsString> {
+            once(program.as_os_str())
                 .chain(extra.iter().map(OsStr::new))
                 .map(OsStr::to_os_string)
-                .collect();
-            TmuxPopups::new(prefix, &Self::ASSIGNMENTS.map(OsString::from))
+                .collect()
+        }
+
+        fn popups(finder_prefix: Vec<OsString>, menu_prefix: Vec<OsString>) -> TmuxPopups {
+            TmuxPopups::new(
+                finder_prefix,
+                menu_prefix,
+                &Self::ASSIGNMENTS.map(OsString::from),
+            )
         }
 
         fn render(popup: &TmuxPopups) -> String {
@@ -141,6 +190,10 @@ mod tests {
             self.server.press(client, Self::FINDER_KEY);
         }
 
+        fn press_menu_key(&self, client: &ControlClient) {
+            self.server.press(client, Self::MENU_KEY);
+        }
+
         fn close_popup(&self, client: &ControlClient) {
             let name = self.server.client_name(client);
             self.server.text(&["display-popup", "-C", "-c", &name]);
@@ -150,8 +203,20 @@ mod tests {
             self.server.wait_for(|| self.runs().len() == count)
         }
 
+        fn menu_runs_reach(&self, count: usize) -> bool {
+            self.server.wait_for(|| self.menu_runs().len() == count)
+        }
+
         fn runs(&self) -> Vec<Vec<String>> {
-            let text = fs::read_to_string(self.recording()).unwrap_or_default();
+            Self::runs_of(&self.finder)
+        }
+
+        fn menu_runs(&self) -> Vec<Vec<String>> {
+            Self::runs_of(&self.menu)
+        }
+
+        fn runs_of(script: &Path) -> Vec<Vec<String>> {
+            let text = fs::read_to_string(Self::recording(script)).unwrap_or_default();
             let lines: Vec<String> = text.lines().map(str::to_string).collect();
             lines
                 .chunks(Self::LINES_PER_RUN)
@@ -159,8 +224,8 @@ mod tests {
                 .collect()
         }
 
-        fn recording(&self) -> PathBuf {
-            let mut path = self.finder.clone().into_os_string();
+        fn recording(script: &Path) -> PathBuf {
+            let mut path = script.as_os_str().to_os_string();
             path.push(".runs");
             PathBuf::from(path)
         }
@@ -168,7 +233,7 @@ mod tests {
 
     #[test]
     fn the_command_opens_a_borderless_popup_that_names_the_client_and_the_programs() {
-        let popup = PopupFixture::popup(Path::new("/bin/ringleader"), &["__find-session"]);
+        let popup = PopupFixture::ringleader();
 
         assert_eq!(
             popup.finder_command(),
@@ -177,6 +242,38 @@ mod tests {
              -e 'RINGLEADER_GIT=/nix/store/example-git/bin/git' \
              '/bin/ringleader' '__find-session' '#{client_name}'\""
         );
+    }
+
+    #[test]
+    fn the_menu_command_opens_a_borderless_popup_across_the_bottom_of_the_pane() {
+        let popup = PopupFixture::ringleader();
+
+        assert_eq!(
+            popup.menu_command(),
+            "run-shell -C \"display-popup -EE -B -x P -y P -w '#{pane_width}' -h 5 \
+             -e 'RINGLEADER_TMUX=/nix/store/example-tmux/bin/tmux' \
+             -e 'RINGLEADER_GIT=/nix/store/example-git/bin/git' \
+             '/bin/ringleader' '__session-menu' '#{client_name}'\""
+        );
+    }
+
+    #[test]
+    fn the_menu_key_runs_the_menu_with_the_pressing_client_and_the_programs() {
+        let fixture = PopupFixture::new();
+        let client = fixture.client();
+
+        fixture.press_menu_key(&client);
+
+        assert!(fixture.menu_runs_reach(1), "{:?}", fixture.menu_runs());
+        assert_eq!(
+            fixture.menu_runs()[0],
+            [
+                fixture.server.client_name(&client),
+                "/nix/store/example-tmux/bin/tmux".to_string(),
+                "/nix/store/example-git/bin/git".to_string(),
+            ]
+        );
+        assert!(fixture.runs().is_empty());
     }
 
     #[test]

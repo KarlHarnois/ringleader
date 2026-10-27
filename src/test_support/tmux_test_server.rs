@@ -35,6 +35,7 @@ impl TmuxTestServer {
     pub const STAND_IN: [&'static str; 4] = ["sh", "-c", "sleep 30", "--"];
     const STAND_IN_EXECUTABLE: &'static str = "/nix/store/example-ringleader/bin/ringleader";
     const STAND_IN_FINDER_ARGUMENTS: [&'static str; 2] = ["__find-session", "--client"];
+    const STAND_IN_MENU_ARGUMENTS: [&'static str; 2] = ["__session-menu", "--client"];
     const STAND_IN_PROGRAMS: [&'static str; 2] = [
         "RINGLEADER_TMUX=/nix/store/example-tmux/bin/tmux",
         "RINGLEADER_GIT=/nix/store/example-git/bin/git",
@@ -64,11 +65,18 @@ impl TmuxTestServer {
     }
 
     pub fn stand_in_popups_at(executable: &str) -> TmuxPopups {
-        let finder_prefix = once(executable)
-            .chain(Self::STAND_IN_FINDER_ARGUMENTS)
+        TmuxPopups::new(
+            Self::stand_in_prefix(executable, Self::STAND_IN_FINDER_ARGUMENTS),
+            Self::stand_in_prefix(executable, Self::STAND_IN_MENU_ARGUMENTS),
+            &Self::STAND_IN_PROGRAMS.map(OsString::from),
+        )
+    }
+
+    fn stand_in_prefix(executable: &str, arguments: [&str; 2]) -> Vec<OsString> {
+        once(executable)
+            .chain(arguments)
             .map(OsString::from)
-            .collect();
-        TmuxPopups::new(finder_prefix, &Self::STAND_IN_PROGRAMS.map(OsString::from))
+            .collect()
     }
 
     fn with_config_marked(config_text: &str, marker: ProcessMarker) -> Self {

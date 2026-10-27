@@ -233,7 +233,8 @@ mod tests {
     impl ServerFixture {
         const TABLES: [&'static str; 3] = ["root", "copy-mode", "copy-mode-vi"];
         const SHELL_TOGGLE_MARKER: &'static str = "@ringleader_meta";
-        const FINDER_MARKER: &'static str = "display-popup";
+        const FINDER_MARKER: &'static str = "__find-session";
+        const MENU_MARKER: &'static str = "__session-menu";
         const NEWER_EXECUTABLE: &'static str = "/nix/store/example-newer/bin/ringleader";
 
         fn alt_x() -> KeyBindings {
@@ -293,6 +294,10 @@ mod tests {
 
         fn finder_keys_in(server: &TmuxTestServer, table: &str) -> Vec<String> {
             Self::keys_bound_where(server, table, |line| line.contains(Self::FINDER_MARKER))
+        }
+
+        fn menu_keys_in(server: &TmuxTestServer, table: &str) -> Vec<String> {
+            Self::keys_bound_where(server, table, |line| line.contains(Self::MENU_MARKER))
         }
 
         fn command_running(server: &TmuxTestServer, executable: &str) -> TmuxCommand {
@@ -858,6 +863,25 @@ mod tests {
         for table in ServerFixture::TABLES {
             assert!(
                 ServerFixture::finder_keys_in(&server, table).is_empty(),
+                "{table}"
+            );
+        }
+    }
+
+    #[test]
+    fn applying_a_changed_menu_key_moves_the_menu_in_every_table() {
+        let server = TmuxTestServer::with_session("holder");
+        let tmux = server.command();
+        let changed = KeyBindings::default().with_menu_keys(HotKey::parse_valid(["F10"]));
+
+        PrivateServer::new(&tmux, server.process_table())
+            .apply(&changed)
+            .unwrap();
+
+        for table in ServerFixture::TABLES {
+            assert_eq!(
+                ServerFixture::menu_keys_in(&server, table),
+                ["F10"],
                 "{table}"
             );
         }
