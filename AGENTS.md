@@ -262,6 +262,7 @@ nix develop -c cargo test --bin ringleader <module::path>
 | `docs/agents/features/write-lock.md` | change what a process saves, or when a process takes a lock |
 | `docs/agents/skills.md` | add or change a skill, change how a launch gets the built-in skills, or change the CLI |
 | `docs/agents/features/usage.md` | change how Ringleader measures an agent's usage, or the usage view that the `u` key opens |
+| `docs/agents/features/session-popups.md` | change the session finder or the session menu |
 | `docs/agents/pull-requests.md` | open a pull request, push to one, or fix a CI failure |
 
 ## Architecture
@@ -410,10 +411,6 @@ Confine each `unsafe` block to one adapter method.
 
 The hidden `__exec-agent` path loads no config. It opens no log. It takes no lock.
 
-The hidden `__find-session` path runs in the popup that a key in `finder_keys` opens on the private tmux server. It takes no lock. It writes no first-run config.
-
-The hidden `__session-menu` path runs in the popup that a key in `menu_keys` opens on the private tmux server. It takes no lock. It writes no first-run config. Its delete item NEVER deletes. A delete kills the session's tmux session, which kills the popup. The item hands the delete to the TUI instead. Its new-session item NEVER creates a session, because a create runs under the write lock. The item hands the create to the TUI, which attaches the new session after the create.
-
 ### Locks
 
 **A change to a session, a repo, or the generated config runs under the write lock.** No other command takes the write lock.
@@ -439,7 +436,6 @@ The hidden `__session-menu` path runs in the popup that a key in `menu_keys` ope
 
 - If the server runs, `r` re-sources the generated config, even when the server's `@ringleader_config` hash matches the current render. A `tmux source-file` run from a pane can change the server without changing that hash.
 - Only the write lock's holder writes or re-sources the generated config.
-- The binding of each `finder_keys` and `menu_keys` key names the paths of Ringleader's executable and its tmux and git programs. The config hash covers those paths. A config that another build applied therefore reads as stale. Two builds that share one private tmux server rebind each such key in turn.
 
 ### Private tmux server
 
