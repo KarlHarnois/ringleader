@@ -109,6 +109,17 @@ impl Reconciliation {
             .ok_or_else(|| ServiceError::NotFound(format!("no session named {name}")))
     }
 
+    pub fn row_in_tmux_session(&self, tmux_name: &str) -> Result<&SessionSummary, ServiceError> {
+        self.rows
+            .iter()
+            .find(|row| row.tmux_name() == tmux_name)
+            .ok_or_else(|| {
+                ServiceError::NotFound(format!(
+                    "tmux session {tmux_name} holds no Ringleader session"
+                ))
+            })
+    }
+
     pub fn managed(&self, name: &str) -> Result<ManagedRow<'_>, ServiceError> {
         let row = self.row(name)?;
         let session = row.session().ok_or_else(|| Self::unmanaged_refusal(row))?;

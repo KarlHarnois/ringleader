@@ -45,6 +45,11 @@ shell_toggle_keys = ["M-l"]
 # Ctrl-K, which deletes to the end of the line, away from agents and shells.
 # Inside your own tmux, they must not be bound in its root table.
 finder_keys = ["C-k"]
+# Keys that open the session menu over a session while you are attached. It
+# lists what you can do with the session, each beside its key. [] turns the
+# menu off, and a missing list keeps this default. Inside your own tmux, they
+# must not be bound in its root table.
+menu_keys = ["C-Space"]
 state_poll_ms = 1000
 preview_refresh_ms = 750
 diff_refresh_ms = 3000
@@ -421,6 +426,25 @@ mod tests {
     }
 
     #[test]
+    fn the_menu_keys_in_a_file_reach_the_config() {
+        let fixture = SourceFixture::with_text("menu_keys = [\"M-m\", \"F10\"]\n");
+
+        let config = fixture.source().load().unwrap();
+
+        let menu = config.key_bindings().menu_keys();
+        assert_eq!(SourceFixture::names(menu), ["M-m", "F10"]);
+    }
+
+    #[test]
+    fn an_empty_menu_list_in_a_file_binds_no_menu_key() {
+        let fixture = SourceFixture::with_text("menu_keys = []\n");
+
+        let config = fixture.source().load().unwrap();
+
+        assert!(config.key_bindings().menu_keys().is_empty());
+    }
+
+    #[test]
     fn an_older_config_whose_return_key_is_a_default_session_key_still_loads() {
         let fixture = SourceFixture::with_text("return_key = \"M-k\"\n");
 
@@ -671,6 +695,15 @@ mod tests {
         let written = TomlConfigSource::TEMPLATE
             .lines()
             .any(|line| line == r#"finder_keys = ["C-k"]"#);
+
+        assert!(written);
+    }
+
+    #[test]
+    fn the_first_run_template_writes_the_default_menu_keys() {
+        let written = TomlConfigSource::TEMPLATE
+            .lines()
+            .any(|line| line == r#"menu_keys = ["C-Space"]"#);
 
         assert!(written);
     }

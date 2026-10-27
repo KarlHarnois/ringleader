@@ -19,6 +19,7 @@ pub struct ConfigDraft {
     previous_session_keys: Option<Vec<String>>,
     shell_toggle_keys: Option<Vec<String>>,
     finder_keys: Option<Vec<String>>,
+    menu_keys: Option<Vec<String>>,
     state_poll_ms: u64,
     preview_refresh_ms: u64,
     diff_refresh_ms: u64,
@@ -40,6 +41,7 @@ impl ConfigDraft {
             previous_session_keys: None,
             shell_toggle_keys: None,
             finder_keys: None,
+            menu_keys: None,
             state_poll_ms: 1000,
             preview_refresh_ms: 750,
             diff_refresh_ms: 3000,
@@ -91,6 +93,13 @@ impl ConfigDraft {
     pub fn finder_keys(self, keys: &[impl AsRef<str>]) -> Self {
         Self {
             finder_keys: Some(Self::owned(keys)),
+            ..self
+        }
+    }
+
+    pub fn menu_keys(self, keys: &[impl AsRef<str>]) -> Self {
+        Self {
+            menu_keys: Some(Self::owned(keys)),
             ..self
         }
     }
@@ -195,6 +204,10 @@ impl ConfigDraft {
         self.written_or_default(self.finder_keys.as_deref(), &KeyBindings::FINDER_KEYS)
     }
 
+    pub(super) fn raw_menu_keys(&self) -> Vec<String> {
+        self.written_or_default(self.menu_keys.as_deref(), &KeyBindings::MENU_KEYS)
+    }
+
     pub(super) fn raw_activity_idle_seconds(&self) -> i64 {
         self.activity_idle_seconds
     }
@@ -249,6 +262,10 @@ impl ConfigDraft {
         HotKey::parse_valid(self.raw_finder_keys())
     }
 
+    pub(super) fn menu_keys_value(&self) -> Vec<HotKey> {
+        HotKey::parse_valid(self.raw_menu_keys())
+    }
+
     pub(super) fn activity_idle_seconds_value(&self) -> u64 {
         u64::try_from(self.activity_idle_seconds).unwrap_or_default()
     }
@@ -295,6 +312,7 @@ impl ConfigDraft {
             &self.previous_session_keys,
             &self.shell_toggle_keys,
             &self.finder_keys,
+            &self.menu_keys,
         ]
         .into_iter()
         .flatten()

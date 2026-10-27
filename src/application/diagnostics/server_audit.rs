@@ -423,7 +423,7 @@ mod tests {
         assert!(AuditFixture::line_with(
             &fixture,
             "info:",
-            "your tmux must not use any of C-q, M-j, M-Down, M-k, M-Up, M-l, C-k as its prefix or bind them in its root table"
+            "your tmux must not use any of C-q, M-j, M-Down, M-k, M-Up, M-l, C-k, C-Space as its prefix or bind them in its root table"
         ));
     }
 
@@ -434,7 +434,8 @@ mod tests {
             .next_session_keys(&none)
             .previous_session_keys(&none)
             .shell_toggle_keys(&none)
-            .finder_keys(&none);
+            .finder_keys(&none)
+            .menu_keys(&none);
         let fixture = AuditFixture::with_draft(draft)
             .with_multiplexer(FakeMultiplexer::new().called_from_other_tmux());
 

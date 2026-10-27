@@ -3,7 +3,8 @@ use std::sync::Arc;
 
 use super::checks::agent_readiness::AgentReadiness;
 use super::ports::{
-    AttachTarget, HostProbe, Multiplexer, MultiplexerError, RepoPages, TerminalEmulator, WebBrowser,
+    AttachTarget, ClientView, HostProbe, Multiplexer, MultiplexerError, RepoPages, ReturnRequest,
+    TerminalEmulator, WebBrowser,
 };
 use super::reconciliation::ManagedRow;
 use super::service_error::ServiceError;
@@ -86,25 +87,106 @@ impl SessionAccess {
     }
 
     pub fn open_shell(&self, row: &SessionSummary) -> Result<ShellOutcome, ServiceError> {
-        let session = row.session().ok_or_else(|| {
-            ServiceError::Invalid(format!(
-                "session {} is unmanaged and has no trusted worktree for a shell",
-                row.name()
-            ))
-        })?;
+        let session = Self::trusted_session(row)?;
         self.check_worktree(session)?;
         if row.state() == SessionState::Stopped {
             let shell = EphemeralShell::new(&self.shell, session.worktree_path());
             return Ok(ShellOutcome::Ephemeral(shell));
         }
         self.refuse_own_pane()?;
+        self.multiplexer.attach(&self.shell_window(session)?)?;
+        Ok(ShellOutcome::Attached)
+    }
+
+    pub fn client_view(&self, client: &str) -> Result<ClientView, ServiceError> {
+        self.multiplexer
+            .client_view(client)?
+            .ok_or_else(|| ServiceError::NotFound(format!("tmux client {client} shows no session")))
+    }
+
+    pub fn toggle_shell(
+        &self,
+        row: &SessionSummary,
+        view: &ClientView,
+        client: &str,
+    ) -> Result<(), ServiceError> {
+        let target = match view.shows_shell() {
+            true => Self::agent_of(row),
+            false => self.checked_shell_window(row)?,
+        };
+        self.multiplexer.switch_client(client, &target)?;
+        Ok(())
+    }
+
+    pub fn return_client(&self, client: &str) -> Result<(), ServiceError> {
+        self.multiplexer.detach_client(client)?;
+        Ok(())
+    }
+
+    pub fn delete_on_return(&self, row: &SessionSummary, client: &str) -> Result<(), ServiceError> {
+        let request = ReturnRequest::Delete(row.tmux_name().to_string());
+        self.hand_off_on_return(&request, client)
+    }
+
+    pub fn new_session_on_return(
+        &self,
+        row: &SessionSummary,
+        client: &str,
+    ) -> Result<(), ServiceError> {
+        let repo = RepoGroup::of(row).path().map(Path::to_path_buf);
+        self.hand_off_on_return(&ReturnRequest::NewSession(repo), client)
+    }
+
+    fn hand_off_on_return(
+        &self,
+        request: &ReturnRequest,
+        client: &str,
+    ) -> Result<(), ServiceError> {
+        self.multiplexer.record_return_request(request)?;
+        let detached = self.multiplexer.detach_client(client);
+        if detached.is_err() {
+            self.withdraw_return_request();
+        }
+        Ok(detached?)
+    }
+
+    pub fn return_request(&self) -> Result<Option<ReturnRequest>, ServiceError> {
+        Ok(self.multiplexer.return_request()?)
+    }
+
+    pub fn clear_return_request(&self) -> Result<(), ServiceError> {
+        self.multiplexer.clear_return_request()?;
+        Ok(())
+    }
+
+    fn withdraw_return_request(&self) {
+        if let Err(error) = self.multiplexer.clear_return_request() {
+            log::warn!("could not withdraw the return request: {error}");
+        }
+    }
+
+    fn trusted_session(row: &SessionSummary) -> Result<&Session, ServiceError> {
+        row.session().ok_or_else(|| {
+            ServiceError::Invalid(format!(
+                "session {} is unmanaged and has no trusted worktree for a shell",
+                row.name()
+            ))
+        })
+    }
+
+    fn checked_shell_window(&self, row: &SessionSummary) -> Result<AttachTarget, ServiceError> {
+        let session = Self::trusted_session(row)?;
+        self.check_worktree(session)?;
+        self.shell_window(session)
+    }
+
+    fn shell_window(&self, session: &Session) -> Result<AttachTarget, ServiceError> {
         let window = self.multiplexer.ensure_shell_window(
             session.tmux_name(),
             session.worktree_path(),
             &self.shell,
         )?;
-        self.multiplexer.attach(&AttachTarget::Shell(window))?;
-        Ok(ShellOutcome::Attached)
+        Ok(AttachTarget::Shell(window))
     }
 
     pub fn open_terminal(&self, session: &Session) -> Result<(), ServiceError> {
@@ -222,10 +304,10 @@ impl EphemeralShell {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::application::SessionService;
     use crate::application::ports::{
         ConfigError, RepoPageError, TerminalEmulatorError, WebBrowserError,
     };
+    use crate::application::{HandOff, SessionService};
     use crate::domain::PullRequestState;
     use crate::test_support::{
         FakeMultiplexer, FakePullRequests, FakeRepoPages, FakeTerminalEmulator, FakeWebBrowser,
@@ -256,6 +338,67 @@ mod tests {
                 .with_multiplexer(
                     FakeMultiplexer::new().with_live(ServiceFixture::waiting(&session)),
                 )
+        }
+    }
+
+    struct ClientFixture;
+
+    impl ClientFixture {
+        const CLIENT: &'static str = "client-1234";
+        const TMUX_NAME: &'static str = "ringleader-fix-auth";
+
+        fn on_agent() -> ServiceFixture {
+            Self::showing(
+                ClientView::showing_agent(Self::TMUX_NAME),
+                FakeMultiplexer::new(),
+            )
+        }
+
+        fn on_shell() -> ServiceFixture {
+            Self::showing(
+                ClientView::showing_shell(Self::TMUX_NAME),
+                FakeMultiplexer::new(),
+            )
+        }
+
+        fn with_delete_request() -> ServiceFixture {
+            let multiplexer = FakeMultiplexer::new().with_return_request(Self::delete_request());
+            Self::showing(ClientView::showing_agent(Self::TMUX_NAME), multiplexer)
+        }
+
+        fn with_new_session_request() -> ServiceFixture {
+            let request = ReturnRequest::NewSession(Some(PathBuf::from(ServiceFixture::REPO)));
+            let multiplexer = FakeMultiplexer::new().with_return_request(request);
+            Self::showing(ClientView::showing_agent(Self::TMUX_NAME), multiplexer)
+        }
+
+        fn failing_to_detach() -> ServiceFixture {
+            let failure = MultiplexerError::Failed {
+                subcommand: "detach-client".to_string(),
+                detail: "example failure".to_string(),
+            };
+            let multiplexer = FakeMultiplexer::new().failing("detach_client", failure);
+            Self::showing(ClientView::showing_agent(Self::TMUX_NAME), multiplexer)
+        }
+
+        fn showing(view: ClientView, multiplexer: FakeMultiplexer) -> ServiceFixture {
+            let session = ServiceFixture::session("fix-auth");
+            ServiceFixture::new()
+                .with_sessions(std::slice::from_ref(&session))
+                .with_host(ServiceFixture::host_for(&[&session]))
+                .with_multiplexer(
+                    multiplexer
+                        .with_live(ServiceFixture::waiting(&session))
+                        .with_client_view(Self::CLIENT, view),
+                )
+        }
+
+        fn delete_request() -> ReturnRequest {
+            ReturnRequest::Delete(Self::TMUX_NAME.to_string())
+        }
+
+        fn switched_to(target: AttachTarget) -> Vec<(String, AttachTarget)> {
+            vec![(Self::CLIENT.to_string(), target)]
         }
     }
 
@@ -445,6 +588,167 @@ mod tests {
 
         assert_eq!(switching.to_string(), attaching.to_string());
         assert!(fixture.multiplexer().switched().is_empty());
+    }
+
+    #[test]
+    fn a_client_names_the_session_it_shows() {
+        let fixture = ClientFixture::on_agent();
+
+        let name = fixture
+            .service()
+            .client_session(ClientFixture::CLIENT)
+            .unwrap();
+
+        assert_eq!(name, "fix-auth");
+    }
+
+    #[test]
+    fn a_client_that_shows_no_session_is_not_found() {
+        let fixture = ClientFixture::on_agent();
+
+        let error = fixture.service().client_session("client-9999").unwrap_err();
+
+        assert!(matches!(error, ServiceError::NotFound(_)), "{error}");
+    }
+
+    #[test]
+    fn toggling_from_the_agent_shows_the_shell_window_of_the_configured_shell() {
+        let fixture = ClientFixture::on_agent();
+
+        fixture
+            .service()
+            .toggle_shell(ClientFixture::CLIENT)
+            .unwrap();
+
+        assert_eq!(
+            fixture.multiplexer().switched(),
+            ClientFixture::switched_to(AttachTarget::Shell("@9".to_string()))
+        );
+        assert!(
+            fixture.multiplexer().calls().contains(
+                &"ensure_shell_window ringleader-fix-auth /bin/example-shell".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn toggling_from_the_shell_shows_the_agent() {
+        let fixture = ClientFixture::on_shell();
+
+        fixture
+            .service()
+            .toggle_shell(ClientFixture::CLIENT)
+            .unwrap();
+
+        assert_eq!(
+            fixture.multiplexer().switched(),
+            ClientFixture::switched_to(AttachTarget::Agent(ClientFixture::TMUX_NAME.to_string()))
+        );
+    }
+
+    #[test]
+    fn returning_a_client_detaches_it() {
+        let fixture = ClientFixture::on_agent();
+
+        fixture
+            .service()
+            .return_client(ClientFixture::CLIENT)
+            .unwrap();
+
+        assert_eq!(fixture.multiplexer().detached(), [ClientFixture::CLIENT]);
+    }
+
+    #[test]
+    fn a_delete_on_return_records_the_request_before_it_detaches_the_client() {
+        let fixture = ClientFixture::on_agent();
+
+        fixture
+            .service()
+            .delete_on_return(ClientFixture::CLIENT)
+            .unwrap();
+
+        let calls = fixture.multiplexer().state_changing_calls();
+        assert_eq!(
+            calls,
+            [
+                format!(
+                    "record_return_request {:?}",
+                    ClientFixture::delete_request()
+                ),
+                format!("detach_client {}", ClientFixture::CLIENT),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_delete_on_return_whose_detach_fails_withdraws_the_request() {
+        let fixture = ClientFixture::failing_to_detach();
+
+        let outcome = fixture.service().delete_on_return(ClientFixture::CLIENT);
+
+        assert!(outcome.is_err());
+        assert_eq!(fixture.multiplexer().recorded_return_request(), None);
+    }
+
+    #[test]
+    fn a_new_session_on_return_records_the_repo_of_the_session_before_it_detaches_the_client() {
+        let fixture = ClientFixture::on_agent();
+
+        fixture
+            .service()
+            .new_session_on_return(ClientFixture::CLIENT)
+            .unwrap();
+
+        let calls = fixture.multiplexer().state_changing_calls();
+        assert_eq!(
+            calls,
+            [
+                format!(
+                    "record_return_request {:?}",
+                    ReturnRequest::NewSession(Some(PathBuf::from(ServiceFixture::REPO)))
+                ),
+                format!("detach_client {}", ClientFixture::CLIENT),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_recorded_delete_request_hands_off_the_session_to_delete() {
+        let fixture = ClientFixture::with_delete_request();
+
+        let requested = fixture.service().requested_hand_off().unwrap();
+
+        assert_eq!(requested, Some(HandOff::Delete("fix-auth".to_string())));
+    }
+
+    #[test]
+    fn a_recorded_new_session_request_hands_off_a_new_session_in_its_repo() {
+        let fixture = ClientFixture::with_new_session_request();
+
+        let requested = fixture.service().requested_hand_off().unwrap();
+
+        assert_eq!(
+            requested,
+            Some(HandOff::NewSession(Some(PathBuf::from(
+                ServiceFixture::REPO
+            ))))
+        );
+    }
+
+    #[test]
+    fn no_recorded_request_hands_off_nothing() {
+        let fixture = ClientFixture::on_agent();
+
+        assert_eq!(fixture.service().requested_hand_off().unwrap(), None);
+    }
+
+    #[test]
+    fn a_cleared_request_hands_off_nothing() {
+        let fixture = ClientFixture::with_delete_request();
+
+        fixture.service().clear_return_request().unwrap();
+
+        assert_eq!(fixture.service().requested_hand_off().unwrap(), None);
     }
 
     #[test]

@@ -1,7 +1,7 @@
 use std::{iter, slice};
 
-use super::tmux_finder_popup::TmuxFinderPopup;
 use super::tmux_listing::TmuxListing;
+use super::tmux_popups::TmuxPopups;
 use super::tmux_sequence::TmuxSequence;
 use super::tmux_shell_toggle::TmuxShellToggle;
 use crate::adapters::filesystem::fnv_hash::FnvHash;
@@ -9,7 +9,7 @@ use crate::domain::{HotKey, KeyBindings};
 
 pub struct TmuxServerConfig {
     key_bindings: KeyBindings,
-    finder_popup: TmuxFinderPopup,
+    popups: TmuxPopups,
 }
 
 impl TmuxServerConfig {
@@ -41,10 +41,11 @@ impl TmuxServerConfig {
     const RETURN: &'static str = "detach-client";
     const SUSPEND_KEY: &'static str = "C-z";
     const EMACS_COPY_MODE: &'static str = "copy-mode";
-    const EMACS_COPY_MODE_DEFAULTS: [(&'static str, &'static str); 3] = [
+    const EMACS_COPY_MODE_DEFAULTS: [(&'static str, &'static str); 4] = [
         ("M-Up", "halfpage-up"),
         ("M-Down", "halfpage-down"),
         ("C-k", "copy-pipe-end-of-line-and-cancel"),
+        ("C-Space", "begin-selection"),
     ];
 
     pub const RETURN_KEY_OPTION: &'static str = "@ringleader_return_key";
@@ -52,12 +53,13 @@ impl TmuxServerConfig {
     pub const PREVIOUS_SESSION_KEYS_OPTION: &'static str = "@ringleader_previous_session_keys";
     pub const SHELL_TOGGLE_KEYS_OPTION: &'static str = "@ringleader_shell_toggle_keys";
     pub const FINDER_KEYS_OPTION: &'static str = "@ringleader_finder_keys";
+    pub const MENU_KEYS_OPTION: &'static str = "@ringleader_menu_keys";
     pub const HASH_OPTION: &'static str = "@ringleader_config";
 
-    pub fn new(key_bindings: &KeyBindings, finder_popup: &TmuxFinderPopup) -> Self {
+    pub fn new(key_bindings: &KeyBindings, popups: &TmuxPopups) -> Self {
         Self {
             key_bindings: key_bindings.clone(),
-            finder_popup: finder_popup.clone(),
+            popups: popups.clone(),
         }
     }
 
@@ -87,7 +89,7 @@ impl TmuxServerConfig {
         lines
     }
 
-    fn recorded_keys(&self) -> [String; 5] {
+    fn recorded_keys(&self) -> [String; 6] {
         let bindings = &self.key_bindings;
         [
             Self::option_line(
@@ -109,6 +111,10 @@ impl TmuxServerConfig {
             Self::option_line(
                 Self::FINDER_KEYS_OPTION,
                 &Self::key_list(bindings.finder_keys()),
+            ),
+            Self::option_line(
+                Self::MENU_KEYS_OPTION,
+                &Self::key_list(bindings.menu_keys()),
             ),
         ]
     }
@@ -159,8 +165,14 @@ impl TmuxServerConfig {
             .iter()
             .flat_map(|table| self.table_bindings(table));
         iter::once(Self::suspend_binding())
+            .chain(self.menu_bindings())
             .chain(configured)
             .collect()
+    }
+
+    fn menu_bindings(&self) -> Vec<String> {
+        let menu_keys = self.key_bindings.menu_keys();
+        Self::bound(Self::ROOT_TABLE, menu_keys, &self.popups.menu_command())
     }
 
     fn suspend_binding() -> String {
@@ -187,7 +199,7 @@ impl TmuxServerConfig {
                 bindings.shell_toggle_keys(),
                 &TmuxShellToggle::command(),
             ),
-            Self::bound(table, bindings.finder_keys(), &self.finder_popup.command()),
+            Self::bound(table, bindings.finder_keys(), &self.popups.finder_command()),
             Self::bound(table, return_key, Self::RETURN),
         ]
         .concat()
@@ -234,7 +246,7 @@ mod tests {
     impl ConfigFixture {
         fn render(key: &str) -> String {
             let bindings = KeyBindings::default().with_return_key(HotKey::parse(key).unwrap());
-            TmuxServerConfig::new(&bindings, &TmuxTestServer::stand_in_finder()).render()
+            TmuxServerConfig::new(&bindings, &TmuxTestServer::stand_in_popups()).render()
         }
 
         fn binding(key: &str) -> String {
@@ -357,7 +369,7 @@ mod tests {
     #[test]
     fn the_default_render_matches_the_golden_fixture() {
         let render =
-            TmuxServerConfig::new(&KeyBindings::default(), &TmuxTestServer::stand_in_finder())
+            TmuxServerConfig::new(&KeyBindings::default(), &TmuxTestServer::stand_in_popups())
                 .render();
 
         assert_eq!(render, GOLDEN);
@@ -374,6 +386,33 @@ mod tests {
             words.join(" "),
             "unbind-key -q -T root M-j ; unbind-key -q -T copy-mode M-j ; \
              unbind-key -q -T copy-mode-vi M-j ; source-file -"
+        );
+    }
+
+    #[test]
+    fn the_menu_key_binds_only_outside_copy_mode_so_emacs_copy_mode_keeps_ctrl_space_for_selections()
+     {
+        let rendered =
+            TmuxServerConfig::new(&KeyBindings::default(), &TmuxTestServer::stand_in_popups())
+                .render();
+
+        let copy_mode_menu_bindings = rendered
+            .lines()
+            .filter(|line| line.contains("'C-Space'") && line.contains("copy-mode"));
+        assert_eq!(copy_mode_menu_bindings.count(), 0);
+    }
+
+    #[test]
+    fn the_reapply_unbinds_a_dropped_menu_key_and_gives_emacs_copy_mode_its_selection_key_back() {
+        let changed = KeyBindings::default().with_menu_keys(HotKey::parse_valid(["F10"]));
+
+        let words = ConfigFixture::reapply_words(&KeyBindings::default(), &changed);
+
+        assert_eq!(
+            words.join(" "),
+            "unbind-key -q -T root C-Space ; unbind-key -q -T copy-mode C-Space ; \
+             unbind-key -q -T copy-mode-vi C-Space ; \
+             bind-key -T copy-mode C-Space send-keys -X begin-selection ; source-file -"
         );
     }
 
@@ -671,7 +710,7 @@ mod tests {
             OsStr::new("tmux"),
             &files,
             &server.environment(),
-            &TmuxTestServer::stand_in_finder(),
+            &TmuxTestServer::stand_in_popups(),
         );
 
         tmux.create(

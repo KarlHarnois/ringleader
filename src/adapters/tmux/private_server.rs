@@ -180,7 +180,7 @@ impl<'a> PrivateServer<'a> {
     }
 
     fn render_for(&self, key_bindings: &KeyBindings) -> TmuxServerConfig {
-        TmuxServerConfig::new(key_bindings, self.tmux.finder_popup())
+        TmuxServerConfig::new(key_bindings, self.tmux.popups())
     }
 
     fn write_render(&self, render: &TmuxServerConfig) -> Result<(), MultiplexerError> {
@@ -233,7 +233,8 @@ mod tests {
     impl ServerFixture {
         const TABLES: [&'static str; 3] = ["root", "copy-mode", "copy-mode-vi"];
         const SHELL_TOGGLE_MARKER: &'static str = "@ringleader_meta";
-        const FINDER_MARKER: &'static str = "display-popup";
+        const FINDER_MARKER: &'static str = "__find-session";
+        const MENU_MARKER: &'static str = "__session-menu";
         const NEWER_EXECUTABLE: &'static str = "/nix/store/example-newer/bin/ringleader";
 
         fn alt_x() -> KeyBindings {
@@ -295,10 +296,14 @@ mod tests {
             Self::keys_bound_where(server, table, |line| line.contains(Self::FINDER_MARKER))
         }
 
+        fn menu_keys_in(server: &TmuxTestServer, table: &str) -> Vec<String> {
+            Self::keys_bound_where(server, table, |line| line.contains(Self::MENU_MARKER))
+        }
+
         fn command_running(server: &TmuxTestServer, executable: &str) -> TmuxCommand {
             let files = ServerFiles::new(server.socket(), server.config());
-            let finder = TmuxTestServer::stand_in_finder_at(executable);
-            TmuxCommand::new(server.program(), &files, &server.environment(), &finder)
+            let popups = TmuxTestServer::stand_in_popups_at(executable);
+            TmuxCommand::new(server.program(), &files, &server.environment(), &popups)
         }
 
         fn keys_bound_where(
@@ -645,7 +650,7 @@ mod tests {
         let recorded = HotKey::recorded("M-BSpace").unwrap();
         let older = KeyBindings::default().with_return_key(recorded);
         let server = TmuxTestServer::with_config(
-            &TmuxServerConfig::new(&older, &TmuxTestServer::stand_in_finder()).render(),
+            &TmuxServerConfig::new(&older, &TmuxTestServer::stand_in_popups()).render(),
         );
         server.start_session("holder");
         let tmux = server.command();
@@ -694,7 +699,7 @@ mod tests {
         assert!(written.contains("bind-key -T root 'M-x' detach-client"));
         assert_eq!(
             ServerFixture::option(&server, "@ringleader_config"),
-            TmuxServerConfig::new(&ServerFixture::alt_x(), &TmuxTestServer::stand_in_finder())
+            TmuxServerConfig::new(&ServerFixture::alt_x(), &TmuxTestServer::stand_in_popups())
                 .hash()
         );
     }
@@ -750,7 +755,7 @@ mod tests {
 
         assert_eq!(
             ServerFixture::option(&server, "@ringleader_config"),
-            TmuxServerConfig::new(&changed, &TmuxTestServer::stand_in_finder()).hash()
+            TmuxServerConfig::new(&changed, &TmuxTestServer::stand_in_popups()).hash()
         );
         assert_eq!(
             ServerFixture::option(&server, "@ringleader_next_session_keys"),
@@ -861,6 +866,19 @@ mod tests {
                 "{table}"
             );
         }
+    }
+
+    #[test]
+    fn applying_a_changed_menu_key_moves_the_menu_in_the_root_table() {
+        let server = TmuxTestServer::with_session("holder");
+        let tmux = server.command();
+        let changed = KeyBindings::default().with_menu_keys(HotKey::parse_valid(["F10"]));
+
+        PrivateServer::new(&tmux, server.process_table())
+            .apply(&changed)
+            .unwrap();
+
+        assert_eq!(ServerFixture::menu_keys_in(&server, "root"), ["F10"]);
     }
 
     #[test]

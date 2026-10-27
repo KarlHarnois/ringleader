@@ -1,3 +1,4 @@
+use super::app::AppRequest;
 use super::batch_operation::BatchOperation;
 use crate::application::{
     BatchReport, CreateRequest, DeleteConfirmation, DeleteImpact, DeleteOutcome, ServiceError,
@@ -9,7 +10,7 @@ use crate::domain::RepoGroup;
 pub enum BlockingOperation {
     Restart(String),
     Stop(String),
-    Create(CreateRequest),
+    Create(CreateStep),
     Delete(DeleteStep),
     Rename { old: String, new: String },
     Merge(String),
@@ -34,7 +35,7 @@ impl BlockingOperation {
         match self {
             Self::Restart(name) => format!("Restarting {name}…"),
             Self::Stop(name) => format!("Stopping {name}…"),
-            Self::Create(request) => format!("Creating {}…", request.name()),
+            Self::Create(step) => step.busy_message(),
             Self::Delete(step) => step.busy_message(),
             Self::Rename { old, .. } => format!("Renaming {old}…"),
             Self::Merge(name) => format!("Fetching origin and merging it into {name}…"),
@@ -47,7 +48,7 @@ impl BlockingOperation {
         match self {
             Self::Restart(name) => Self::restart(service, name),
             Self::Stop(name) => Self::stop(service, name),
-            Self::Create(request) => Self::create(service, &request),
+            Self::Create(step) => step.run(service),
             Self::Delete(step) => step.run(service),
             Self::Rename { old, new } => Self::rename(service, &old, &new),
             Self::Merge(name) => Self::merge(service, name),
@@ -67,9 +68,13 @@ impl BlockingOperation {
         }
     }
 
-    fn create(service: &mut SessionService, request: &CreateRequest) -> OperationOutcome {
+    fn create(
+        service: &mut SessionService,
+        request: &CreateRequest,
+        report: fn(String, &StartOutcome) -> OperationOutcome,
+    ) -> OperationOutcome {
         match service.create_session(request) {
-            Ok(outcome) => OperationOutcome::started(Self::created(&outcome), &outcome),
+            Ok(outcome) => report(Self::created(&outcome), &outcome),
             Err(error) => OperationOutcome::Failed(error),
         }
     }
@@ -158,6 +163,35 @@ impl BrowserPage {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CreateStep {
+    Stay(CreateRequest),
+    Attach(CreateRequest),
+}
+
+impl CreateStep {
+    fn busy_message(&self) -> String {
+        format!("Creating {}…", self.request().name())
+    }
+
+    fn run(self, service: &mut SessionService) -> OperationOutcome {
+        BlockingOperation::create(service, self.request(), self.report())
+    }
+
+    fn request(&self) -> &CreateRequest {
+        match self {
+            Self::Stay(request) | Self::Attach(request) => request,
+        }
+    }
+
+    fn report(&self) -> fn(String, &StartOutcome) -> OperationOutcome {
+        match self {
+            Self::Stay(_) => OperationOutcome::started,
+            Self::Attach(_) => OperationOutcome::started_then_attach,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DeleteStep {
     Measure(String),
     Confirmed { name: String, seen: DeleteImpact },
@@ -238,6 +272,10 @@ pub enum OperationOutcome {
         name: String,
         message: String,
     },
+    Attach {
+        name: String,
+        report: Box<OperationOutcome>,
+    },
     Failed(ServiceError),
 }
 
@@ -257,6 +295,20 @@ impl OperationOutcome {
                 select: None,
             },
             false => Self::done(message, None),
+        }
+    }
+
+    pub fn follow_up(&self) -> AppRequest {
+        match self {
+            Self::Attach { name, .. } => AppRequest::Attach(name.clone()),
+            _ => AppRequest::Continue,
+        }
+    }
+
+    fn started_then_attach(message: String, outcome: &StartOutcome) -> Self {
+        Self::Attach {
+            name: outcome.session().name().to_string(),
+            report: Box::new(Self::started(message, outcome)),
         }
     }
 
@@ -310,7 +362,8 @@ mod tests {
             .with_directory_environment(ServiceFixture::not_allowed_envrc("fix-auth"));
         let request = CreateRequest::new("fix-auth", ServiceFixture::repo());
 
-        let outcome = BlockingOperation::Create(request).run(&mut fixture.service());
+        let outcome =
+            BlockingOperation::Create(CreateStep::Stay(request)).run(&mut fixture.service());
 
         let warning = StartOperationFixture::warning(outcome);
         assert!(
