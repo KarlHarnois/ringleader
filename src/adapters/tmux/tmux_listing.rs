@@ -86,6 +86,12 @@ impl<'a> TmuxListing<'a> {
         self.output.first("ringleader-server-pid")?.parse().ok()
     }
 
+    pub fn window_size(&self) -> Option<String> {
+        self.output
+            .first("ringleader-window-size")
+            .map(str::to_string)
+    }
+
     pub fn window_resized(&self) -> bool {
         let mut sizes = self.output.labeled("ringleader-window-size");
         sizes.next() != sizes.next()

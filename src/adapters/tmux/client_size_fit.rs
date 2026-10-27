@@ -9,45 +9,53 @@ use super::tmux_scripts::TmuxScripts;
 pub struct ClientSizeFit<'a> {
     tmux: &'a TmuxCommand,
     pane: &'a str,
+    before: WindowWatch,
 }
 
 impl<'a> ClientSizeFit<'a> {
     const CLIENT_PATIENCE: Duration = Duration::from_secs(1);
     const CLIENT_POLL: Duration = Duration::from_millis(10);
 
-    pub fn new(tmux: &'a TmuxCommand, pane: &'a str) -> Self {
-        Self { tmux, pane }
+    pub fn before_a_client_arrives(tmux: &'a TmuxCommand, pane: &'a str) -> Self {
+        let before = WindowWatch::read(tmux, pane);
+        Self { tmux, pane, before }
     }
 
-    pub fn attached_clients(&self) -> usize {
-        self.tmux
-            .query(&TmuxScripts::attached_clients(self.pane))
-            .ok()
-            .and_then(|output| TmuxListing::new(&output).attached_clients())
-            .unwrap_or_default()
+    pub fn fit_once_a_client_joins(&self) {
+        if self.client_joined() {
+            self.fit_if_resized();
+        }
     }
 
-    pub fn fit_once_a_client_joins(&self, clients_before: usize) {
-        if self.client_joined(clients_before) {
+    pub fn fit_if_resized(&self) {
+        if self.window_resized() {
             self.fit();
         }
     }
 
-    pub fn fit(&self) {
-        if let Err(error) = self.redraw_at_client_size() {
-            log::warn!("{error}");
-        }
-    }
-
-    fn client_joined(&self, clients_before: usize) -> bool {
+    fn client_joined(&self) -> bool {
         let deadline = Instant::now() + Self::CLIENT_PATIENCE;
-        while self.attached_clients() <= clients_before {
+        while self.watch().clients() <= self.before.clients() {
             if Instant::now() >= deadline {
                 return false;
             }
             thread::sleep(Self::CLIENT_POLL);
         }
         true
+    }
+
+    fn window_resized(&self) -> bool {
+        self.watch().size() != self.before.size()
+    }
+
+    fn watch(&self) -> WindowWatch {
+        WindowWatch::read(self.tmux, self.pane)
+    }
+
+    fn fit(&self) {
+        if let Err(error) = self.redraw_at_client_size() {
+            log::warn!("{error}");
+        }
     }
 
     // Each resize runs in its own tmux call because tmux merges the resizes of one call.
@@ -61,6 +69,33 @@ impl<'a> ClientSizeFit<'a> {
             }
         }
         Ok(())
+    }
+}
+
+struct WindowWatch {
+    clients: usize,
+    size: Option<String>,
+}
+
+impl WindowWatch {
+    fn read(tmux: &TmuxCommand, pane: &str) -> Self {
+        let output = tmux.query(&TmuxScripts::window_watch(pane)).ok();
+        let listing = output.as_ref().map(TmuxListing::new);
+        Self {
+            clients: listing
+                .as_ref()
+                .and_then(TmuxListing::attached_clients)
+                .unwrap_or_default(),
+            size: listing.as_ref().and_then(TmuxListing::window_size),
+        }
+    }
+
+    fn clients(&self) -> usize {
+        self.clients
+    }
+
+    fn size(&self) -> Option<&str> {
+        self.size.as_deref()
     }
 }
 
@@ -121,12 +156,11 @@ mod tests {
     fn a_client_that_joins_gets_its_size_twice_so_a_narrowed_agent_lays_out_its_rows_again() {
         let fixture = FitFixture::narrowed();
         let tmux = fixture.server.command();
-        let fit = ClientSizeFit::new(&tmux, FitFixture::WINDOW);
-        let clients_before = fit.attached_clients();
+        let fit = ClientSizeFit::before_a_client_arrives(&tmux, FitFixture::WINDOW);
         let _client = fixture.join_client();
         fixture.server.record_window_sizes();
 
-        fit.fit_once_a_client_joins(clients_before);
+        fit.fit_once_a_client_joins();
 
         assert!(fixture.shows_a_second_resize_at_the_client_size());
     }
@@ -135,10 +169,23 @@ mod tests {
     fn a_window_that_no_client_joins_keeps_its_size() {
         let fixture = FitFixture::narrowed();
         let tmux = fixture.server.command();
-        let fit = ClientSizeFit::new(&tmux, FitFixture::WINDOW);
+        let fit = ClientSizeFit::before_a_client_arrives(&tmux, FitFixture::WINDOW);
 
-        fit.fit_once_a_client_joins(fit.attached_clients());
+        fit.fit_once_a_client_joins();
 
         assert_eq!(fixture.window_size(), "46x22");
+    }
+
+    #[test]
+    fn a_window_already_at_the_client_size_is_not_resized_again() {
+        let fixture = FitFixture::narrowed();
+        let _client = fixture.join_client();
+        let tmux = fixture.server.command();
+        let fit = ClientSizeFit::before_a_client_arrives(&tmux, FitFixture::WINDOW);
+        fixture.server.record_window_sizes();
+
+        fit.fit_if_resized();
+
+        assert!(fixture.server.recorded_window_sizes().is_empty());
     }
 }

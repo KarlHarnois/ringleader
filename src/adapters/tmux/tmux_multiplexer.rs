@@ -200,11 +200,10 @@ impl TmuxMultiplexer {
         mut attach: Command,
         fit: &ClientSizeFit,
     ) -> Result<(), MultiplexerError> {
-        let clients_before = fit.attached_clients();
         let child = attach
             .spawn()
             .map_err(|error| Self::attach_failed(error.to_string()))?;
-        fit.fit_once_a_client_joins(clients_before);
+        fit.fit_once_a_client_joins();
         ForegroundChild::of(&child).map_or(Ok(()), |foreground| {
             foreground.wait().map_err(|status| {
                 Self::attach_failed(format!(
@@ -306,19 +305,20 @@ impl Multiplexer for TmuxMultiplexer {
 
     fn attach(&self, target: &AttachTarget) -> Result<(), MultiplexerError> {
         let pane = self.resolved(target)?;
-        let fit = ClientSizeFit::new(&self.tmux, &pane);
+        let fit = ClientSizeFit::before_a_client_arrives(&self.tmux, &pane);
         self.attach_in_foreground(self.attach_command(&pane), &fit)
     }
 
     fn switch_client(&self, client: &str, target: &AttachTarget) -> Result<(), MultiplexerError> {
         let pane = self.resolved(target)?;
+        let fit = ClientSizeFit::before_a_client_arrives(&self.tmux, &pane);
         let output = self
             .tmux
             .change(&TmuxScripts::switch_client(client, &pane))?;
         if !output.succeeded() {
             return Err(TmuxError::failed("switch-client", &output).into());
         }
-        ClientSizeFit::new(&self.tmux, &pane).fit();
+        fit.fit_if_resized();
         Ok(())
     }
 

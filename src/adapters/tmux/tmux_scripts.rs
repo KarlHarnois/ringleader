@@ -243,14 +243,16 @@ impl TmuxScripts {
             .command(["display-message", "-p", "-t", pane, TmuxLaunch::DONE_LABEL])
     }
 
-    pub fn attached_clients(pane: &str) -> TmuxSequence {
-        TmuxSequence::new().command([
-            "display-message",
-            "-p",
-            "-t",
-            pane,
-            TmuxListing::ATTACHED_CLIENTS_FORMAT,
-        ])
+    pub fn window_watch(pane: &str) -> TmuxSequence {
+        TmuxSequence::new()
+            .command([
+                "display-message",
+                "-p",
+                "-t",
+                pane,
+                TmuxListing::ATTACHED_CLIENTS_FORMAT,
+            ])
+            .command(Self::window_size(pane))
     }
 
     pub fn redraw_at_client_size(pane: &str) -> [TmuxSequence; 3] {
