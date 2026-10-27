@@ -411,6 +411,8 @@ The hidden `__exec-agent` path loads no config. It opens no log. It takes no loc
 
 The hidden `__find-session` path runs in the popup that a key in `finder_keys` opens on the private tmux server. It takes no lock. It writes no first-run config.
 
+The hidden `__session-menu` path runs in the popup that a key in `menu_keys` opens on the private tmux server. It takes no lock. It writes no first-run config. Its delete item NEVER deletes. A delete kills the session's tmux session, which kills the popup. The item hands the delete to the TUI instead.
+
 ### Locks
 
 **A change to a session, a repo, or the generated config runs under the write lock.** No other command takes the write lock.

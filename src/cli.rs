@@ -82,6 +82,11 @@ enum CliCommand {
         #[arg(long = Cli::CLIENT_OPTION, value_name = "CLIENT")]
         client: String,
     },
+    #[command(name = Cli::SESSION_MENU, hide = true)]
+    SessionMenu {
+        #[arg(long = Cli::CLIENT_OPTION, value_name = "CLIENT")]
+        client: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -182,6 +187,7 @@ struct RenameArgs {
 impl Cli {
     const LOCK_WAIT_NOTE: &'static str = "waiting for another Ringleader to finish a change";
     const FIND_SESSION: &'static str = "__find-session";
+    const SESSION_MENU: &'static str = "__session-menu";
     const CLIENT_OPTION: &'static str = "client";
 
     pub fn parse_arguments<I, A>(arguments: I) -> Result<Self, ExitCode>
@@ -214,6 +220,9 @@ impl Cli {
         if let Some(client) = self.finder_client() {
             return entry_points.find_session(self, client);
         }
+        if let Some(client) = self.menu_client() {
+            return entry_points.show_session_menu(self, client);
+        }
         if self.runs_tui() {
             return entry_points.open_tui(self);
         }
@@ -238,6 +247,13 @@ impl Cli {
     fn finder_client(&self) -> Option<&str> {
         match &self.command {
             Some(CliCommand::FindSession { client }) => Some(client),
+            _ => None,
+        }
+    }
+
+    fn menu_client(&self) -> Option<&str> {
+        match &self.command {
+            Some(CliCommand::SessionMenu { client }) => Some(client),
             _ => None,
         }
     }
@@ -382,7 +398,8 @@ impl Cli {
             | CliCommand::Send(_)
             | CliCommand::Doctor(_)
             | CliCommand::ExecAgent { .. }
-            | CliCommand::FindSession { .. } => Ok(0),
+            | CliCommand::FindSession { .. }
+            | CliCommand::SessionMenu { .. } => Ok(0),
         }
     }
 
@@ -502,6 +519,10 @@ mod tests {
 
         fn find_session(&self, _cli: &Cli, client: &str) -> ExitCode {
             self.record(format!("find_session {client}"))
+        }
+
+        fn show_session_menu(&self, _cli: &Cli, client: &str) -> ExitCode {
+            self.record(format!("show_session_menu {client}"))
         }
 
         fn open_tui(&self, _cli: &Cli) -> ExitCode {
@@ -820,9 +841,19 @@ mod tests {
     }
 
     #[test]
+    fn the_session_menu_arguments_enter_the_session_menu() {
+        let entry_points = RecordingEntryPoints::default();
+
+        entry_points.enter(&["__session-menu", "--client", "client-1234"]);
+
+        assert_eq!(entry_points.entered(), ["show_session_menu client-1234"]);
+    }
+
+    #[test]
     fn a_run_that_another_entry_point_takes_runs_no_command() {
         for arguments in [
             ["__find-session", "--client", "client-1234"].as_slice(),
+            ["__session-menu", "--client", "client-1234"].as_slice(),
             &[],
         ] {
             let harness = CliHarness::new(ServiceFixture::new());
@@ -849,11 +880,13 @@ mod tests {
 
         entry_points.enter(&[]);
         entry_points.enter(&["__find-session", "--client", "client-1234"]);
+        entry_points.enter(&["__session-menu", "--client", "client-1234"]);
         entry_points.enter(&["doctor"]);
 
         assert_eq!(
             entry_points.entered(),
             [
+                "refuse_to_start the socket is gone",
                 "refuse_to_start the socket is gone",
                 "refuse_to_start the socket is gone",
                 "run_command"

@@ -4,18 +4,20 @@ use std::time::Duration;
 
 use super::private_server::PrivateServer;
 use super::tmux_agent_input::{InputError, TmuxAgentInput};
+use super::tmux_clients::TmuxClients;
 use super::tmux_command::TmuxCommand;
 use super::tmux_error::TmuxError;
 use super::tmux_launch::{Launched, TmuxLaunch};
 use super::tmux_listing::TmuxListing;
 use super::tmux_output::TmuxOutput;
+use super::tmux_return_requests::TmuxReturnRequests;
 use super::tmux_scripts::TmuxScripts;
 use crate::adapters::agent_launch::launcher_command::{LauncherCommand, PreparedLaunch};
 use crate::adapters::child_process::foreground_child::ForegroundChild;
 use crate::adapters::host::process_table::ProcessTable;
 use crate::application::ports::{
-    AgentLaunch, AttachTarget, Multiplexer, MultiplexerError, ServerConfig, ServerState,
-    SessionSpec,
+    AgentLaunch, AttachTarget, ClientView, Multiplexer, MultiplexerError, ReturnRequest,
+    ServerConfig, ServerState, SessionSpec,
 };
 use crate::domain::{KeyBindings, SessionMetadata, SessionObservation, SessionSize};
 
@@ -310,6 +312,26 @@ impl Multiplexer for TmuxMultiplexer {
             true => Ok(()),
             false => Err(TmuxError::failed("switch-client", &output).into()),
         }
+    }
+
+    fn client_view(&self, client: &str) -> Result<Option<ClientView>, MultiplexerError> {
+        TmuxClients::new(&self.tmux).view(client)
+    }
+
+    fn detach_client(&self, client: &str) -> Result<(), MultiplexerError> {
+        TmuxClients::new(&self.tmux).detach(client)
+    }
+
+    fn record_return_request(&self, request: &ReturnRequest) -> Result<(), MultiplexerError> {
+        TmuxReturnRequests::new(&self.tmux).record(request)
+    }
+
+    fn return_request(&self) -> Result<Option<ReturnRequest>, MultiplexerError> {
+        TmuxReturnRequests::new(&self.tmux).request()
+    }
+
+    fn clear_return_request(&self) -> Result<(), MultiplexerError> {
+        TmuxReturnRequests::new(&self.tmux).clear()
     }
 
     fn capture_pane(&self, tmux_name: &str) -> Result<String, MultiplexerError> {

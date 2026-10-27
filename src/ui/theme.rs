@@ -27,6 +27,10 @@ impl Theme {
         self.base().add_modifier(Modifier::UNDERLINED)
     }
 
+    pub fn accent(&self) -> Style {
+        self.base().fg(Color::Cyan)
+    }
+
     pub fn dim(&self) -> Style {
         self.base().add_modifier(Modifier::DIM)
     }

@@ -175,7 +175,8 @@ where
     fn attach(&mut self, app: &mut App, name: &str) -> io::Result<()> {
         self.screen.restore();
         app.attach(name);
-        self.resume()
+        self.resume()?;
+        self.follow_return_request(app)
     }
 
     fn open_shell(&mut self, app: &mut App, name: &str) -> io::Result<()> {
@@ -183,7 +184,13 @@ where
         if let Some(shell) = app.open_shell(name) {
             app.shell_finished(self.shells.run(&shell));
         }
-        self.resume()
+        self.resume()?;
+        self.follow_return_request(app)
+    }
+
+    fn follow_return_request(&mut self, app: &mut App) -> io::Result<()> {
+        let request = app.follow_return_request();
+        self.serve_request(app, request)
     }
 
     fn resume(&mut self) -> io::Result<()> {
@@ -228,7 +235,7 @@ mod tests {
 
     use super::EventLoop;
     use crate::application::EphemeralShell;
-    use crate::application::ports::AttachTarget;
+    use crate::application::ports::{AttachTarget, ReturnRequest};
     use crate::test_support::{
         Deadline, FakeFoldStore, FakeMultiplexer, FixtureBackend, HeldCalls, RecordingShells,
         ScriptedInput, ServiceFixture, UiHarness,
@@ -393,6 +400,52 @@ mod tests {
         assert_eq!(harness.screen_switches(), ["enter", "leave", "enter"]);
         assert_eq!(event_loop.backend().clears(), 1);
         assert_eq!(fixture.multiplexer().attached().len(), 1);
+    }
+
+    #[test]
+    fn a_delete_requested_from_the_session_menu_opens_the_delete_dialog_on_return() {
+        let session = ServiceFixture::session("fix-auth");
+        let request = ReturnRequest::Delete(session.tmux_name().to_string());
+        let fixture = ServiceFixture::new()
+            .with_sessions(std::slice::from_ref(&session))
+            .with_multiplexer(
+                FakeMultiplexer::new()
+                    .with_live(ServiceFixture::waiting(&session))
+                    .with_return_request(request),
+            );
+        let harness = UiHarness::new();
+        let mut app = UiHarness::app(&fixture);
+        let input =
+            ScriptedInput::events(vec![UiHarness::key(KeyCode::Enter)]).then_after_a_pause(vec![
+                UiHarness::key(KeyCode::Esc),
+                UiHarness::character('q'),
+            ]);
+        let mut event_loop = harness.event_loop(input);
+
+        event_loop.run(&mut app).unwrap();
+
+        let frames = event_loop.backend().frames();
+        assert!(frames.iter().any(|frame| frame.contains("Delete session")));
+        assert_eq!(fixture.multiplexer().recorded_return_request(), None);
+    }
+
+    #[test]
+    fn a_return_without_a_request_opens_no_dialog() {
+        let session = ServiceFixture::session("fix-auth");
+        let fixture = ServiceFixture::new()
+            .with_sessions(std::slice::from_ref(&session))
+            .with_multiplexer(FakeMultiplexer::new().with_live(ServiceFixture::waiting(&session)));
+        let harness = UiHarness::new();
+        let mut app = UiHarness::app(&fixture);
+        let mut event_loop = harness.event_loop(ScriptedInput::events(vec![
+            UiHarness::key(KeyCode::Enter),
+            UiHarness::character('q'),
+        ]));
+
+        event_loop.run(&mut app).unwrap();
+
+        let frames = event_loop.backend().frames();
+        assert!(!frames.iter().any(|frame| frame.contains("Delete session")));
     }
 
     #[test]

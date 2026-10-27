@@ -33,7 +33,8 @@ pub use interrupts::Interrupts;
 pub use lock::{Lock, LockError};
 pub use merge_outcome::MergeOutcome;
 pub use multiplexer::{
-    AttachTarget, Multiplexer, MultiplexerError, ServerConfig, ServerState, SessionSpec,
+    AttachTarget, ClientView, Multiplexer, MultiplexerError, ReturnRequest, ServerConfig,
+    ServerState, SessionSpec,
 };
 pub use pull_requests::{PullRequestError, PullRequests};
 pub use repo_pages::{RepoPageError, RepoPages};

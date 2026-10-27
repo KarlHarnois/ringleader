@@ -8,6 +8,7 @@ mod ui;
 
 use std::convert;
 use std::ffi::OsString;
+use std::fmt::Display;
 use std::fs;
 use std::io::{self, Write};
 use std::iter::once;
@@ -64,8 +65,8 @@ use application::{
 };
 use cli::{Cli, CliExit, CliOutput, CliSession, EntryPoints};
 use ui::{
-    App, CrosstermInput, CrosstermScreenMode, EventLoop, FinderPopupError, SessionFinderPopup,
-    TerminalGuard,
+    App, CrosstermInput, CrosstermScreenMode, EventLoop, FinderPopupError, MenuPopupError,
+    SessionFinderPopup, SessionMenuPopup, TerminalGuard,
 };
 
 fn main() -> ExitCode {
@@ -519,10 +520,32 @@ impl CompositionRoot {
         TmuxPopups::new(finder_prefix, &self.programs.assignments())
     }
 
+    fn run_popup<E: Display>(
+        &self,
+        cli: &Cli,
+        show: impl FnOnce(SessionService) -> Result<(), E>,
+    ) -> ExitCode {
+        let _log = self.start_log(cli);
+        let config_source = self.config_source(cli);
+        let loaded = Self::load(&config_source);
+        show(self.service(config_source, loaded)).map_or_else(
+            |error| Self::fail(&error.to_string()),
+            |()| ExitCode::SUCCESS,
+        )
+    }
+
     fn show_finder(popup: SessionFinderPopup) -> Result<(), FinderPopupError> {
         let screen = TerminalGuard::enter(Box::new(CrosstermScreenMode))?;
         screen.state().install_panic_hook();
         popup.run(CrosstermBackend::new(io::stdout()), CrosstermInput)
+    }
+
+    fn show_menu(popup: SessionMenuPopup) -> Result<(), MenuPopupError> {
+        let screen = TerminalGuard::enter(Box::new(CrosstermScreenMode))?;
+        screen.state().install_panic_hook();
+        Terminal::new(CrosstermBackend::new(io::stdout()))
+            .map_err(MenuPopupError::from)
+            .and_then(|mut terminal| popup.run(&mut terminal, CrosstermInput))
     }
 
     fn handoff(&self) -> AgentHandoff {
@@ -558,14 +581,15 @@ impl EntryPoints for CompositionRoot {
     }
 
     fn find_session(&self, cli: &Cli, client: &str) -> ExitCode {
-        let _log = self.start_log(cli);
-        let config_source = self.config_source(cli);
-        let loaded = Self::load(&config_source);
-        let popup = SessionFinderPopup::new(self.service(config_source, loaded), client);
-        Self::show_finder(popup).map_or_else(
-            |error| Self::fail(&error.to_string()),
-            |()| ExitCode::SUCCESS,
-        )
+        self.run_popup(cli, |service| {
+            Self::show_finder(SessionFinderPopup::new(service, client))
+        })
+    }
+
+    fn show_session_menu(&self, cli: &Cli, client: &str) -> ExitCode {
+        self.run_popup(cli, |service| {
+            Self::show_menu(SessionMenuPopup::new(service, client))
+        })
     }
 
     fn open_tui(&self, cli: &Cli) -> ExitCode {

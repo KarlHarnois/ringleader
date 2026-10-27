@@ -4,7 +4,7 @@ use std::time::Instant;
 use crossterm::event::{Event, KeyEvent, KeyEventKind};
 use ratatui::Frame;
 
-use super::blocking_operation::{BlockingOperation, OperationOutcome};
+use super::blocking_operation::{BlockingOperation, DeleteStep, OperationOutcome};
 use super::dialogs::{Dialog, DialogSlot, DialogStep};
 use super::theme::Theme;
 use crate::application::ports::{FoldStore, Lock, LockError};
@@ -159,6 +159,26 @@ impl App {
             Err(error) => self.report_failure(error),
         }
         None
+    }
+
+    pub fn follow_return_request(&mut self) -> AppRequest {
+        match self.take_requested_deletion() {
+            Some(name) => self.request(AppRequest::Block(BlockingOperation::Delete(
+                DeleteStep::Measure(name),
+            ))),
+            None => AppRequest::Continue,
+        }
+    }
+
+    fn take_requested_deletion(&mut self) -> Option<String> {
+        let requested = self.service.requested_deletion();
+        if let Err(error) = self.service.clear_return_request() {
+            log::warn!("could not clear the return request: {error}");
+        }
+        requested
+            .inspect_err(|error| log::warn!("could not read the return request: {error}"))
+            .ok()
+            .flatten()
     }
 
     pub fn shell_finished(&mut self, outcome: io::Result<()>) {
@@ -485,7 +505,7 @@ mod tests {
         HeldCalls, LogCapture, ServiceFixture, UiHarness,
     };
     use crate::ui::batch_operation::{BatchOperation, DeleteSessionsStep};
-    use crate::ui::blocking_operation::{BrowserPage, DeleteStep};
+    use crate::ui::blocking_operation::BrowserPage;
 
     struct AppFixture;
 
@@ -1846,7 +1866,7 @@ mod tests {
             fixture
                 .multiplexer()
                 .calls()
-                .contains(&"apply_config C-q M-j M-Down M-k M-Up M-l C-k".to_string())
+                .contains(&"apply_config C-q M-j M-Down M-k M-Up M-l C-k C-Space".to_string())
         );
     }
 
