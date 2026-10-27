@@ -54,8 +54,9 @@ impl CreateRequest {
     }
 
     pub fn with_prompt(self, prompt: &str) -> Self {
+        let is_blank = prompt.trim().is_empty();
         Self {
-            prompt: prompt.to_string(),
+            prompt: if is_blank { "" } else { prompt }.to_string(),
             ..self
         }
     }
@@ -83,6 +84,10 @@ impl CreateRequest {
 
     pub fn prompt(&self) -> &str {
         &self.prompt
+    }
+
+    pub fn has_prompt(&self) -> bool {
+        !self.prompt.is_empty()
     }
 }
 

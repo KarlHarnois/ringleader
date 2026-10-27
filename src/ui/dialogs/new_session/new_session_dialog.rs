@@ -48,7 +48,9 @@ impl NewSessionDialog {
             focus: NewSessionField::Name,
             checkout: Checkout::default(),
             error: None,
-            creation: |request| BlockingOperation::Create(CreateStep::Stay(request)),
+            creation: |request| {
+                BlockingOperation::Create(CreateStep::attaching_unless_prompted(request))
+            },
         }
     }
 
@@ -213,15 +215,15 @@ impl NewSessionDialog {
             Self::REPO_MISSING,
         ))?;
         let agent = self.agents.selected().map_err(Refusal::General)?;
-        let prompt = self.prompt.value();
-        if let Some(problem) = agent.launch_refusal(self.mode, &prompt) {
-            return Err(Refusal::General(problem));
-        }
-        Ok(CreateRequest::new(name, repo.clone())
+        let request = CreateRequest::new(name, repo.clone())
             .with_agent(agent.name())
             .with_checkout(self.checkout)
             .with_mode(self.mode)
-            .with_prompt(&prompt))
+            .with_prompt(&self.prompt.value());
+        match agent.launch_refusal(self.mode, request.prompt()) {
+            Some(problem) => Err(Refusal::General(problem)),
+            None => Ok(request),
+        }
     }
 }
 
@@ -609,10 +611,14 @@ mod tests {
         }
 
         fn submitted(step: DialogStep) -> CreateRequest {
+            match Self::create_step(step) {
+                CreateStep::Stay(request) | CreateStep::Attach(request) => request,
+            }
+        }
+
+        fn create_step(step: DialogStep) -> CreateStep {
             match step {
-                DialogStep::Request(AppRequest::Block(BlockingOperation::Create(
-                    CreateStep::Stay(request),
-                ))) => request,
+                DialogStep::Request(AppRequest::Block(BlockingOperation::Create(step))) => step,
                 other => panic!("expected a create request, got {other:?}"),
             }
         }
@@ -872,6 +878,62 @@ mod tests {
                 .with_mode(AgentMode::Plan)
                 .with_prompt("")
         );
+    }
+
+    #[test]
+    fn a_create_without_a_prompt_attaches_so_the_prompt_can_be_typed_in_the_session() {
+        let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
+        DialogFixture::type_text(&mut dialog, &service, "fix-auth");
+
+        let step = DialogFixture::create(&mut dialog, &service);
+
+        assert!(matches!(
+            DialogFixture::create_step(step),
+            CreateStep::Attach(_)
+        ));
+    }
+
+    #[test]
+    fn a_create_with_only_blank_lines_in_the_prompt_attaches() {
+        let (mut dialog, service) =
+            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
+        DialogFixture::control(&mut dialog, &service, 'j');
+
+        let step = DialogFixture::create(&mut dialog, &service);
+
+        assert!(matches!(
+            DialogFixture::create_step(step),
+            CreateStep::Attach(_)
+        ));
+    }
+
+    #[test]
+    fn a_create_with_a_prompt_stays_on_the_home_screen() {
+        let (mut dialog, service) =
+            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
+        DialogFixture::type_text(&mut dialog, &service, "fix the tests");
+
+        let step = DialogFixture::create(&mut dialog, &service);
+
+        assert!(matches!(
+            DialogFixture::create_step(step),
+            CreateStep::Stay(_)
+        ));
+    }
+
+    #[test]
+    fn a_create_from_the_session_menu_attaches_even_with_a_prompt() {
+        let (dialog, service) =
+            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
+        let mut dialog = dialog.attaching_after_create();
+        DialogFixture::type_text(&mut dialog, &service, "fix the tests");
+
+        let step = DialogFixture::create(&mut dialog, &service);
+
+        assert!(matches!(
+            DialogFixture::create_step(step),
+            CreateStep::Attach(_)
+        ));
     }
 
     #[test]
