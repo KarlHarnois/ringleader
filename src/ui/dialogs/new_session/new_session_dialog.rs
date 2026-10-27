@@ -13,7 +13,7 @@ use super::setting::Setting;
 use crate::application::{CreateRequest, SessionService};
 use crate::domain::{AgentMode, Checkout};
 use crate::ui::app::AppRequest;
-use crate::ui::blocking_operation::BlockingOperation;
+use crate::ui::blocking_operation::{BlockingOperation, CreateStep};
 use crate::ui::dialogs::DialogStep;
 use crate::ui::dialogs::dialog_labels::DialogLabels;
 use crate::ui::dialogs::text_field::{FieldKind, TextField};
@@ -48,13 +48,13 @@ impl NewSessionDialog {
             focus: NewSessionField::Name,
             checkout: Checkout::default(),
             error: None,
-            creation: BlockingOperation::Create,
+            creation: |request| BlockingOperation::Create(CreateStep::Stay(request)),
         }
     }
 
     pub fn attaching_after_create(self) -> Self {
         Self {
-            creation: BlockingOperation::CreateThenAttach,
+            creation: |request| BlockingOperation::Create(CreateStep::Attach(request)),
             ..self
         }
     }
@@ -610,9 +610,9 @@ mod tests {
 
         fn submitted(step: DialogStep) -> CreateRequest {
             match step {
-                DialogStep::Request(AppRequest::Block(BlockingOperation::Create(request))) => {
-                    request
-                }
+                DialogStep::Request(AppRequest::Block(BlockingOperation::Create(
+                    CreateStep::Stay(request),
+                ))) => request,
                 other => panic!("expected a create request, got {other:?}"),
             }
         }

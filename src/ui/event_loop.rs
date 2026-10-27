@@ -242,7 +242,7 @@ mod tests {
         ScriptedInput, ServiceFixture, UiHarness,
     };
     use crate::ui::App;
-    use crate::ui::blocking_operation::BlockingOperation;
+    use crate::ui::blocking_operation::{BlockingOperation, CreateStep};
 
     type FixtureLoop = EventLoop<FixtureBackend, ScriptedInput>;
 
@@ -440,7 +440,10 @@ mod tests {
         let request = CreateRequest::new("new-idea", ServiceFixture::repo());
 
         event_loop
-            .perform(&mut app, BlockingOperation::CreateThenAttach(request))
+            .perform(
+                &mut app,
+                BlockingOperation::Create(CreateStep::Attach(request)),
+            )
             .unwrap();
 
         assert_eq!(

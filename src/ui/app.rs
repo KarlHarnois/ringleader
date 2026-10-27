@@ -522,7 +522,7 @@ mod tests {
         HeldCalls, LogCapture, ServiceFixture, UiHarness,
     };
     use crate::ui::batch_operation::{BatchOperation, DeleteSessionsStep};
-    use crate::ui::blocking_operation::BrowserPage;
+    use crate::ui::blocking_operation::{BrowserPage, CreateStep};
 
     struct AppFixture;
 
@@ -3216,9 +3216,8 @@ mod tests {
             .registry()
             .save_from_elsewhere(ServiceFixture::session("dark-mode"));
 
-        app.perform(BlockingOperation::Create(CreateRequest::new(
-            "fix-auth",
-            ServiceFixture::repo(),
+        app.perform(BlockingOperation::Create(CreateStep::Stay(
+            CreateRequest::new("fix-auth", ServiceFixture::repo()),
         )));
 
         assert_eq!(fixture.registry().names(), ["dark-mode", "fix-auth"]);
@@ -3311,9 +3310,8 @@ mod tests {
             .config_source()
             .replace(ServiceFixture::config().with_agents(Vec::new()));
 
-        app.perform(BlockingOperation::Create(CreateRequest::new(
-            "fix-auth",
-            ServiceFixture::repo(),
+        app.perform(BlockingOperation::Create(CreateStep::Stay(
+            CreateRequest::new("fix-auth", ServiceFixture::repo()),
         )));
 
         assert!(fixture.registry().names().is_empty());
