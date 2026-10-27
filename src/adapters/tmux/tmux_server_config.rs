@@ -164,8 +164,14 @@ impl TmuxServerConfig {
             .iter()
             .flat_map(|table| self.table_bindings(table));
         iter::once(Self::suspend_binding())
+            .chain(self.menu_bindings())
             .chain(configured)
             .collect()
+    }
+
+    fn menu_bindings(&self) -> Vec<String> {
+        let menu_keys = self.key_bindings.menu_keys();
+        Self::bound(Self::ROOT_TABLE, menu_keys, &self.popups.menu_command())
     }
 
     fn suspend_binding() -> String {
@@ -193,7 +199,6 @@ impl TmuxServerConfig {
                 &TmuxShellToggle::command(),
             ),
             Self::bound(table, bindings.finder_keys(), &self.popups.finder_command()),
-            Self::bound(table, bindings.menu_keys(), &self.popups.menu_command()),
             Self::bound(table, return_key, Self::RETURN),
         ]
         .concat()
@@ -381,6 +386,19 @@ mod tests {
             "unbind-key -q -T root M-j ; unbind-key -q -T copy-mode M-j ; \
              unbind-key -q -T copy-mode-vi M-j ; source-file -"
         );
+    }
+
+    #[test]
+    fn the_menu_key_binds_only_outside_copy_mode_so_emacs_copy_mode_keeps_ctrl_space_for_selections()
+     {
+        let rendered =
+            TmuxServerConfig::new(&KeyBindings::default(), &TmuxTestServer::stand_in_popups())
+                .render();
+
+        let copy_mode_menu_bindings = rendered
+            .lines()
+            .filter(|line| line.contains("'C-Space'") && line.contains("copy-mode"));
+        assert_eq!(copy_mode_menu_bindings.count(), 0);
     }
 
     #[test]

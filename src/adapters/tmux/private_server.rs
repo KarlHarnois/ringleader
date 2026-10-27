@@ -869,7 +869,7 @@ mod tests {
     }
 
     #[test]
-    fn applying_a_changed_menu_key_moves_the_menu_in_every_table() {
+    fn applying_a_changed_menu_key_moves_the_menu_in_the_root_table() {
         let server = TmuxTestServer::with_session("holder");
         let tmux = server.command();
         let changed = KeyBindings::default().with_menu_keys(HotKey::parse_valid(["F10"]));
@@ -878,13 +878,7 @@ mod tests {
             .apply(&changed)
             .unwrap();
 
-        for table in ServerFixture::TABLES {
-            assert_eq!(
-                ServerFixture::menu_keys_in(&server, table),
-                ["F10"],
-                "{table}"
-            );
-        }
+        assert_eq!(ServerFixture::menu_keys_in(&server, "root"), ["F10"]);
     }
 
     #[test]
