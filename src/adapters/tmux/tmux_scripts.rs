@@ -227,20 +227,13 @@ impl TmuxScripts {
     }
 
     pub fn fit_window(pane: &str, size: SessionSize) -> TmuxSequence {
-        TmuxSequence::new()
-            .command(Self::window_size(pane))
-            .command([
-                "resize-window",
-                "-t",
-                pane,
-                "-x",
-                &size.width().to_string(),
-                "-y",
-                &size.height().to_string(),
-            ])
-            .command(["set-option", "-w", "-u", "-t", pane, "window-size"])
-            .command(Self::window_size(pane))
-            .command(["display-message", "-p", "-t", pane, TmuxLaunch::DONE_LABEL])
+        Self::resized_for_clients(
+            TmuxSequence::new().command(Self::window_size(pane)),
+            pane,
+            size,
+        )
+        .command(Self::window_size(pane))
+        .command(["display-message", "-p", "-t", pane, TmuxLaunch::DONE_LABEL])
     }
 
     pub fn window_watch(pane: &str) -> TmuxSequence {
@@ -264,18 +257,22 @@ impl TmuxScripts {
                 pane,
                 Self::REDRAW_NUDGE_ROWS,
             ]),
-            TmuxSequence::new()
-                .command([
-                    "resize-window",
-                    "-t",
-                    pane,
-                    "-x",
-                    &size.width().to_string(),
-                    "-y",
-                    &size.height().to_string(),
-                ])
-                .command(["set-option", "-w", "-u", "-t", pane, "window-size"]),
+            Self::resized_for_clients(TmuxSequence::new(), pane, size),
         ]
+    }
+
+    fn resized_for_clients(sequence: TmuxSequence, pane: &str, size: SessionSize) -> TmuxSequence {
+        sequence
+            .command([
+                "resize-window",
+                "-t",
+                pane,
+                "-x",
+                &size.width().to_string(),
+                "-y",
+                &size.height().to_string(),
+            ])
+            .command(["set-option", "-w", "-u", "-t", pane, "window-size"])
     }
 
     fn window_size(pane: &str) -> [&str; 5] {
