@@ -791,11 +791,25 @@ mod tests {
             Self::submit_new_session(app, name)
         }
 
-        fn submit_new_session(app: &mut App, name: &str) -> AppRequest {
+        fn request_prompted_create(app: &mut App, name: &str, prompt: &str) -> AppRequest {
+            Self::press(app, 'n');
             Self::settle_dialog(app);
-            for character in name.chars() {
+            Self::type_text(app, name);
+            app.handle_event(&UiHarness::key(KeyCode::Tab));
+            app.handle_event(&UiHarness::key(KeyCode::Tab));
+            Self::type_text(app, prompt);
+            app.handle_event(&UiHarness::control('s'))
+        }
+
+        fn type_text(app: &mut App, text: &str) {
+            for character in text.chars() {
                 Self::press(app, character);
             }
+        }
+
+        fn submit_new_session(app: &mut App, name: &str) -> AppRequest {
+            Self::settle_dialog(app);
+            Self::type_text(app, name);
             app.handle_event(&UiHarness::control('s'))
         }
 
@@ -2260,7 +2274,21 @@ mod tests {
     }
 
     #[test]
-    fn a_session_created_from_n_stays_in_ringleader() {
+    fn a_session_created_from_n_with_a_prompt_stays_in_ringleader() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        let request = AppFixture::request_prompted_create(&mut app, "new-idea", "fix the tests");
+        let AppRequest::Block(operation) = request else {
+            panic!("expected a blocking create");
+        };
+
+        let follow_up = app.perform(operation);
+
+        assert_eq!(follow_up, AppRequest::Continue);
+    }
+
+    #[test]
+    fn a_session_created_from_n_without_a_prompt_attaches_to_take_the_prompt() {
         let fixture = AppFixture::two_waiting_sessions();
         let mut app = AppFixture::started(&fixture, 100, 28);
         let AppRequest::Block(operation) = AppFixture::request_create(&mut app, "new-idea") else {
@@ -2269,7 +2297,7 @@ mod tests {
 
         let follow_up = app.perform(operation);
 
-        assert_eq!(follow_up, AppRequest::Continue);
+        assert_eq!(follow_up, AppRequest::Attach("new-idea".to_string()));
     }
 
     #[test]
