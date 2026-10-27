@@ -5,7 +5,7 @@ use super::metadata_json::MetadataJson;
 use super::pane_row::PaneRow;
 use super::tmux_output::TmuxOutput;
 use crate::application::ports::ServerState;
-use crate::domain::{SessionObservation, TmuxAddress};
+use crate::domain::{SessionObservation, SessionSize, TmuxAddress};
 
 pub struct TmuxListing<'a> {
     output: &'a TmuxOutput,
@@ -86,10 +86,8 @@ impl<'a> TmuxListing<'a> {
         self.output.first("ringleader-server-pid")?.parse().ok()
     }
 
-    pub fn window_size(&self) -> Option<String> {
-        self.output
-            .first("ringleader-window-size")
-            .map(str::to_string)
+    pub fn window_size(&self) -> Option<SessionSize> {
+        SessionSize::parse(self.output.first("ringleader-window-size")?)
     }
 
     pub fn window_resized(&self) -> bool {

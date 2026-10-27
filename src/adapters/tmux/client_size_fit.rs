@@ -5,6 +5,7 @@ use super::tmux_command::TmuxCommand;
 use super::tmux_error::TmuxError;
 use super::tmux_listing::TmuxListing;
 use super::tmux_scripts::TmuxScripts;
+use crate::domain::SessionSize;
 
 pub struct ClientSizeFit {
     tmux: TmuxCommand,
@@ -42,8 +43,8 @@ impl ClientSizeFit {
     }
 
     pub fn fit_if_resized(&self) {
-        if self.window_resized() {
-            self.fit();
+        if let Some(size) = self.resized_to() {
+            self.fit(size);
         }
     }
 
@@ -58,16 +59,18 @@ impl ClientSizeFit {
         true
     }
 
-    fn window_resized(&self) -> bool {
-        self.watch().size() != self.before.size()
+    fn resized_to(&self) -> Option<SessionSize> {
+        self.watch()
+            .size()
+            .filter(|size| Some(*size) != self.before.size())
     }
 
     fn watch(&self) -> WindowWatch {
         WindowWatch::read(&self.tmux, &self.pane)
     }
 
-    fn fit(&self) {
-        if let Err(error) = self.redraw_at_client_size() {
+    fn fit(&self, size: SessionSize) {
+        if let Err(error) = self.redraw_at(size) {
             log::warn!("{error}");
         }
     }
@@ -75,8 +78,8 @@ impl ClientSizeFit {
     // Each resize runs in its own tmux call because tmux merges the resizes of one call.
     // An agent that the preview narrowed lays out its rows for the wide window only after
     // a second resize at the client's size.
-    fn redraw_at_client_size(&self) -> Result<(), TmuxError> {
-        for step in TmuxScripts::redraw_at_client_size(&self.pane) {
+    fn redraw_at(&self, size: SessionSize) -> Result<(), TmuxError> {
+        for step in TmuxScripts::redraw_at(&self.pane, size) {
             let output = self.tmux.change(&step)?;
             if !output.succeeded() {
                 return Err(TmuxError::failed("resize-window", &output));
@@ -88,7 +91,7 @@ impl ClientSizeFit {
 
 struct WindowWatch {
     clients: usize,
-    size: Option<String>,
+    size: Option<SessionSize>,
 }
 
 impl WindowWatch {
@@ -108,8 +111,8 @@ impl WindowWatch {
         self.clients
     }
 
-    fn size(&self) -> Option<&str> {
-        self.size.as_deref()
+    fn size(&self) -> Option<SessionSize> {
+        self.size
     }
 }
 
@@ -140,11 +143,14 @@ mod tests {
         }
 
         fn join_client(&self) -> ControlClient {
+            self.join_client_of_size(&format!("{}x{}", Self::CLIENT_WIDTH, Self::CLIENT_HEIGHT))
+        }
+
+        fn join_client_of_size(&self, size: &str) -> ControlClient {
             let client = self.server.control_client(Self::WINDOW);
             let name = self.server.client_name(&client);
-            let size = format!("{}x{}", Self::CLIENT_WIDTH, Self::CLIENT_HEIGHT);
             self.server
-                .text(&["refresh-client", "-t", &name, "-C", &size]);
+                .text(&["refresh-client", "-t", &name, "-C", size]);
             client
         }
 
@@ -199,6 +205,23 @@ mod tests {
         fit.fit_once_a_client_joins();
 
         assert!(fixture.shows_a_second_resize_at_the_client_size());
+    }
+
+    #[test]
+    fn a_client_that_joins_a_larger_client_gets_its_own_size_and_never_the_larger_one() {
+        let fixture = FitFixture::narrowed();
+        let _larger = fixture.join_client_of_size("120x40");
+        let tmux = fixture.server.command();
+        let fit = ClientSizeFit::before_a_client_arrives(&tmux, FitFixture::WINDOW);
+        let _client = fixture.join_client();
+        fixture.server.record_window_sizes();
+
+        fit.fit_once_a_client_joins();
+
+        assert_eq!(
+            fixture.sizes_recorded_through_a_sentinel(),
+            ["90x29", "90x30", FitFixture::SENTINEL_SIZE]
+        );
     }
 
     #[test]

@@ -255,10 +255,8 @@ impl TmuxScripts {
             .command(Self::window_size(pane))
     }
 
-    pub fn redraw_at_client_size(pane: &str) -> [TmuxSequence; 3] {
-        let to_clients = ["resize-window", "-A", "-t", pane];
+    pub fn redraw_at(pane: &str, size: SessionSize) -> [TmuxSequence; 2] {
         [
-            TmuxSequence::new().command(to_clients),
             TmuxSequence::new().command([
                 "resize-window",
                 "-U",
@@ -266,14 +264,17 @@ impl TmuxScripts {
                 pane,
                 Self::REDRAW_NUDGE_ROWS,
             ]),
-            TmuxSequence::new().command(to_clients).command([
-                "set-option",
-                "-w",
-                "-u",
-                "-t",
-                pane,
-                "window-size",
-            ]),
+            TmuxSequence::new()
+                .command([
+                    "resize-window",
+                    "-t",
+                    pane,
+                    "-x",
+                    &size.width().to_string(),
+                    "-y",
+                    &size.height().to_string(),
+                ])
+                .command(["set-option", "-w", "-u", "-t", pane, "window-size"]),
         ]
     }
 
