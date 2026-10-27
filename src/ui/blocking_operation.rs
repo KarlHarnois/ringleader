@@ -170,7 +170,7 @@ pub enum CreateStep {
 
 impl CreateStep {
     pub fn attaching_unless_prompted(request: CreateRequest) -> Self {
-        match request.prompt().is_empty() {
+        match request.prompt().trim().is_empty() {
             true => Self::Attach(request),
             false => Self::Stay(request),
         }

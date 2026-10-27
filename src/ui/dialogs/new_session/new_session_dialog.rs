@@ -894,6 +894,20 @@ mod tests {
     }
 
     #[test]
+    fn a_create_with_only_blank_lines_in_the_prompt_attaches() {
+        let (mut dialog, service) =
+            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
+        DialogFixture::control(&mut dialog, &service, 'j');
+
+        let step = DialogFixture::create(&mut dialog, &service);
+
+        assert!(matches!(
+            DialogFixture::create_step(step),
+            CreateStep::Attach(_)
+        ));
+    }
+
+    #[test]
     fn a_create_with_a_prompt_stays_on_the_home_screen() {
         let (mut dialog, service) =
             DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
