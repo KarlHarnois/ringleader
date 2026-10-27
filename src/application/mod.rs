@@ -45,7 +45,7 @@ pub use service_error::{ServiceError, Tool};
 pub use service_ports::{AgentPorts, DesktopPorts, RepoPorts, ServicePorts, StatePorts, TmuxPorts};
 pub use session_access::{EphemeralShell, ShellOutcome};
 pub use session_count::SessionCount;
-pub use session_service::{CorruptRegistry, SessionService};
+pub use session_service::{CorruptRegistry, HandOff, SessionService};
 pub use start::creation_plan::CreateRequest;
 pub use start::start_outcome::StartOutcome;
 pub use stop_report::StopReport;

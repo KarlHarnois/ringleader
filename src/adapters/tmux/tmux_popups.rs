@@ -14,7 +14,7 @@ impl TmuxPopups {
     const BORDERLESS: &'static str = "-B";
     const PANE_BOTTOM_LEFT: [&'static str; 4] = ["-x", "P", "-y", "P"];
     const PANE_WIDE: [&'static str; 2] = ["-w", "'#{pane_width}'"];
-    const MENU_ROWS: [&'static str; 2] = ["-h", "5"];
+    const MENU_ROWS: [&'static str; 2] = ["-h", "6"];
     const ASSIGNMENT_FLAG: &'static str = "-e";
     const CLIENT_NAME: &'static str = "#{client_name}";
     const FORMAT_MARK: &'static str = "#";
@@ -250,7 +250,7 @@ mod tests {
 
         assert_eq!(
             popup.menu_command(),
-            "run-shell -C \"display-popup -EE -B -x P -y P -w '#{pane_width}' -h 5 \
+            "run-shell -C \"display-popup -EE -B -x P -y P -w '#{pane_width}' -h 6 \
              -e 'RINGLEADER_TMUX=/nix/store/example-tmux/bin/tmux' \
              -e 'RINGLEADER_GIT=/nix/store/example-git/bin/git' \
              '/bin/ringleader' '__session-menu' '#{client_name}'\""

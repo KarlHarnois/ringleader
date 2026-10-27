@@ -95,6 +95,7 @@ impl SessionMenuPopup {
             MenuItem::PullRequest => self.service.open_pull_request(name),
             MenuItem::Terminal => self.service.open_terminal(name),
             MenuItem::ShellToggle => self.service.toggle_shell(client),
+            MenuItem::NewSession => self.service.new_session_on_return(client),
             MenuItem::Delete => self.service.delete_on_return(client),
             MenuItem::Return => self.service.return_client(client),
         };
@@ -158,7 +159,7 @@ pub enum MenuPopupError {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
     use crossterm::event::{KeyCode, KeyModifiers};
 
@@ -178,7 +179,7 @@ mod tests {
         const NAME: &'static str = "fix-auth";
         const TMUX_NAME: &'static str = "ringleader-fix-auth";
         const WIDTH: u16 = 80;
-        const ROWS: u16 = 5;
+        const ROWS: u16 = 6;
 
         fn run(fixture: &ServiceFixture, events: Vec<Event>) -> Result<Self, MenuPopupError> {
             let mut terminal = Terminal::new(FixtureBackend::new(Self::WIDTH, Self::ROWS))?;
@@ -235,7 +236,7 @@ mod tests {
         let popup = PopupFixture::run(&fixture, vec![PopupFixture::escape()]).unwrap();
 
         assert!(popup.shows(" fix-auth "));
-        assert!(popup.shows(" o  open pull request      u  usage"));
+        assert!(popup.shows(" n  new session… (in Ringleader)   u  usage"));
     }
 
     #[test]
@@ -303,6 +304,21 @@ mod tests {
         assert_eq!(
             fixture.multiplexer().recorded_return_request(),
             Some(ReturnRequest::Delete(PopupFixture::TMUX_NAME.to_string()))
+        );
+        assert_eq!(fixture.multiplexer().detached(), [PopupFixture::CLIENT]);
+    }
+
+    #[test]
+    fn n_hands_a_new_session_in_the_repo_to_ringleader_and_returns_the_client() {
+        let fixture = PopupFixture::attached();
+
+        PopupFixture::pressing(&fixture, "n");
+
+        assert_eq!(
+            fixture.multiplexer().recorded_return_request(),
+            Some(ReturnRequest::NewSession(Some(PathBuf::from(
+                ServiceFixture::REPO
+            ))))
         );
         assert_eq!(fixture.multiplexer().detached(), [PopupFixture::CLIENT]);
     }

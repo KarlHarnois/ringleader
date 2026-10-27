@@ -1,15 +1,16 @@
 use std::io::{self, Write};
+use std::path::PathBuf;
 use std::time::Instant;
 
 use crossterm::event::{Event, KeyEvent, KeyEventKind};
 use ratatui::Frame;
 
 use super::blocking_operation::{BlockingOperation, DeleteStep, OperationOutcome};
-use super::dialogs::{Dialog, DialogSlot, DialogStep};
+use super::dialogs::{Dialog, DialogOpening, DialogSlot, DialogStep};
 use super::theme::Theme;
 use crate::application::ports::{FoldStore, Lock, LockError};
 use crate::application::{
-    CorruptRegistry, EphemeralShell, ServiceError, SessionService, ShellOutcome,
+    CorruptRegistry, EphemeralShell, HandOff, ServiceError, SessionService, ShellOutcome,
 };
 use crate::domain::RepoGroup;
 use crate::ui::home::bell::Bell;
@@ -162,16 +163,24 @@ impl App {
     }
 
     pub fn follow_return_request(&mut self) -> AppRequest {
-        match self.take_requested_deletion() {
-            Some(name) => self.request(AppRequest::Block(BlockingOperation::Delete(
-                DeleteStep::Measure(name),
-            ))),
+        match self.take_hand_off() {
+            Some(HandOff::Delete(name)) => self.request(AppRequest::Block(
+                BlockingOperation::Delete(DeleteStep::Measure(name)),
+            )),
+            Some(HandOff::NewSession(repo)) => self.open_new_session_then_attach(repo),
             None => AppRequest::Continue,
         }
     }
 
-    fn take_requested_deletion(&mut self) -> Option<String> {
-        let requested = self.service.requested_deletion();
+    fn open_new_session_then_attach(&mut self, repo: Option<PathBuf>) -> AppRequest {
+        let gate = Self::gate(&self.home, &self.service);
+        let opening = DialogOpening::NewSessionThenAttach(repo);
+        let action = KeyAction::from(gate.writable().map(|()| KeyAction::Open(opening)));
+        self.take_action(action)
+    }
+
+    fn take_hand_off(&mut self) -> Option<HandOff> {
+        let requested = self.service.requested_hand_off();
         if let Err(error) = self.service.clear_return_request() {
             log::warn!("could not clear the return request: {error}");
         }
@@ -188,12 +197,14 @@ impl App {
         self.observe();
     }
 
-    pub fn perform(&mut self, operation: BlockingOperation) {
+    pub fn perform(&mut self, operation: BlockingOperation) -> AppRequest {
         let outcome = match operation.changes_state() {
             true => self.perform_change(operation),
             false => self.perform_check(operation),
         };
+        let follow_up = outcome.follow_up();
         self.show_outcome(outcome);
+        follow_up
     }
 
     fn perform_change(&mut self, operation: BlockingOperation) -> OperationOutcome {
@@ -243,6 +254,7 @@ impl App {
                 self.home.adopt_latest_pull_request(&name, &self.service);
                 self.status.info(message);
             }
+            OperationOutcome::Attach { report, .. } => self.show_outcome(*report),
             OperationOutcome::Failed(error) => self.report_failure(error),
         }
     }
@@ -263,7 +275,12 @@ impl App {
 
     fn handle_key(&mut self, key: &KeyEvent) -> AppRequest {
         self.status.show(None);
-        match self.key_action(key) {
+        let action = self.key_action(key);
+        self.take_action(action)
+    }
+
+    fn take_action(&mut self, action: KeyAction) -> AppRequest {
+        match action {
             KeyAction::Request(request) => self.request(request),
             KeyAction::Refuse(refusal) => {
                 self.status.error(refusal);
@@ -491,8 +508,8 @@ mod tests {
     use ratatui::style::{Color, Modifier};
 
     use crate::application::ports::{
-        ConfigError, MergeOutcome, MultiplexerError, RegistryError, TerminalEmulatorError,
-        UnmergedCommits, WebBrowserError,
+        ConfigError, MergeOutcome, MultiplexerError, RegistryError, ReturnRequest,
+        TerminalEmulatorError, UnmergedCommits, WebBrowserError,
     };
     use crate::application::{CreateRequest, DeleteImpact};
     use crate::domain::{
@@ -771,11 +788,30 @@ mod tests {
 
         fn request_create(app: &mut App, name: &str) -> AppRequest {
             Self::press(app, 'n');
+            Self::submit_new_session(app, name)
+        }
+
+        fn submit_new_session(app: &mut App, name: &str) -> AppRequest {
             Self::settle_dialog(app);
             for character in name.chars() {
                 Self::press(app, character);
             }
             app.handle_event(&UiHarness::control('s'))
+        }
+
+        fn new_session_handed_off_in_the_docs_repo() -> ServiceFixture {
+            let docs_repo = UiHarness::docs_repo_group();
+            let main_checkout = docs_repo.path().unwrap();
+            let session = ServiceFixture::session("fix-auth");
+            let request = ReturnRequest::NewSession(Some(main_checkout.to_path_buf()));
+            ServiceFixture::new()
+                .with_sessions(std::slice::from_ref(&session))
+                .with_host(ServiceFixture::host_for(&[]).with_directory(main_checkout))
+                .with_multiplexer(
+                    FakeMultiplexer::new()
+                        .with_live(ServiceFixture::waiting(&session))
+                        .with_return_request(request),
+                )
         }
 
         fn settle_dialog(app: &mut App) {
@@ -2221,6 +2257,68 @@ mod tests {
             AppFixture::status_line(&app, 100),
             " Created new-idea on branch new-idea."
         );
+    }
+
+    #[test]
+    fn a_session_created_from_n_stays_in_ringleader() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        let AppRequest::Block(operation) = AppFixture::request_create(&mut app, "new-idea") else {
+            panic!("expected a blocking create");
+        };
+
+        let follow_up = app.perform(operation);
+
+        assert_eq!(follow_up, AppRequest::Continue);
+    }
+
+    #[test]
+    fn a_new_session_handed_off_by_the_session_menu_opens_the_dialog_on_its_repo() {
+        let fixture = AppFixture::new_session_handed_off_in_the_docs_repo();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        app.follow_return_request();
+        AppFixture::settle_dialog(&mut app);
+
+        let screen = AppFixture::screen(&app, 100, 28);
+        assert!(screen.contains(" New session "), "{screen}");
+        assert!(screen.contains("Repo      alpha"), "{screen}");
+    }
+
+    #[test]
+    fn a_new_session_handed_off_by_the_session_menu_clears_the_request() {
+        let fixture = AppFixture::new_session_handed_off_in_the_docs_repo();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        app.follow_return_request();
+
+        assert_eq!(fixture.multiplexer().recorded_return_request(), None);
+    }
+
+    #[test]
+    fn a_session_created_from_a_handed_off_dialog_is_attached() {
+        let fixture = AppFixture::new_session_handed_off_in_the_docs_repo();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        app.follow_return_request();
+        let AppRequest::Block(operation) = AppFixture::submit_new_session(&mut app, "new-idea")
+        else {
+            panic!("expected a blocking create");
+        };
+
+        let follow_up = app.perform(operation);
+
+        assert_eq!(follow_up, AppRequest::Attach("new-idea".to_string()));
+    }
+
+    #[test]
+    fn a_new_session_handed_off_to_a_read_only_tui_opens_no_dialog() {
+        let fixture = AppFixture::new_session_handed_off_in_the_docs_repo()
+            .with_broken_config(AppFixture::config_error());
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        app.follow_return_request();
+
+        assert!(!app.dialogs.is_open());
     }
 
     #[test]

@@ -42,6 +42,9 @@ impl Dialog {
             DialogOpening::NewSession(preferred_repo) => {
                 Self::NewSession(Box::new(NewSessionDialog::open(service, preferred_repo)))
             }
+            DialogOpening::NewSessionThenAttach(preferred_repo) => Self::NewSession(Box::new(
+                NewSessionDialog::open(service, preferred_repo).attaching_after_create(),
+            )),
             DialogOpening::Rename(session) => {
                 Self::Rename(Box::new(RenameSessionDialog::open(*session)))
             }
@@ -241,6 +244,7 @@ impl Dialog {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DialogOpening {
     NewSession(Option<PathBuf>),
+    NewSessionThenAttach(Option<PathBuf>),
     Rename(Box<Session>),
     Help,
     Usage,

@@ -1,3 +1,6 @@
+use std::ffi::OsString;
+use std::path::PathBuf;
+
 use super::tmux_command::TmuxCommand;
 use super::tmux_error::TmuxError;
 use super::tmux_output::TmuxOutput;
@@ -11,15 +14,21 @@ pub struct TmuxReturnRequests<'a> {
 impl<'a> TmuxReturnRequests<'a> {
     const OPTION: &'static str = "@ringleader_return_request";
     const DELETE: &'static str = "delete ";
+    const NEW_SESSION: &'static str = "new-session";
+    const NEW_SESSION_IN: &'static str = "new-session ";
 
     pub fn new(tmux: &'a TmuxCommand) -> Self {
         Self { tmux }
     }
 
     pub fn record(&self, request: &ReturnRequest) -> Result<(), MultiplexerError> {
-        let ReturnRequest::Delete(tmux_name) = request;
-        let value = format!("{}{tmux_name}", Self::DELETE);
-        let record = TmuxSequence::new().command(["set-option", "-g", Self::OPTION, &value]);
+        let value = Self::encoded(request);
+        let record = TmuxSequence::new().command([
+            "set-option".as_ref(),
+            "-g".as_ref(),
+            Self::OPTION.as_ref(),
+            value.as_os_str(),
+        ]);
         let output = self.tmux.change(&record)?;
         Self::require_success("set-option", &output)
     }
@@ -43,10 +52,34 @@ impl<'a> TmuxReturnRequests<'a> {
         Self::require_success("set-option", &output)
     }
 
+    fn encoded(request: &ReturnRequest) -> OsString {
+        match request {
+            ReturnRequest::Delete(tmux_name) => format!("{}{tmux_name}", Self::DELETE).into(),
+            ReturnRequest::NewSession(None) => Self::NEW_SESSION.into(),
+            ReturnRequest::NewSession(Some(repo)) => {
+                let mut value = OsString::from(Self::NEW_SESSION_IN);
+                value.push(repo);
+                value
+            }
+        }
+    }
+
     fn parsed(value: &str) -> Option<ReturnRequest> {
         let line = value.strip_suffix('\n').unwrap_or(value);
+        if line == Self::NEW_SESSION {
+            return Some(ReturnRequest::NewSession(None));
+        }
+        Self::deletion(line).or_else(|| Self::new_session_in(line))
+    }
+
+    fn deletion(line: &str) -> Option<ReturnRequest> {
         line.strip_prefix(Self::DELETE)
             .map(|tmux_name| ReturnRequest::Delete(tmux_name.to_string()))
+    }
+
+    fn new_session_in(line: &str) -> Option<ReturnRequest> {
+        line.strip_prefix(Self::NEW_SESSION_IN)
+            .map(|repo| ReturnRequest::NewSession(Some(PathBuf::from(repo))))
     }
 
     fn require_success(subcommand: &str, output: &TmuxOutput) -> Result<(), MultiplexerError> {
@@ -91,12 +124,36 @@ mod tests {
         fn delete(tmux_name: &str) -> ReturnRequest {
             ReturnRequest::Delete(tmux_name.to_string())
         }
+
+        fn new_session_in(repo: &str) -> ReturnRequest {
+            ReturnRequest::NewSession(Some(PathBuf::from(repo)))
+        }
     }
 
     #[test]
     fn a_recorded_request_reads_back_with_its_raw_tmux_name() {
         let fixture = RequestsFixture::with_server();
         let request = RequestsFixture::delete("ringleader-fix auth #{x}");
+
+        fixture.requests().record(&request).unwrap();
+
+        assert_eq!(fixture.requests().request().unwrap(), Some(request));
+    }
+
+    #[test]
+    fn a_recorded_new_session_request_reads_back_with_its_raw_repo_path() {
+        let fixture = RequestsFixture::with_server();
+        let request = RequestsFixture::new_session_in("/repos/example project #{x}");
+
+        fixture.requests().record(&request).unwrap();
+
+        assert_eq!(fixture.requests().request().unwrap(), Some(request));
+    }
+
+    #[test]
+    fn a_recorded_new_session_request_without_a_repo_reads_back_without_one() {
+        let fixture = RequestsFixture::with_server();
+        let request = ReturnRequest::NewSession(None);
 
         fixture.requests().record(&request).unwrap();
 

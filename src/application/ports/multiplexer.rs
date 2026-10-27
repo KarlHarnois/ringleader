@@ -205,6 +205,7 @@ impl ClientView {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReturnRequest {
     Delete(String),
+    NewSession(Option<PathBuf>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]

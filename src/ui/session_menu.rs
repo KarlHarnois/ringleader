@@ -59,14 +59,14 @@ impl SessionMenu {
 
     pub fn lines(&self, theme: &Theme) -> Vec<Line<'static>> {
         let widths = MenuItem::COLUMNS.map(Self::description_width);
-        let mut lines: Vec<Line<'static>> = (0..MenuItem::ROWS)
+        let mut lines: Vec<Line<'static>> = (0..MenuItem::rows())
             .map(|row| self.row(row, widths, theme))
             .collect();
         lines.push(self.status_line(theme));
         lines
     }
 
-    fn description_width(column: [MenuItem; MenuItem::ROWS]) -> usize {
+    fn description_width(column: &[MenuItem]) -> usize {
         column
             .iter()
             .map(|item| item.description().chars().count())
@@ -78,7 +78,8 @@ impl SessionMenu {
         let spans = MenuItem::COLUMNS
             .iter()
             .zip(widths)
-            .flat_map(|(column, width)| self.cell(column[row], width, theme));
+            .filter_map(|(column, width)| column.get(row).map(|item| (*item, width)))
+            .flat_map(|(item, width)| self.cell(item, width, theme));
         Line::from(spans.collect::<Vec<_>>())
     }
 
@@ -115,6 +116,7 @@ impl SessionMenu {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MenuItem {
+    NewSession,
     PullRequest,
     Terminal,
     ShellToggle,
@@ -124,10 +126,14 @@ pub enum MenuItem {
 }
 
 impl MenuItem {
-    const ROWS: usize = 3;
-    const COLUMNS: [[Self; Self::ROWS]; 2] = [
-        [Self::PullRequest, Self::Terminal, Self::ShellToggle],
-        [Self::Usage, Self::Delete, Self::Return],
+    const COLUMNS: [&'static [Self]; 2] = [
+        &[
+            Self::NewSession,
+            Self::PullRequest,
+            Self::Terminal,
+            Self::ShellToggle,
+        ],
+        &[Self::Usage, Self::Delete, Self::Return],
     ];
 
     pub fn for_key(key: &KeyEvent) -> Option<Self> {
@@ -136,14 +142,23 @@ impl MenuItem {
         };
         let typed = KeyModifiers::SHIFT.contains(key.modifiers);
         Self::COLUMNS
-            .into_iter()
-            .flatten()
+            .iter()
+            .flat_map(|column| column.iter().copied())
             .find(|item| item.key() == character)
             .filter(|_| typed)
     }
 
+    fn rows() -> usize {
+        Self::COLUMNS
+            .iter()
+            .map(|column| column.len())
+            .max()
+            .unwrap_or_default()
+    }
+
     fn key(self) -> char {
         match self {
+            Self::NewSession => 'n',
             Self::PullRequest => 'o',
             Self::Terminal => 'T',
             Self::ShellToggle => 't',
@@ -155,6 +170,7 @@ impl MenuItem {
 
     fn description(self) -> &'static str {
         match self {
+            Self::NewSession => "new session… (in Ringleader)",
             Self::PullRequest => "open pull request",
             Self::Terminal => "open terminal window",
             Self::ShellToggle => "toggle agent / shell",
@@ -235,9 +251,10 @@ mod tests {
         assert_eq!(
             text,
             [
-                "o  open pull request      u  usage",
-                "T  open terminal window   d  delete session… (in Ringleader)",
-                "t  toggle agent / shell   q  return to Ringleader",
+                "n  new session… (in Ringleader)   u  usage",
+                "o  open pull request              d  delete session… (in Ringleader)",
+                "T  open terminal window           q  return to Ringleader",
+                "t  toggle agent / shell",
                 "",
             ]
         );

@@ -28,6 +28,7 @@ pub struct NewSessionDialog {
     checkout: Checkout,
     mode: AgentMode,
     error: Option<String>,
+    creation: fn(CreateRequest) -> BlockingOperation,
 }
 
 impl NewSessionDialog {
@@ -47,6 +48,14 @@ impl NewSessionDialog {
             focus: NewSessionField::Name,
             checkout: Checkout::default(),
             error: None,
+            creation: BlockingOperation::Create,
+        }
+    }
+
+    pub fn attaching_after_create(self) -> Self {
+        Self {
+            creation: BlockingOperation::CreateThenAttach,
+            ..self
         }
     }
 
@@ -173,9 +182,7 @@ impl NewSessionDialog {
 
     fn submit(&mut self) -> DialogStep {
         match self.request() {
-            Ok(request) => {
-                DialogStep::Request(AppRequest::Block(BlockingOperation::Create(request)))
-            }
+            Ok(request) => DialogStep::Request(AppRequest::Block((self.creation)(request))),
             Err(refusal) => {
                 self.refuse(refusal);
                 DialogStep::Stay

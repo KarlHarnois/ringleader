@@ -125,7 +125,24 @@ impl SessionAccess {
 
     pub fn delete_on_return(&self, row: &SessionSummary, client: &str) -> Result<(), ServiceError> {
         let request = ReturnRequest::Delete(row.tmux_name().to_string());
-        self.multiplexer.record_return_request(&request)?;
+        self.hand_off_on_return(&request, client)
+    }
+
+    pub fn new_session_on_return(
+        &self,
+        row: &SessionSummary,
+        client: &str,
+    ) -> Result<(), ServiceError> {
+        let repo = RepoGroup::of(row).path().map(Path::to_path_buf);
+        self.hand_off_on_return(&ReturnRequest::NewSession(repo), client)
+    }
+
+    fn hand_off_on_return(
+        &self,
+        request: &ReturnRequest,
+        client: &str,
+    ) -> Result<(), ServiceError> {
+        self.multiplexer.record_return_request(request)?;
         let detached = self.multiplexer.detach_client(client);
         if detached.is_err() {
             self.withdraw_return_request();
@@ -287,10 +304,10 @@ impl EphemeralShell {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::application::SessionService;
     use crate::application::ports::{
         ConfigError, RepoPageError, TerminalEmulatorError, WebBrowserError,
     };
+    use crate::application::{HandOff, SessionService};
     use crate::domain::PullRequestState;
     use crate::test_support::{
         FakeMultiplexer, FakePullRequests, FakeRepoPages, FakeTerminalEmulator, FakeWebBrowser,
@@ -346,6 +363,12 @@ mod tests {
 
         fn with_delete_request() -> ServiceFixture {
             let multiplexer = FakeMultiplexer::new().with_return_request(Self::delete_request());
+            Self::showing(ClientView::showing_agent(Self::TMUX_NAME), multiplexer)
+        }
+
+        fn with_new_session_request() -> ServiceFixture {
+            let request = ReturnRequest::NewSession(Some(PathBuf::from(ServiceFixture::REPO)));
+            let multiplexer = FakeMultiplexer::new().with_return_request(request);
             Self::showing(ClientView::showing_agent(Self::TMUX_NAME), multiplexer)
         }
 
@@ -668,28 +691,64 @@ mod tests {
     }
 
     #[test]
-    fn a_recorded_delete_request_names_the_session_to_delete() {
-        let fixture = ClientFixture::with_delete_request();
-
-        let requested = fixture.service().requested_deletion().unwrap();
-
-        assert_eq!(requested.as_deref(), Some("fix-auth"));
-    }
-
-    #[test]
-    fn no_recorded_request_names_no_session_to_delete() {
+    fn a_new_session_on_return_records_the_repo_of_the_session_before_it_detaches_the_client() {
         let fixture = ClientFixture::on_agent();
 
-        assert_eq!(fixture.service().requested_deletion().unwrap(), None);
+        fixture
+            .service()
+            .new_session_on_return(ClientFixture::CLIENT)
+            .unwrap();
+
+        let calls = fixture.multiplexer().state_changing_calls();
+        assert_eq!(
+            calls,
+            [
+                format!(
+                    "record_return_request {:?}",
+                    ReturnRequest::NewSession(Some(PathBuf::from(ServiceFixture::REPO)))
+                ),
+                format!("detach_client {}", ClientFixture::CLIENT),
+            ]
+        );
     }
 
     #[test]
-    fn a_cleared_request_names_no_session_to_delete() {
+    fn a_recorded_delete_request_hands_off_the_session_to_delete() {
+        let fixture = ClientFixture::with_delete_request();
+
+        let requested = fixture.service().requested_hand_off().unwrap();
+
+        assert_eq!(requested, Some(HandOff::Delete("fix-auth".to_string())));
+    }
+
+    #[test]
+    fn a_recorded_new_session_request_hands_off_a_new_session_in_its_repo() {
+        let fixture = ClientFixture::with_new_session_request();
+
+        let requested = fixture.service().requested_hand_off().unwrap();
+
+        assert_eq!(
+            requested,
+            Some(HandOff::NewSession(Some(PathBuf::from(
+                ServiceFixture::REPO
+            ))))
+        );
+    }
+
+    #[test]
+    fn no_recorded_request_hands_off_nothing() {
+        let fixture = ClientFixture::on_agent();
+
+        assert_eq!(fixture.service().requested_hand_off().unwrap(), None);
+    }
+
+    #[test]
+    fn a_cleared_request_hands_off_nothing() {
         let fixture = ClientFixture::with_delete_request();
 
         fixture.service().clear_return_request().unwrap();
 
-        assert_eq!(fixture.service().requested_deletion().unwrap(), None);
+        assert_eq!(fixture.service().requested_hand_off().unwrap(), None);
     }
 
     #[test]

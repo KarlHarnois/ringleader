@@ -145,8 +145,9 @@ where
 
     fn perform(&mut self, app: &mut App, operation: BlockingOperation) -> io::Result<()> {
         self.draw(app)?;
-        app.perform(operation);
-        self.drop_queued_input(app)
+        let follow_up = app.perform(operation);
+        self.drop_queued_input(app)?;
+        self.serve_request(app, follow_up)
     }
 
     fn drop_queued_input(&mut self, app: &mut App) -> io::Result<()> {
@@ -234,13 +235,14 @@ mod tests {
     use signal_hook::consts::SIGHUP;
 
     use super::EventLoop;
-    use crate::application::EphemeralShell;
     use crate::application::ports::{AttachTarget, ReturnRequest};
+    use crate::application::{CreateRequest, EphemeralShell};
     use crate::test_support::{
         Deadline, FakeFoldStore, FakeMultiplexer, FixtureBackend, HeldCalls, RecordingShells,
         ScriptedInput, ServiceFixture, UiHarness,
     };
     use crate::ui::App;
+    use crate::ui::blocking_operation::BlockingOperation;
 
     type FixtureLoop = EventLoop<FixtureBackend, ScriptedInput>;
 
@@ -427,6 +429,24 @@ mod tests {
         let frames = event_loop.backend().frames();
         assert!(frames.iter().any(|frame| frame.contains("Delete session")));
         assert_eq!(fixture.multiplexer().recorded_return_request(), None);
+    }
+
+    #[test]
+    fn a_create_then_attach_attaches_the_created_session() {
+        let fixture = ServiceFixture::new();
+        let harness = UiHarness::new();
+        let mut app = UiHarness::app(&fixture);
+        let mut event_loop = harness.event_loop(ScriptedInput::events(Vec::new()));
+        let request = CreateRequest::new("new-idea", ServiceFixture::repo());
+
+        event_loop
+            .perform(&mut app, BlockingOperation::CreateThenAttach(request))
+            .unwrap();
+
+        assert_eq!(
+            fixture.multiplexer().attached(),
+            [AttachTarget::Agent("ringleader-new-idea".to_string())]
+        );
     }
 
     #[test]

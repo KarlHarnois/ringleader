@@ -1,3 +1,4 @@
+use super::app::AppRequest;
 use super::batch_operation::BatchOperation;
 use crate::application::{
     BatchReport, CreateRequest, DeleteConfirmation, DeleteImpact, DeleteOutcome, ServiceError,
@@ -10,6 +11,7 @@ pub enum BlockingOperation {
     Restart(String),
     Stop(String),
     Create(CreateRequest),
+    CreateThenAttach(CreateRequest),
     Delete(DeleteStep),
     Rename { old: String, new: String },
     Merge(String),
@@ -34,7 +36,9 @@ impl BlockingOperation {
         match self {
             Self::Restart(name) => format!("Restarting {name}…"),
             Self::Stop(name) => format!("Stopping {name}…"),
-            Self::Create(request) => format!("Creating {}…", request.name()),
+            Self::Create(request) | Self::CreateThenAttach(request) => {
+                format!("Creating {}…", request.name())
+            }
             Self::Delete(step) => step.busy_message(),
             Self::Rename { old, .. } => format!("Renaming {old}…"),
             Self::Merge(name) => format!("Fetching origin and merging it into {name}…"),
@@ -47,7 +51,10 @@ impl BlockingOperation {
         match self {
             Self::Restart(name) => Self::restart(service, name),
             Self::Stop(name) => Self::stop(service, name),
-            Self::Create(request) => Self::create(service, &request),
+            Self::Create(request) => Self::create(service, &request, OperationOutcome::started),
+            Self::CreateThenAttach(request) => {
+                Self::create(service, &request, OperationOutcome::started_then_attach)
+            }
             Self::Delete(step) => step.run(service),
             Self::Rename { old, new } => Self::rename(service, &old, &new),
             Self::Merge(name) => Self::merge(service, name),
@@ -67,9 +74,13 @@ impl BlockingOperation {
         }
     }
 
-    fn create(service: &mut SessionService, request: &CreateRequest) -> OperationOutcome {
+    fn create(
+        service: &mut SessionService,
+        request: &CreateRequest,
+        report: fn(String, &StartOutcome) -> OperationOutcome,
+    ) -> OperationOutcome {
         match service.create_session(request) {
-            Ok(outcome) => OperationOutcome::started(Self::created(&outcome), &outcome),
+            Ok(outcome) => report(Self::created(&outcome), &outcome),
             Err(error) => OperationOutcome::Failed(error),
         }
     }
@@ -238,6 +249,10 @@ pub enum OperationOutcome {
         name: String,
         message: String,
     },
+    Attach {
+        name: String,
+        report: Box<OperationOutcome>,
+    },
     Failed(ServiceError),
 }
 
@@ -257,6 +272,20 @@ impl OperationOutcome {
                 select: None,
             },
             false => Self::done(message, None),
+        }
+    }
+
+    pub fn follow_up(&self) -> AppRequest {
+        match self {
+            Self::Attach { name, .. } => AppRequest::Attach(name.clone()),
+            _ => AppRequest::Continue,
+        }
+    }
+
+    fn started_then_attach(message: String, outcome: &StartOutcome) -> Self {
+        Self::Attach {
+            name: outcome.session().name().to_string(),
+            report: Box::new(Self::started(message, outcome)),
         }
     }
 

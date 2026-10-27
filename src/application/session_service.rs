@@ -419,13 +419,24 @@ impl SessionService {
         })
     }
 
-    pub fn requested_deletion(&mut self) -> Result<Option<String>, ServiceError> {
-        let Some(ReturnRequest::Delete(tmux_name)) = self.access.return_request()? else {
-            return Ok(None);
-        };
+    pub fn new_session_on_return(&mut self, client: &str) -> Result<(), ServiceError> {
+        self.on_client_session(client, |access, row, _| {
+            access.new_session_on_return(row, client)
+        })
+    }
+
+    pub fn requested_hand_off(&mut self) -> Result<Option<HandOff>, ServiceError> {
+        match self.access.return_request()? {
+            Some(ReturnRequest::Delete(tmux_name)) => self.requested_deletion(&tmux_name),
+            Some(ReturnRequest::NewSession(repo)) => Ok(Some(HandOff::NewSession(repo))),
+            None => Ok(None),
+        }
+    }
+
+    fn requested_deletion(&mut self, tmux_name: &str) -> Result<Option<HandOff>, ServiceError> {
         let reconciliation = self.reconcile()?;
-        let row = reconciliation.row_in_tmux_session(&tmux_name).ok();
-        Ok(row.map(|row| row.name().to_string()))
+        let row = reconciliation.row_in_tmux_session(tmux_name).ok();
+        Ok(row.map(|row| HandOff::Delete(row.name().to_string())))
     }
 
     pub fn clear_return_request(&self) -> Result<(), ServiceError> {
@@ -556,6 +567,12 @@ impl SessionService {
 pub enum CorruptRegistry {
     MoveAside,
     Report,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HandOff {
+    Delete(String),
+    NewSession(Option<PathBuf>),
 }
 
 #[cfg(test)]
