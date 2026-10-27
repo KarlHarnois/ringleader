@@ -10,7 +10,7 @@ use crate::domain::SessionSize;
 pub struct ClientSizeFit {
     tmux: TmuxCommand,
     pane: String,
-    before: WindowWatch,
+    before: Option<WindowWatch>,
     patience: Duration,
 }
 
@@ -22,7 +22,7 @@ impl ClientSizeFit {
         Self {
             tmux: tmux.clone(),
             pane: pane.to_string(),
-            before: WindowWatch::read(tmux, pane),
+            before: WindowWatch::read(tmux, pane).inspect_err(Self::warn).ok(),
             patience: Self::CLIENT_PATIENCE,
         }
     }
@@ -37,20 +37,26 @@ impl ClientSizeFit {
     }
 
     pub fn fit_once_a_client_joins(&self) {
-        if self.client_joined() {
-            self.fit_if_resized();
+        let Some(before) = &self.before else {
+            return;
+        };
+        if self.client_joined(before) {
+            self.fit_resized_from(before);
         }
     }
 
     pub fn fit_if_resized(&self) {
-        if let Some(size) = self.resized_to() {
-            self.fit(size);
+        if let Some(before) = &self.before {
+            self.fit_resized_from(before);
         }
     }
 
-    fn client_joined(&self) -> bool {
+    fn client_joined(&self, before: &WindowWatch) -> bool {
         let deadline = Instant::now() + self.patience;
-        while self.watch().clients() <= self.before.clients() {
+        while !self
+            .watch()
+            .is_ok_and(|now| now.clients() > before.clients())
+        {
             if Instant::now() >= deadline {
                 return false;
             }
@@ -59,19 +65,24 @@ impl ClientSizeFit {
         true
     }
 
-    fn resized_to(&self) -> Option<SessionSize> {
-        self.watch()
-            .size()
-            .filter(|size| Some(*size) != self.before.size())
+    fn fit_resized_from(&self, before: &WindowWatch) {
+        let resized = self
+            .watch()
+            .inspect_err(Self::warn)
+            .ok()
+            .map(|now| now.size());
+        if let Some(size) = resized.filter(|size| *size != before.size()) {
+            self.fit(size);
+        }
     }
 
-    fn watch(&self) -> WindowWatch {
+    fn watch(&self) -> Result<WindowWatch, TmuxError> {
         WindowWatch::read(&self.tmux, &self.pane)
     }
 
     fn fit(&self, size: SessionSize) {
         if let Err(error) = self.redraw_at(size) {
-            log::warn!("{error}");
+            Self::warn(&error);
         }
     }
 
@@ -87,23 +98,26 @@ impl ClientSizeFit {
         }
         Ok(())
     }
+
+    fn warn(error: &TmuxError) {
+        log::warn!("cannot fit the attached window to its client: {error}");
+    }
 }
 
 struct WindowWatch {
     clients: usize,
-    size: Option<SessionSize>,
+    size: SessionSize,
 }
 
 impl WindowWatch {
-    fn read(tmux: &TmuxCommand, pane: &str) -> Self {
-        let output = tmux.query(&TmuxScripts::window_watch(pane)).ok();
-        let listing = output.as_ref().map(TmuxListing::new);
-        Self {
-            clients: listing
-                .as_ref()
-                .and_then(TmuxListing::attached_clients)
-                .unwrap_or_default(),
-            size: listing.as_ref().and_then(TmuxListing::window_size),
+    const SUBCOMMAND: &'static str = "display-message";
+
+    fn read(tmux: &TmuxCommand, pane: &str) -> Result<Self, TmuxError> {
+        let output = tmux.query(&TmuxScripts::window_watch(pane))?;
+        let listing = TmuxListing::new(&output);
+        match (listing.attached_clients(), listing.window_size()) {
+            (Some(clients), Some(size)) => Ok(Self { clients, size }),
+            _ => Err(TmuxError::failed(Self::SUBCOMMAND, &output)),
         }
     }
 
@@ -111,7 +125,7 @@ impl WindowWatch {
         self.clients
     }
 
-    fn size(&self) -> Option<SessionSize> {
+    fn size(&self) -> SessionSize {
         self.size
     }
 }
