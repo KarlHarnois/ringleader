@@ -169,6 +169,13 @@ pub enum CreateStep {
 }
 
 impl CreateStep {
+    pub fn attaching_unless_prompted(request: CreateRequest) -> Self {
+        match request.prompt().is_empty() {
+            true => Self::Attach(request),
+            false => Self::Stay(request),
+        }
+    }
+
     fn busy_message(&self) -> String {
         format!("Creating {}…", self.request().name())
     }

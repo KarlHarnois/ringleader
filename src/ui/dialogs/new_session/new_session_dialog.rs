@@ -48,7 +48,9 @@ impl NewSessionDialog {
             focus: NewSessionField::Name,
             checkout: Checkout::default(),
             error: None,
-            creation: |request| BlockingOperation::Create(CreateStep::Stay(request)),
+            creation: |request| {
+                BlockingOperation::Create(CreateStep::attaching_unless_prompted(request))
+            },
         }
     }
 
@@ -609,10 +611,14 @@ mod tests {
         }
 
         fn submitted(step: DialogStep) -> CreateRequest {
+            match Self::create_step(step) {
+                CreateStep::Stay(request) | CreateStep::Attach(request) => request,
+            }
+        }
+
+        fn create_step(step: DialogStep) -> CreateStep {
             match step {
-                DialogStep::Request(AppRequest::Block(BlockingOperation::Create(
-                    CreateStep::Stay(request),
-                ))) => request,
+                DialogStep::Request(AppRequest::Block(BlockingOperation::Create(step))) => step,
                 other => panic!("expected a create request, got {other:?}"),
             }
         }
@@ -872,6 +878,33 @@ mod tests {
                 .with_mode(AgentMode::Plan)
                 .with_prompt("")
         );
+    }
+
+    #[test]
+    fn a_create_without_a_prompt_attaches_so_the_prompt_can_be_typed_in_the_session() {
+        let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
+        DialogFixture::type_text(&mut dialog, &service, "fix-auth");
+
+        let step = DialogFixture::create(&mut dialog, &service);
+
+        assert!(matches!(
+            DialogFixture::create_step(step),
+            CreateStep::Attach(_)
+        ));
+    }
+
+    #[test]
+    fn a_create_with_a_prompt_stays_on_the_home_screen() {
+        let (mut dialog, service) =
+            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
+        DialogFixture::type_text(&mut dialog, &service, "fix the tests");
+
+        let step = DialogFixture::create(&mut dialog, &service);
+
+        assert!(matches!(
+            DialogFixture::create_step(step),
+            CreateStep::Stay(_)
+        ));
     }
 
     #[test]
