@@ -41,10 +41,11 @@ impl TmuxServerConfig {
     const RETURN: &'static str = "detach-client";
     const SUSPEND_KEY: &'static str = "C-z";
     const EMACS_COPY_MODE: &'static str = "copy-mode";
-    const EMACS_COPY_MODE_DEFAULTS: [(&'static str, &'static str); 3] = [
+    const EMACS_COPY_MODE_DEFAULTS: [(&'static str, &'static str); 4] = [
         ("M-Up", "halfpage-up"),
         ("M-Down", "halfpage-down"),
         ("C-k", "copy-pipe-end-of-line-and-cancel"),
+        ("C-Space", "begin-selection"),
     ];
 
     pub const RETURN_KEY_OPTION: &'static str = "@ringleader_return_key";
@@ -402,7 +403,7 @@ mod tests {
     }
 
     #[test]
-    fn the_reapply_unbinds_a_dropped_menu_key() {
+    fn the_reapply_unbinds_a_dropped_menu_key_and_gives_emacs_copy_mode_its_selection_key_back() {
         let changed = KeyBindings::default().with_menu_keys(HotKey::parse_valid(["F10"]));
 
         let words = ConfigFixture::reapply_words(&KeyBindings::default(), &changed);
@@ -410,7 +411,8 @@ mod tests {
         assert_eq!(
             words.join(" "),
             "unbind-key -q -T root C-Space ; unbind-key -q -T copy-mode C-Space ; \
-             unbind-key -q -T copy-mode-vi C-Space ; source-file -"
+             unbind-key -q -T copy-mode-vi C-Space ; \
+             bind-key -T copy-mode C-Space send-keys -X begin-selection ; source-file -"
         );
     }
 
