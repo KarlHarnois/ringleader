@@ -129,6 +129,7 @@ mod tests {
         const WINDOW: &str = "=alpha:";
         const CLIENT_WIDTH: &str = "90";
         const CLIENT_HEIGHT: &str = "30";
+        const SENTINEL_SIZE: &str = "70x20";
 
         fn narrowed() -> Self {
             let server = TmuxTestServer::new();
@@ -155,6 +156,25 @@ mod tests {
                 Self::WINDOW,
                 "#{window_width}x#{window_height}",
             ])
+        }
+
+        fn sizes_recorded_through_a_sentinel(&self) -> Vec<String> {
+            let (width, height) = Self::SENTINEL_SIZE.split_once('x').unwrap();
+            self.server.text(&[
+                "resize-window",
+                "-t",
+                Self::WINDOW,
+                "-x",
+                width,
+                "-y",
+                height,
+            ]);
+            self.server.wait_for(|| {
+                self.server
+                    .recorded_window_sizes()
+                    .contains(&Self::SENTINEL_SIZE.to_string())
+            });
+            self.server.recorded_window_sizes()
         }
 
         fn shows_a_second_resize_at_the_client_size(&self) -> bool {
@@ -203,6 +223,9 @@ mod tests {
 
         fit.fit_if_resized();
 
-        assert!(fixture.server.recorded_window_sizes().is_empty());
+        assert_eq!(
+            fixture.sizes_recorded_through_a_sentinel(),
+            [FitFixture::SENTINEL_SIZE]
+        );
     }
 }
