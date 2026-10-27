@@ -922,6 +922,21 @@ mod tests {
     }
 
     #[test]
+    fn a_create_from_the_session_menu_attaches_even_with_a_prompt() {
+        let (dialog, service) =
+            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
+        let mut dialog = dialog.attaching_after_create();
+        DialogFixture::type_text(&mut dialog, &service, "fix the tests");
+
+        let step = DialogFixture::create(&mut dialog, &service);
+
+        assert!(matches!(
+            DialogFixture::create_step(step),
+            CreateStep::Attach(_)
+        ));
+    }
+
+    #[test]
     fn control_w_deletes_the_last_word_of_the_name() {
         let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
         DialogFixture::type_text(&mut dialog, &service, "fix the auth");
