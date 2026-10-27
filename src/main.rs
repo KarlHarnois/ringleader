@@ -53,8 +53,8 @@ use adapters::sqlite::sqlite_opencode_database::SqliteOpencodeDatabase;
 use adapters::terminal_emulator::system_terminal_emulator::SystemTerminalEmulator;
 use adapters::tmux::server_files::ServerFiles;
 use adapters::tmux::tmux_command::TmuxCommand;
-use adapters::tmux::tmux_finder_popup::TmuxFinderPopup;
 use adapters::tmux::tmux_multiplexer::TmuxMultiplexer;
+use adapters::tmux::tmux_popups::TmuxPopups;
 use adapters::web_browser::xdg_web_browser::XdgWebBrowser;
 use adapters::{BoundedCommand, Deadlines, GitWorkspace, HostDesktop, HostMounts};
 use application::ports::{ConfigSource, HostProbe, PullRequests, RepoPages, UsageMeter};
@@ -488,7 +488,7 @@ impl CompositionRoot {
             self.programs.tmux(),
             &self.server,
             &self.environment,
-            &self.finder_popup(),
+            &self.popups(),
         )
         .removing_env_names(env_names)
     }
@@ -512,11 +512,11 @@ impl CompositionRoot {
         ]
     }
 
-    fn finder_popup(&self) -> TmuxFinderPopup {
+    fn popups(&self) -> TmuxPopups {
         let finder_prefix = once(self.executable.clone().into_os_string())
             .chain(Cli::finder_arguments())
             .collect();
-        TmuxFinderPopup::new(finder_prefix, &self.programs.assignments())
+        TmuxPopups::new(finder_prefix, &self.programs.assignments())
     }
 
     fn show_finder(popup: SessionFinderPopup) -> Result<(), FinderPopupError> {

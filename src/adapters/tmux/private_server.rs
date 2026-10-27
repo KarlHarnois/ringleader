@@ -180,7 +180,7 @@ impl<'a> PrivateServer<'a> {
     }
 
     fn render_for(&self, key_bindings: &KeyBindings) -> TmuxServerConfig {
-        TmuxServerConfig::new(key_bindings, self.tmux.finder_popup())
+        TmuxServerConfig::new(key_bindings, self.tmux.popups())
     }
 
     fn write_render(&self, render: &TmuxServerConfig) -> Result<(), MultiplexerError> {
@@ -297,8 +297,8 @@ mod tests {
 
         fn command_running(server: &TmuxTestServer, executable: &str) -> TmuxCommand {
             let files = ServerFiles::new(server.socket(), server.config());
-            let finder = TmuxTestServer::stand_in_finder_at(executable);
-            TmuxCommand::new(server.program(), &files, &server.environment(), &finder)
+            let popups = TmuxTestServer::stand_in_popups_at(executable);
+            TmuxCommand::new(server.program(), &files, &server.environment(), &popups)
         }
 
         fn keys_bound_where(
@@ -645,7 +645,7 @@ mod tests {
         let recorded = HotKey::recorded("M-BSpace").unwrap();
         let older = KeyBindings::default().with_return_key(recorded);
         let server = TmuxTestServer::with_config(
-            &TmuxServerConfig::new(&older, &TmuxTestServer::stand_in_finder()).render(),
+            &TmuxServerConfig::new(&older, &TmuxTestServer::stand_in_popups()).render(),
         );
         server.start_session("holder");
         let tmux = server.command();
@@ -694,7 +694,7 @@ mod tests {
         assert!(written.contains("bind-key -T root 'M-x' detach-client"));
         assert_eq!(
             ServerFixture::option(&server, "@ringleader_config"),
-            TmuxServerConfig::new(&ServerFixture::alt_x(), &TmuxTestServer::stand_in_finder())
+            TmuxServerConfig::new(&ServerFixture::alt_x(), &TmuxTestServer::stand_in_popups())
                 .hash()
         );
     }
@@ -750,7 +750,7 @@ mod tests {
 
         assert_eq!(
             ServerFixture::option(&server, "@ringleader_config"),
-            TmuxServerConfig::new(&changed, &TmuxTestServer::stand_in_finder()).hash()
+            TmuxServerConfig::new(&changed, &TmuxTestServer::stand_in_popups()).hash()
         );
         assert_eq!(
             ServerFixture::option(&server, "@ringleader_next_session_keys"),

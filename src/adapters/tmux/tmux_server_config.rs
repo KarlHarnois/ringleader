@@ -1,7 +1,7 @@
 use std::{iter, slice};
 
-use super::tmux_finder_popup::TmuxFinderPopup;
 use super::tmux_listing::TmuxListing;
+use super::tmux_popups::TmuxPopups;
 use super::tmux_sequence::TmuxSequence;
 use super::tmux_shell_toggle::TmuxShellToggle;
 use crate::adapters::filesystem::fnv_hash::FnvHash;
@@ -9,7 +9,7 @@ use crate::domain::{HotKey, KeyBindings};
 
 pub struct TmuxServerConfig {
     key_bindings: KeyBindings,
-    finder_popup: TmuxFinderPopup,
+    popups: TmuxPopups,
 }
 
 impl TmuxServerConfig {
@@ -55,10 +55,10 @@ impl TmuxServerConfig {
     pub const MENU_KEYS_OPTION: &'static str = "@ringleader_menu_keys";
     pub const HASH_OPTION: &'static str = "@ringleader_config";
 
-    pub fn new(key_bindings: &KeyBindings, finder_popup: &TmuxFinderPopup) -> Self {
+    pub fn new(key_bindings: &KeyBindings, popups: &TmuxPopups) -> Self {
         Self {
             key_bindings: key_bindings.clone(),
-            finder_popup: finder_popup.clone(),
+            popups: popups.clone(),
         }
     }
 
@@ -192,7 +192,7 @@ impl TmuxServerConfig {
                 bindings.shell_toggle_keys(),
                 &TmuxShellToggle::command(),
             ),
-            Self::bound(table, bindings.finder_keys(), &self.finder_popup.command()),
+            Self::bound(table, bindings.finder_keys(), &self.popups.finder_command()),
             Self::bound(table, return_key, Self::RETURN),
         ]
         .concat()
@@ -239,7 +239,7 @@ mod tests {
     impl ConfigFixture {
         fn render(key: &str) -> String {
             let bindings = KeyBindings::default().with_return_key(HotKey::parse(key).unwrap());
-            TmuxServerConfig::new(&bindings, &TmuxTestServer::stand_in_finder()).render()
+            TmuxServerConfig::new(&bindings, &TmuxTestServer::stand_in_popups()).render()
         }
 
         fn binding(key: &str) -> String {
@@ -362,7 +362,7 @@ mod tests {
     #[test]
     fn the_default_render_matches_the_golden_fixture() {
         let render =
-            TmuxServerConfig::new(&KeyBindings::default(), &TmuxTestServer::stand_in_finder())
+            TmuxServerConfig::new(&KeyBindings::default(), &TmuxTestServer::stand_in_popups())
                 .render();
 
         assert_eq!(render, GOLDEN);
@@ -689,7 +689,7 @@ mod tests {
             OsStr::new("tmux"),
             &files,
             &server.environment(),
-            &TmuxTestServer::stand_in_finder(),
+            &TmuxTestServer::stand_in_popups(),
         );
 
         tmux.create(

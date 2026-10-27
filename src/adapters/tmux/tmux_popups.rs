@@ -2,12 +2,12 @@ use std::ffi::{OsStr, OsString};
 use std::iter::once;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TmuxFinderPopup {
+pub struct TmuxPopups {
     finder_prefix: Vec<OsString>,
     assignments: Vec<OsString>,
 }
 
-impl TmuxFinderPopup {
+impl TmuxPopups {
     const POPUP: &'static str = "display-popup";
     const KEEP_OPEN_ON_FAILURE: &'static str = "-EE";
     const BORDERLESS: &'static str = "-B";
@@ -26,7 +26,7 @@ impl TmuxFinderPopup {
         }
     }
 
-    pub fn command(&self) -> String {
+    pub fn finder_command(&self) -> String {
         format!("run-shell -C \"{}\"", Self::double_quoted(&self.popup()))
     }
 
@@ -121,15 +121,15 @@ mod tests {
             fixture
         }
 
-        fn popup(finder: &Path, extra: &[&str]) -> TmuxFinderPopup {
+        fn popup(finder: &Path, extra: &[&str]) -> TmuxPopups {
             let prefix = once(finder.as_os_str())
                 .chain(extra.iter().map(OsStr::new))
                 .map(OsStr::to_os_string)
                 .collect();
-            TmuxFinderPopup::new(prefix, &Self::ASSIGNMENTS.map(OsString::from))
+            TmuxPopups::new(prefix, &Self::ASSIGNMENTS.map(OsString::from))
         }
 
-        fn render(popup: &TmuxFinderPopup) -> String {
+        fn render(popup: &TmuxPopups) -> String {
             TmuxServerConfig::new(&KeyBindings::default(), popup).render()
         }
 
@@ -171,7 +171,7 @@ mod tests {
         let popup = PopupFixture::popup(Path::new("/bin/ringleader"), &["__find-session"]);
 
         assert_eq!(
-            popup.command(),
+            popup.finder_command(),
             "run-shell -C \"display-popup -EE -B \
              -e 'RINGLEADER_TMUX=/nix/store/example-tmux/bin/tmux' \
              -e 'RINGLEADER_GIT=/nix/store/example-git/bin/git' \
