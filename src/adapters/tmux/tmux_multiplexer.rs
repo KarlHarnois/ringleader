@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::thread;
 use std::time::Duration;
 
 use super::private_server::PrivateServer;
@@ -28,6 +29,7 @@ pub struct TmuxMultiplexer {
 impl TmuxMultiplexer {
     const MISSING_SESSION: &'static str = "can't find session";
     const STARTUP_PATIENCE: Duration = Duration::from_secs(60);
+    const AGENT_REDRAW_TIME: Duration = Duration::from_millis(60);
 
     pub fn new(tmux: TmuxCommand, launcher: LauncherCommand, processes: ProcessTable) -> Self {
         Self {
@@ -325,6 +327,7 @@ impl Multiplexer for TmuxMultiplexer {
         let pane = self.shown_pane(tmux_name)?;
         let output = self.tmux.change(&TmuxScripts::fit_window(&pane, size))?;
         if output.has(TmuxLaunch::DONE_LABEL) {
+            thread::sleep(Self::AGENT_REDRAW_TIME);
             return Ok(());
         }
         log::warn!("{}", TmuxError::failed("resize-window", &output));
