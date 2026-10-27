@@ -31,15 +31,18 @@ impl SessionFinderPopup {
         }
     }
 
-    pub fn run<B, I>(mut self, backend: B, mut input: I) -> Result<(), FinderPopupError>
+    pub fn run<B, I>(
+        mut self,
+        terminal: &mut Terminal<B>,
+        mut input: I,
+    ) -> Result<(), FinderPopupError>
     where
         B: Backend,
         B::Error: Send + Sync + 'static,
         I: InputSource,
     {
-        let mut terminal = Terminal::new(backend).map_err(io::Error::other)?;
         let mut finder = Dialog::find_session(self.load_sessions()?.rows());
-        while let Choice::Session(name) = self.choose(&mut terminal, &mut input, &mut finder)? {
+        while let Choice::Session(name) = self.choose(terminal, &mut input, &mut finder)? {
             match self.service.switch_client(&name, &self.client) {
                 Ok(()) => return Ok(()),
                 Err(error) => Self::show_failure(&mut finder, &error),
@@ -120,18 +123,27 @@ mod tests {
     use super::*;
     use crate::application::ports::AttachTarget;
     use crate::test_support::{
-        FakeMultiplexer, FixtureBackend, ScriptedInput, ServiceFixture, UiHarness,
+        FakeMultiplexer, FixtureBackend, LogCapture, ScriptedInput, ServiceFixture, UiHarness,
     };
 
-    struct PopupFixture;
+    struct PopupFixture {
+        frames: Vec<String>,
+    }
 
     impl PopupFixture {
         const CLIENT: &'static str = "client-1234";
 
-        fn run(fixture: &ServiceFixture, events: Vec<Event>) -> Result<(), FinderPopupError> {
+        fn run(fixture: &ServiceFixture, events: Vec<Event>) -> Result<Self, FinderPopupError> {
             let backend = FixtureBackend::new(UiHarness::WIDTH / 2, UiHarness::HEIGHT / 2);
+            let mut terminal = Terminal::new(backend)?;
             let script = ScriptedInput::events(Self::ending_dismissed(events));
-            SessionFinderPopup::new(fixture.service(), Self::CLIENT).run(backend, script)
+            SessionFinderPopup::new(fixture.service(), Self::CLIENT).run(&mut terminal, script)?;
+            let frames = terminal.backend().frames().to_vec();
+            Ok(Self { frames })
+        }
+
+        fn shows(&self, text: &str) -> bool {
+            self.frames.iter().any(|frame| frame.contains(text))
         }
 
         fn ending_dismissed(mut events: Vec<Event>) -> Vec<Event> {
@@ -278,6 +290,26 @@ mod tests {
     }
 
     #[test]
+    fn picking_a_stopped_session_shows_the_refusal_in_the_finder() {
+        let fixture = PopupFixture::stopped("fix-auth");
+
+        let popup = PopupFixture::run(&fixture, vec![PopupFixture::enter()]).unwrap();
+
+        assert!(popup.shows("is stopped"));
+    }
+
+    #[test]
+    fn a_refusal_is_logged() {
+        let log = LogCapture::installed();
+        let fixture = PopupFixture::stopped("fix-auth");
+        let before = log.count_containing("the session finder could not switch");
+
+        PopupFixture::run(&fixture, vec![PopupFixture::enter()]).unwrap();
+
+        assert!(log.count_containing("the session finder could not switch") > before);
+    }
+
+    #[test]
     fn after_a_refusal_another_session_can_be_picked() {
         let fixture = PopupFixture::stopped_beside_live("dark-mode", "fix-auth");
         let mut events = PopupFixture::typed("dark");
@@ -298,9 +330,10 @@ mod tests {
     fn a_lost_terminal_is_returned() {
         let fixture = PopupFixture::live("fix-auth");
         let backend = FixtureBackend::new(UiHarness::WIDTH, UiHarness::HEIGHT);
+        let mut terminal = Terminal::new(backend).unwrap();
 
         let outcome = SessionFinderPopup::new(fixture.service(), PopupFixture::CLIENT)
-            .run(backend, ScriptedInput::failing());
+            .run(&mut terminal, ScriptedInput::failing());
 
         assert!(matches!(outcome, Err(FinderPopupError::Terminal(_))));
     }
