@@ -544,7 +544,9 @@ impl CompositionRoot {
     fn show_finder(popup: SessionFinderPopup) -> Result<(), FinderPopupError> {
         let screen = TerminalGuard::enter(Box::new(CrosstermScreenMode))?;
         screen.state().install_panic_hook();
-        popup.run(CrosstermBackend::new(io::stdout()), CrosstermInput)
+        Terminal::new(CrosstermBackend::new(io::stdout()))
+            .map_err(FinderPopupError::from)
+            .and_then(|mut terminal| popup.run(&mut terminal, CrosstermInput))
     }
 
     fn show_menu(popup: SessionMenuPopup) -> Result<(), MenuPopupError> {
