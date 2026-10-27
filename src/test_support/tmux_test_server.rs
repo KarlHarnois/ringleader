@@ -17,8 +17,8 @@ use crate::adapters::host::process_environment::ProcessEnvironment;
 use crate::adapters::host::process_table::ProcessTable;
 use crate::adapters::tmux::server_files::ServerFiles;
 use crate::adapters::tmux::tmux_command::TmuxCommand;
-use crate::adapters::tmux::tmux_finder_popup::TmuxFinderPopup;
 use crate::adapters::tmux::tmux_multiplexer::TmuxMultiplexer;
+use crate::adapters::tmux::tmux_popups::TmuxPopups;
 use crate::adapters::tmux::tmux_server_config::TmuxServerConfig;
 use crate::application::ports::{AgentLaunch, Multiplexer, SessionSpec};
 use crate::domain::{KeyBindings, RepoName, SessionMetadata, SessionRepo, SessionWorktree};
@@ -35,6 +35,7 @@ impl TmuxTestServer {
     pub const STAND_IN: [&'static str; 4] = ["sh", "-c", "sleep 30", "--"];
     const STAND_IN_EXECUTABLE: &'static str = "/nix/store/example-ringleader/bin/ringleader";
     const STAND_IN_FINDER_ARGUMENTS: [&'static str; 2] = ["__find-session", "--client"];
+    const STAND_IN_MENU_ARGUMENTS: [&'static str; 2] = ["__session-menu", "--client"];
     const STAND_IN_PROGRAMS: [&'static str; 2] = [
         "RINGLEADER_TMUX=/nix/store/example-tmux/bin/tmux",
         "RINGLEADER_GIT=/nix/store/example-git/bin/git",
@@ -56,19 +57,26 @@ impl TmuxTestServer {
     }
 
     fn default_config() -> String {
-        TmuxServerConfig::new(&KeyBindings::default(), &Self::stand_in_finder()).render()
+        TmuxServerConfig::new(&KeyBindings::default(), &Self::stand_in_popups()).render()
     }
 
-    pub fn stand_in_finder() -> TmuxFinderPopup {
-        Self::stand_in_finder_at(Self::STAND_IN_EXECUTABLE)
+    pub fn stand_in_popups() -> TmuxPopups {
+        Self::stand_in_popups_at(Self::STAND_IN_EXECUTABLE)
     }
 
-    pub fn stand_in_finder_at(executable: &str) -> TmuxFinderPopup {
-        let finder_prefix = once(executable)
-            .chain(Self::STAND_IN_FINDER_ARGUMENTS)
+    pub fn stand_in_popups_at(executable: &str) -> TmuxPopups {
+        TmuxPopups::new(
+            Self::stand_in_prefix(executable, Self::STAND_IN_FINDER_ARGUMENTS),
+            Self::stand_in_prefix(executable, Self::STAND_IN_MENU_ARGUMENTS),
+            &Self::STAND_IN_PROGRAMS.map(OsString::from),
+        )
+    }
+
+    fn stand_in_prefix(executable: &str, arguments: [&str; 2]) -> Vec<OsString> {
+        once(executable)
+            .chain(arguments)
             .map(OsString::from)
-            .collect();
-        TmuxFinderPopup::new(finder_prefix, &Self::STAND_IN_PROGRAMS.map(OsString::from))
+            .collect()
     }
 
     fn with_config_marked(config_text: &str, marker: ProcessMarker) -> Self {
@@ -173,7 +181,7 @@ impl TmuxTestServer {
             &self.program,
             &self.files,
             &self.marked(environment),
-            &Self::stand_in_finder(),
+            &Self::stand_in_popups(),
         )
         .with_deadlines(deadlines)
     }

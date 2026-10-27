@@ -13,7 +13,7 @@ use super::setting::Setting;
 use crate::application::{CreateRequest, SessionService};
 use crate::domain::{AgentMode, Checkout};
 use crate::ui::app::AppRequest;
-use crate::ui::blocking_operation::BlockingOperation;
+use crate::ui::blocking_operation::{BlockingOperation, CreateStep};
 use crate::ui::dialogs::DialogStep;
 use crate::ui::dialogs::dialog_labels::DialogLabels;
 use crate::ui::dialogs::text_field::{FieldKind, TextField};
@@ -28,6 +28,7 @@ pub struct NewSessionDialog {
     checkout: Checkout,
     mode: AgentMode,
     error: Option<String>,
+    creation: fn(CreateRequest) -> BlockingOperation,
 }
 
 impl NewSessionDialog {
@@ -47,6 +48,14 @@ impl NewSessionDialog {
             focus: NewSessionField::Name,
             checkout: Checkout::default(),
             error: None,
+            creation: |request| BlockingOperation::Create(CreateStep::Stay(request)),
+        }
+    }
+
+    pub fn attaching_after_create(self) -> Self {
+        Self {
+            creation: |request| BlockingOperation::Create(CreateStep::Attach(request)),
+            ..self
         }
     }
 
@@ -173,9 +182,7 @@ impl NewSessionDialog {
 
     fn submit(&mut self) -> DialogStep {
         match self.request() {
-            Ok(request) => {
-                DialogStep::Request(AppRequest::Block(BlockingOperation::Create(request)))
-            }
+            Ok(request) => DialogStep::Request(AppRequest::Block((self.creation)(request))),
             Err(refusal) => {
                 self.refuse(refusal);
                 DialogStep::Stay
@@ -603,9 +610,9 @@ mod tests {
 
         fn submitted(step: DialogStep) -> CreateRequest {
             match step {
-                DialogStep::Request(AppRequest::Block(BlockingOperation::Create(request))) => {
-                    request
-                }
+                DialogStep::Request(AppRequest::Block(BlockingOperation::Create(
+                    CreateStep::Stay(request),
+                ))) => request,
                 other => panic!("expected a create request, got {other:?}"),
             }
         }

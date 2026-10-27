@@ -5,7 +5,8 @@ use std::sync::Arc;
 use super::batch_report::BatchReport;
 use super::pending::Pending;
 use super::ports::{
-    Clock, ConfigError, ConfigSource, HostProbe, PullRequestError, RegistryError, SessionRegistry,
+    ClientView, Clock, ConfigError, ConfigSource, HostProbe, PullRequestError, RegistryError,
+    ReturnRequest, SessionRegistry,
 };
 use super::pull_request_catalog::PullRequestCatalog;
 use super::reconciliation::Reconciliation;
@@ -398,6 +399,50 @@ impl SessionService {
         self.access.switch_client(reconciliation.row(name)?, client)
     }
 
+    pub fn client_session(&mut self, client: &str) -> Result<String, ServiceError> {
+        self.on_client_session(client, |_, row, _| Ok(row.name().to_string()))
+    }
+
+    pub fn toggle_shell(&mut self, client: &str) -> Result<(), ServiceError> {
+        self.on_client_session(client, |access, row, view| {
+            access.toggle_shell(row, view, client)
+        })
+    }
+
+    pub fn return_client(&self, client: &str) -> Result<(), ServiceError> {
+        self.access.return_client(client)
+    }
+
+    pub fn delete_on_return(&mut self, client: &str) -> Result<(), ServiceError> {
+        self.on_client_session(client, |access, row, _| {
+            access.delete_on_return(row, client)
+        })
+    }
+
+    pub fn new_session_on_return(&mut self, client: &str) -> Result<(), ServiceError> {
+        self.on_client_session(client, |access, row, _| {
+            access.new_session_on_return(row, client)
+        })
+    }
+
+    pub fn requested_hand_off(&mut self) -> Result<Option<HandOff>, ServiceError> {
+        match self.access.return_request()? {
+            Some(ReturnRequest::Delete(tmux_name)) => self.requested_deletion(&tmux_name),
+            Some(ReturnRequest::NewSession(repo)) => Ok(Some(HandOff::NewSession(repo))),
+            None => Ok(None),
+        }
+    }
+
+    fn requested_deletion(&mut self, tmux_name: &str) -> Result<Option<HandOff>, ServiceError> {
+        let reconciliation = self.reconcile()?;
+        let row = reconciliation.row_in_tmux_session(tmux_name).ok();
+        Ok(row.map(|row| HandOff::Delete(row.name().to_string())))
+    }
+
+    pub fn clear_return_request(&self) -> Result<(), ServiceError> {
+        self.access.clear_return_request()
+    }
+
     pub fn send_prompt(&mut self, name: &str, prompt: &str) -> Result<(), ServiceError> {
         let reconciliation = self.reconcile()?;
         self.access
@@ -453,6 +498,17 @@ impl SessionService {
 
     pub fn wait_startup_input(&self, stop: impl Fn() -> bool) {
         self.lifecycle.wait_startup_input(stop);
+    }
+
+    fn on_client_session<T>(
+        &mut self,
+        client: &str,
+        action: impl FnOnce(&SessionAccess, &SessionSummary, &ClientView) -> Result<T, ServiceError>,
+    ) -> Result<T, ServiceError> {
+        let reconciliation = self.reconcile()?;
+        let view = self.access.client_view(client)?;
+        let row = reconciliation.row_in_tmux_session(view.tmux_name())?;
+        action(&self.access, row, &view)
     }
 
     fn reconcile(&mut self) -> Result<Reconciliation, ServiceError> {
@@ -511,6 +567,12 @@ impl SessionService {
 pub enum CorruptRegistry {
     MoveAside,
     Report,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HandOff {
+    Delete(String),
+    NewSession(Option<PathBuf>),
 }
 
 #[cfg(test)]
@@ -824,7 +886,7 @@ mod tests {
             fixture
                 .multiplexer()
                 .calls()
-                .contains(&"apply_config C-q M-n M-k M-Up M-l C-k".to_string())
+                .contains(&"apply_config C-q M-n M-k M-Up M-l C-k C-Space".to_string())
         );
     }
 
@@ -838,7 +900,7 @@ mod tests {
             fixture
                 .multiplexer()
                 .calls()
-                .contains(&"apply_config C-q M-j M-Down M-k M-Up M-l C-k".to_string())
+                .contains(&"apply_config C-q M-j M-Down M-k M-Up M-l C-k C-Space".to_string())
         );
     }
 

@@ -16,6 +16,11 @@ pub trait Multiplexer: Send + Sync {
     fn observe_all(&self) -> Result<Vec<SessionObservation>, MultiplexerError>;
     fn attach(&self, target: &AttachTarget) -> Result<(), MultiplexerError>;
     fn switch_client(&self, client: &str, target: &AttachTarget) -> Result<(), MultiplexerError>;
+    fn client_view(&self, client: &str) -> Result<Option<ClientView>, MultiplexerError>;
+    fn detach_client(&self, client: &str) -> Result<(), MultiplexerError>;
+    fn record_return_request(&self, request: &ReturnRequest) -> Result<(), MultiplexerError>;
+    fn return_request(&self) -> Result<Option<ReturnRequest>, MultiplexerError>;
+    fn clear_return_request(&self) -> Result<(), MultiplexerError>;
     fn capture_pane(&self, tmux_name: &str) -> Result<String, MultiplexerError>;
     fn fit_agent_window(&self, tmux_name: &str, size: SessionSize) -> Result<(), MultiplexerError>;
     fn rename_session(
@@ -165,6 +170,42 @@ impl ServerConfig {
 pub enum AttachTarget {
     Agent(String),
     Shell(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientView {
+    tmux_name: String,
+    shows_shell: bool,
+}
+
+impl ClientView {
+    pub fn showing_agent(tmux_name: &str) -> Self {
+        Self {
+            tmux_name: tmux_name.to_string(),
+            shows_shell: false,
+        }
+    }
+
+    pub fn showing_shell(tmux_name: &str) -> Self {
+        Self {
+            tmux_name: tmux_name.to_string(),
+            shows_shell: true,
+        }
+    }
+
+    pub fn tmux_name(&self) -> &str {
+        &self.tmux_name
+    }
+
+    pub fn shows_shell(&self) -> bool {
+        self.shows_shell
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReturnRequest {
+    Delete(String),
+    NewSession(Option<PathBuf>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]

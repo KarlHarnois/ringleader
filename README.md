@@ -34,7 +34,7 @@ Both installs bring Ringleader's own tmux and git, and leave yours untouched.
 
 **Run `ringleader` in a directory that holds your repos.** The command opens the TUI. If no config exists, the command writes a commented config with Claude Code and opencode as agents.
 
-Sessions run on Ringleader's own tmux server. The server ignores your tmux config, and its sessions do not show in your `tmux ls`. Ctrl-Q detaches you from a session and returns you to the TUI or the shell you attached from.
+Sessions run on Ringleader's own tmux server. The server ignores your tmux config, and its sessions do not show in your `tmux ls`. Ctrl-Q detaches you from a session and returns you to the TUI or the shell you attached from. Ctrl-Space opens a menu of session actions.
 
 ## CLI
 

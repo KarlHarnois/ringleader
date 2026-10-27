@@ -13,8 +13,9 @@ impl RunningConfig {
     const PREVIOUS_SESSION_LABEL: &'static str = "ringleader-previous-session-keys";
     const SHELL_TOGGLE_LABEL: &'static str = "ringleader-shell-toggle-keys";
     const FINDER_LABEL: &'static str = "ringleader-finder-keys";
+    const MENU_LABEL: &'static str = "ringleader-menu-keys";
 
-    pub fn formats() -> [String; 5] {
+    pub fn formats() -> [String; 6] {
         [
             format!(
                 "{} #{{{}}} #{{{}}}",
@@ -35,6 +36,7 @@ impl RunningConfig {
                 TmuxServerConfig::SHELL_TOGGLE_KEYS_OPTION,
             ),
             Self::labeled(Self::FINDER_LABEL, TmuxServerConfig::FINDER_KEYS_OPTION),
+            Self::labeled(Self::MENU_LABEL, TmuxServerConfig::MENU_KEYS_OPTION),
         ]
     }
 
@@ -48,6 +50,7 @@ impl RunningConfig {
                 Self::keys(output, Self::PREVIOUS_SESSION_LABEL),
                 Self::keys(output, Self::SHELL_TOGGLE_LABEL),
                 Self::keys(output, Self::FINDER_LABEL),
+                Self::keys(output, Self::MENU_LABEL),
             )
         });
         Some(Self {
@@ -94,13 +97,14 @@ mod tests {
     }
 
     #[test]
-    fn the_hash_and_all_five_key_settings_are_read() {
+    fn the_hash_and_all_six_key_settings_are_read() {
         let running = RunningFixture::read(concat!(
             "ringleader-config 0123456789abcdef M-x\n",
             "ringleader-next-session-keys M-n F7\n",
             "ringleader-previous-session-keys M-p\n",
             "ringleader-shell-toggle-keys M-o F8\n",
             "ringleader-finder-keys M-f\n",
+            "ringleader-menu-keys C-Space F9\n",
         ));
 
         let bindings = running.key_bindings().unwrap();
@@ -119,6 +123,22 @@ mod tests {
             ["M-o", "F8"]
         );
         assert_eq!(RunningFixture::names(bindings.finder_keys()), ["M-f"]);
+        assert_eq!(
+            RunningFixture::names(bindings.menu_keys()),
+            ["C-Space", "F9"]
+        );
+    }
+
+    #[test]
+    fn a_server_without_the_menu_option_reads_as_no_menu_keys() {
+        let running = RunningFixture::read(concat!(
+            "ringleader-config 0123456789abcdef C-q\n",
+            "ringleader-finder-keys C-k\n",
+            "ringleader-menu-keys \n",
+        ));
+
+        let bindings = running.key_bindings().unwrap();
+        assert!(bindings.menu_keys().is_empty());
     }
 
     #[test]

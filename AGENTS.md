@@ -57,6 +57,7 @@ Each way comes from an ecosystem users already know, and keeps the meaning it ha
 | A fuzzy picker | fzf |
 | The key that opens a finder | the `Ctrl-K` quick switcher, as in Slack, Discord, and GitHub |
 | The key that opens a pull request or the GitHub page of a repo in the browser | the `o` open key, as in gh-dash, newsboat, and GitHub |
+| The key that opens the session menu, and its panel | the leader key and which-key, as in Spacemacs and LazyVim |
 | The new-session dialog's prompt box and status line | Claude Code, where the mode and the model show under the prompt box |
 
 - The arrow keys work wherever an ecosystem's movement keys work.
@@ -261,6 +262,7 @@ nix develop -c cargo test --bin ringleader <module::path>
 | `docs/agents/features/write-lock.md` | change what a process saves, or when a process takes a lock |
 | `docs/agents/skills.md` | add or change a skill, change how a launch gets the built-in skills, or change the CLI |
 | `docs/agents/features/usage.md` | change how Ringleader measures an agent's usage, or the usage view that the `u` key opens |
+| `docs/agents/features/session-popups.md` | change the session finder or the session menu |
 | `docs/agents/pull-requests.md` | open a pull request, push to one, or fix a CI failure |
 
 ## Architecture
@@ -409,8 +411,6 @@ Confine each `unsafe` block to one adapter method.
 
 The hidden `__exec-agent` path loads no config. It opens no log. It takes no lock.
 
-The hidden `__find-session` path runs in the popup that a key in `finder_keys` opens on the private tmux server. It takes no lock. It writes no first-run config.
-
 ### Locks
 
 **A change to a session, a repo, or the generated config runs under the write lock.** No other command takes the write lock.
@@ -436,7 +436,6 @@ The hidden `__find-session` path runs in the popup that a key in `finder_keys` o
 
 - If the server runs, `r` re-sources the generated config, even when the server's `@ringleader_config` hash matches the current render. A `tmux source-file` run from a pane can change the server without changing that hash.
 - Only the write lock's holder writes or re-sources the generated config.
-- The binding of each `finder_keys` key names the paths of Ringleader's executable and its tmux and git programs. The config hash covers those paths. A config that another build applied therefore reads as stale. Two builds that share one private tmux server rebind each `finder_keys` key in turn.
 
 ### Private tmux server
 
