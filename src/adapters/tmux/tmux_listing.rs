@@ -16,6 +16,8 @@ impl<'a> TmuxListing<'a> {
     pub const METADATA_OPTION: &'static str = "@ringleader_meta";
     pub const PANE_PID_FORMAT: &'static str = "ringleader-pane-pid #{pane_dead} #{pane_pid}";
     pub const TTY_FORMAT: &'static str = "ringleader-tty #{pane_dead} #{pane_tty}";
+    pub const WINDOW_SIZE_FORMAT: &'static str =
+        "ringleader-window-size #{window_width}x#{window_height}";
     pub const SERVER_FORMAT: &'static str = "ringleader-server #{version}";
     pub const SERVER_PID_FORMAT: &'static str = "ringleader-server-pid #{pid}";
     pub const SESSION_FORMAT: &'static str = "ringleader-session";
