@@ -105,6 +105,20 @@ env = ["OPENAI_API_KEY"]
 prompt_args = ["--prompt={prompt}"]
 plan_args = ["--agent", "plan"]
 resume_args = ["--continue"]
+
+# Gemini CLI works too. It reads skills only from its own config or the
+# worktree, so Ringleader cannot hand it the built-in skill. The flag below
+# only stops Ringleader from publishing the unused skill. If you authenticate
+# with an API key rather than Google sign-in, add env = ["GEMINI_API_KEY"].
+# Vertex AI users also need GOOGLE_GENAI_USE_VERTEXAI and their project
+# variables in env.
+# [[agents]]
+# name = "gemini"
+# command = "gemini"
+# prompt_args = ["{prompt}"]
+# plan_args = ["--approval-mode", "plan"]
+# resume_args = ["--resume"]
+# built_in_skills = false
 "#;
     const REPOS_KEY: &'static str = "repos";
 
@@ -303,6 +317,30 @@ mod tests {
 
         fn names(keys: &[HotKey]) -> Vec<String> {
             keys.iter().map(HotKey::to_string).collect()
+        }
+
+        fn gemini_example() -> String {
+            let lines: Vec<&str> = TomlConfigSource::TEMPLATE.lines().collect();
+            let name = lines
+                .iter()
+                .position(|line| *line == r#"# name = "gemini""#)
+                .expect("the template has a commented Gemini agent");
+            let header = lines[..name]
+                .iter()
+                .rposition(|line| *line == r#"# [[agents]]"#)
+                .expect("the Gemini agent has a table header");
+            lines[header..]
+                .iter()
+                .copied()
+                .take_while(|line| !line.is_empty())
+                .filter_map(|line| {
+                    let stripped = line.strip_prefix("# ")?;
+                    let is_toml =
+                        stripped.starts_with('[') || stripped.parse::<DocumentMut>().is_ok();
+                    is_toml.then_some(stripped)
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
         }
     }
 
@@ -756,6 +794,57 @@ mod tests {
             config.agent("opencode").unwrap().resume_argv(&session),
             ["opencode", "--continue"]
         );
+    }
+
+    #[test]
+    fn the_gemini_agent_takes_the_prompt_as_a_positional_argument() {
+        let fixture = SourceFixture::with_text(&SourceFixture::gemini_example());
+        let config = fixture.source().load().unwrap();
+        let session = SessionName::new("fix-auth").unwrap();
+
+        assert_eq!(
+            config.agent("gemini").unwrap().launch_argv(
+                &session,
+                AgentMode::Build,
+                "fix the tests"
+            ),
+            ["gemini", "fix the tests"]
+        );
+    }
+
+    #[test]
+    fn the_gemini_agent_starts_in_its_read_only_plan_mode() {
+        let fixture = SourceFixture::with_text(&SourceFixture::gemini_example());
+        let config = fixture.source().load().unwrap();
+        let session = SessionName::new("fix-auth").unwrap();
+
+        assert_eq!(
+            config
+                .agent("gemini")
+                .unwrap()
+                .launch_argv(&session, AgentMode::Plan, "fix the tests"),
+            ["gemini", "--approval-mode", "plan", "fix the tests"]
+        );
+    }
+
+    #[test]
+    fn the_gemini_agent_resumes_the_latest_session() {
+        let fixture = SourceFixture::with_text(&SourceFixture::gemini_example());
+        let config = fixture.source().load().unwrap();
+        let session = SessionName::new("fix-auth").unwrap();
+
+        assert_eq!(
+            config.agent("gemini").unwrap().resume_argv(&session),
+            ["gemini", "--resume"]
+        );
+    }
+
+    #[test]
+    fn the_gemini_agent_gets_no_built_in_skills() {
+        let fixture = SourceFixture::with_text(&SourceFixture::gemini_example());
+        let config = fixture.source().load().unwrap();
+
+        assert!(!config.agent("gemini").unwrap().gets_built_in_skills());
     }
 
     #[test]
