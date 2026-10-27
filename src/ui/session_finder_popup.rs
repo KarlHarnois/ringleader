@@ -281,7 +281,7 @@ mod tests {
     }
 
     #[test]
-    fn picking_a_stopped_session_keeps_the_finder_open_without_a_switch() {
+    fn picking_a_stopped_session_switches_nothing() {
         let fixture = PopupFixture::stopped("fix-auth");
 
         PopupFixture::run(&fixture, vec![PopupFixture::enter()]).unwrap();
