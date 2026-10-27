@@ -5,7 +5,7 @@ use crossterm::event::{Event, KeyEvent, KeyEventKind};
 use ratatui::backend::Backend;
 use ratatui::layout::Rect;
 use ratatui::text::Line;
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::{Block, Borders, Padding, Paragraph};
 use ratatui::{Frame, Terminal};
 use thiserror::Error;
 
@@ -108,6 +108,8 @@ enum Panel {
 }
 
 impl Panel {
+    const TITLE_INDENT: u16 = 1;
+
     fn usage(service: &SessionService) -> Self {
         Self::Usage(Box::new(UsageView::open(service)))
     }
@@ -120,7 +122,10 @@ impl Panel {
     }
 
     fn render(&self, frame: &mut Frame, theme: &Theme) {
-        let block = Block::default().borders(Borders::TOP).title(self.title());
+        let block = Block::default()
+            .borders(Borders::TOP)
+            .title(self.title())
+            .padding(Padding::left(Self::TITLE_INDENT));
         let inner = block.inner(frame.area());
         frame.render_widget(block, frame.area());
         frame.render_widget(Paragraph::new(self.lines(inner, theme)), inner);
@@ -318,6 +323,15 @@ mod tests {
         let popup = PopupFixture::pressing(&fixture, "uu");
 
         assert!(popup.shows(UsageView::TITLE));
+    }
+
+    #[test]
+    fn the_usage_view_starts_in_the_column_of_its_title_like_the_menu() {
+        let fixture = PopupFixture::attached();
+
+        let popup = PopupFixture::pressing(&fixture, "uu");
+
+        assert!(popup.shows("\n Measuring usage…"));
     }
 
     #[test]

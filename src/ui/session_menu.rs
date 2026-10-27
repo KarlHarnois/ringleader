@@ -18,9 +18,8 @@ pub struct SessionMenu {
 }
 
 impl SessionMenu {
-    const KEY_INDENT: &'static str = " ";
     const KEY_GAP: &'static str = "  ";
-    const COLUMN_GAP: &'static str = "  ";
+    const COLUMN_GAP: &'static str = "   ";
 
     pub fn open(name: &str, service: &SessionService) -> Self {
         Self {
@@ -83,10 +82,9 @@ impl SessionMenu {
         Line::from(spans.collect::<Vec<_>>())
     }
 
-    fn cell(&self, item: MenuItem, width: usize, theme: &Theme) -> [Span<'static>; 3] {
+    fn cell(&self, item: MenuItem, width: usize, theme: &Theme) -> [Span<'static>; 2] {
         let (key_style, description_style) = self.styles(item, theme);
         [
-            Span::raw(Self::KEY_INDENT),
             Span::styled(item.key().to_string(), key_style),
             Span::styled(
                 format!(
@@ -109,7 +107,7 @@ impl SessionMenu {
 
     fn status_line(&self, theme: &Theme) -> Line<'static> {
         match &self.failure {
-            Some(failure) => Line::styled(format!("{}{failure}", Self::KEY_INDENT), theme.error()),
+            Some(failure) => Line::styled(failure.clone(), theme.error()),
             None => Line::default(),
         }
     }
@@ -237,9 +235,9 @@ mod tests {
         assert_eq!(
             text,
             [
-                " o  open pull request      u  usage",
-                " T  open terminal window   d  delete session… (in Ringleader)",
-                " t  toggle agent / shell   q  return to Ringleader",
+                "o  open pull request      u  usage",
+                "T  open terminal window   d  delete session… (in Ringleader)",
+                "t  toggle agent / shell   q  return to Ringleader",
                 "",
             ]
         );
@@ -281,7 +279,7 @@ mod tests {
         ));
 
         let text = MenuFixture::text(&menu.lines(&Theme));
-        assert_eq!(text.last().unwrap(), " no terminal emulator found");
+        assert_eq!(text.last().unwrap(), "no terminal emulator found");
     }
 
     #[test]
