@@ -945,6 +945,20 @@ mod tests {
     }
 
     #[test]
+    fn create_treats_a_blank_prompt_as_no_prompt() {
+        let agent = Agent::new("claude", "claude");
+        let fixture =
+            ServiceFixture::new().with_config(ServiceFixture::config().with_agents(vec![agent]));
+
+        let created = CreateFixture::create(
+            &fixture,
+            CreateFixture::request("fix-auth").with_prompt(" \n "),
+        );
+
+        assert!(created.is_ok());
+    }
+
+    #[test]
     fn create_refuses_plan_mode_for_an_agent_without_plan_args() {
         let agent = Agent::new("claude", "claude");
         let fixture =

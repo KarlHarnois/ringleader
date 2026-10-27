@@ -215,15 +215,15 @@ impl NewSessionDialog {
             Self::REPO_MISSING,
         ))?;
         let agent = self.agents.selected().map_err(Refusal::General)?;
-        let prompt = self.prompt.value();
-        if let Some(problem) = agent.launch_refusal(self.mode, &prompt) {
-            return Err(Refusal::General(problem));
-        }
-        Ok(CreateRequest::new(name, repo.clone())
+        let request = CreateRequest::new(name, repo.clone())
             .with_agent(agent.name())
             .with_checkout(self.checkout)
             .with_mode(self.mode)
-            .with_prompt(&prompt))
+            .with_prompt(&self.prompt.value());
+        match agent.launch_refusal(self.mode, request.prompt()) {
+            Some(problem) => Err(Refusal::General(problem)),
+            None => Ok(request),
+        }
     }
 }
 
