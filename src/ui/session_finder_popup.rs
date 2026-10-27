@@ -39,10 +39,18 @@ impl SessionFinderPopup {
     {
         let mut terminal = Terminal::new(backend).map_err(io::Error::other)?;
         let mut finder = Dialog::find_session(self.load_sessions()?.rows());
-        match self.choose(&mut terminal, &mut input, &mut finder)? {
-            Choice::Session(name) => Ok(self.service.switch_client(&name, &self.client)?),
-            Choice::Dismissed => Ok(()),
+        while let Choice::Session(name) = self.choose(&mut terminal, &mut input, &mut finder)? {
+            match self.service.switch_client(&name, &self.client) {
+                Ok(()) => return Ok(()),
+                Err(error) => Self::show_refusal(&mut finder, &error),
+            }
         }
+        Ok(())
+    }
+
+    fn show_refusal(finder: &mut Dialog, error: &ServiceError) {
+        log::warn!("the session finder could not switch: {error}");
+        finder.fail(error.to_string());
     }
 
     fn load_sessions(&mut self) -> Result<SessionList, ServiceError> {
@@ -135,6 +143,12 @@ mod tests {
             text.chars().map(UiHarness::character).collect()
         }
 
+        fn erased(text: &str) -> Vec<Event> {
+            text.chars()
+                .map(|_| UiHarness::key(KeyCode::Backspace))
+                .collect()
+        }
+
         fn control(character: char) -> Event {
             Event::Key(KeyEvent::new(
                 KeyCode::Char(character),
@@ -155,6 +169,13 @@ mod tests {
 
         fn stopped(name: &str) -> ServiceFixture {
             ServiceFixture::new().with_sessions(&[ServiceFixture::session(name)])
+        }
+
+        fn stopped_beside_live(stopped: &str, live: &str) -> ServiceFixture {
+            let live = ServiceFixture::session(live);
+            ServiceFixture::new()
+                .with_sessions(&[ServiceFixture::session(stopped), live.clone()])
+                .with_multiplexer(FakeMultiplexer::new().with_live(ServiceFixture::waiting(&live)))
         }
 
         fn live(name: &str) -> ServiceFixture {
@@ -248,12 +269,29 @@ mod tests {
     }
 
     #[test]
-    fn picking_a_stopped_session_returns_the_refusal() {
+    fn picking_a_stopped_session_keeps_the_finder_open_without_a_switch() {
         let fixture = PopupFixture::stopped("fix-auth");
 
-        let error = PopupFixture::run(&fixture, vec![PopupFixture::enter()]).unwrap_err();
+        PopupFixture::run(&fixture, vec![PopupFixture::enter()]).unwrap();
 
-        assert!(error.to_string().contains("stopped"), "{error}");
+        assert!(fixture.multiplexer().switched().is_empty());
+    }
+
+    #[test]
+    fn after_a_refusal_another_session_can_be_picked() {
+        let fixture = PopupFixture::stopped_beside_live("dark-mode", "fix-auth");
+        let mut events = PopupFixture::typed("dark");
+        events.push(PopupFixture::enter());
+        events.extend(PopupFixture::erased("dark"));
+        events.extend(PopupFixture::typed("fix"));
+        events.push(PopupFixture::enter());
+
+        PopupFixture::run(&fixture, events).unwrap();
+
+        assert_eq!(
+            fixture.multiplexer().switched(),
+            PopupFixture::switched_to("fix-auth")
+        );
     }
 
     #[test]

@@ -141,11 +141,8 @@ impl Dialog {
         match self {
             Self::NewSession(dialog) => dialog.fail(error),
             Self::Rename(dialog) => dialog.fail(error),
-            Self::Delete(_)
-            | Self::DeleteSessions(_)
-            | Self::Help(_)
-            | Self::FindSession(_)
-            | Self::Usage(_) => {}
+            Self::FindSession(finder) => finder.fail(error),
+            Self::Delete(_) | Self::DeleteSessions(_) | Self::Help(_) | Self::Usage(_) => {}
         }
     }
 
