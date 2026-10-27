@@ -4,8 +4,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::application::ports::{
-    AgentLaunch, AttachTarget, Multiplexer, MultiplexerError, ServerConfig, ServerState,
-    SessionSpec,
+    AgentLaunch, AttachTarget, ClientView, Multiplexer, MultiplexerError, ReturnRequest,
+    ServerConfig, ServerState, SessionSpec,
 };
 use crate::domain::{
     AgentPane, HotKey, KeyBindings, SessionMetadata, SessionObservation, SessionSize, TmuxAddress,
@@ -39,6 +39,9 @@ struct MultiplexerState {
     failed_create_still_creates: bool,
     attached: Vec<AttachTarget>,
     switched: Vec<(String, AttachTarget)>,
+    client_views: HashMap<String, ClientView>,
+    detached: Vec<String>,
+    return_request: Option<ReturnRequest>,
     calls: Vec<String>,
     client_version: String,
     server: Option<ServerState>,
@@ -52,7 +55,7 @@ struct MultiplexerState {
 
 impl FakeMultiplexer {
     pub const SOCKET: &'static str = "/run/user/1000/ringleader/tmux/tmux.sock";
-    pub const STATE_CHANGING: [&'static str; 8] = [
+    pub const STATE_CHANGING: [&'static str; 11] = [
         "create_session",
         "kill_session",
         "rename_session",
@@ -61,6 +64,9 @@ impl FakeMultiplexer {
         "type_if_ready",
         "submit_when_ready",
         "ensure_shell_window",
+        "detach_client",
+        "record_return_request",
+        "clear_return_request",
     ];
     const TYPING_GATE_LIMIT: Duration = Duration::from_secs(5);
 
@@ -83,6 +89,9 @@ impl FakeMultiplexer {
                 failed_create_still_creates: false,
                 attached: Vec::new(),
                 switched: Vec::new(),
+                client_views: HashMap::new(),
+                detached: Vec::new(),
+                return_request: None,
                 calls: Vec::new(),
                 client_version: "3.6a".to_string(),
                 server: Some(ServerState::new("3.6a", 1)),
@@ -113,6 +122,16 @@ impl FakeMultiplexer {
 
     pub fn called_from_own_pane(self) -> Self {
         self.edit(|state| state.caller_in_own_pane = true);
+        self
+    }
+
+    pub fn with_client_view(self, client: &str, view: ClientView) -> Self {
+        self.edit(|state| state.client_views.insert(client.to_string(), view));
+        self
+    }
+
+    pub fn with_return_request(self, request: ReturnRequest) -> Self {
+        self.edit(|state| state.return_request = Some(request));
         self
     }
 
@@ -293,6 +312,14 @@ impl FakeMultiplexer {
         self.edit(|state| state.switched.clone())
     }
 
+    pub fn detached(&self) -> Vec<String> {
+        self.edit(|state| state.detached.clone())
+    }
+
+    pub fn recorded_return_request(&self) -> Option<ReturnRequest> {
+        self.edit(|state| state.return_request.clone())
+    }
+
     fn edit<T>(&self, change: impl FnOnce(&mut MultiplexerState) -> T) -> T {
         change(&mut self.state.lock().unwrap())
     }
@@ -426,6 +453,34 @@ impl Multiplexer for FakeMultiplexer {
     fn switch_client(&self, client: &str, target: &AttachTarget) -> Result<(), MultiplexerError> {
         self.call("switch_client", &format!("{client} {target:?}"))?;
         self.edit(|state| state.switched.push((client.to_string(), target.clone())));
+        Ok(())
+    }
+
+    fn client_view(&self, client: &str) -> Result<Option<ClientView>, MultiplexerError> {
+        self.call("client_view", client)?;
+        Ok(self.edit(|state| state.client_views.get(client).cloned()))
+    }
+
+    fn detach_client(&self, client: &str) -> Result<(), MultiplexerError> {
+        self.call("detach_client", client)?;
+        self.edit(|state| state.detached.push(client.to_string()));
+        Ok(())
+    }
+
+    fn record_return_request(&self, request: &ReturnRequest) -> Result<(), MultiplexerError> {
+        self.call("record_return_request", &format!("{request:?}"))?;
+        self.edit(|state| state.return_request = Some(request.clone()));
+        Ok(())
+    }
+
+    fn return_request(&self) -> Result<Option<ReturnRequest>, MultiplexerError> {
+        self.call("return_request", "")?;
+        Ok(self.edit(|state| state.return_request.clone()))
+    }
+
+    fn clear_return_request(&self) -> Result<(), MultiplexerError> {
+        self.call("clear_return_request", "")?;
+        self.edit(|state| state.return_request = None);
         Ok(())
     }
 

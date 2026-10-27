@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use super::delete_report::DeleteReport;
 use super::list_report::ListReport;
@@ -8,8 +9,8 @@ use super::{
     SendArgs, StopArgs,
 };
 use crate::application::{
-    CreateRequest, DeleteConfirmation, DeleteImpact, DeleteOutcome, RestartReport, ServiceError,
-    SessionService, StartOutcome, StopReport,
+    CreateRequest, DeleteConfirmation, DeleteImpact, DeleteOutcome, HandOff, RestartReport,
+    ServiceError, SessionService, StartOutcome, StopReport,
 };
 use crate::domain::{AgentMode, BaseBranch, Checkout, Repo, RepoGroup};
 
@@ -21,6 +22,7 @@ pub struct SessionCommands<'a> {
 impl<'a> SessionCommands<'a> {
     const NOTHING_TO_RESTART: &'static str = "no exited or stopped session to restart";
     const NOTHING_TO_STOP: &'static str = "no waiting or exited session to stop";
+    const UNKNOWN_REPO: &'static str = "<repo>";
 
     pub fn new(service: &'a mut SessionService, session: &'a mut CliSession) -> Self {
         Self { service, session }
@@ -151,7 +153,38 @@ impl<'a> SessionCommands<'a> {
 
     pub fn attach(&mut self, name: &str) -> Result<u8, CommandStop> {
         self.service.attach(name)?;
+        if let Some(hand_off) = self.take_hand_off() {
+            self.session.output().line(&Self::hand_off_hint(&hand_off));
+        }
         Ok(0)
+    }
+
+    fn hand_off_hint(hand_off: &HandOff) -> String {
+        match hand_off {
+            HandOff::Delete(name) => format!("run ringleader delete {name}"),
+            HandOff::NewSession(repo) => format!(
+                "run ringleader new --name <name> --repo {}",
+                Self::shown_repo(repo.as_ref())
+            ),
+        }
+    }
+
+    fn shown_repo(repo: Option<&PathBuf>) -> String {
+        repo.map_or_else(
+            || Self::UNKNOWN_REPO.to_string(),
+            |repo| repo.display().to_string(),
+        )
+    }
+
+    fn take_hand_off(&mut self) -> Option<HandOff> {
+        let requested = self.service.requested_hand_off();
+        if let Err(error) = self.service.clear_return_request() {
+            log::warn!("could not clear the return request: {error}");
+        }
+        requested
+            .inspect_err(|error| log::warn!("could not read the return request: {error}"))
+            .ok()
+            .flatten()
     }
 
     pub fn send(&mut self, args: &SendArgs) -> Result<u8, CommandStop> {
@@ -293,7 +326,7 @@ mod tests {
     use signal_hook::consts::{SIGHUP, SIGINT};
 
     use crate::application::ports::{
-        AttachTarget, ConfigError, DirtyState, MultiplexerError, RegistryError,
+        AttachTarget, ConfigError, DirtyState, MultiplexerError, RegistryError, ReturnRequest,
     };
     use crate::cli::CliExit;
     use crate::domain::{Repo, RepoName, Session};
@@ -307,6 +340,25 @@ mod tests {
     impl CommandFixture {
         fn session() -> Session {
             ServiceFixture::session("fix-auth")
+        }
+
+        fn live_with_delete_request() -> ServiceFixture {
+            let session = Self::session();
+            let request = ReturnRequest::Delete(session.tmux_name().to_string());
+            Self::live().with_multiplexer(
+                FakeMultiplexer::new()
+                    .with_live(ServiceFixture::waiting(&session))
+                    .with_return_request(request),
+            )
+        }
+
+        fn live_with_new_session_request(repo: Option<PathBuf>) -> ServiceFixture {
+            let session = Self::session();
+            Self::live().with_multiplexer(
+                FakeMultiplexer::new()
+                    .with_live(ServiceFixture::waiting(&session))
+                    .with_return_request(ReturnRequest::NewSession(repo)),
+            )
         }
 
         fn live() -> ServiceFixture {
@@ -1179,6 +1231,67 @@ mod tests {
         assert_eq!(
             harness.fixture().multiplexer().attached(),
             [AttachTarget::Agent("ringleader-fix-auth".to_string())]
+        );
+    }
+
+    #[test]
+    fn attach_names_the_delete_command_for_a_delete_requested_from_the_session_menu() {
+        let harness = CliHarness::new(CommandFixture::live_with_delete_request());
+
+        harness.run(&["attach", "fix-auth"]);
+
+        assert_eq!(harness.stdout(), "run ringleader delete fix-auth\n");
+    }
+
+    #[test]
+    fn attach_names_the_new_command_in_the_repo_of_a_new_session_requested_from_the_session_menu() {
+        let repo = PathBuf::from(ServiceFixture::REPO);
+        let harness = CliHarness::new(CommandFixture::live_with_new_session_request(Some(repo)));
+
+        harness.run(&["attach", "fix-auth"]);
+
+        assert_eq!(
+            harness.stdout(),
+            format!(
+                "run ringleader new --name <name> --repo {}\n",
+                ServiceFixture::REPO
+            )
+        );
+    }
+
+    #[test]
+    fn attach_leaves_the_repo_to_fill_in_for_a_new_session_requested_from_a_session_without_one() {
+        let harness = CliHarness::new(CommandFixture::live_with_new_session_request(None));
+
+        harness.run(&["attach", "fix-auth"]);
+
+        assert_eq!(
+            harness.stdout(),
+            "run ringleader new --name <name> --repo <repo>\n"
+        );
+    }
+
+    #[test]
+    fn attach_clears_the_new_session_request_it_finds() {
+        let harness = CliHarness::new(CommandFixture::live_with_new_session_request(None));
+
+        harness.run(&["attach", "fix-auth"]);
+
+        assert_eq!(
+            harness.fixture().multiplexer().recorded_return_request(),
+            None
+        );
+    }
+
+    #[test]
+    fn attach_clears_the_return_request_it_finds() {
+        let harness = CliHarness::new(CommandFixture::live_with_delete_request());
+
+        harness.run(&["attach", "fix-auth"]);
+
+        assert_eq!(
+            harness.fixture().multiplexer().recorded_return_request(),
+            None
         );
     }
 
