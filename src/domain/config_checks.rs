@@ -87,6 +87,7 @@ impl<'a> ConfigChecks<'a> {
                 draft.raw_shell_toggle_keys(),
             ))
             .chain(listed(KeyBindings::FINDER_SETTING, draft.raw_finder_keys()))
+            .chain(listed(KeyBindings::MENU_SETTING, draft.raw_menu_keys()))
             .collect()
     }
 
@@ -587,6 +588,50 @@ mod tests {
         let config = Config::new(&draft).unwrap();
 
         assert!(config.key_bindings().finder_keys().is_empty());
+    }
+
+    #[test]
+    fn a_menu_key_bound_by_another_key_setting_fails_naming_both_settings() {
+        let written = ChecksFixture::draft().finder_keys(&["C-k"]);
+        for (key, other_setting) in [("C-q", "return_key"), ("C-k", "finder_keys")] {
+            let draft = written.clone().menu_keys(&[key]);
+
+            let failures = ChecksFixture::failures(&draft);
+
+            assert_eq!(
+                failures,
+                [format!(
+                    "menu_keys: `{key}` is already bound in {other_setting}, and each key can do only one thing"
+                )]
+            );
+        }
+    }
+
+    #[test]
+    fn a_menu_key_listed_twice_is_named_as_listed_twice() {
+        let draft = ChecksFixture::draft().menu_keys(&["C-Space", "F10", "C-Space"]);
+
+        let failures = ChecksFixture::failures(&draft);
+
+        assert_eq!(failures, ["menu_keys: `C-Space` is listed twice"]);
+    }
+
+    #[test]
+    fn a_missing_menu_list_keeps_ctrl_space() {
+        let config = Config::new(&ChecksFixture::draft()).unwrap();
+
+        let menu = config.key_bindings().menu_keys();
+        assert_eq!(menu, HotKey::parse_valid(["C-Space"]));
+    }
+
+    #[test]
+    fn an_empty_menu_list_binds_no_menu_key() {
+        let none: [&str; 0] = [];
+        let draft = ChecksFixture::draft().menu_keys(&none);
+
+        let config = Config::new(&draft).unwrap();
+
+        assert!(config.key_bindings().menu_keys().is_empty());
     }
 
     #[test]

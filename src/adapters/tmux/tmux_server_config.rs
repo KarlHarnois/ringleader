@@ -52,6 +52,7 @@ impl TmuxServerConfig {
     pub const PREVIOUS_SESSION_KEYS_OPTION: &'static str = "@ringleader_previous_session_keys";
     pub const SHELL_TOGGLE_KEYS_OPTION: &'static str = "@ringleader_shell_toggle_keys";
     pub const FINDER_KEYS_OPTION: &'static str = "@ringleader_finder_keys";
+    pub const MENU_KEYS_OPTION: &'static str = "@ringleader_menu_keys";
     pub const HASH_OPTION: &'static str = "@ringleader_config";
 
     pub fn new(key_bindings: &KeyBindings, finder_popup: &TmuxFinderPopup) -> Self {
@@ -87,7 +88,7 @@ impl TmuxServerConfig {
         lines
     }
 
-    fn recorded_keys(&self) -> [String; 5] {
+    fn recorded_keys(&self) -> [String; 6] {
         let bindings = &self.key_bindings;
         [
             Self::option_line(
@@ -109,6 +110,10 @@ impl TmuxServerConfig {
             Self::option_line(
                 Self::FINDER_KEYS_OPTION,
                 &Self::key_list(bindings.finder_keys()),
+            ),
+            Self::option_line(
+                Self::MENU_KEYS_OPTION,
+                &Self::key_list(bindings.menu_keys()),
             ),
         ]
     }
@@ -374,6 +379,19 @@ mod tests {
             words.join(" "),
             "unbind-key -q -T root M-j ; unbind-key -q -T copy-mode M-j ; \
              unbind-key -q -T copy-mode-vi M-j ; source-file -"
+        );
+    }
+
+    #[test]
+    fn the_reapply_unbinds_a_dropped_menu_key() {
+        let changed = KeyBindings::default().with_menu_keys(HotKey::parse_valid(["F10"]));
+
+        let words = ConfigFixture::reapply_words(&KeyBindings::default(), &changed);
+
+        assert_eq!(
+            words.join(" "),
+            "unbind-key -q -T root C-Space ; unbind-key -q -T copy-mode C-Space ; \
+             unbind-key -q -T copy-mode-vi C-Space ; source-file -"
         );
     }
 

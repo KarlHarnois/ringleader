@@ -34,6 +34,7 @@ impl Config {
                 draft.previous_session_keys_value(),
                 draft.shell_toggle_keys_value(),
                 draft.finder_keys_value(),
+                draft.menu_keys_value(),
             ),
             intervals: draft.intervals(),
             activity_idle_seconds: draft.activity_idle_seconds_value(),
