@@ -42,13 +42,13 @@ impl SessionFinderPopup {
         while let Choice::Session(name) = self.choose(&mut terminal, &mut input, &mut finder)? {
             match self.service.switch_client(&name, &self.client) {
                 Ok(()) => return Ok(()),
-                Err(error) => Self::show_refusal(&mut finder, &error),
+                Err(error) => Self::show_failure(&mut finder, &error),
             }
         }
         Ok(())
     }
 
-    fn show_refusal(finder: &mut Dialog, error: &ServiceError) {
+    fn show_failure(finder: &mut Dialog, error: &ServiceError) {
         log::warn!("the session finder could not switch: {error}");
         finder.fail(error.to_string());
     }
