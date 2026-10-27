@@ -43,6 +43,7 @@ impl TmuxTestServer {
     const SETTLE_LIMIT: Duration = Duration::from_secs(2);
     const POLL_INTERVAL: Duration = Duration::from_millis(20);
     const OUTER_SESSION: &'static str = "outer";
+    const WINDOW_SIZES_FILE: &'static str = "window-sizes";
 
     pub fn new() -> Self {
         Self::with_config(&Self::default_config())
@@ -333,6 +334,23 @@ impl TmuxTestServer {
         let mut args = vec!["new-session", "-d", "-s", name];
         args.extend(Self::STAND_IN);
         self.text(&args);
+    }
+
+    pub fn record_window_sizes(&self) {
+        let sizes = self.directory().join(Self::WINDOW_SIZES_FILE);
+        let record = format!(
+            "run-shell \"echo #{{window_width}}x#{{window_height}} >> {}\"",
+            sizes.display()
+        );
+        self.text(&["set-hook", "-g", "window-resized", &record]);
+    }
+
+    pub fn recorded_window_sizes(&self) -> Vec<String> {
+        std::fs::read_to_string(self.directory().join(Self::WINDOW_SIZES_FILE))
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_string)
+            .collect()
     }
 
     pub fn wait_for(&self, condition: impl Fn() -> bool) -> bool {

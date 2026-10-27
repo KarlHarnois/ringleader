@@ -5,7 +5,7 @@ use super::metadata_json::MetadataJson;
 use super::pane_row::PaneRow;
 use super::tmux_output::TmuxOutput;
 use crate::application::ports::ServerState;
-use crate::domain::{SessionObservation, TmuxAddress};
+use crate::domain::{SessionObservation, SessionSize, TmuxAddress};
 
 pub struct TmuxListing<'a> {
     output: &'a TmuxOutput,
@@ -19,6 +19,8 @@ impl<'a> TmuxListing<'a> {
     pub const TTY_FORMAT: &'static str = "ringleader-tty #{pane_dead} #{pane_tty}";
     pub const WINDOW_SIZE_FORMAT: &'static str =
         "ringleader-window-size #{window_width}x#{window_height}";
+    pub const ATTACHED_CLIENTS_FORMAT: &'static str =
+        "ringleader-attached-clients #{session_attached}";
     pub const SERVER_FORMAT: &'static str = "ringleader-server #{version}";
     pub const SERVER_PID_FORMAT: &'static str = "ringleader-server-pid #{pid}";
     pub const SESSION_FORMAT: &'static str = "ringleader-session";
@@ -84,9 +86,20 @@ impl<'a> TmuxListing<'a> {
         self.output.first("ringleader-server-pid")?.parse().ok()
     }
 
+    pub fn window_size(&self) -> Option<SessionSize> {
+        SessionSize::parse(self.output.first("ringleader-window-size")?)
+    }
+
     pub fn window_resized(&self) -> bool {
         let mut sizes = self.output.labeled("ringleader-window-size");
         sizes.next() != sizes.next()
+    }
+
+    pub fn attached_clients(&self) -> Option<usize> {
+        self.output
+            .first("ringleader-attached-clients")?
+            .parse()
+            .ok()
     }
 
     pub fn shows_terminal(&self, terminal: &OsStr) -> bool {
@@ -279,5 +292,13 @@ mod tests {
         let output = ListingFixture::window_sizes("46x22", "46x22");
 
         assert!(!TmuxListing::new(&output).window_resized());
+    }
+
+    #[test]
+    fn the_attached_clients_of_a_session_are_counted() {
+        let stdout = TmuxListing::ATTACHED_CLIENTS_FORMAT.replace("#{session_attached}", "2");
+        let output = TmuxOutput::new(true, &stdout, "");
+
+        assert_eq!(TmuxListing::new(&output).attached_clients(), Some(2));
     }
 }

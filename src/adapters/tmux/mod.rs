@@ -1,4 +1,5 @@
 pub mod agent_cursor;
+pub mod client_size_fit;
 pub mod key_switch;
 pub mod metadata_json;
 pub mod pane_row;

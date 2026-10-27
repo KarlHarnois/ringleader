@@ -14,6 +14,7 @@ impl TmuxScripts {
     const SESSION_CREATED: &'static str = "ringleader-created #{session_id} #{pane_id}";
     const WINDOW_CREATED: &'static str = "ringleader-created #{window_id} #{pane_id}";
     const SESSION_ID_MARKER: char = '$';
+    const REDRAW_NUDGE_ROWS: &'static str = "1";
 
     pub fn exact(tmux_name: &str) -> String {
         format!("={tmux_name}:")
@@ -226,8 +227,42 @@ impl TmuxScripts {
     }
 
     pub fn fit_window(pane: &str, size: SessionSize) -> TmuxSequence {
+        Self::resized_for_clients(
+            TmuxSequence::new().command(Self::window_size(pane)),
+            pane,
+            size,
+        )
+        .command(Self::window_size(pane))
+        .command(["display-message", "-p", "-t", pane, TmuxLaunch::DONE_LABEL])
+    }
+
+    pub fn window_watch(pane: &str) -> TmuxSequence {
         TmuxSequence::new()
+            .command([
+                "display-message",
+                "-p",
+                "-t",
+                pane,
+                TmuxListing::ATTACHED_CLIENTS_FORMAT,
+            ])
             .command(Self::window_size(pane))
+    }
+
+    pub fn redraw_at(pane: &str, size: SessionSize) -> [TmuxSequence; 2] {
+        [
+            TmuxSequence::new().command([
+                "resize-window",
+                "-U",
+                "-t",
+                pane,
+                Self::REDRAW_NUDGE_ROWS,
+            ]),
+            Self::resized_for_clients(TmuxSequence::new(), pane, size),
+        ]
+    }
+
+    fn resized_for_clients(sequence: TmuxSequence, pane: &str, size: SessionSize) -> TmuxSequence {
+        sequence
             .command([
                 "resize-window",
                 "-t",
@@ -238,8 +273,6 @@ impl TmuxScripts {
                 &size.height().to_string(),
             ])
             .command(["set-option", "-w", "-u", "-t", pane, "window-size"])
-            .command(Self::window_size(pane))
-            .command(["display-message", "-p", "-t", pane, TmuxLaunch::DONE_LABEL])
     }
 
     fn window_size(pane: &str) -> [&str; 5] {
