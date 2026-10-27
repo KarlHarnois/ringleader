@@ -2,9 +2,10 @@ use std::ffi::OsStr;
 use std::path::Path;
 
 use super::metadata_json::MetadataJson;
+use super::pane_row::PaneRow;
 use super::tmux_output::TmuxOutput;
 use crate::application::ports::ServerState;
-use crate::domain::{AgentPane, SessionObservation, TmuxAddress};
+use crate::domain::{SessionObservation, TmuxAddress};
 
 pub struct TmuxListing<'a> {
     output: &'a TmuxOutput,
@@ -56,8 +57,8 @@ impl<'a> TmuxListing<'a> {
             .collect();
         let mut sessions: Vec<&str> = Vec::new();
         for row in &rows {
-            if !sessions.contains(&row.session) {
-                sessions.push(row.session);
+            if !sessions.contains(&row.session()) {
+                sessions.push(row.session());
             }
         }
         sessions
@@ -130,76 +131,20 @@ impl<'a> TmuxListing<'a> {
 
     fn observe_session(rows: &[PaneRow], session: &str) -> SessionObservation {
         let session_rows: Vec<&PaneRow> =
-            rows.iter().filter(|row| row.session == session).collect();
+            rows.iter().filter(|row| row.session() == session).collect();
         let tagged = session_rows
             .iter()
-            .find(|row| row.agent_tag == Self::TAGGED);
+            .find(|row| row.agent_tag() == Self::TAGGED);
         let first = session_rows[0];
-        let tmux = TmuxAddress::new(session, Path::new(first.socket));
-        let observation = SessionObservation::new(tmux, first.created_at);
+        let tmux = TmuxAddress::new(session, Path::new(first.socket()));
+        let observation = SessionObservation::new(tmux, first.created_at());
         let observation = match tagged {
             Some(row) => observation.with_agent_pane(row.agent_pane()),
             None => observation,
         };
-        match MetadataJson::decode(first.metadata) {
+        match MetadataJson::decode(first.metadata()) {
             Some(metadata) => observation.with_metadata(metadata),
             None => observation,
-        }
-    }
-}
-
-struct PaneRow<'a> {
-    session: &'a str,
-    socket: &'a str,
-    created_at: u64,
-    active_clients: u32,
-    agent_tag: &'a str,
-    dead: bool,
-    activity_at: u64,
-    metadata: &'a str,
-}
-
-impl<'a> PaneRow<'a> {
-    const COLUMNS: usize = 9;
-
-    fn parse(row: &'a str) -> Option<Self> {
-        let columns: Vec<&str> = row.splitn(Self::COLUMNS, '\t').collect();
-        let [
-            session,
-            socket,
-            created,
-            clients,
-            _pane,
-            tag,
-            dead,
-            activity,
-            metadata,
-        ] = columns.as_slice()
-        else {
-            return None;
-        };
-        Some(Self {
-            session,
-            socket,
-            created_at: created.parse().unwrap_or(0),
-            active_clients: clients.parse().unwrap_or(0),
-            agent_tag: tag,
-            dead: *dead == "1",
-            activity_at: activity.parse().unwrap_or(0),
-            metadata,
-        })
-    }
-
-    fn agent_pane(&self) -> AgentPane {
-        let pane = if self.dead {
-            AgentPane::dead(self.activity_at)
-        } else {
-            AgentPane::live(self.activity_at)
-        };
-        if self.active_clients > 0 {
-            pane.shown_by_a_client()
-        } else {
-            pane
         }
     }
 }
