@@ -227,6 +227,7 @@ impl TmuxScripts {
 
     pub fn fit_window(pane: &str, size: SessionSize) -> TmuxSequence {
         TmuxSequence::new()
+            .command(Self::window_size(pane))
             .command([
                 "resize-window",
                 "-t",
@@ -237,7 +238,18 @@ impl TmuxScripts {
                 &size.height().to_string(),
             ])
             .command(["set-option", "-w", "-u", "-t", pane, "window-size"])
+            .command(Self::window_size(pane))
             .command(["display-message", "-p", "-t", pane, TmuxLaunch::DONE_LABEL])
+    }
+
+    fn window_size(pane: &str) -> [&str; 5] {
+        [
+            "display-message",
+            "-p",
+            "-t",
+            pane,
+            TmuxListing::WINDOW_SIZE_FORMAT,
+        ]
     }
 
     pub fn root_keys() -> TmuxSequence {

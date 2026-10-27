@@ -1,6 +1,7 @@
 pub mod agent_cursor;
 pub mod key_switch;
 pub mod metadata_json;
+pub mod pane_row;
 pub mod private_server;
 pub mod running_config;
 pub mod server_files;
