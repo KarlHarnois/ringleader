@@ -3,6 +3,7 @@ use std::process::Command;
 use std::thread;
 use std::time::Duration;
 
+use super::client_size_fit::ClientSizeFit;
 use super::private_server::PrivateServer;
 use super::tmux_agent_input::{InputError, TmuxAgentInput};
 use super::tmux_command::TmuxCommand;
@@ -162,11 +163,8 @@ impl TmuxMultiplexer {
         Ok(TmuxListing::new(&output).agent_pane())
     }
 
-    fn attach_command(&self, target: &AttachTarget) -> Result<Command, MultiplexerError> {
-        let resolved = self.resolved(target)?;
-        Ok(self
-            .tmux
-            .foreground(&TmuxScripts::attach_session(&resolved)))
+    fn attach_command(&self, pane: &str) -> Command {
+        self.tmux.foreground(&TmuxScripts::attach_session(pane))
     }
 
     fn resolved(&self, target: &AttachTarget) -> Result<String, MultiplexerError> {
@@ -195,10 +193,16 @@ impl TmuxMultiplexer {
             })
     }
 
-    fn attach_in_foreground(&self, mut attach: Command) -> Result<(), MultiplexerError> {
+    fn attach_in_foreground(
+        &self,
+        mut attach: Command,
+        fit: &ClientSizeFit,
+    ) -> Result<(), MultiplexerError> {
+        let clients_before = fit.attached_clients();
         let child = attach
             .spawn()
             .map_err(|error| Self::attach_failed(error.to_string()))?;
+        fit.fit_once_a_client_joins(clients_before);
         ForegroundChild::of(&child).map_or(Ok(()), |foreground| {
             foreground.wait().map_err(|status| {
                 Self::attach_failed(format!(
@@ -299,19 +303,21 @@ impl Multiplexer for TmuxMultiplexer {
     }
 
     fn attach(&self, target: &AttachTarget) -> Result<(), MultiplexerError> {
-        let attach = self.attach_command(target)?;
-        self.attach_in_foreground(attach)
+        let pane = self.resolved(target)?;
+        let fit = ClientSizeFit::new(&self.tmux, &pane);
+        self.attach_in_foreground(self.attach_command(&pane), &fit)
     }
 
     fn switch_client(&self, client: &str, target: &AttachTarget) -> Result<(), MultiplexerError> {
-        let resolved = self.resolved(target)?;
+        let pane = self.resolved(target)?;
         let output = self
             .tmux
-            .change(&TmuxScripts::switch_client(client, &resolved))?;
-        match output.succeeded() {
-            true => Ok(()),
-            false => Err(TmuxError::failed("switch-client", &output).into()),
+            .change(&TmuxScripts::switch_client(client, &pane))?;
+        if !output.succeeded() {
+            return Err(TmuxError::failed("switch-client", &output).into());
         }
+        ClientSizeFit::new(&self.tmux, &pane).fit();
+        Ok(())
     }
 
     fn capture_pane(&self, tmux_name: &str) -> Result<String, MultiplexerError> {
@@ -574,7 +580,8 @@ mod tests {
         }
 
         fn attached_to(&self, target: &AttachTarget) -> Vec<String> {
-            let attach = self.server.multiplexer().attach_command(target).unwrap();
+            let multiplexer = self.server.multiplexer();
+            let attach = multiplexer.attach_command(&multiplexer.resolved(target).unwrap());
             let arguments: Vec<String> = attach
                 .get_args()
                 .map(|argument| argument.to_string_lossy().into_owned())
@@ -1383,6 +1390,38 @@ mod tests {
             .unwrap();
 
         assert_eq!(fixture.server.client_pane(&client), agent);
+    }
+
+    #[test]
+    fn switching_a_client_into_a_fitted_window_resizes_it_to_the_client_twice() {
+        let fixture = MultiplexerFixture::new();
+        fixture.create("fix-auth").unwrap();
+        fixture.create("dark-mode").unwrap();
+        let client = fixture.server.control_client("=ringleader-fix-auth:");
+        let name = fixture.server.client_name(&client);
+        fixture
+            .server
+            .text(&["refresh-client", "-t", &name, "-C", "90x30"]);
+        let multiplexer = fixture.server.multiplexer();
+        multiplexer
+            .fit_agent_window("ringleader-dark-mode", SessionSize::new(46, 22))
+            .unwrap();
+        fixture.server.record_window_sizes();
+
+        multiplexer
+            .switch_client(
+                &name,
+                &AttachTarget::Agent("ringleader-dark-mode".to_string()),
+            )
+            .unwrap();
+
+        let resized_twice = ["90x29".to_string(), "90x30".to_string()];
+        assert!(fixture.server.wait_for(|| {
+            fixture
+                .server
+                .recorded_window_sizes()
+                .ends_with(&resized_twice)
+        }));
     }
 
     #[test]
