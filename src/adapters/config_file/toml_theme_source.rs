@@ -32,6 +32,7 @@ struct RawStyle {
 enum RawColor {
     Text(String),
     Number(i64),
+    Other(toml::Value),
 }
 
 impl TomlThemeSource {
@@ -232,6 +233,7 @@ impl RawColor {
         match self {
             Self::Text(text) => ThemeColor::parse(text),
             Self::Number(number) => ThemeColor::parse(&number.to_string()),
+            Self::Other(value) => ThemeColor::parse(&value.to_string()),
         }
     }
 }
@@ -395,6 +397,16 @@ mod tests {
         let failures = ThemeFileFixture::containing("dim = { fg = 300 }\n").failures();
 
         assert!(failures[0].contains("`300` is not a color"), "{failures:?}");
+    }
+
+    #[test]
+    fn a_color_of_another_type_lists_the_accepted_forms() {
+        let failures = ThemeFileFixture::containing("dim = { fg = 2.5 }\n").failures();
+
+        assert!(
+            failures[0].contains("`2.5` is not a color: use"),
+            "{failures:?}"
+        );
     }
 
     #[test]
