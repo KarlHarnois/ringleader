@@ -30,8 +30,8 @@ impl GitVersion {
     }
 
     fn git_inputs(&self) -> Vec<PathBuf> {
-        let worktree_inputs = self.git_files("--git-dir", &["HEAD", "index"]);
-        let repository_inputs = self.git_files("--git-common-dir", &["refs", "packed-refs"]);
+        let worktree_inputs = self.git_files("--git-dir", &["HEAD", "logs/HEAD", "index"]);
+        let repository_inputs = self.git_files("--git-common-dir", &["refs/tags", "packed-refs"]);
         worktree_inputs
             .into_iter()
             .chain(repository_inputs)
