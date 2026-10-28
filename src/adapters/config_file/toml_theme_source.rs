@@ -19,12 +19,12 @@ pub struct TomlThemeSource {
 struct RawStyle {
     fg: Option<String>,
     bg: Option<String>,
-    bold: bool,
-    dim: bool,
-    italic: bool,
-    underlined: bool,
-    reversed: bool,
-    crossed_out: bool,
+    bold: Option<bool>,
+    dim: Option<bool>,
+    italic: Option<bool>,
+    underlined: Option<bool>,
+    reversed: Option<bool>,
+    crossed_out: Option<bool>,
 }
 
 impl TomlThemeSource {
@@ -190,10 +190,14 @@ impl RawStyle {
             (self.crossed_out, TextModifier::CrossedOut),
         ]
         .into_iter()
-        .filter(|(set, _)| *set)
-        .fold(StyleSpec::default(), |style, (_, modifier)| {
-            style.with(modifier)
-        })
+        .fold(
+            StyleSpec::default(),
+            |style, (setting, modifier)| match setting {
+                Some(true) => style.with(modifier),
+                Some(false) => style.without(modifier),
+                None => style,
+            },
+        )
     }
 }
 
@@ -314,6 +318,16 @@ mod tests {
         let failures = ThemeFileFixture::containing("acent = { fg = \"red\" }\n").failures();
 
         assert_eq!(failures, ["unknown theme role `acent`"]);
+    }
+
+    #[test]
+    fn a_false_modifier_removes_it() {
+        let spec = ThemeFileFixture::containing("hint = { bold = false }\n").spec();
+
+        assert_eq!(
+            spec.style(ThemeRole::Hint),
+            StyleSpec::default().without(TextModifier::Bold)
+        );
     }
 
     #[test]

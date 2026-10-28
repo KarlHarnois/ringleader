@@ -197,7 +197,9 @@ impl Theme {
     }
 
     fn style_of(spec: &StyleSpec) -> Style {
-        let style = Style::default().add_modifier(Self::modifiers_of(spec));
+        let style = Style::default()
+            .add_modifier(Self::modifiers_in(spec.modifiers()))
+            .remove_modifier(Self::modifiers_in(spec.removed_modifiers()));
         let colored = match spec.foreground() {
             Some(color) => style.fg(Self::color_of(color)),
             None => style,
@@ -208,10 +210,10 @@ impl Theme {
         }
     }
 
-    fn modifiers_of(spec: &StyleSpec) -> Modifier {
+    fn modifiers_in(listed: &[TextModifier]) -> Modifier {
         Self::MODIFIERS
             .iter()
-            .filter(|(modifier, _)| spec.modifiers().contains(modifier))
+            .filter(|(modifier, _)| listed.contains(modifier))
             .fold(Modifier::empty(), |all, (_, modifier)| all | *modifier)
     }
 
@@ -352,5 +354,27 @@ mod tests {
         let theme = ColorMode::Monochrome.theme(&ThemeSpec::default());
 
         assert!(theme.selected().add_modifier.contains(Modifier::REVERSED));
+    }
+
+    #[test]
+    fn a_role_can_turn_off_a_modifier_set_on_base() {
+        let spec = ThemeSpec::new(
+            ThemeOverrides::default()
+                .with(
+                    ThemeRole::Base,
+                    StyleSpec::default().with(TextModifier::Bold),
+                )
+                .with(
+                    ThemeRole::Hint,
+                    StyleSpec::default().without(TextModifier::Bold),
+                ),
+        );
+
+        assert!(
+            !Theme::new(&spec)
+                .hint()
+                .add_modifier
+                .contains(Modifier::BOLD)
+        );
     }
 }

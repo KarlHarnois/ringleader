@@ -5,6 +5,7 @@ pub struct StyleSpec {
     foreground: Option<ThemeColor>,
     background: Option<ThemeColor>,
     modifiers: Vec<TextModifier>,
+    removed_modifiers: Vec<TextModifier>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,8 +34,18 @@ impl StyleSpec {
     }
 
     pub fn with(mut self, modifier: TextModifier) -> Self {
+        self.removed_modifiers
+            .retain(|removed| *removed != modifier);
         if !self.modifiers.contains(&modifier) {
             self.modifiers.push(modifier);
+        }
+        self
+    }
+
+    pub fn without(mut self, modifier: TextModifier) -> Self {
+        self.modifiers.retain(|added| *added != modifier);
+        if !self.removed_modifiers.contains(&modifier) {
+            self.removed_modifiers.push(modifier);
         }
         self
     }
@@ -50,6 +61,10 @@ impl StyleSpec {
     pub fn modifiers(&self) -> &[TextModifier] {
         &self.modifiers
     }
+
+    pub fn removed_modifiers(&self) -> &[TextModifier] {
+        &self.removed_modifiers
+    }
 }
 
 #[cfg(test)]
@@ -63,5 +78,17 @@ mod tests {
             .with(TextModifier::Bold);
 
         assert_eq!(style.modifiers(), [TextModifier::Bold]);
+    }
+
+    #[test]
+    fn removing_a_modifier_undoes_adding_it() {
+        let style = StyleSpec::default()
+            .with(TextModifier::Bold)
+            .without(TextModifier::Bold);
+
+        assert_eq!(
+            (style.modifiers(), style.removed_modifiers()),
+            (&[][..], &[TextModifier::Bold][..])
+        );
     }
 }
