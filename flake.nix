@@ -139,6 +139,7 @@
             // {
               cargoArtifacts = craneLib.buildDepsOnly (buildArgs // { cargoCheckCommand = "true"; });
               nativeBuildInputs = [ pkgs.makeWrapper ];
+              RINGLEADER_VERSION = "${crateVersion}-g${self.shortRev or self.dirtyShortRev}";
               postInstall = ''
                 wrapProgram $out/bin/ringleader ${pinnedToolDefaults tools}
               '';
