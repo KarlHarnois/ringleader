@@ -153,11 +153,11 @@ impl TomlThemeSource {
 
     fn unknown_role(name: &str) -> String {
         let unknown = format!("unknown theme role `{name}`");
-        match name.split_once('.') {
-            Some((group, _)) if Self::is_group(group) => {
-                format!("{unknown}: `[{group}]` takes {}", Self::roles_in(group))
-            }
-            _ => unknown,
+        let group = name.split_once('.').map_or(name, |(group, _)| group);
+        if Self::is_group(group) {
+            format!("{unknown}: `[{group}]` takes {}", Self::roles_in(group))
+        } else {
+            unknown
         }
     }
 
@@ -361,6 +361,18 @@ mod tests {
             failures,
             [
                 "unknown theme role `state.fg`: `[state]` takes working, waiting, exited, stopped, unmanaged"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_plain_value_on_a_group_points_at_the_groups_roles() {
+        let failures = ThemeFileFixture::containing("pull_request = \"red\"\n").failures();
+
+        assert_eq!(
+            failures,
+            [
+                "unknown theme role `pull_request`: `[pull_request]` takes approved, open, draft, merged, closed"
             ]
         );
     }
