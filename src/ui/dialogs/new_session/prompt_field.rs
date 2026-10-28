@@ -63,7 +63,6 @@ impl PromptField {
     }
 
     pub fn render(&self, frame: &mut Frame, inner: Rect, style: PromptStyle) {
-        frame.buffer_mut().set_style(inner, style.text);
         self.render_text(frame, Self::text_area(inner), style);
         self.paint_cursor(frame.buffer_mut(), inner, self.cursor_style(style));
     }

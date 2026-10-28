@@ -486,6 +486,13 @@ mod tests {
                 .clone()
         }
 
+        fn first_cell_of_row_with(dialog: &NewSessionDialog, theme: &Theme, text: &str) -> Cell {
+            let screen = Self::themed_screen(dialog, theme);
+            let rows = Self::rows(&screen, |cell| cell.symbol());
+            let row = rows.lines().position(|line| line.contains(text)).unwrap();
+            screen[(0, u16::try_from(row).unwrap())].clone()
+        }
+
         fn cells_from(dialog: &NewSessionDialog, theme: &Theme, text: &str) -> Vec<Cell> {
             let screen = Self::themed_screen(dialog, theme);
             let rows = Self::rows(&screen, |cell| cell.symbol());
@@ -1465,7 +1472,7 @@ mod tests {
     }
 
     #[test]
-    fn the_prompt_text_takes_the_prompt_color() {
+    fn a_focused_prompt_draws_its_text_and_chevron_in_the_prompt_color() {
         let (mut dialog, service) =
             DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
         let theme = DialogFixture::prompt_theme();
@@ -1474,7 +1481,7 @@ mod tests {
 
         assert_eq!(
             DialogFixture::in_style_color(&dialog, &theme, theme.prompt()),
-            "fix"
+            "❯ fix"
         );
     }
 
@@ -1504,6 +1511,18 @@ mod tests {
         let cells = DialogFixture::cells_from(&dialog, &theme, "fix the tests");
 
         assert!(cells.iter().all(|cell| Some(cell.bg) == theme.prompt().bg));
+    }
+
+    #[test]
+    fn a_prompt_background_reaches_the_left_edge_of_the_prompt_box() {
+        let (mut dialog, service) =
+            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
+        let theme = DialogFixture::prompt_theme();
+
+        DialogFixture::type_text(&mut dialog, &service, "fix the tests");
+        let edge = DialogFixture::first_cell_of_row_with(&dialog, &theme, "fix the tests");
+
+        assert_eq!(Some(edge.bg), theme.prompt().bg);
     }
 
     #[test]
