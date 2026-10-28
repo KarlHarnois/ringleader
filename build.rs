@@ -40,7 +40,13 @@ impl GitVersion {
 
     fn git_files(&self, directory_flag: &str, names: &[&str]) -> Vec<PathBuf> {
         self.git_path(directory_flag)
-            .map(|directory| names.iter().map(|name| directory.join(name)).collect())
+            .map(|directory| {
+                names
+                    .iter()
+                    .map(|name| directory.join(name))
+                    .filter(|path| path.exists())
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
