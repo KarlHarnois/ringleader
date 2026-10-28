@@ -17,14 +17,21 @@ pub struct TomlThemeSource {
 #[derive(Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
 struct RawStyle {
-    fg: Option<String>,
-    bg: Option<String>,
+    fg: Option<RawColor>,
+    bg: Option<RawColor>,
     bold: Option<bool>,
     dim: Option<bool>,
     italic: Option<bool>,
     underlined: Option<bool>,
     reversed: Option<bool>,
     crossed_out: Option<bool>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum RawColor {
+    Text(String),
+    Number(i64),
 }
 
 impl TomlThemeSource {
@@ -189,8 +196,8 @@ impl ThemeSource for TomlThemeSource {
 
 impl RawStyle {
     fn into_style(self) -> Result<StyleSpec, String> {
-        let foreground = self.fg.as_deref().map(ThemeColor::parse).transpose()?;
-        let background = self.bg.as_deref().map(ThemeColor::parse).transpose()?;
+        let foreground = self.fg.as_ref().map(RawColor::parse).transpose()?;
+        let background = self.bg.as_ref().map(RawColor::parse).transpose()?;
         let style = foreground
             .into_iter()
             .fold(self.modified_style(), StyleSpec::with_foreground);
@@ -217,6 +224,15 @@ impl RawStyle {
                 None => style,
             },
         )
+    }
+}
+
+impl RawColor {
+    fn parse(&self) -> Result<ThemeColor, String> {
+        match self {
+            Self::Text(text) => ThemeColor::parse(text),
+            Self::Number(number) => ThemeColor::parse(&number.to_string()),
+        }
     }
 }
 
@@ -362,6 +378,23 @@ mod tests {
             spec.style(ThemeRole::Hint),
             StyleSpec::default().without(TextModifier::Bold)
         );
+    }
+
+    #[test]
+    fn a_bare_number_picks_a_256_color_index() {
+        let spec = ThemeFileFixture::containing("dim = { fg = 240 }\n").spec();
+
+        assert_eq!(
+            spec.style(ThemeRole::Dim),
+            StyleSpec::default().with_foreground(ThemeColor::Indexed(240))
+        );
+    }
+
+    #[test]
+    fn a_bare_number_past_255_is_refused() {
+        let failures = ThemeFileFixture::containing("dim = { fg = 300 }\n").failures();
+
+        assert!(failures[0].contains("`300` is not a color"), "{failures:?}");
     }
 
     #[test]

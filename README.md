@@ -42,7 +42,7 @@ Sessions run on Ringleader's own tmux server. The server ignores your tmux confi
 
 ```toml
 selected = { bg = "#333333", bold = true }
-dim = { fg = "240" }
+dim = { fg = 240 }
 
 [state]
 exited = { fg = "red" }
