@@ -65,6 +65,7 @@ use application::{
     ServiceError, ServicePorts, SessionService, StatePorts, TmuxPorts,
 };
 use cli::{Cli, CliExit, CliOutput, CliSession, EntryPoints};
+use ui::theme::ColorMode;
 use ui::{
     App, CrosstermInput, CrosstermScreenMode, EventLoop, FinderPopupError, MenuPopupError,
     SessionFinderPopup, SessionMenuPopup, TerminalGuard,
@@ -285,7 +286,8 @@ impl CompositionRoot {
             Box::new(io::stdout()),
             Box::new(JsonFoldStore::new(&state_directory.join("folds.json"))),
             Instant::now(),
-        );
+        )
+        .with_color_mode(self.color_mode());
         let process_warnings = [log_problem, startup_message]
             .into_iter()
             .flatten()
@@ -339,6 +341,10 @@ impl CompositionRoot {
             .unwrap_or_else(|| self.paths.config_file());
         TomlConfigSource::new(&path, &self.paths.worktree_root(), self.paths.home())
             .resolved_from(&self.launch_directory)
+    }
+
+    fn color_mode(&self) -> ColorMode {
+        ColorMode::from_no_color(self.environment.get(ColorMode::VARIABLE))
     }
 
     fn write_template_if_missing(source: &TomlConfigSource) -> Option<String> {
@@ -593,14 +599,16 @@ impl EntryPoints for CompositionRoot {
     }
 
     fn find_session(&self, cli: &Cli, client: &str) -> ExitCode {
+        let color_mode = self.color_mode();
         self.run_popup(cli, |service| {
-            Self::show_finder(SessionFinderPopup::new(service, client))
+            Self::show_finder(SessionFinderPopup::new(service, client).with_color_mode(color_mode))
         })
     }
 
     fn show_session_menu(&self, cli: &Cli, client: &str) -> ExitCode {
+        let color_mode = self.color_mode();
         self.run_popup(cli, |service| {
-            Self::show_menu(SessionMenuPopup::new(service, client))
+            Self::show_menu(SessionMenuPopup::new(service, client).with_color_mode(color_mode))
         })
     }
 

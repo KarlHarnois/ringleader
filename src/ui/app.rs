@@ -7,7 +7,7 @@ use ratatui::Frame;
 
 use super::blocking_operation::{BlockingOperation, DeleteStep, OperationOutcome};
 use super::dialogs::{Dialog, DialogOpening, DialogSlot, DialogStep};
-use super::theme::Theme;
+use super::theme::{ColorMode, Theme};
 use crate::application::ports::{FoldStore, Lock, LockError};
 use crate::application::{
     CorruptRegistry, EphemeralShell, HandOff, ServiceError, SessionService, ShellOutcome,
@@ -32,6 +32,7 @@ pub struct App {
     status: StatusReport,
     tick: u64,
     theme: Theme,
+    color_mode: ColorMode,
 }
 
 impl App {
@@ -55,7 +56,12 @@ impl App {
             status: StatusReport::default(),
             tick: 0,
             theme: Theme::default(),
+            color_mode: ColorMode::default(),
         }
+    }
+
+    pub fn with_color_mode(self, color_mode: ColorMode) -> Self {
+        Self { color_mode, ..self }
     }
 
     pub fn start_up(&mut self, process_warnings: Vec<String>) -> Result<(), ServiceError> {
@@ -400,7 +406,7 @@ impl App {
 
     fn load_theme(&mut self) {
         self.service.load_theme();
-        self.theme = Theme::new(self.service.theme());
+        self.theme = self.color_mode.theme(self.service.theme());
     }
 
     fn theme_warning(&self) -> Option<String> {
@@ -1998,6 +2004,19 @@ mod tests {
         app.start_up(Vec::new()).unwrap();
 
         assert_eq!(app.theme.error(), AppFixture::rgb_error_style());
+    }
+
+    #[test]
+    fn a_monochrome_app_drops_the_configured_colors() {
+        let fixture = AppFixture::two_waiting_sessions();
+        fixture
+            .theme_source()
+            .replace(AppFixture::rgb_error_theme());
+        let mut app = AppFixture::started(&fixture, 100, 28).with_color_mode(ColorMode::Monochrome);
+
+        app.start_up(Vec::new()).unwrap();
+
+        assert_eq!(app.theme.error().fg, None);
     }
 
     #[test]

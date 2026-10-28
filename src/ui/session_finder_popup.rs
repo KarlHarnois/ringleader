@@ -12,13 +12,14 @@ use super::event_loop::InputSource;
 use super::keys::back_key::BackKey;
 use super::keys::control_key::ControlKey;
 use super::table::session_list::SessionList;
-use super::theme::Theme;
+use super::theme::{ColorMode, Theme};
 use crate::application::{CorruptRegistry, ServiceError, SessionService};
 
 pub struct SessionFinderPopup {
     service: SessionService,
     client: String,
     theme: Theme,
+    color_mode: ColorMode,
 }
 
 impl SessionFinderPopup {
@@ -30,7 +31,12 @@ impl SessionFinderPopup {
             service,
             client: client.to_string(),
             theme: Theme::default(),
+            color_mode: ColorMode::default(),
         }
+    }
+
+    pub fn with_color_mode(self, color_mode: ColorMode) -> Self {
+        Self { color_mode, ..self }
     }
 
     pub fn run<B, I>(
@@ -56,7 +62,7 @@ impl SessionFinderPopup {
 
     fn load_theme(&mut self) {
         self.service.load_theme();
-        self.theme = Theme::new(self.service.theme());
+        self.theme = self.color_mode.theme(self.service.theme());
     }
 
     fn show_failure(finder: &mut Dialog, error: &ServiceError) {

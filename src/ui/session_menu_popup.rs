@@ -13,13 +13,14 @@ use super::dialogs::DialogStep;
 use super::dialogs::usage_view::UsageView;
 use super::event_loop::InputSource;
 use super::session_menu::{MenuItem, SessionMenu};
-use super::theme::Theme;
+use super::theme::{ColorMode, Theme};
 use crate::application::{CorruptRegistry, ServiceError, SessionService};
 
 pub struct SessionMenuPopup {
     service: SessionService,
     client: String,
     theme: Theme,
+    color_mode: ColorMode,
 }
 
 impl SessionMenuPopup {
@@ -30,7 +31,12 @@ impl SessionMenuPopup {
             service,
             client: client.to_string(),
             theme: Theme::default(),
+            color_mode: ColorMode::default(),
         }
+    }
+
+    pub fn with_color_mode(self, color_mode: ColorMode) -> Self {
+        Self { color_mode, ..self }
     }
 
     pub fn run<B, I>(
@@ -65,7 +71,7 @@ impl SessionMenuPopup {
 
     fn load_theme(&mut self) {
         self.service.load_theme();
-        self.theme = Theme::new(self.service.theme());
+        self.theme = self.color_mode.theme(self.service.theme());
     }
 
     fn pressed(event: &Event) -> Option<&KeyEvent> {

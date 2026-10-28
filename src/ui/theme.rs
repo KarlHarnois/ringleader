@@ -1,3 +1,5 @@
+use std::ffi::OsStr;
+
 use ratatui::style::{Color, Modifier, Style};
 
 use crate::domain::{
@@ -8,6 +10,13 @@ use crate::domain::{
 #[derive(Debug, Clone, Copy)]
 pub struct Theme {
     styles: [Style; ThemeRole::ALL.len()],
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ColorMode {
+    #[default]
+    Full,
+    Monochrome,
 }
 
 impl Default for Theme {
@@ -48,6 +57,16 @@ impl Theme {
         let base = Self::style_of(&spec.style(ThemeRole::Base));
         Self {
             styles: ThemeRole::ALL.map(|role| base.patch(Self::style_of(&spec.style(role)))),
+        }
+    }
+
+    fn without_colors(self) -> Self {
+        Self {
+            styles: self.styles.map(|style| Style {
+                fg: None,
+                bg: None,
+                ..style
+            }),
         }
     }
 
@@ -169,6 +188,24 @@ impl Theme {
     }
 }
 
+impl ColorMode {
+    pub const VARIABLE: &'static str = "NO_COLOR";
+
+    pub fn from_no_color(value: Option<&OsStr>) -> Self {
+        match value {
+            Some(value) if !value.is_empty() => Self::Monochrome,
+            _ => Self::Full,
+        }
+    }
+
+    pub fn theme(self, spec: &ThemeSpec) -> Theme {
+        match self {
+            Self::Full => Theme::new(spec),
+            Self::Monochrome => Theme::new(spec).without_colors(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -241,5 +278,35 @@ mod tests {
                 .add_modifier
                 .contains(Modifier::DIM)
         );
+    }
+
+    #[test]
+    fn a_set_no_color_turns_colors_off() {
+        assert_eq!(
+            ColorMode::from_no_color(Some(OsStr::new("1"))),
+            ColorMode::Monochrome
+        );
+    }
+
+    #[test]
+    fn an_empty_no_color_keeps_colors_on() {
+        assert_eq!(
+            ColorMode::from_no_color(Some(OsStr::new(""))),
+            ColorMode::Full
+        );
+    }
+
+    #[test]
+    fn a_monochrome_theme_drops_every_color() {
+        let theme = ColorMode::Monochrome.theme(&ThemeSpec::default());
+
+        assert_eq!((theme.error().fg, theme.base().bg), (None, None));
+    }
+
+    #[test]
+    fn a_monochrome_theme_keeps_the_modifiers() {
+        let theme = ColorMode::Monochrome.theme(&ThemeSpec::default());
+
+        assert!(theme.selected().add_modifier.contains(Modifier::REVERSED));
     }
 }

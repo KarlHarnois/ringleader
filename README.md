@@ -92,6 +92,8 @@ A color takes one of these forms:
 - a number from 0 to 255
 - `#rrggbb`
 
+If the `NO_COLOR` variable is set and not empty, Ringleader drops every color and keeps the modifiers.
+
 ## CLI
 
 ```
