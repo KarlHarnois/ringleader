@@ -393,15 +393,9 @@ impl App {
                     .reload_server_config()
                     .map_err(|error| error.to_string())
             });
-        self.status.outcome(outcome, reloaded);
-        self.reload_theme();
-    }
-
-    fn reload_theme(&mut self) {
         self.load_theme();
-        if let Some(warning) = self.theme_warning() {
-            self.status.error(warning);
-        }
+        let outcome = outcome.and_then(|()| self.theme_warning().map_or(Ok(()), Err));
+        self.status.outcome(outcome, reloaded);
     }
 
     fn load_theme(&mut self) {
@@ -546,9 +540,9 @@ mod tests {
         UsageRow,
     };
     use crate::test_support::{
-        CapturedWriter, Deadline, FakeFoldStore, FakeLock, FakeMultiplexer, FakePullRequests,
-        FakeRepoPages, FakeSessionRegistry, FakeTerminalEmulator, FakeUsageMeter, FakeWebBrowser,
-        HeldCalls, LogCapture, ServiceFixture, UiHarness,
+        CapturedWriter, Deadline, FakeConfigSource, FakeFoldStore, FakeLock, FakeMultiplexer,
+        FakePullRequests, FakeRepoPages, FakeSessionRegistry, FakeTerminalEmulator, FakeUsageMeter,
+        FakeWebBrowser, HeldCalls, LogCapture, ServiceFixture, UiHarness,
     };
     use crate::ui::batch_operation::{BatchOperation, DeleteSessionsStep};
     use crate::ui::blocking_operation::{BrowserPage, CreateStep};
@@ -2059,6 +2053,38 @@ mod tests {
         app.start_up(Vec::new()).unwrap();
 
         assert!(app.service.read_only_reason().is_none());
+    }
+
+    #[test]
+    fn r_shows_a_theme_broken_since_startup() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        fixture
+            .theme_source()
+            .break_with(AppFixture::invalid_theme());
+
+        AppFixture::press(&mut app, 'r');
+
+        assert!(AppFixture::status_line(&app, 200).starts_with(&format!(" {}", App::THEME_ERROR)));
+    }
+
+    #[test]
+    fn a_failed_config_reload_outranks_a_broken_theme_because_colors_are_side_work() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        fixture
+            .theme_source()
+            .break_with(AppFixture::invalid_theme());
+        fixture.config_source().break_with(ConfigError::Parse {
+            path: PathBuf::from(FakeConfigSource::PATH),
+            detail: "expected `=`".to_string(),
+        });
+
+        AppFixture::press(&mut app, 'r');
+
+        assert!(
+            AppFixture::status_line(&app, 200).starts_with(&format!(" {}", App::RELOAD_FAILED))
+        );
     }
 
     #[test]
