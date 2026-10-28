@@ -29,7 +29,7 @@ struct RawStyle {
 
 impl TomlThemeSource {
     const FILE_NAME: &'static str = "theme.toml";
-    const ROLE_NAMES: [(&'static str, ThemeRole); 34] = [
+    const ROLE_NAMES: [(&'static str, ThemeRole); ThemeRole::ALL.len()] = [
         ("base", ThemeRole::Base),
         ("selected", ThemeRole::Selected),
         ("selected_out_of_focus", ThemeRole::SelectedOutOfFocus),
@@ -235,6 +235,16 @@ mod tests {
                 other => panic!("expected an invalid theme, got {other:?}"),
             }
         }
+    }
+
+    #[test]
+    fn every_role_has_one_name_so_each_role_stays_configurable() {
+        let named: Vec<ThemeRole> = TomlThemeSource::ROLE_NAMES
+            .iter()
+            .map(|(_, role)| *role)
+            .collect();
+
+        assert_eq!(named, ThemeRole::ALL);
     }
 
     #[test]
