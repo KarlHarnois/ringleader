@@ -62,9 +62,8 @@ A dotted role goes under its table: `state.exited` is `exited` under `[state]`. 
 | `matched` | `emphasis` | the letters a search matched |
 | `error` |  | errors |
 | `warning` |  | warnings |
-| `insertions` |  | added-line counts |
-| `deletions` |  | removed-line counts |
-| `approved` | `insertions` | an approved pull request |
+| `diff.insertions` |  | added-line counts |
+| `diff.deletions` |  | removed-line counts |
 | `border` |  | the borders of the session list and the preview |
 | `title` |  | panel and dialog titles |
 | `dialog.border` | `border` | the borders of dialogs and the session menu |
@@ -86,6 +85,7 @@ A dotted role goes under its table: `state.exited` is `exited` under `[state]`. 
 | `pull_request.draft` | `warning` | a draft pull request |
 | `pull_request.merged` |  | a merged pull request |
 | `pull_request.closed` |  | a closed pull request |
+| `pull_request.approved` | `pull_request.open` | an open pull request with an approving review |
 
 A role's style replaces the role's whole default. A style takes `fg` and `bg`, each a color. A style also takes these modifiers, each `true` or `false`:
 

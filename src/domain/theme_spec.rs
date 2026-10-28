@@ -85,7 +85,10 @@ impl ThemeSpec {
         (ThemeRole::Deletions, DefaultStyle::colored(AnsiColor::Red)),
         (
             ThemeRole::Approved,
-            DefaultStyle::Derived(ThemeRole::Insertions, Some(TextModifier::Bold)),
+            DefaultStyle::Derived(
+                ThemeRole::PullRequest(PullRequestState::Open),
+                Some(TextModifier::Bold),
+            ),
         ),
         (ThemeRole::Border, DefaultStyle::Own(None, None)),
         (ThemeRole::Title, DefaultStyle::Own(None, None)),
@@ -317,6 +320,19 @@ mod tests {
         assert_eq!(
             spec.style(ThemeRole::Matched),
             emphasis.with(TextModifier::Underlined)
+        );
+    }
+
+    #[test]
+    fn an_approved_pull_request_follows_open_pull_requests_and_not_the_diff() {
+        let open = StyleSpec::default().with_foreground(ThemeColor::Ansi(AnsiColor::Blue));
+        let overrides = ThemeOverrides::default()
+            .with(ThemeRole::PullRequest(PullRequestState::Open), open.clone())
+            .with(ThemeRole::Insertions, StyleSpec::default());
+
+        assert_eq!(
+            ThemeSpec::new(overrides).style(ThemeRole::Approved),
+            open.with(TextModifier::Bold)
         );
     }
 
