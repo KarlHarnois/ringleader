@@ -176,7 +176,7 @@ impl PromptStyle {
         Self {
             text: theme.prompt(),
             cursor: theme.prompt_cursor(),
-            selection: theme.selected_text(),
+            selection: theme.without_base_colors(theme.selected_text()),
         }
     }
 

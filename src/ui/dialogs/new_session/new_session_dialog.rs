@@ -1507,6 +1507,22 @@ mod tests {
     }
 
     #[test]
+    fn a_selection_in_the_prompt_keeps_the_prompt_background() {
+        let (mut dialog, service) =
+            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
+        let theme = DialogFixture::prompt_theme();
+        DialogFixture::type_text(&mut dialog, &service, "fix the tests");
+        let select_left = KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT);
+
+        for _ in 0.."tests".len() {
+            dialog.handle_key(&select_left, &service);
+        }
+        let cells = DialogFixture::cells_from(&dialog, &theme, "fix the tests");
+
+        assert!(cells.iter().all(|cell| Some(cell.bg) == theme.prompt().bg));
+    }
+
+    #[test]
     fn the_prompt_cursor_is_a_block_in_the_prompt_color_not_a_selected_row() {
         let (mut dialog, service) =
             DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
