@@ -1,6 +1,6 @@
 # Theme
 
-**To change Ringleader's colors, write a `theme.toml` file next to the config.** Ringleader reads the file at startup and when you press `r`. A role that the file leaves out keeps its default style, whose colors come from your terminal's palette.
+**To change Ringleader's colors, write a `theme.toml` file next to the config.** By default, the file is `~/.config/ringleader/theme.toml`. If you pass `--config <path>`, the file goes in the same directory as that config. Ringleader reads the file at startup and when you press `r`.
 
 ```toml
 selected = { bg = "#333333", bold = true }
@@ -10,7 +10,9 @@ dim = { fg = 240 }
 exited = { fg = "red" }
 ```
 
-A dotted role goes under its table: `state.exited` is `exited` under `[state]`. If a left-out role has a Follows entry, the role starts from the style of the role it follows.
+A dotted role goes under its table: `state.exited` is `exited` under `[state]`.
+
+A role that the file leaves out keeps its default style. Every default style uses your terminal's palette. If a left-out role has a Follows entry, the role starts from the style of the role it follows instead.
 
 | Role | Follows | What it colors |
 |---|---|---|
