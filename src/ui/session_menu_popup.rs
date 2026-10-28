@@ -14,13 +14,13 @@ use super::dialogs::usage_view::UsageView;
 use super::event_loop::InputSource;
 use super::session_menu::{MenuItem, SessionMenu};
 use super::theme::{ColorMode, Theme};
+use super::theme_slot::ThemeSlot;
 use crate::application::{CorruptRegistry, ServiceError, SessionService};
 
 pub struct SessionMenuPopup {
     service: SessionService,
     client: String,
-    theme: Theme,
-    color_mode: ColorMode,
+    theme_slot: ThemeSlot,
 }
 
 impl SessionMenuPopup {
@@ -30,13 +30,15 @@ impl SessionMenuPopup {
         Self {
             service,
             client: client.to_string(),
-            theme: Theme::default(),
-            color_mode: ColorMode::default(),
+            theme_slot: ThemeSlot::default(),
         }
     }
 
     pub fn with_color_mode(self, color_mode: ColorMode) -> Self {
-        Self { color_mode, ..self }
+        Self {
+            theme_slot: ThemeSlot::new(color_mode),
+            ..self
+        }
     }
 
     pub fn run<B, I>(
@@ -49,13 +51,13 @@ impl SessionMenuPopup {
         B::Error: Send + Sync + 'static,
         I: InputSource,
     {
-        self.load_theme();
+        self.theme_slot.reload(&mut self.service);
         self.service.load_registry(CorruptRegistry::Report)?;
         let name = self.service.client_session(&self.client)?;
         let mut panel = Panel::Menu(SessionMenu::open(&name, &self.service));
         loop {
             terminal
-                .draw(|frame| panel.render(frame, &self.theme))
+                .draw(|frame| panel.render(frame, &self.theme_slot.theme()))
                 .map_err(io::Error::other)?;
             let event = input.next_event(Self::TICK)?;
             panel.poll(Instant::now(), &self.service);
@@ -67,11 +69,6 @@ impl SessionMenuPopup {
                 None => return Ok(()),
             };
         }
-    }
-
-    fn load_theme(&mut self) {
-        self.service.load_theme();
-        self.theme = self.color_mode.theme(self.service.theme());
     }
 
     fn pressed(event: &Event) -> Option<&KeyEvent> {

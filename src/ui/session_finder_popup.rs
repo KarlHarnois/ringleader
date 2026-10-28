@@ -12,14 +12,14 @@ use super::event_loop::InputSource;
 use super::keys::back_key::BackKey;
 use super::keys::control_key::ControlKey;
 use super::table::session_list::SessionList;
-use super::theme::{ColorMode, Theme};
+use super::theme::ColorMode;
+use super::theme_slot::ThemeSlot;
 use crate::application::{CorruptRegistry, ServiceError, SessionService};
 
 pub struct SessionFinderPopup {
     service: SessionService,
     client: String,
-    theme: Theme,
-    color_mode: ColorMode,
+    theme_slot: ThemeSlot,
 }
 
 impl SessionFinderPopup {
@@ -30,13 +30,15 @@ impl SessionFinderPopup {
         Self {
             service,
             client: client.to_string(),
-            theme: Theme::default(),
-            color_mode: ColorMode::default(),
+            theme_slot: ThemeSlot::default(),
         }
     }
 
     pub fn with_color_mode(self, color_mode: ColorMode) -> Self {
-        Self { color_mode, ..self }
+        Self {
+            theme_slot: ThemeSlot::new(color_mode),
+            ..self
+        }
     }
 
     pub fn run<B, I>(
@@ -49,7 +51,7 @@ impl SessionFinderPopup {
         B::Error: Send + Sync + 'static,
         I: InputSource,
     {
-        self.load_theme();
+        self.theme_slot.reload(&mut self.service);
         let mut finder = Dialog::find_session(self.load_sessions()?.rows());
         while let Choice::Session(name) = self.choose(terminal, &mut input, &mut finder)? {
             match self.service.switch_client(&name, &self.client) {
@@ -58,11 +60,6 @@ impl SessionFinderPopup {
             }
         }
         Ok(())
-    }
-
-    fn load_theme(&mut self) {
-        self.service.load_theme();
-        self.theme = self.color_mode.theme(self.service.theme());
     }
 
     fn show_failure(finder: &mut Dialog, error: &ServiceError) {
@@ -90,7 +87,7 @@ impl SessionFinderPopup {
     {
         loop {
             terminal
-                .draw(|frame| finder.fill(frame, &self.theme))
+                .draw(|frame| finder.fill(frame, &self.theme_slot.theme()))
                 .map_err(io::Error::other)?;
             let event = input.next_event(Self::IDLE_WAIT)?;
             if let Some(choice) = event.and_then(|event| self.answer(finder, &event)) {

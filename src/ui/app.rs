@@ -9,6 +9,7 @@ use ratatui::widgets::Block;
 use super::blocking_operation::{BlockingOperation, DeleteStep, OperationOutcome};
 use super::dialogs::{Dialog, DialogOpening, DialogSlot, DialogStep};
 use super::theme::{ColorMode, Theme};
+use super::theme_slot::ThemeSlot;
 use crate::application::ports::{FoldStore, Lock, LockError};
 use crate::application::{
     CorruptRegistry, EphemeralShell, HandOff, ServiceError, SessionService, ShellOutcome,
@@ -32,8 +33,7 @@ pub struct App {
     dialogs: DialogSlot,
     status: StatusReport,
     tick: u64,
-    theme: Theme,
-    color_mode: ColorMode,
+    theme_slot: ThemeSlot,
 }
 
 impl App {
@@ -56,13 +56,15 @@ impl App {
             dialogs: DialogSlot::default(),
             status: StatusReport::default(),
             tick: 0,
-            theme: Theme::default(),
-            color_mode: ColorMode::default(),
+            theme_slot: ThemeSlot::default(),
         }
     }
 
     pub fn with_color_mode(self, color_mode: ColorMode) -> Self {
-        Self { color_mode, ..self }
+        Self {
+            theme_slot: ThemeSlot::new(color_mode),
+            ..self
+        }
     }
 
     pub fn start_up(&mut self, process_warnings: Vec<String>) -> Result<(), ServiceError> {
@@ -113,14 +115,14 @@ impl App {
     }
 
     pub fn resize(&mut self, width: u16, height: u16) {
-        let status = Self::status_bar(self.theme, &self.status, &self.home);
+        let status = Self::status_bar(self.theme_slot.theme(), &self.status, &self.home);
         self.home.resize(width, height, &status, &self.service);
     }
 
     pub fn on_tick(&mut self, now: Instant) {
         self.tick = self.tick.wrapping_add(1);
         self.service.poll_startup_input();
-        let status = Self::status_bar(self.theme, &self.status, &self.home);
+        let status = Self::status_bar(self.theme_slot.theme(), &self.status, &self.home);
         let outcome = self.home.tick(now, &mut self.service, &status);
         self.status.failure(outcome);
         self.dialogs.poll(now, &self.service);
@@ -270,11 +272,12 @@ impl App {
     }
 
     pub fn render(&self, frame: &mut Frame) {
-        let status = Self::status_bar(self.theme, &self.status, &self.home);
-        let table = self.home.table(self.tick, self.theme);
-        frame.render_widget(Block::default().style(self.theme.base()), frame.area());
-        HomeView::new(table, self.home.preview_panel(self.theme), status).render(frame);
-        self.dialogs.render(frame, &self.theme);
+        let theme = self.theme_slot.theme();
+        let status = Self::status_bar(theme, &self.status, &self.home);
+        let table = self.home.table(self.tick, theme);
+        frame.render_widget(Block::default().style(theme.base()), frame.area());
+        HomeView::new(table, self.home.preview_panel(theme), status).render(frame);
+        self.dialogs.render(frame, &theme);
     }
 
     fn status_bar<'s>(theme: Theme, status: &'s StatusReport, home: &HomeState) -> StatusBar<'s> {
@@ -401,8 +404,7 @@ impl App {
     }
 
     fn load_theme(&mut self) {
-        self.service.load_theme();
-        self.theme = self.color_mode.theme(self.service.theme());
+        self.theme_slot.reload(&mut self.service);
     }
 
     fn theme_warning(&self) -> Option<String> {
@@ -2005,7 +2007,10 @@ mod tests {
 
         app.start_up(Vec::new()).unwrap();
 
-        assert_eq!(app.theme.error(), AppFixture::rgb_error_style());
+        assert_eq!(
+            app.theme_slot.theme().error(),
+            AppFixture::rgb_error_style()
+        );
     }
 
     #[test]
@@ -2018,7 +2023,7 @@ mod tests {
 
         app.start_up(Vec::new()).unwrap();
 
-        assert_eq!(app.theme.error().fg, None);
+        assert_eq!(app.theme_slot.theme().error().fg, None);
     }
 
     #[test]
@@ -2047,7 +2052,10 @@ mod tests {
 
         AppFixture::press(&mut app, 'r');
 
-        assert_eq!(app.theme.error(), AppFixture::rgb_error_style());
+        assert_eq!(
+            app.theme_slot.theme().error(),
+            AppFixture::rgb_error_style()
+        );
     }
 
     #[test]
@@ -2125,7 +2133,10 @@ mod tests {
 
         AppFixture::press(&mut app, 'r');
 
-        assert_eq!(app.theme.error(), AppFixture::rgb_error_style());
+        assert_eq!(
+            app.theme_slot.theme().error(),
+            AppFixture::rgb_error_style()
+        );
     }
 
     #[test]

@@ -15,6 +15,7 @@ pub mod table;
 pub mod terminal_guard;
 pub mod text_fit;
 pub mod theme;
+pub mod theme_slot;
 
 pub use app::App;
 pub use event_loop::{CrosstermInput, EventLoop};
