@@ -114,7 +114,12 @@ impl Theme {
     }
 
     pub fn prompt_cursor(&self) -> Style {
-        self.prompt().add_modifier(Modifier::REVERSED)
+        let prompt = self.prompt();
+        if prompt.add_modifier.contains(Modifier::REVERSED) {
+            prompt.remove_modifier(Modifier::REVERSED)
+        } else {
+            prompt.add_modifier(Modifier::REVERSED)
+        }
     }
 
     pub fn accent(&self) -> Style {
@@ -301,6 +306,15 @@ mod tests {
                 theme.base().fg(Color::Red),
             )
         );
+    }
+
+    #[test]
+    fn a_reversed_prompt_gets_an_unreversed_cursor_so_the_cursor_stays_visible() {
+        let prompt = StyleSpec::default().with(TextModifier::Reversed);
+
+        let theme = ThemeFixture::with(ThemeRole::Prompt, prompt);
+
+        assert!(!theme.prompt_cursor().add_modifier.contains(Modifier::REVERSED));
     }
 
     #[test]
