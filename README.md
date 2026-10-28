@@ -55,8 +55,8 @@ A dotted role goes under its table: `state.exited` is `exited` under `[state]`. 
 | `base` |  | all text and the background |
 | `selected` |  | the cursor row and the focused field |
 | `selected_out_of_focus` |  | the cursor row while the terminal lacks focus |
-| `selected_text` |  | selected text |
-| `accent` |  | hot keys |
+| `selected_text` |  | selected text in a prompt |
+| `accent` |  | hot keys in the session menu |
 | `dim` |  | secondary text |
 | `emphasis` |  | names and headings |
 | `matched` | `emphasis` | the letters a search matched |
@@ -70,33 +70,13 @@ A dotted role goes under its table: `state.exited` is `exited` under `[state]`. 
 | `dialog.border` | `border` | the borders of dialogs and the session menu |
 | `separator` | `dim` | rule lines |
 | `table.header` | `emphasis` | the session list's column header |
-| `repo.number` | `dim` | the number before a repo name |
-| `repo.arrow` |  | the fold arrow before a repo name |
 | `repo.name` | `emphasis` | repo names |
 | `session.branch_prefix` | `dim` | the branch prefix before a session name |
 | `session.agent` | `dim` | the agent column |
-| `session.untracked` |  | the untracked-files marker |
 | `hint` | `dim` | hint lines in dialogs |
 | `hint_bar.key` |  | keys in the hint bar |
 | `hint_bar.text` |  | actions in the hint bar |
-| `notice` | `dim` | notices such as a search in progress |
-| `count` | `dim` | match counts in the finders |
-| `status.info` |  | information in the status bar |
 | `status.error` | `error` | errors in the status bar |
-| `status.note` | `warning` | the selected session's note in the status bar |
-| `prompt.cursor` | `selected` | the cursor in a prompt |
-| `prompt.selection` | `selected_text` | selected text in a prompt |
-| `prompt.rule` |  | the rule around a focused prompt |
-| `setting.key` | `dim` | the key labels on the new-session status line |
-| `setting.main_checkout` | `warning` | the main-checkout setting |
-| `menu.key` | `accent` | hot keys in the session menu |
-| `menu.disabled` | `dim` | disabled items in the session menu |
-| `usage.agent` | `emphasis` | agent names in the usage view |
-| `usage.bar` |  | usage bars |
-| `usage.reset` | `dim` | reset times in the usage view |
-| `help.heading` | `emphasis` | headings in the help view |
-| `preview.title` | `emphasis` | the session title in the preview |
-| `preview.path` | `dim` | the worktree path in the preview |
 | `state.working` |  | a working session |
 | `state.waiting` |  | a session that waits for you |
 | `state.exited` |  | a session whose agent exited |

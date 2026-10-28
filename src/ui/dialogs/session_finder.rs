@@ -134,7 +134,7 @@ impl SessionFinder {
         let padded_count = TextFit::new(&count).padded(count_room);
         Line::from(vec![
             Span::raw(padded_query),
-            Span::styled(padded_count, theme.count()),
+            Span::styled(padded_count, theme.dim()),
         ])
     }
 

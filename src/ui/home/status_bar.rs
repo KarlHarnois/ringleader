@@ -67,7 +67,7 @@ impl<'a> StatusBar<'a> {
     fn text(&self) -> Option<(&str, Style)> {
         match (self.message, &self.note) {
             (Some(message), _) => Some((message.text(), message.style(&self.theme))),
-            (None, Some(note)) => Some((note.as_str(), self.theme.status_note())),
+            (None, Some(note)) => Some((note.as_str(), self.theme.warning())),
             (None, None) => None,
         }
     }
@@ -93,7 +93,7 @@ impl StatusMessage {
 
     fn style(&self, theme: &Theme) -> Style {
         match self {
-            Self::Info(_) => theme.status_info(),
+            Self::Info(_) => theme.base(),
             Self::Error(_) => theme.status_error(),
         }
     }

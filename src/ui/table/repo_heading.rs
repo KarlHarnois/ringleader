@@ -76,8 +76,8 @@ impl<'a> RepoHeading<'a> {
 
     fn lead_spans(&self, theme: &Theme) -> Vec<Span<'static>> {
         vec![
-            Span::styled(self.number_label(), theme.repo_number()),
-            Span::styled(format!(" {} ", self.arrow()), theme.repo_arrow()),
+            Span::styled(self.number_label(), theme.dim()),
+            Span::styled(format!(" {} ", self.arrow()), theme.base()),
         ]
     }
 

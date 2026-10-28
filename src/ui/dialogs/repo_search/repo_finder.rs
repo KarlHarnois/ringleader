@@ -115,17 +115,17 @@ impl RepoFinder {
 
     fn summary_lines(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
         if self.scan.is_scanning() {
-            return vec![Line::styled(Self::SEARCHING, theme.notice())];
+            return vec![Line::styled(Self::SEARCHING, theme.dim())];
         }
         let notices = self.scan.notices().into_iter();
         let mut lines: Vec<Line<'static>> = notices
-            .flat_map(|notice| TextFit::new(&notice).styled_lines(width, theme.notice()))
+            .flat_map(|notice| TextFit::new(&notice).styled_lines(width, theme.dim()))
             .collect();
         match self.scan.problem() {
             Some(problem) => {
                 lines.extend(TextFit::new(&problem).styled_lines(width, theme.error()))
             }
-            None => lines.insert(0, Line::styled(self.count(), theme.count())),
+            None => lines.insert(0, Line::styled(self.count(), theme.dim())),
         }
         lines
     }
@@ -148,7 +148,7 @@ impl RepoFinder {
         if self.scan.is_scanning() || self.typed_path().is_none() {
             return Vec::new();
         }
-        vec![Line::styled(Self::NO_MATCH, theme.notice())]
+        vec![Line::styled(Self::NO_MATCH, theme.dim())]
     }
 }
 

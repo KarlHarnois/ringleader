@@ -101,8 +101,8 @@ impl SessionMenu {
 
     fn styles(&self, item: MenuItem, theme: &Theme) -> (Style, Style) {
         match item == MenuItem::PullRequest && !self.has_pull_request {
-            true => (theme.menu_disabled(), theme.menu_disabled()),
-            false => (theme.menu_key(), theme.base()),
+            true => (theme.dim(), theme.dim()),
+            false => (theme.accent(), theme.base()),
         }
     }
 
@@ -266,7 +266,7 @@ mod tests {
 
         let style = MenuFixture::style_of(&menu.lines(&Theme::default()), "T");
 
-        assert_eq!(style, Theme::default().menu_key());
+        assert_eq!(style, Theme::default().accent());
     }
 
     #[test]

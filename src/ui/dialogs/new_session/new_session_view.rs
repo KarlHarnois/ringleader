@@ -171,7 +171,7 @@ impl<'a> NewSessionView<'a> {
 
     fn rule_style(&self, theme: &Theme) -> Style {
         if self.is_focused(NewSessionField::Prompt) {
-            theme.prompt_rule()
+            theme.base()
         } else {
             theme.dim()
         }

@@ -68,10 +68,10 @@ impl UsageView {
 
     fn body(&self, theme: &Theme) -> Vec<Line<'static>> {
         let Some(reading) = self.feed.reading() else {
-            return vec![Line::styled(Self::FIRST_MEASUREMENT, theme.notice())];
+            return vec![Line::styled(Self::FIRST_MEASUREMENT, theme.dim())];
         };
         if reading.agents().is_empty() {
-            return vec![Line::styled(Self::NO_REPORTING_AGENT, theme.notice())];
+            return vec![Line::styled(Self::NO_REPORTING_AGENT, theme.dim())];
         }
         reading
             .agents()
@@ -93,7 +93,7 @@ impl UsageView {
     }
 
     fn heading(agent: &AgentReading, theme: &Theme) -> Line<'static> {
-        let name = Span::styled(agent.agent().to_string(), theme.usage_agent());
+        let name = Span::styled(agent.agent().to_string(), theme.emphasis());
         match agent.usage().ok().and_then(AgentUsage::model) {
             Some(model) => Line::from(vec![name, Span::styled(format!(" · {model}"), theme.dim())]),
             None => Line::from(name),
@@ -102,7 +102,7 @@ impl UsageView {
 
     fn usage_rows(&self, usage: &AgentUsage, theme: &Theme) -> Vec<Line<'static>> {
         if usage.rows().is_empty() {
-            return vec![Self::note(Self::NO_PLAN_USAGE, theme.notice())];
+            return vec![Self::note(Self::NO_PLAN_USAGE, theme.dim())];
         }
         usage
             .rows()
@@ -126,9 +126,9 @@ impl UsageView {
                 Self::label(&Self::window_label(limit.window())),
                 theme.base(),
             ),
-            Span::styled(Self::bar(percent), theme.usage_bar()),
+            Span::styled(Self::bar(percent), theme.base()),
             Span::styled(format!(" {percent:>3}%"), theme.base()),
-            Span::styled(self.reset(limit.resets_at()), theme.usage_reset()),
+            Span::styled(self.reset(limit.resets_at()), theme.dim()),
         ])
     }
 

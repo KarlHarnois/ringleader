@@ -257,7 +257,7 @@ impl<'a> SessionTable<'a> {
         ];
         spans.extend(
             diff.untracked_marker()
-                .map(|marker| Span::styled(format!(" {marker}"), self.theme.untracked())),
+                .map(|marker| Span::styled(format!(" {marker}"), self.theme.base())),
         );
         spans
     }

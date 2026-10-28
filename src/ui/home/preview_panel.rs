@@ -57,10 +57,10 @@ impl<'a> PreviewPanel<'a> {
     fn render_row(&self, row: &SessionSummary, frame: &mut Frame, area: Rect) {
         let width = usize::from(area.width);
         let mut lines = vec![
-            Line::styled(Self::title(row), self.theme.preview_title()),
+            Line::styled(Self::title(row), self.theme.emphasis()),
             Line::styled(
                 TextFit::new(&Self::worktree(row)).left_truncated(width),
-                self.theme.preview_path(),
+                self.theme.dim(),
             ),
             Line::styled(
                 Self::SEPARATOR.to_string().repeat(width),

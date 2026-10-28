@@ -171,8 +171,8 @@ pub struct PromptStyle {
 impl PromptStyle {
     pub fn focused(theme: &Theme) -> Self {
         Self {
-            cursor: theme.prompt_cursor(),
-            selection: theme.prompt_selection(),
+            cursor: theme.selected(),
+            selection: theme.selected_text(),
         }
     }
 
