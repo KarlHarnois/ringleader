@@ -259,7 +259,7 @@ impl ColorMode {
     pub fn theme(self, spec: &ThemeSpec) -> Theme {
         match self {
             Self::Full => Theme::new(spec),
-            Self::Monochrome => Theme::new(spec).without_colors(),
+            Self::Monochrome => Theme::default().without_colors(),
         }
     }
 }
@@ -359,6 +359,16 @@ mod tests {
         let theme = ColorMode::Monochrome.theme(&ThemeSpec::default());
 
         assert_eq!((theme.error().fg, theme.base().bg), (None, None));
+    }
+
+    #[test]
+    fn a_monochrome_theme_keeps_the_cursor_visible_under_a_color_only_override() {
+        let selected = StyleSpec::default().with_background(ThemeColor::Rgb(0x33, 0x33, 0x33));
+        let spec = ThemeSpec::new(ThemeOverrides::default().with(ThemeRole::Selected, selected));
+
+        let theme = ColorMode::Monochrome.theme(&spec);
+
+        assert!(theme.selected().add_modifier.contains(Modifier::REVERSED));
     }
 
     #[test]
