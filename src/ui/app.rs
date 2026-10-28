@@ -76,8 +76,8 @@ impl App {
             .into_iter()
             .chain(socket_recovery.as_ref().err().map(ToString::to_string))
             .chain(pane_warning)
-            .chain(self.theme_warning())
             .chain(state_warnings)
+            .chain(self.theme_warning())
             .collect();
         self.show_startup_messages(&warnings, socket_recovery.ok().flatten());
         Ok(())
@@ -2053,6 +2053,32 @@ mod tests {
         app.start_up(Vec::new()).unwrap();
 
         assert!(app.service.theme_error().is_none());
+    }
+
+    #[test]
+    fn a_startup_theme_error_follows_the_state_warnings_because_colors_are_side_work() {
+        let fixture = AppFixture::two_waiting_sessions();
+        fixture
+            .theme_source()
+            .break_with(AppFixture::invalid_theme());
+        fixture.multiplexer().fail(
+            "apply_config",
+            MultiplexerError::Failed {
+                subcommand: "source-file".to_string(),
+                detail: "invalid option: no-such-option".to_string(),
+            },
+        );
+        fixture.multiplexer().drift_config("M-x");
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        app.start_up(Vec::new()).unwrap();
+
+        assert!(matches!(
+            app.status.message(),
+            Some(StatusMessage::Error(message))
+                if message.starts_with("could not update the config")
+                    && message.contains(App::THEME_ERROR)
+        ));
     }
 
     #[test]
