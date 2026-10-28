@@ -312,9 +312,9 @@ mod tests {
     fn a_reversed_prompt_gets_an_unreversed_cursor_so_the_cursor_stays_visible() {
         let prompt = StyleSpec::default().with(TextModifier::Reversed);
 
-        let theme = ThemeFixture::with(ThemeRole::Prompt, prompt);
+        let cursor = ThemeFixture::with(ThemeRole::Prompt, prompt).prompt_cursor();
 
-        assert!(!theme.prompt_cursor().add_modifier.contains(Modifier::REVERSED));
+        assert!(!cursor.add_modifier.contains(Modifier::REVERSED));
     }
 
     #[test]
