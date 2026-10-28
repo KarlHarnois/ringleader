@@ -459,7 +459,9 @@ mod tests {
 
         fn prompt_theme() -> Theme {
             let selected = StyleSpec::default().with_background(ThemeColor::Indexed(235));
-            let prompt = StyleSpec::default().with_foreground(ThemeColor::Indexed(231));
+            let prompt = StyleSpec::default()
+                .with_foreground(ThemeColor::Indexed(231))
+                .with_background(ThemeColor::Indexed(236));
             let overrides = ThemeOverrides::default()
                 .with(ThemeRole::Selected, selected)
                 .with(ThemeRole::Prompt, prompt);
@@ -475,6 +477,15 @@ mod tests {
                 .map(Cell::symbol)
                 .collect();
             in_color.trim_end().to_string()
+        }
+
+        fn last_cell_of_row_with(dialog: &NewSessionDialog, theme: &Theme, text: &str) -> Cell {
+            let screen = Self::themed_screen(dialog, theme);
+            let row = Self::rows(&screen, |cell| cell.symbol())
+                .lines()
+                .position(|row| row.contains(text))
+                .unwrap();
+            screen[(Self::WIDTH - 1, u16::try_from(row).unwrap())].clone()
         }
 
         fn cursor_cell(dialog: &NewSessionDialog, theme: &Theme) -> Cell {
@@ -1455,6 +1466,18 @@ mod tests {
     }
 
     #[test]
+    fn a_prompt_background_reaches_the_right_edge_of_the_prompt_box() {
+        let (mut dialog, service) =
+            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
+        let theme = DialogFixture::prompt_theme();
+
+        DialogFixture::type_text(&mut dialog, &service, "fix the tests");
+        let edge = DialogFixture::last_cell_of_row_with(&dialog, &theme, "fix the tests");
+
+        assert_eq!(Some(edge.bg), theme.prompt().bg);
+    }
+
+    #[test]
     fn the_prompt_cursor_is_a_block_in_the_prompt_color_not_a_selected_row() {
         let (mut dialog, service) =
             DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
@@ -1465,7 +1488,7 @@ mod tests {
 
         assert_eq!(
             (Some(cursor.fg), Some(cursor.bg)),
-            (theme.prompt().fg, theme.base().bg)
+            (theme.prompt().fg, theme.prompt().bg)
         );
     }
 
