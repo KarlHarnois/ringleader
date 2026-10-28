@@ -242,10 +242,12 @@ mod tests {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::buffer::{Buffer, Cell};
-    use ratatui::style::Modifier;
+    use ratatui::style::{Modifier, Style};
 
     use super::*;
-    use crate::domain::{Agent, Repo, RepoName};
+    use crate::domain::{
+        Agent, Repo, RepoName, StyleSpec, ThemeColor, ThemeOverrides, ThemeRole, ThemeSpec,
+    };
     use crate::test_support::{FakeHostProbe, FakeRepoScanner, ServiceFixture};
 
     struct DialogFixture;
@@ -429,11 +431,60 @@ mod tests {
             height: u16,
             labels: DialogLabels,
         ) -> Buffer {
-            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            Self::drawn(
+                dialog,
+                Rect::new(0, 0, width, height),
+                labels,
+                &Theme::default(),
+            )
+        }
+
+        fn themed_screen(dialog: &NewSessionDialog, theme: &Theme) -> Buffer {
+            let area = Rect::new(0, 0, Self::WIDTH, Self::FULL_HEIGHT);
+            Self::drawn(dialog, area, DialogLabels::full(), theme)
+        }
+
+        fn drawn(
+            dialog: &NewSessionDialog,
+            area: Rect,
+            labels: DialogLabels,
+            theme: &Theme,
+        ) -> Buffer {
+            let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
             terminal
-                .draw(|frame| dialog.render(frame, frame.area(), labels, &Theme::default()))
+                .draw(|frame| dialog.render(frame, frame.area(), labels, theme))
                 .unwrap();
             terminal.backend().buffer().clone()
+        }
+
+        fn prompt_theme() -> Theme {
+            let selected = StyleSpec::default().with_background(ThemeColor::Indexed(235));
+            let prompt = StyleSpec::default().with_foreground(ThemeColor::Indexed(231));
+            let overrides = ThemeOverrides::default()
+                .with(ThemeRole::Selected, selected)
+                .with(ThemeRole::Prompt, prompt);
+            Theme::new(&ThemeSpec::new(overrides))
+        }
+
+        fn in_style_color(dialog: &NewSessionDialog, theme: &Theme, style: Style) -> String {
+            let screen = Self::themed_screen(dialog, theme);
+            let in_color: String = screen
+                .content()
+                .iter()
+                .filter(|cell| Some(cell.fg) == style.fg)
+                .map(Cell::symbol)
+                .collect();
+            in_color.trim_end().to_string()
+        }
+
+        fn cursor_cell(dialog: &NewSessionDialog, theme: &Theme) -> Cell {
+            let screen = Self::themed_screen(dialog, theme);
+            screen
+                .content()
+                .iter()
+                .find(|cell| Self::is_cursor(cell))
+                .unwrap()
+                .clone()
         }
 
         fn compact_text(dialog: &NewSessionDialog) -> String {
@@ -1387,6 +1438,35 @@ mod tests {
 
         assert!(focused);
         assert!(!DialogFixture::shows_a_cursor(&dialog));
+    }
+
+    #[test]
+    fn the_prompt_text_takes_the_prompt_color() {
+        let (mut dialog, service) =
+            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
+        let theme = DialogFixture::prompt_theme();
+
+        DialogFixture::type_text(&mut dialog, &service, "fix");
+
+        assert_eq!(
+            DialogFixture::in_style_color(&dialog, &theme, theme.prompt()),
+            "fix"
+        );
+    }
+
+    #[test]
+    fn the_prompt_cursor_is_a_block_in_the_prompt_color_not_a_selected_row() {
+        let (mut dialog, service) =
+            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
+        let theme = DialogFixture::prompt_theme();
+
+        DialogFixture::type_text(&mut dialog, &service, "fix");
+        let cursor = DialogFixture::cursor_cell(&dialog, &theme);
+
+        assert_eq!(
+            (Some(cursor.fg), Some(cursor.bg)),
+            (theme.prompt().fg, theme.base().bg)
+        );
     }
 
     #[test]

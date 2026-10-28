@@ -109,6 +109,14 @@ impl Theme {
         self.style(ThemeRole::SelectedText)
     }
 
+    pub fn prompt(&self) -> Style {
+        self.style(ThemeRole::Prompt)
+    }
+
+    pub fn prompt_cursor(&self) -> Style {
+        self.prompt().add_modifier(Modifier::REVERSED)
+    }
+
     pub fn accent(&self) -> Style {
         self.style(ThemeRole::Accent)
     }

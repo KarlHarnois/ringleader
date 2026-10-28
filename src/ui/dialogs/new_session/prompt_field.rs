@@ -63,7 +63,7 @@ impl PromptField {
     }
 
     pub fn render(&self, frame: &mut Frame, inner: Rect, style: PromptStyle) {
-        self.render_text(frame, Self::text_area(inner), style.selection);
+        self.render_text(frame, Self::text_area(inner), style);
         self.paint_cursor(frame.buffer_mut(), inner, self.cursor_style(style));
     }
 
@@ -71,9 +71,10 @@ impl PromptField {
         key.code == KeyCode::Char(character) && key.modifiers == KeyModifiers::CONTROL
     }
 
-    fn render_text(&self, frame: &mut Frame, text: Rect, selection_style: Style) {
+    fn render_text(&self, frame: &mut Frame, text: Rect, style: PromptStyle) {
         let mut editor = self.editor.borrow_mut();
-        editor.set_selection_style(selection_style);
+        editor.set_style(style.text);
+        editor.set_selection_style(style.selection);
         frame.render_widget(&*editor, text);
         let stale_rows = Self::stale_scroll_rows(&editor, text);
         if stale_rows > 0 {
@@ -164,6 +165,7 @@ impl PromptField {
 
 #[derive(Debug, Clone, Copy)]
 pub struct PromptStyle {
+    text: Style,
     cursor: Style,
     selection: Style,
 }
@@ -171,13 +173,15 @@ pub struct PromptStyle {
 impl PromptStyle {
     pub fn focused(theme: &Theme) -> Self {
         Self {
-            cursor: theme.selected(),
+            text: theme.prompt(),
+            cursor: theme.prompt_cursor(),
             selection: theme.selected_text(),
         }
     }
 
     pub fn unfocused(theme: &Theme) -> Self {
         Self {
+            text: theme.prompt(),
             cursor: theme.base(),
             selection: theme.base(),
         }

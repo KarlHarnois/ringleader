@@ -133,7 +133,7 @@ impl SessionFinder {
         let padded_query = TextFit::new(&query).padded(query_room);
         let padded_count = TextFit::new(&count).padded(count_room);
         Line::from(vec![
-            Span::raw(padded_query),
+            Span::styled(padded_query, theme.prompt()),
             Span::styled(padded_count, theme.dim()),
         ])
     }
@@ -175,9 +175,12 @@ impl SessionFinder {
 #[cfg(test)]
 mod tests {
     use crossterm::event::KeyModifiers;
+    use ratatui::style::Style;
 
     use super::*;
-    use crate::domain::SessionState;
+    use crate::domain::{
+        SessionState, StyleSpec, ThemeColor, ThemeOverrides, ThemeRole, ThemeSpec,
+    };
     use crate::test_support::ServiceFixture;
 
     struct FinderFixture;
@@ -235,6 +238,17 @@ mod tests {
                 .collect()
         }
 
+        fn prompt_theme() -> Theme {
+            let prompt = StyleSpec::default().with_foreground(ThemeColor::Indexed(231));
+            let overrides = ThemeOverrides::default().with(ThemeRole::Prompt, prompt);
+            Theme::new(&ThemeSpec::new(overrides))
+        }
+
+        fn query_style(finder: &SessionFinder, theme: &Theme) -> Style {
+            let lines = finder.lines(Self::WIDTH, Self::HEIGHT, theme);
+            lines[0].spans[0].style
+        }
+
         fn attach(name: &str) -> DialogStep {
             DialogStep::CloseWith(AppRequest::Attach(name.to_string()))
         }
@@ -262,6 +276,15 @@ mod tests {
                 FinderFixture::full_width(" docs"),
             ]
         );
+    }
+
+    #[test]
+    fn the_query_takes_the_prompt_color() {
+        let theme = FinderFixture::prompt_theme();
+
+        let style = FinderFixture::query_style(&FinderFixture::finder(), &theme);
+
+        assert_eq!(style, theme.prompt());
     }
 
     #[test]

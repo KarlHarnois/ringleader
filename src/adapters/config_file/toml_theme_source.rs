@@ -42,6 +42,7 @@ impl TomlThemeSource {
         ("selected", ThemeRole::Selected),
         ("selected_out_of_focus", ThemeRole::SelectedOutOfFocus),
         ("selected_text", ThemeRole::SelectedText),
+        ("prompt", ThemeRole::Prompt),
         ("accent", ThemeRole::Accent),
         ("dim", ThemeRole::Dim),
         ("emphasis", ThemeRole::Emphasis),
