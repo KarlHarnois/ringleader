@@ -256,6 +256,10 @@ impl ColorMode {
         }
     }
 
+    pub fn reads_theme_file(self) -> bool {
+        self == Self::Full
+    }
+
     pub fn theme(self, spec: &ThemeSpec) -> Theme {
         match self {
             Self::Full => Theme::new(spec),

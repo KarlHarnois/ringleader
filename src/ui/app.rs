@@ -2043,6 +2043,19 @@ mod tests {
     }
 
     #[test]
+    fn a_monochrome_app_reports_no_theme_error_because_it_ignores_the_file() {
+        let fixture = AppFixture::two_waiting_sessions();
+        fixture
+            .theme_source()
+            .break_with(AppFixture::invalid_theme());
+        let mut app = AppFixture::started(&fixture, 100, 28).with_color_mode(ColorMode::Monochrome);
+
+        app.start_up(Vec::new()).unwrap();
+
+        assert!(app.service.theme_error().is_none());
+    }
+
+    #[test]
     fn r_reloads_the_theme() {
         let fixture = AppFixture::two_waiting_sessions();
         let mut app = AppFixture::started(&fixture, 100, 28);

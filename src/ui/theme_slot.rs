@@ -16,7 +16,9 @@ impl ThemeSlot {
     }
 
     pub fn reload(&mut self, service: &mut SessionService) {
-        service.load_theme();
+        if self.color_mode.reads_theme_file() {
+            service.load_theme();
+        }
         self.theme = self.color_mode.theme(service.theme());
     }
 
