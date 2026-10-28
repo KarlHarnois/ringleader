@@ -478,7 +478,6 @@ Ringleader checks a registry entry recorded on another socket only through `Proc
   - first run
   - the CLI synopsis
   - the exit codes
-  - the theme file
   - the built-in skills
 - Never put architecture or the rules of this file in `README.md`.
 - Put a rule that every task needs in this file. Put a rule that only one kind of task needs in a reference file under `docs/agents/`.
