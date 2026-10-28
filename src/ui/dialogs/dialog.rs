@@ -199,7 +199,7 @@ impl Dialog {
             Self::Delete(_) => DeleteSessionDialog::TITLE,
             Self::DeleteSessions(_) => DeleteSessionsDialog::TITLE,
             Self::Rename(_) => RenameSessionDialog::TITLE,
-            Self::Help(_) => HelpView::TITLE,
+            Self::Help(_) => HelpView::title(),
             Self::FindSession(_) => SessionFinder::TITLE,
             Self::Usage(_) => UsageView::TITLE,
         }

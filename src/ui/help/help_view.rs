@@ -1,13 +1,14 @@
 use std::iter::once;
 use std::path::Path;
 use std::slice;
+use std::sync::LazyLock;
 
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::text::{Line, Span};
 
 use super::label_column::LabelColumn;
 use super::legend::{Legend, LegendEntry};
-use crate::domain::{HotKey, KeyBindings, PullRequestState, SessionState};
+use crate::domain::{BuildVersion, HotKey, KeyBindings, PullRequestState, SessionState};
 use crate::ui::dialogs::DialogStep;
 use crate::ui::dialogs::home_path::HomePath;
 use crate::ui::dialogs::scroll_window::ScrollWindow;
@@ -23,7 +24,6 @@ pub struct HelpView {
 }
 
 impl HelpView {
-    pub const TITLE: &'static str = concat!(" Help · ringleader ", env!("CARGO_PKG_VERSION"), " ");
     const KEYS_HEADING: &'static str = "Keys";
     const KEYS: [(&'static str, &'static str); 21] = [
         ("n", "create a session"),
@@ -80,6 +80,12 @@ impl HelpView {
     const FIRST_SPINNER_TICK: u64 = 0;
     const PULL_REQUEST_SYMBOL: &'static str = "#n";
     const CLOSE_HINT: &'static str = "? Esc q close";
+
+    pub fn title() -> &'static str {
+        static TITLE: LazyLock<String> =
+            LazyLock::new(|| format!(" Help · ringleader {} ", BuildVersion::CURRENT.text()));
+        TITLE.as_str()
+    }
 
     pub fn new(key_bindings: &KeyBindings, files: &[(&str, &Path)], home: &HomePath) -> Self {
         let files = files
@@ -480,7 +486,7 @@ mod tests {
 
         assert!(screen.contains(&format!(
             "┌ Help · ringleader {} ",
-            env!("CARGO_PKG_VERSION")
+            BuildVersion::CURRENT.text()
         )));
     }
 
