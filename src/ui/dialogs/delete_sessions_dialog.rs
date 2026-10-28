@@ -39,13 +39,15 @@ impl DeleteSessionsDialog {
         let mut lines = self.scroll.window(self.session_list(width, theme), room);
         lines.push(Line::from(""));
         let hints = self.scroll.hint(self.hints());
-        lines.extend(TextFit::new(&hints).styled_lines(width, theme.dim()));
+        lines.extend(TextFit::new(&hints).styled_lines(width, theme.hint()));
         lines
     }
 
     fn widest_hint_rows(&self, width: usize, theme: &Theme) -> usize {
         let widest = ScrollWindow::scrolling_hint(self.hints());
-        TextFit::new(&widest).styled_lines(width, theme.dim()).len()
+        TextFit::new(&widest)
+            .styled_lines(width, theme.hint())
+            .len()
     }
 
     fn session_list(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {

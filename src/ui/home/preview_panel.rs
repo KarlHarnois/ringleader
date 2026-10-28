@@ -37,7 +37,9 @@ impl<'a> PreviewPanel<'a> {
     }
 
     pub fn render(&self, frame: &mut Frame, area: Rect) {
-        let block = Self::frame().border_style(self.theme.border());
+        let block = Self::frame()
+            .border_style(self.theme.border())
+            .title_style(self.theme.title());
         let inner = block.inner(area);
         frame.render_widget(block, area);
         if let Some(row) = self.row {
@@ -55,12 +57,15 @@ impl<'a> PreviewPanel<'a> {
     fn render_row(&self, row: &SessionSummary, frame: &mut Frame, area: Rect) {
         let width = usize::from(area.width);
         let mut lines = vec![
-            Line::styled(Self::title(row), self.theme.emphasis()),
+            Line::styled(Self::title(row), self.theme.preview_title()),
             Line::styled(
                 TextFit::new(&Self::worktree(row)).left_truncated(width),
-                self.theme.dim(),
+                self.theme.preview_path(),
             ),
-            Line::styled(Self::SEPARATOR.to_string().repeat(width), self.theme.dim()),
+            Line::styled(
+                Self::SEPARATOR.to_string().repeat(width),
+                self.theme.separator(),
+            ),
         ];
         let room = usize::from(area.height).saturating_sub(lines.len());
         lines.extend(self.body(row, room));

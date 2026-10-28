@@ -134,12 +134,12 @@ impl SessionFinder {
         let padded_count = TextFit::new(&count).padded(count_room);
         Line::from(vec![
             Span::raw(padded_query),
-            Span::styled(padded_count, theme.dim()),
+            Span::styled(padded_count, theme.count()),
         ])
     }
 
     fn rule(width: usize, theme: &Theme) -> Line<'static> {
-        Line::styled(Self::RULE.to_string().repeat(width), theme.dim())
+        Line::styled(Self::RULE.to_string().repeat(width), theme.separator())
     }
 
     fn error_lines(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {

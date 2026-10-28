@@ -93,14 +93,6 @@ impl Theme {
         style
     }
 
-    pub fn selected_text(&self) -> Style {
-        self.style(ThemeRole::SelectedText)
-    }
-
-    pub fn accent(&self) -> Style {
-        self.style(ThemeRole::Accent)
-    }
-
     pub fn dim(&self) -> Style {
         self.style(ThemeRole::Dim)
     }
@@ -131,6 +123,130 @@ impl Theme {
 
     pub fn border(&self) -> Style {
         self.style(ThemeRole::Border)
+    }
+
+    pub fn title(&self) -> Style {
+        self.style(ThemeRole::Title)
+    }
+
+    pub fn dialog_border(&self) -> Style {
+        self.style(ThemeRole::DialogBorder)
+    }
+
+    pub fn separator(&self) -> Style {
+        self.style(ThemeRole::Separator)
+    }
+
+    pub fn table_header(&self) -> Style {
+        self.style(ThemeRole::TableHeader)
+    }
+
+    pub fn repo_number(&self) -> Style {
+        self.style(ThemeRole::RepoNumber)
+    }
+
+    pub fn repo_arrow(&self) -> Style {
+        self.style(ThemeRole::RepoArrow)
+    }
+
+    pub fn repo_name(&self) -> Style {
+        self.style(ThemeRole::RepoName)
+    }
+
+    pub fn branch_prefix(&self) -> Style {
+        self.style(ThemeRole::BranchPrefix)
+    }
+
+    pub fn agent(&self) -> Style {
+        self.style(ThemeRole::Agent)
+    }
+
+    pub fn untracked(&self) -> Style {
+        self.style(ThemeRole::Untracked)
+    }
+
+    pub fn hint(&self) -> Style {
+        self.style(ThemeRole::Hint)
+    }
+
+    pub fn hint_bar_key(&self) -> Style {
+        self.style(ThemeRole::HintBarKey)
+    }
+
+    pub fn hint_bar_text(&self) -> Style {
+        self.style(ThemeRole::HintBarText)
+    }
+
+    pub fn notice(&self) -> Style {
+        self.style(ThemeRole::Notice)
+    }
+
+    pub fn count(&self) -> Style {
+        self.style(ThemeRole::Count)
+    }
+
+    pub fn status_info(&self) -> Style {
+        self.style(ThemeRole::StatusInfo)
+    }
+
+    pub fn status_error(&self) -> Style {
+        self.style(ThemeRole::StatusError)
+    }
+
+    pub fn status_note(&self) -> Style {
+        self.style(ThemeRole::StatusNote)
+    }
+
+    pub fn prompt_cursor(&self) -> Style {
+        self.style(ThemeRole::PromptCursor)
+    }
+
+    pub fn prompt_selection(&self) -> Style {
+        self.style(ThemeRole::PromptSelection)
+    }
+
+    pub fn setting_key(&self) -> Style {
+        self.style(ThemeRole::SettingKey)
+    }
+
+    pub fn main_checkout(&self) -> Style {
+        self.style(ThemeRole::MainCheckout)
+    }
+
+    pub fn menu_key(&self) -> Style {
+        self.style(ThemeRole::MenuKey)
+    }
+
+    pub fn menu_disabled(&self) -> Style {
+        self.style(ThemeRole::MenuDisabled)
+    }
+
+    pub fn usage_agent(&self) -> Style {
+        self.style(ThemeRole::UsageAgent)
+    }
+
+    pub fn usage_bar(&self) -> Style {
+        self.style(ThemeRole::UsageBar)
+    }
+
+    pub fn usage_reset(&self) -> Style {
+        self.style(ThemeRole::UsageReset)
+    }
+
+    pub fn help_heading(&self) -> Style {
+        self.style(ThemeRole::HelpHeading)
+    }
+
+    pub fn preview_title(&self) -> Style {
+        self.style(ThemeRole::PreviewTitle)
+    }
+
+    pub fn prompt_rule(&self) -> Style {
+        self.style(ThemeRole::PromptRule)
+    }
+
+    pub fn preview_path(&self) -> Style {
+        self.style(ThemeRole::PreviewPath)
     }
 
     pub fn state(&self, state: SessionState) -> Style {
@@ -239,7 +355,7 @@ mod tests {
 
         let theme = ThemeFixture::with(ThemeRole::Accent, accent);
 
-        assert_eq!(theme.accent().fg, Some(Color::Rgb(0x8a, 0x8a, 0x8d)));
+        assert_eq!(theme.menu_key().fg, Some(Color::Rgb(0x8a, 0x8a, 0x8d)));
     }
 
     #[test]
@@ -257,7 +373,7 @@ mod tests {
 
         let theme = ThemeFixture::with(ThemeRole::Accent, accent);
 
-        assert_eq!(theme.accent().fg, Some(Color::Gray));
+        assert_eq!(theme.menu_key().fg, Some(Color::Gray));
     }
 
     #[test]

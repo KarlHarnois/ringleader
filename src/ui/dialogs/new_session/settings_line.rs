@@ -81,7 +81,7 @@ impl<'a> SettingsLine<'a> {
     fn checkout_value(&self, theme: &Theme) -> Span<'static> {
         let style = match self.checkout {
             Checkout::NewWorktree => theme.base(),
-            Checkout::Main => theme.warning(),
+            Checkout::Main => theme.main_checkout(),
         };
         Span::styled(self.checkout.name(), style)
     }
@@ -92,7 +92,7 @@ impl<'a> SettingsLine<'a> {
         };
         vec![
             Span::raw(Self::MARK_SEPARATOR),
-            Span::styled(mark, theme.warning()),
+            Span::styled(mark, theme.main_checkout()),
         ]
     }
 
@@ -106,7 +106,7 @@ impl<'a> SettingsLine<'a> {
     }
 
     fn key_span(setting: Setting, theme: &Theme) -> Span<'static> {
-        Span::styled(format!(" ({})", setting.key().label()), theme.dim())
+        Span::styled(format!(" ({})", setting.key().label()), theme.setting_key())
     }
 }
 

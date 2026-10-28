@@ -29,8 +29,7 @@ struct RawStyle {
 
 impl TomlThemeSource {
     const FILE_NAME: &'static str = "theme.toml";
-    const GROUPS: [&'static str; 2] = ["state", "pull_request"];
-    const ROLE_NAMES: [(&'static str, ThemeRole); 23] = [
+    const ROLE_NAMES: [(&'static str, ThemeRole); 54] = [
         ("base", ThemeRole::Base),
         ("selected", ThemeRole::Selected),
         ("selected_out_of_focus", ThemeRole::SelectedOutOfFocus),
@@ -45,6 +44,37 @@ impl TomlThemeSource {
         ("deletions", ThemeRole::Deletions),
         ("approved", ThemeRole::Approved),
         ("border", ThemeRole::Border),
+        ("title", ThemeRole::Title),
+        ("dialog.border", ThemeRole::DialogBorder),
+        ("separator", ThemeRole::Separator),
+        ("table.header", ThemeRole::TableHeader),
+        ("repo.number", ThemeRole::RepoNumber),
+        ("repo.arrow", ThemeRole::RepoArrow),
+        ("repo.name", ThemeRole::RepoName),
+        ("session.branch_prefix", ThemeRole::BranchPrefix),
+        ("session.agent", ThemeRole::Agent),
+        ("session.untracked", ThemeRole::Untracked),
+        ("hint", ThemeRole::Hint),
+        ("hint_bar.key", ThemeRole::HintBarKey),
+        ("hint_bar.text", ThemeRole::HintBarText),
+        ("notice", ThemeRole::Notice),
+        ("count", ThemeRole::Count),
+        ("status.info", ThemeRole::StatusInfo),
+        ("status.error", ThemeRole::StatusError),
+        ("status.note", ThemeRole::StatusNote),
+        ("prompt.cursor", ThemeRole::PromptCursor),
+        ("prompt.selection", ThemeRole::PromptSelection),
+        ("setting.key", ThemeRole::SettingKey),
+        ("setting.main_checkout", ThemeRole::MainCheckout),
+        ("menu.key", ThemeRole::MenuKey),
+        ("menu.disabled", ThemeRole::MenuDisabled),
+        ("usage.agent", ThemeRole::UsageAgent),
+        ("usage.bar", ThemeRole::UsageBar),
+        ("usage.reset", ThemeRole::UsageReset),
+        ("help.heading", ThemeRole::HelpHeading),
+        ("preview.title", ThemeRole::PreviewTitle),
+        ("prompt.rule", ThemeRole::PromptRule),
+        ("preview.path", ThemeRole::PreviewPath),
         ("state.working", ThemeRole::State(SessionState::Working)),
         ("state.waiting", ThemeRole::State(SessionState::Waiting)),
         ("state.exited", ThemeRole::State(SessionState::Exited)),
@@ -106,13 +136,20 @@ impl TomlThemeSource {
         table
             .into_iter()
             .flat_map(|(key, value)| match value {
-                toml::Value::Table(group) if Self::GROUPS.contains(&key.as_str()) => group
+                toml::Value::Table(group) if Self::is_group(&key) => group
                     .into_iter()
                     .map(|(role, value)| (format!("{key}.{role}"), value))
                     .collect(),
                 value => vec![(key, value)],
             })
             .collect()
+    }
+
+    fn is_group(key: &str) -> bool {
+        let prefix = format!("{key}.");
+        Self::ROLE_NAMES
+            .iter()
+            .any(|(name, _)| name.starts_with(&prefix))
     }
 
     fn role_style(name: &str, value: toml::Value) -> Result<(ThemeRole, StyleSpec), String> {
@@ -254,6 +291,32 @@ mod tests {
                 .with(TextModifier::Bold)
                 .with_foreground(ThemeColor::Ansi(AnsiColor::Magenta))
         );
+    }
+
+    #[test]
+    fn a_top_level_role_and_a_group_with_a_similar_name_load_side_by_side() {
+        let spec = ThemeFileFixture::containing(
+            "hint = { italic = true }\n[hint_bar]\nkey = { bold = true }\n",
+        )
+        .spec();
+
+        assert_eq!(
+            (
+                spec.style(ThemeRole::Hint),
+                spec.style(ThemeRole::HintBarKey)
+            ),
+            (
+                StyleSpec::default().with(TextModifier::Italic),
+                StyleSpec::default().with(TextModifier::Bold)
+            )
+        );
+    }
+
+    #[test]
+    fn an_unknown_role_inside_a_group_names_the_dotted_role() {
+        let failures = ThemeFileFixture::containing("[repo]\nnmae = { bold = true }\n").failures();
+
+        assert_eq!(failures, ["unknown theme role `repo.nmae`"]);
     }
 
     #[test]

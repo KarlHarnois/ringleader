@@ -80,7 +80,7 @@ impl<'a> NewSessionView<'a> {
         self.render_prompt_panel(frame, panel_area, theme);
         frame.render_widget(Paragraph::new(status), status_area);
         frame.render_widget(Paragraph::new(errors), error_area);
-        frame.render_widget(Line::styled(self.hints(), theme.dim()), hints_area);
+        frame.render_widget(Line::styled(self.hints(), theme.hint()), hints_area);
     }
 
     fn layout(
@@ -171,7 +171,7 @@ impl<'a> NewSessionView<'a> {
 
     fn rule_style(&self, theme: &Theme) -> Style {
         if self.is_focused(NewSessionField::Prompt) {
-            theme.base()
+            theme.prompt_rule()
         } else {
             theme.dim()
         }

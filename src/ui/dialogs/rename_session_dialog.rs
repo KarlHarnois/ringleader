@@ -58,7 +58,7 @@ impl RenameSessionDialog {
         lines.push(Line::from(""));
         let error = self.error.as_deref().unwrap_or_default();
         lines.extend(TextFit::new(error).styled_lines(width, theme.error()));
-        lines.extend(TextFit::new(Self::HINTS).styled_lines(width, theme.dim()));
+        lines.extend(TextFit::new(Self::HINTS).styled_lines(width, theme.hint()));
         lines
     }
 

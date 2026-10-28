@@ -94,7 +94,7 @@ impl DeleteSessionDialog {
         } else {
             ConfirmationKeys::HINTS
         };
-        lines.extend(TextFit::new(hints).styled_lines(width, theme.dim()));
+        lines.extend(TextFit::new(hints).styled_lines(width, theme.hint()));
         lines
     }
 

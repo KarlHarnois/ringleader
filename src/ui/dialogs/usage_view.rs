@@ -68,10 +68,10 @@ impl UsageView {
 
     fn body(&self, theme: &Theme) -> Vec<Line<'static>> {
         let Some(reading) = self.feed.reading() else {
-            return vec![Line::styled(Self::FIRST_MEASUREMENT, theme.dim())];
+            return vec![Line::styled(Self::FIRST_MEASUREMENT, theme.notice())];
         };
         if reading.agents().is_empty() {
-            return vec![Line::styled(Self::NO_REPORTING_AGENT, theme.dim())];
+            return vec![Line::styled(Self::NO_REPORTING_AGENT, theme.notice())];
         }
         reading
             .agents()
@@ -93,7 +93,7 @@ impl UsageView {
     }
 
     fn heading(agent: &AgentReading, theme: &Theme) -> Line<'static> {
-        let name = Span::styled(agent.agent().to_string(), theme.emphasis());
+        let name = Span::styled(agent.agent().to_string(), theme.usage_agent());
         match agent.usage().ok().and_then(AgentUsage::model) {
             Some(model) => Line::from(vec![name, Span::styled(format!(" · {model}"), theme.dim())]),
             None => Line::from(name),
@@ -102,7 +102,7 @@ impl UsageView {
 
     fn usage_rows(&self, usage: &AgentUsage, theme: &Theme) -> Vec<Line<'static>> {
         if usage.rows().is_empty() {
-            return vec![Self::note(Self::NO_PLAN_USAGE, theme.dim())];
+            return vec![Self::note(Self::NO_PLAN_USAGE, theme.notice())];
         }
         usage
             .rows()
@@ -126,9 +126,9 @@ impl UsageView {
                 Self::label(&Self::window_label(limit.window())),
                 theme.base(),
             ),
-            Span::styled(Self::bar(percent), theme.base()),
+            Span::styled(Self::bar(percent), theme.usage_bar()),
             Span::styled(format!(" {percent:>3}%"), theme.base()),
-            Span::styled(self.reset(limit.resets_at()), theme.dim()),
+            Span::styled(self.reset(limit.resets_at()), theme.usage_reset()),
         ])
     }
 
@@ -212,7 +212,7 @@ impl UsageView {
         let used = status.chars().count() + hint.chars().count();
         let gap = width.saturating_sub(used).max(Self::MINIMUM_GAP);
         let footer = format!("{status}{}{hint}", " ".repeat(gap));
-        Line::styled(footer, theme.dim())
+        Line::styled(footer, theme.hint())
     }
 
     fn status(&self) -> String {

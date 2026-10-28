@@ -137,7 +137,7 @@ impl HelpView {
         let mut lines = self.scroll.window(self.content(width, theme), room);
         lines.push(Line::styled(
             self.scroll.hint(Self::CLOSE_HINT),
-            theme.dim(),
+            theme.hint(),
         ));
         lines
     }
@@ -150,7 +150,7 @@ impl HelpView {
     }
 
     fn keys(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
-        let heading = Line::styled(Self::KEYS_HEADING, theme.emphasis());
+        let heading = Line::styled(Self::KEYS_HEADING, theme.help_heading());
         let rows = Self::KEYS
             .iter()
             .flat_map(|(key, action)| Self::labeled(key, action, width, theme));
@@ -212,7 +212,7 @@ impl HelpView {
         let entries = vec![
             LegendEntry::new("+n", theme.insertions(), "added lines"),
             LegendEntry::new("-n", theme.deletions(), "removed lines"),
-            LegendEntry::new("?n", theme.base(), "untracked files"),
+            LegendEntry::new("?n", theme.untracked(), "untracked files"),
         ];
         Legend::new("Diff", entries)
     }

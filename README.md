@@ -48,33 +48,64 @@ dim = { fg = "240" }
 exited = { fg = "red" }
 ```
 
-A dotted role goes under its table: `state.exited` is `exited` under `[state]`.
+A dotted role goes under its table: `state.exited` is `exited` under `[state]`. If a left-out role has a Follows entry, the role starts from the style of the role it follows.
 
-| Role | What it colors |
-|---|---|
-| `base` | all text and the background |
-| `selected` | the cursor row and the focused field |
-| `selected_out_of_focus` | the cursor row while the terminal lacks focus |
-| `selected_text` | selected text in a prompt |
-| `accent` | the hot-key letters in the session menu |
-| `dim` | hints, separators, and secondary columns |
-| `emphasis` | headings and the table header |
-| `matched` | the letters a search matched |
-| `error` | errors |
-| `warning` | warnings |
-| `insertions` | added-line counts |
-| `deletions` | removed-line counts |
-| `approved` | an approved pull request |
-| `border` | the borders of panels and dialogs |
-| `state.working` | a working session |
-| `state.waiting` | a session that waits for you |
-| `state.exited` | a session whose agent exited |
-| `state.stopped` | a stopped session |
-| `state.unmanaged` | a tmux session that Ringleader did not create |
-| `pull_request.open` | an open pull request |
-| `pull_request.draft` | a draft pull request |
-| `pull_request.merged` | a merged pull request |
-| `pull_request.closed` | a closed pull request |
+| Role | Follows | What it colors |
+|---|---|---|
+| `base` |  | all text and the background |
+| `selected` |  | the cursor row and the focused field |
+| `selected_out_of_focus` |  | the cursor row while the terminal lacks focus |
+| `selected_text` |  | selected text |
+| `accent` |  | hot keys |
+| `dim` |  | secondary text |
+| `emphasis` |  | names and headings |
+| `matched` | `emphasis` | the letters a search matched |
+| `error` |  | errors |
+| `warning` |  | warnings |
+| `insertions` |  | added-line counts |
+| `deletions` |  | removed-line counts |
+| `approved` | `insertions` | an approved pull request |
+| `border` |  | the borders of the session list and the preview |
+| `title` |  | panel and dialog titles |
+| `dialog.border` | `border` | the borders of dialogs and the session menu |
+| `separator` | `dim` | rule lines |
+| `table.header` | `emphasis` | the session list's column header |
+| `repo.number` | `dim` | the number before a repo name |
+| `repo.arrow` |  | the fold arrow before a repo name |
+| `repo.name` | `emphasis` | repo names |
+| `session.branch_prefix` | `dim` | the branch prefix before a session name |
+| `session.agent` | `dim` | the agent column |
+| `session.untracked` |  | the untracked-files marker |
+| `hint` | `dim` | hint lines in dialogs |
+| `hint_bar.key` |  | keys in the hint bar |
+| `hint_bar.text` |  | actions in the hint bar |
+| `notice` | `dim` | notices such as a search in progress |
+| `count` | `dim` | match counts in the finders |
+| `status.info` |  | information in the status bar |
+| `status.error` | `error` | errors in the status bar |
+| `status.note` | `warning` | the selected session's note in the status bar |
+| `prompt.cursor` | `selected` | the cursor in a prompt |
+| `prompt.selection` | `selected_text` | selected text in a prompt |
+| `prompt.rule` |  | the rule around a focused prompt |
+| `setting.key` | `dim` | the key labels on the new-session status line |
+| `setting.main_checkout` | `warning` | the main-checkout setting |
+| `menu.key` | `accent` | hot keys in the session menu |
+| `menu.disabled` | `dim` | disabled items in the session menu |
+| `usage.agent` | `emphasis` | agent names in the usage view |
+| `usage.bar` |  | usage bars |
+| `usage.reset` | `dim` | reset times in the usage view |
+| `help.heading` | `emphasis` | headings in the help view |
+| `preview.title` | `emphasis` | the session title in the preview |
+| `preview.path` | `dim` | the worktree path in the preview |
+| `state.working` |  | a working session |
+| `state.waiting` |  | a session that waits for you |
+| `state.exited` |  | a session whose agent exited |
+| `state.stopped` | `dim` | a stopped session |
+| `state.unmanaged` | `warning` | a tmux session that Ringleader did not create |
+| `pull_request.open` |  | an open pull request |
+| `pull_request.draft` | `warning` | a draft pull request |
+| `pull_request.merged` |  | a merged pull request |
+| `pull_request.closed` |  | a closed pull request |
 
 A role's style replaces the role's whole default. A style takes `fg` and `bg`, each a color. A style also takes these modifiers, each `true` or `false`:
 

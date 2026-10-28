@@ -35,7 +35,7 @@ impl TypedRepoCheck {
         match &self.state {
             CheckState::Checking { typed, .. } => {
                 let checking = format!("Checking {typed}…");
-                TextFit::new(&checking).styled_lines(width, theme.dim())
+                TextFit::new(&checking).styled_lines(width, theme.notice())
             }
             CheckState::Refused(error) => TextFit::new(error).styled_lines(width, theme.error()),
             CheckState::Confirmed => Vec::new(),

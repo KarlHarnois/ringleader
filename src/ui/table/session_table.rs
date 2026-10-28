@@ -73,14 +73,18 @@ impl<'a> SessionTable<'a> {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(self.theme.border())
-            .title(" Sessions ");
+            .title(" Sessions ")
+            .title_style(self.theme.title());
         let inner = block.inner(area);
         frame.render_widget(block, area);
         let width = usize::from(inner.width);
         let columns = self.columns(width);
         let mut lines = Vec::new();
         if self.shows_header() {
-            lines.push(Line::styled(self.header(&columns), self.theme.emphasis()));
+            lines.push(Line::styled(
+                self.header(&columns),
+                self.theme.table_header(),
+            ));
         }
         if !self.has_rows() {
             Self::render_empty(lines, frame, inner);
@@ -215,7 +219,7 @@ impl<'a> SessionTable<'a> {
     ) -> Vec<Span<'static>> {
         let indicator = StateIndicator::new(row.state(), self.tick);
         let mut spans = vec![
-            Span::styled(branch.prefix(), self.theme.dim()),
+            Span::styled(branch.prefix(), self.theme.branch_prefix()),
             Span::styled(indicator.glyph().to_string(), indicator.style(&self.theme)),
         ];
         spans.extend(self.colored_cells(row, columns));
@@ -225,7 +229,7 @@ impl<'a> SessionTable<'a> {
     fn colored_cells(&self, row: &SessionSummary, columns: &TableColumns) -> Vec<Span<'static>> {
         let cells = Self::cells(row);
         let text = columns.row(&cells);
-        let agent = vec![Span::styled(cells.agent().to_string(), self.theme.dim())];
+        let agent = vec![Span::styled(cells.agent().to_string(), self.theme.agent())];
         let mut colored = ColoredRow::new(&text, self.theme.base())
             .skip(&columns.name_cell(row.name()))
             .color_first(cells.agent(), agent);
@@ -253,7 +257,7 @@ impl<'a> SessionTable<'a> {
         ];
         spans.extend(
             diff.untracked_marker()
-                .map(|marker| Span::styled(format!(" {marker}"), self.theme.base())),
+                .map(|marker| Span::styled(format!(" {marker}"), self.theme.untracked())),
         );
         spans
     }

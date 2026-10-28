@@ -76,14 +76,14 @@ impl<'a> RepoHeading<'a> {
 
     fn lead_spans(&self, theme: &Theme) -> Vec<Span<'static>> {
         vec![
-            Span::styled(self.number_label(), theme.dim()),
-            Span::styled(format!(" {} ", self.arrow()), theme.base()),
+            Span::styled(self.number_label(), theme.repo_number()),
+            Span::styled(format!(" {} ", self.arrow()), theme.repo_arrow()),
         ]
     }
 
     fn name_span(&self, theme: &Theme, room: usize) -> Span<'static> {
         let name = TextFit::new(&self.group.to_string()).right_truncated(room);
-        Span::styled(name, theme.emphasis())
+        Span::styled(name, theme.repo_name())
     }
 
     fn tail_spans(&self, tick: u64, theme: &Theme) -> Vec<Span<'static>> {

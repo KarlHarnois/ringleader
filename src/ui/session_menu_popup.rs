@@ -139,7 +139,9 @@ impl Panel {
     fn render(&self, frame: &mut Frame, theme: &Theme) {
         let block = Block::default()
             .borders(Borders::TOP)
+            .border_style(theme.dialog_border())
             .title(self.title())
+            .title_style(theme.title())
             .padding(Padding::left(Self::TITLE_INDENT));
         let inner = block.inner(frame.area());
         frame.render_widget(block, frame.area());
