@@ -11,6 +11,6 @@
 **A release is a tag `v<version>` on a commit of `master`.** The release workflow tags each `master` commit that passes CI, and then tells the tap about the tag. The tap publishes the formula for the tag.
 
 - NEVER change the version in `Cargo.toml`: the tap writes each tag's version into `Cargo.toml` and `Cargo.lock` before it builds.
-- A build outside Homebrew reports the version in `Cargo.toml`, which stays `0.1.0`.
+- A build outside Homebrew reports `git describe` of its checkout without the tag's `v`, so it matches the Homebrew version on a tagged commit. A `nix build` has no `.git`, so it reports the version in `Cargo.toml`, which stays `0.1.0`, followed by `-g` and the short commit.
 - NEVER push a release tag by hand: the release workflow computes each tag from the latest one.
 - If the release workflow fails, show its log to the project owner.

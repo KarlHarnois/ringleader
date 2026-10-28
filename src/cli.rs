@@ -24,11 +24,12 @@ use session_commands::SessionCommands;
 
 use crate::application::ports::{Lock, LockError};
 use crate::application::{CorruptRegistry, SessionService};
+use crate::domain::BuildVersion;
 
 #[derive(Debug, Parser)]
 #[command(
     name = "ringleader",
-    version,
+    version = BuildVersion::CURRENT.text(),
     about = "A tmux session manager for AI coding agents"
 )]
 pub struct Cli {
