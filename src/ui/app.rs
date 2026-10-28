@@ -4,10 +4,12 @@ use std::time::Instant;
 
 use crossterm::event::{Event, KeyEvent, KeyEventKind};
 use ratatui::Frame;
+use ratatui::widgets::Block;
 
 use super::blocking_operation::{BlockingOperation, DeleteStep, OperationOutcome};
 use super::dialogs::{Dialog, DialogOpening, DialogSlot, DialogStep};
-use super::theme::Theme;
+use super::theme::{ColorMode, Theme};
+use super::theme_slot::ThemeSlot;
 use crate::application::ports::{FoldStore, Lock, LockError};
 use crate::application::{
     CorruptRegistry, EphemeralShell, HandOff, ServiceError, SessionService, ShellOutcome,
@@ -31,12 +33,13 @@ pub struct App {
     dialogs: DialogSlot,
     status: StatusReport,
     tick: u64,
-    theme: Theme,
+    theme_slot: ThemeSlot,
 }
 
 impl App {
     const RELOADED: &'static str = "Reloaded the config and the registry.";
     const RELOAD_FAILED: &'static str = "reload failed, kept the previous config";
+    const THEME_ERROR: &'static str = "theme error, kept the previous colors";
 
     pub fn new(
         service: SessionService,
@@ -53,11 +56,19 @@ impl App {
             dialogs: DialogSlot::default(),
             status: StatusReport::default(),
             tick: 0,
-            theme: Theme,
+            theme_slot: ThemeSlot::default(),
+        }
+    }
+
+    pub fn with_color_mode(self, color_mode: ColorMode) -> Self {
+        Self {
+            theme_slot: ThemeSlot::new(color_mode),
+            ..self
         }
     }
 
     pub fn start_up(&mut self, process_warnings: Vec<String>) -> Result<(), ServiceError> {
+        self.load_theme();
         let socket_recovery = self.service.restore_server_socket();
         let pane_warning = self.own_pane_warning()?;
         let state_warnings = self.under_write_lock(Self::recover_state)??;
@@ -66,6 +77,7 @@ impl App {
             .chain(socket_recovery.as_ref().err().map(ToString::to_string))
             .chain(pane_warning)
             .chain(state_warnings)
+            .chain(self.theme_warning())
             .collect();
         self.show_startup_messages(&warnings, socket_recovery.ok().flatten());
         Ok(())
@@ -103,14 +115,14 @@ impl App {
     }
 
     pub fn resize(&mut self, width: u16, height: u16) {
-        let status = Self::status_bar(self.theme, &self.status, &self.home);
+        let status = Self::status_bar(self.theme_slot.theme(), &self.status, &self.home);
         self.home.resize(width, height, &status, &self.service);
     }
 
     pub fn on_tick(&mut self, now: Instant) {
         self.tick = self.tick.wrapping_add(1);
         self.service.poll_startup_input();
-        let status = Self::status_bar(self.theme, &self.status, &self.home);
+        let status = Self::status_bar(self.theme_slot.theme(), &self.status, &self.home);
         let outcome = self.home.tick(now, &mut self.service, &status);
         self.status.failure(outcome);
         self.dialogs.poll(now, &self.service);
@@ -260,10 +272,12 @@ impl App {
     }
 
     pub fn render(&self, frame: &mut Frame) {
-        let status = Self::status_bar(self.theme, &self.status, &self.home);
-        let table = self.home.table(self.tick, self.theme);
-        HomeView::new(table, self.home.preview_panel(self.theme), status).render(frame);
-        self.dialogs.render(frame, &self.theme);
+        let theme = self.theme_slot.theme();
+        let status = Self::status_bar(theme, &self.status, &self.home);
+        let table = self.home.table(self.tick, theme);
+        frame.render_widget(Block::default().style(theme.base()), frame.area());
+        HomeView::new(table, self.home.preview_panel(theme), status).render(frame);
+        self.dialogs.render(frame, &theme);
     }
 
     fn status_bar<'s>(theme: Theme, status: &'s StatusReport, home: &HomeState) -> StatusBar<'s> {
@@ -384,7 +398,19 @@ impl App {
                     .reload_server_config()
                     .map_err(|error| error.to_string())
             });
+        self.load_theme();
+        let outcome = outcome.and_then(|()| self.theme_warning().map_or(Ok(()), Err));
         self.status.outcome(outcome, reloaded);
+    }
+
+    fn load_theme(&mut self) {
+        self.theme_slot.reload(&mut self.service);
+    }
+
+    fn theme_warning(&self) -> Option<String> {
+        self.service
+            .theme_error()
+            .map(|error| format!("{}: {error}", Self::THEME_ERROR))
     }
 
     fn open_on_desktop(&mut self, opening: DesktopOpening) {
@@ -505,21 +531,22 @@ mod tests {
     use ratatui::backend::TestBackend;
 
     use super::*;
-    use ratatui::style::{Color, Modifier};
+    use ratatui::style::{Color, Modifier, Style};
 
     use crate::application::ports::{
         ConfigError, MergeOutcome, MultiplexerError, RegistryError, ReturnRequest,
-        TerminalEmulatorError, UnmergedCommits, WebBrowserError,
+        TerminalEmulatorError, ThemeError, UnmergedCommits, WebBrowserError,
     };
     use crate::application::{CreateRequest, DeleteImpact};
     use crate::domain::{
-        AgentUsage, Config, ConfigDraft, DiffStat, LimitWindow, PullRequestState, Session,
-        SessionState, UsageLimit, UsageRow,
+        AgentUsage, AnsiColor, Config, ConfigDraft, DiffStat, LimitWindow, PullRequestState,
+        Session, SessionState, StyleSpec, ThemeColor, ThemeOverrides, ThemeRole, ThemeSpec,
+        UsageLimit, UsageRow,
     };
     use crate::test_support::{
-        CapturedWriter, Deadline, FakeFoldStore, FakeLock, FakeMultiplexer, FakePullRequests,
-        FakeRepoPages, FakeSessionRegistry, FakeTerminalEmulator, FakeUsageMeter, FakeWebBrowser,
-        HeldCalls, LogCapture, ServiceFixture, UiHarness,
+        CapturedWriter, Deadline, FakeConfigSource, FakeFoldStore, FakeLock, FakeMultiplexer,
+        FakePullRequests, FakeRepoPages, FakeSessionRegistry, FakeTerminalEmulator, FakeUsageMeter,
+        FakeWebBrowser, HeldCalls, LogCapture, ServiceFixture, UiHarness,
     };
     use crate::ui::batch_operation::{BatchOperation, DeleteSessionsStep};
     use crate::ui::blocking_operation::{BrowserPage, CreateStep};
@@ -691,6 +718,12 @@ mod tests {
                 .join("\n")
         }
 
+        fn background_at(app: &App, position: (u16, u16)) -> Color {
+            let mut terminal = Terminal::new(TestBackend::new(100, 28)).unwrap();
+            terminal.draw(|frame| app.render(frame)).unwrap();
+            terminal.backend().buffer()[position].bg
+        }
+
         fn status_color(app: &App, width: u16) -> Option<Color> {
             let mut terminal = Terminal::new(TestBackend::new(width, 28)).unwrap();
             terminal.draw(|frame| app.render(frame)).unwrap();
@@ -705,6 +738,24 @@ mod tests {
                 conflicts,
                 ServiceFixture::refusing_typing("fix-auth"),
             )
+        }
+
+        fn rgb_error_theme() -> ThemeOverrides {
+            ThemeOverrides::default().with(
+                ThemeRole::Error,
+                StyleSpec::default().with_foreground(ThemeColor::Rgb(0xa7, 0x53, 0x4e)),
+            )
+        }
+
+        fn rgb_error_style() -> Style {
+            Theme::new(&ThemeSpec::new(Self::rgb_error_theme())).error()
+        }
+
+        fn invalid_theme() -> ThemeError {
+            ThemeError::Invalid {
+                path: PathBuf::from("/config/ringleader/theme.toml"),
+                failures: vec!["unknown theme role `acent`".to_string()],
+            }
         }
 
         fn status_line(app: &App, width: u16) -> String {
@@ -1533,7 +1584,10 @@ mod tests {
             AppFixture::status_line(&app, 100),
             " merged origin/main into fix-auth"
         );
-        assert_ne!(AppFixture::status_color(&app, 100), Theme.error().fg);
+        assert_ne!(
+            AppFixture::status_color(&app, 100),
+            Theme::default().error().fg
+        );
     }
 
     #[test]
@@ -1543,7 +1597,10 @@ mod tests {
 
         app.perform(BlockingOperation::Merge("fix-auth".to_string()));
 
-        assert_eq!(AppFixture::status_color(&app, 100), Theme.error().fg);
+        assert_eq!(
+            AppFixture::status_color(&app, 100),
+            Theme::default().error().fg
+        );
     }
 
     #[test]
@@ -1937,6 +1994,187 @@ mod tests {
         assert_eq!(
             AppFixture::status_line(&app, 100),
             " Reloaded the config and the registry."
+        );
+    }
+
+    #[test]
+    fn starting_up_applies_the_configured_theme() {
+        let fixture = AppFixture::two_waiting_sessions();
+        fixture
+            .theme_source()
+            .replace(AppFixture::rgb_error_theme());
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        app.start_up(Vec::new()).unwrap();
+
+        assert_eq!(
+            app.theme_slot.theme().error(),
+            AppFixture::rgb_error_style()
+        );
+    }
+
+    #[test]
+    fn a_monochrome_app_drops_the_configured_colors() {
+        let fixture = AppFixture::two_waiting_sessions();
+        fixture
+            .theme_source()
+            .replace(AppFixture::rgb_error_theme());
+        let mut app = AppFixture::started(&fixture, 100, 28).with_color_mode(ColorMode::Monochrome);
+
+        app.start_up(Vec::new()).unwrap();
+
+        assert_eq!(app.theme_slot.theme().error().fg, None);
+    }
+
+    #[test]
+    fn a_themed_base_background_fills_the_empty_screen() {
+        let fixture = AppFixture::two_waiting_sessions();
+        fixture
+            .theme_source()
+            .replace(ThemeOverrides::default().with(
+                ThemeRole::Base,
+                StyleSpec::default().with_background(ThemeColor::Ansi(AnsiColor::Blue)),
+            ));
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        app.start_up(Vec::new()).unwrap();
+
+        assert_eq!(AppFixture::background_at(&app, (20, 20)), Color::Blue);
+    }
+
+    #[test]
+    fn a_monochrome_app_reports_no_theme_error_because_it_ignores_the_file() {
+        let fixture = AppFixture::two_waiting_sessions();
+        fixture
+            .theme_source()
+            .break_with(AppFixture::invalid_theme());
+        let mut app = AppFixture::started(&fixture, 100, 28).with_color_mode(ColorMode::Monochrome);
+
+        app.start_up(Vec::new()).unwrap();
+
+        assert!(app.service.theme_error().is_none());
+    }
+
+    #[test]
+    fn a_startup_theme_error_follows_the_state_warnings_because_colors_are_side_work() {
+        let fixture = AppFixture::two_waiting_sessions();
+        fixture
+            .theme_source()
+            .break_with(AppFixture::invalid_theme());
+        fixture.multiplexer().fail(
+            "apply_config",
+            MultiplexerError::Failed {
+                subcommand: "source-file".to_string(),
+                detail: "invalid option: no-such-option".to_string(),
+            },
+        );
+        fixture.multiplexer().drift_config("M-x");
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        app.start_up(Vec::new()).unwrap();
+
+        assert!(matches!(
+            app.status.message(),
+            Some(StatusMessage::Error(message))
+                if message.starts_with("could not update the config")
+                    && message.contains(App::THEME_ERROR)
+        ));
+    }
+
+    #[test]
+    fn r_reloads_the_theme() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        fixture
+            .theme_source()
+            .replace(AppFixture::rgb_error_theme());
+
+        AppFixture::press(&mut app, 'r');
+
+        assert_eq!(
+            app.theme_slot.theme().error(),
+            AppFixture::rgb_error_style()
+        );
+    }
+
+    #[test]
+    fn a_broken_theme_shows_at_startup() {
+        let fixture = AppFixture::two_waiting_sessions();
+        fixture
+            .theme_source()
+            .break_with(AppFixture::invalid_theme());
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        app.start_up(Vec::new()).unwrap();
+
+        assert!(matches!(
+            app.status.message(),
+            Some(StatusMessage::Error(message)) if message.starts_with(App::THEME_ERROR)
+        ));
+    }
+
+    #[test]
+    fn a_broken_theme_leaves_the_config_writable_because_colors_are_side_work() {
+        let fixture = AppFixture::two_waiting_sessions();
+        fixture
+            .theme_source()
+            .break_with(AppFixture::invalid_theme());
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        app.start_up(Vec::new()).unwrap();
+
+        assert!(app.service.read_only_reason().is_none());
+    }
+
+    #[test]
+    fn r_shows_a_theme_broken_since_startup() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        fixture
+            .theme_source()
+            .break_with(AppFixture::invalid_theme());
+
+        AppFixture::press(&mut app, 'r');
+
+        assert!(AppFixture::status_line(&app, 200).starts_with(&format!(" {}", App::THEME_ERROR)));
+    }
+
+    #[test]
+    fn a_failed_config_reload_outranks_a_broken_theme_because_colors_are_side_work() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        fixture
+            .theme_source()
+            .break_with(AppFixture::invalid_theme());
+        fixture.config_source().break_with(ConfigError::Parse {
+            path: PathBuf::from(FakeConfigSource::PATH),
+            detail: "expected `=`".to_string(),
+        });
+
+        AppFixture::press(&mut app, 'r');
+
+        assert!(
+            AppFixture::status_line(&app, 200).starts_with(&format!(" {}", App::RELOAD_FAILED))
+        );
+    }
+
+    #[test]
+    fn a_theme_broken_on_reload_keeps_the_previous_colors() {
+        let fixture = AppFixture::two_waiting_sessions();
+        fixture
+            .theme_source()
+            .replace(AppFixture::rgb_error_theme());
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        app.start_up(Vec::new()).unwrap();
+        fixture
+            .theme_source()
+            .break_with(AppFixture::invalid_theme());
+
+        AppFixture::press(&mut app, 'r');
+
+        assert_eq!(
+            app.theme_slot.theme().error(),
+            AppFixture::rgb_error_style()
         );
     }
 

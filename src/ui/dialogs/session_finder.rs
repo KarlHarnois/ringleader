@@ -139,7 +139,7 @@ impl SessionFinder {
     }
 
     fn rule(width: usize, theme: &Theme) -> Line<'static> {
-        Line::styled(Self::RULE.to_string().repeat(width), theme.dim())
+        Line::styled(Self::RULE.to_string().repeat(width), theme.separator())
     }
 
     fn error_lines(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
@@ -229,7 +229,7 @@ mod tests {
 
         fn rows(finder: &SessionFinder) -> Vec<String> {
             finder
-                .lines(Self::WIDTH, Self::HEIGHT, &Theme)
+                .lines(Self::WIDTH, Self::HEIGHT, &Theme::default())
                 .iter()
                 .map(ToString::to_string)
                 .collect()

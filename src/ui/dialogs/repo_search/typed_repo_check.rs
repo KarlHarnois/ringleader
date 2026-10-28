@@ -87,6 +87,6 @@ mod tests {
         let again = check.poll();
 
         assert_eq!(again, None);
-        assert!(check.lines(60, &Theme).is_empty());
+        assert!(check.lines(60, &Theme::default()).is_empty());
     }
 }

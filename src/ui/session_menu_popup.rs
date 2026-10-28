@@ -13,12 +13,14 @@ use super::dialogs::DialogStep;
 use super::dialogs::usage_view::UsageView;
 use super::event_loop::InputSource;
 use super::session_menu::{MenuItem, SessionMenu};
-use super::theme::Theme;
+use super::theme::{ColorMode, Theme};
+use super::theme_slot::ThemeSlot;
 use crate::application::{CorruptRegistry, ServiceError, SessionService};
 
 pub struct SessionMenuPopup {
     service: SessionService,
     client: String,
+    theme_slot: ThemeSlot,
 }
 
 impl SessionMenuPopup {
@@ -28,6 +30,14 @@ impl SessionMenuPopup {
         Self {
             service,
             client: client.to_string(),
+            theme_slot: ThemeSlot::default(),
+        }
+    }
+
+    pub fn with_color_mode(self, color_mode: ColorMode) -> Self {
+        Self {
+            theme_slot: ThemeSlot::new(color_mode),
+            ..self
         }
     }
 
@@ -41,12 +51,13 @@ impl SessionMenuPopup {
         B::Error: Send + Sync + 'static,
         I: InputSource,
     {
+        self.theme_slot.reload(&mut self.service);
         self.service.load_registry(CorruptRegistry::Report)?;
         let name = self.service.client_session(&self.client)?;
         let mut panel = Panel::Menu(SessionMenu::open(&name, &self.service));
         loop {
             terminal
-                .draw(|frame| panel.render(frame, &Theme))
+                .draw(|frame| panel.render(frame, &self.theme_slot.theme()))
                 .map_err(io::Error::other)?;
             let event = input.next_event(Self::TICK)?;
             panel.poll(Instant::now(), &self.service);
@@ -125,7 +136,10 @@ impl Panel {
     fn render(&self, frame: &mut Frame, theme: &Theme) {
         let block = Block::default()
             .borders(Borders::TOP)
+            .style(theme.base())
+            .border_style(theme.dialog_border())
             .title(self.title())
+            .title_style(theme.title())
             .padding(Padding::left(Self::TITLE_INDENT));
         let inner = block.inner(frame.area());
         frame.render_widget(block, frame.area());

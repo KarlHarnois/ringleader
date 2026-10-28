@@ -94,7 +94,7 @@ impl DeleteSessionDialog {
         } else {
             ConfirmationKeys::HINTS
         };
-        lines.extend(TextFit::new(hints).styled_lines(width, theme.dim()));
+        lines.extend(TextFit::new(hints).styled_lines(width, theme.hint()));
         lines
     }
 
@@ -154,7 +154,9 @@ mod tests {
 
         fn screen(dialog: Dialog) -> String {
             let mut terminal = Terminal::new(TestBackend::new(100, 28)).unwrap();
-            terminal.draw(|frame| dialog.render(frame, &Theme)).unwrap();
+            terminal
+                .draw(|frame| dialog.render(frame, &Theme::default()))
+                .unwrap();
             let buffer = terminal.backend().buffer();
             buffer
                 .content()

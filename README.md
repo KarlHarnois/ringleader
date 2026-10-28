@@ -36,6 +36,8 @@ Both installs bring Ringleader's own tmux and git, and leave yours untouched.
 
 Sessions run on Ringleader's own tmux server. The server ignores your tmux config, and its sessions do not show in your `tmux ls`. Ctrl-Q detaches you from a session and returns you to the TUI or the shell you attached from. Ctrl-Space opens a menu of session actions.
 
+**To change the TUI's colors, write a `theme.toml` file as [docs/theme.md](docs/theme.md) describes.**
+
 ## CLI
 
 ```

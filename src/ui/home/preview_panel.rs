@@ -37,7 +37,9 @@ impl<'a> PreviewPanel<'a> {
     }
 
     pub fn render(&self, frame: &mut Frame, area: Rect) {
-        let block = Self::frame();
+        let block = Self::frame()
+            .border_style(self.theme.border())
+            .title_style(self.theme.title());
         let inner = block.inner(area);
         frame.render_widget(block, area);
         if let Some(row) = self.row {
@@ -60,7 +62,10 @@ impl<'a> PreviewPanel<'a> {
                 TextFit::new(&Self::worktree(row)).left_truncated(width),
                 self.theme.dim(),
             ),
-            Line::styled(Self::SEPARATOR.to_string().repeat(width), self.theme.dim()),
+            Line::styled(
+                Self::SEPARATOR.to_string().repeat(width),
+                self.theme.separator(),
+            ),
         ];
         let room = usize::from(area.height).saturating_sub(lines.len());
         lines.extend(self.body(row, room));
@@ -138,7 +143,8 @@ mod tests {
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
             terminal
                 .draw(|frame| {
-                    PreviewPanel::new(Some(&row), capture, Theme).render(frame, frame.area())
+                    PreviewPanel::new(Some(&row), capture, Theme::default())
+                        .render(frame, frame.area())
                 })
                 .unwrap();
             let buffer = terminal.backend().buffer();
@@ -229,7 +235,8 @@ mod tests {
 
         terminal
             .draw(|frame| {
-                PreviewPanel::new(Some(&row), Some(&capture), Theme).render(frame, frame.area())
+                PreviewPanel::new(Some(&row), Some(&capture), Theme::default())
+                    .render(frame, frame.area())
             })
             .unwrap();
 
@@ -245,7 +252,9 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(70, 10)).unwrap();
 
         terminal
-            .draw(|frame| PreviewPanel::new(None, None, Theme).render(frame, frame.area()))
+            .draw(|frame| {
+                PreviewPanel::new(None, None, Theme::default()).render(frame, frame.area())
+            })
             .unwrap();
 
         let buffer = terminal.backend().buffer();

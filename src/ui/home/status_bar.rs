@@ -59,7 +59,7 @@ impl<'a> StatusBar<'a> {
                 .into_iter()
                 .map(|line| Line::from(Span::styled(format!("{}{line}", Self::MARGIN), style)))
                 .collect(),
-            None => vec![Line::from(self.hints.text(usize::from(area.width)))],
+            None => vec![self.hints.line(usize::from(area.width), &self.theme)],
         };
         frame.render_widget(Paragraph::new(lines), area);
     }
@@ -94,7 +94,7 @@ impl StatusMessage {
     fn style(&self, theme: &Theme) -> Style {
         match self {
             Self::Info(_) => theme.base(),
-            Self::Error(_) => theme.error(),
+            Self::Error(_) => theme.status_error(),
         }
     }
 }
@@ -157,13 +157,13 @@ mod tests {
 
         fn note_for(row: &SessionSummary) -> String {
             let note = StatusNote::new(row).text();
-            Self::render(StatusBar::new(Theme).with_note(note), 300)
+            Self::render(StatusBar::new(Theme::default()).with_note(note), 300)
         }
     }
 
     #[test]
     fn a_bar_without_a_message_shows_its_key_hints() {
-        let status = StatusBar::new(Theme).with_hints(KeyHints::on_heading());
+        let status = StatusBar::new(Theme::default()).with_hints(KeyHints::on_heading());
 
         assert_eq!(
             BarFixture::render(status, 95),
@@ -176,9 +176,13 @@ mod tests {
         let long = StatusMessage::Error("word ".repeat(40));
         let short = StatusMessage::Info("Reloaded the config.".to_string());
 
-        let long_rows = StatusBar::new(Theme).with_message(Some(&long)).rows(80);
-        let short_rows = StatusBar::new(Theme).with_message(Some(&short)).rows(80);
-        let hint_rows = StatusBar::new(Theme).rows(80);
+        let long_rows = StatusBar::new(Theme::default())
+            .with_message(Some(&long))
+            .rows(80);
+        let short_rows = StatusBar::new(Theme::default())
+            .with_message(Some(&short))
+            .rows(80);
+        let hint_rows = StatusBar::new(Theme::default()).rows(80);
 
         assert_eq!((long_rows, short_rows, hint_rows), (3, 1, 1));
     }
@@ -186,7 +190,7 @@ mod tests {
     #[test]
     fn every_wrapped_row_keeps_the_left_margin() {
         let message = StatusMessage::Error("word ".repeat(40));
-        let status = StatusBar::new(Theme).with_message(Some(&message));
+        let status = StatusBar::new(Theme::default()).with_message(Some(&message));
 
         let rows = BarFixture::render_rows(status, 80, 3);
 
@@ -196,7 +200,7 @@ mod tests {
     #[test]
     fn a_message_replaces_the_key_hints() {
         let message = StatusMessage::Error("config error".to_string());
-        let status = StatusBar::new(Theme)
+        let status = StatusBar::new(Theme::default())
             .with_message(Some(&message))
             .with_note(Some("note".to_string()));
 

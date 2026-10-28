@@ -137,7 +137,7 @@ impl HelpView {
         let mut lines = self.scroll.window(self.content(width, theme), room);
         lines.push(Line::styled(
             self.scroll.hint(Self::CLOSE_HINT),
-            theme.dim(),
+            theme.hint(),
         ));
         lines
     }
@@ -313,7 +313,9 @@ mod tests {
 
         fn dialog_screen(dialog: &Dialog, width: u16, height: u16) -> String {
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-            terminal.draw(|frame| dialog.render(frame, &Theme)).unwrap();
+            terminal
+                .draw(|frame| dialog.render(frame, &Theme::default()))
+                .unwrap();
             let buffer = terminal.backend().buffer();
             buffer
                 .content()
@@ -324,7 +326,7 @@ mod tests {
         }
 
         fn page(help: &HelpView, width: usize) -> Vec<Line<'static>> {
-            help.lines(width, Self::EVERY_ROW_HEIGHT, &Theme)
+            help.lines(width, Self::EVERY_ROW_HEIGHT, &Theme::default())
         }
 
         fn rows(help: &HelpView, width: usize) -> Vec<String> {
@@ -373,7 +375,7 @@ mod tests {
         }
 
         fn short_page(help: &HelpView) -> Vec<Line<'static>> {
-            help.lines(Self::SHORT_WIDTH, Self::SHORT_HEIGHT, &Theme)
+            help.lines(Self::SHORT_WIDTH, Self::SHORT_HEIGHT, &Theme::default())
         }
 
         fn scrolled_past_the_end() -> HelpView {
@@ -631,7 +633,7 @@ mod tests {
     fn the_legend_colors_each_glyph_like_the_session_table() {
         assert_eq!(
             HelpFixture::span_style("●"),
-            Theme.state(SessionState::Waiting)
+            Theme::default().state(SessionState::Waiting)
         );
     }
 
@@ -644,8 +646,8 @@ mod tests {
 
     #[test]
     fn the_legend_colors_the_diff_markers_like_the_session_table() {
-        assert_eq!(HelpFixture::span_style("+n"), Theme.insertions());
-        assert_eq!(HelpFixture::span_style("-n"), Theme.deletions());
+        assert_eq!(HelpFixture::span_style("+n"), Theme::default().insertions());
+        assert_eq!(HelpFixture::span_style("-n"), Theme::default().deletions());
     }
 
     #[test]
@@ -663,7 +665,10 @@ mod tests {
     fn the_legend_colors_approved_like_the_session_table() {
         let symbol = HelpView::approved_pull_request_symbol();
 
-        assert_eq!(HelpFixture::span_style(&symbol), Theme.approved());
+        assert_eq!(
+            HelpFixture::span_style(&symbol),
+            Theme::default().approved()
+        );
     }
 
     #[test]
@@ -671,10 +676,10 @@ mod tests {
         assert_eq!(
             HelpFixture::pull_request_styles(),
             vec![
-                Theme.pull_request(PullRequestState::Open),
-                Theme.pull_request(PullRequestState::Draft),
-                Theme.pull_request(PullRequestState::Merged),
-                Theme.pull_request(PullRequestState::Closed),
+                Theme::default().pull_request(PullRequestState::Open),
+                Theme::default().pull_request(PullRequestState::Draft),
+                Theme::default().pull_request(PullRequestState::Merged),
+                Theme::default().pull_request(PullRequestState::Closed),
             ]
         );
     }

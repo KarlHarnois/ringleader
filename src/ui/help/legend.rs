@@ -98,14 +98,16 @@ mod tests {
         const LABEL: &'static str = "Fruit";
 
         fn legend() -> Legend {
-            let entries = [("A", "apple"), ("B", "banana"), ("C", "cherry")]
-                .map(|(symbol, meaning)| LegendEntry::new(symbol, Theme.base(), meaning));
+            let entries =
+                [("A", "apple"), ("B", "banana"), ("C", "cherry")].map(|(symbol, meaning)| {
+                    LegendEntry::new(symbol, Theme::default().base(), meaning)
+                });
             Legend::new(Self::LABEL, entries.into())
         }
 
         fn rows(width: usize) -> Vec<String> {
             Self::legend()
-                .lines(width, &Theme)
+                .lines(width, &Theme::default())
                 .iter()
                 .map(ToString::to_string)
                 .collect()
@@ -154,11 +156,11 @@ mod tests {
 
     #[test]
     fn each_symbol_keeps_its_own_style() {
-        let entry = LegendEntry::new("+", Theme.insertions(), "added");
+        let entry = LegendEntry::new("+", Theme::default().insertions(), "added");
         let legend = Legend::new(LegendFixture::LABEL, vec![entry]);
 
-        let line = &legend.lines(80, &Theme)[0];
+        let line = &legend.lines(80, &Theme::default())[0];
 
-        assert_eq!(line.spans[1].style, Theme.insertions());
+        assert_eq!(line.spans[1].style, Theme::default().insertions());
     }
 }

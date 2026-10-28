@@ -212,7 +212,7 @@ impl UsageView {
         let used = status.chars().count() + hint.chars().count();
         let gap = width.saturating_sub(used).max(Self::MINIMUM_GAP);
         let footer = format!("{status}{}{hint}", " ".repeat(gap));
-        Line::styled(footer, theme.dim())
+        Line::styled(footer, theme.hint())
     }
 
     fn status(&self) -> String {
@@ -304,7 +304,7 @@ mod tests {
         }
 
         fn rows_within(view: &UsageView, width: usize, height: usize) -> Vec<String> {
-            view.lines(width, height, &Theme)
+            view.lines(width, height, &Theme::default())
                 .iter()
                 .map(ToString::to_string)
                 .collect()

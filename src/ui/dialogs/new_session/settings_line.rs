@@ -219,7 +219,10 @@ mod tests {
         }
 
         fn rows(line: &SettingsLine, width: usize) -> Vec<String> {
-            line.lines(width, &Theme).iter().map(Self::text).collect()
+            line.lines(width, &Theme::default())
+                .iter()
+                .map(Self::text)
+                .collect()
         }
 
         fn text(line: &Line<'static>) -> String {
@@ -234,7 +237,7 @@ mod tests {
         }
 
         fn in_style_at(line: &SettingsLine, width: usize, style: Style) -> String {
-            line.lines(width, &Theme)
+            line.lines(width, &Theme::default())
                 .iter()
                 .flat_map(|line| line.spans.clone())
                 .filter(|span| span.style == style)
@@ -292,7 +295,7 @@ mod tests {
         let line = SettingsLine::new(AgentMode::Plan, &picker, Checkout::Main);
 
         assert_eq!(
-            LineFixture::in_style(&line, Theme.warning()),
+            LineFixture::in_style(&line, Theme::default().warning()),
             "no plan_argsno promptmain checkout"
         );
     }
@@ -303,7 +306,7 @@ mod tests {
         let line = SettingsLine::new(AgentMode::Build, &picker, Checkout::NewWorktree);
 
         assert_eq!(
-            LineFixture::in_style(&line, Theme.error()),
+            LineFixture::in_style(&line, Theme::default().error()),
             format!("no agents configured in {}", LineFixture::CONFIG_PATH)
         );
     }
@@ -314,7 +317,7 @@ mod tests {
         let line = SettingsLine::new(AgentMode::Plan, &picker, Checkout::NewWorktree);
 
         assert_eq!(
-            LineFixture::in_style(&line, Theme.dim()),
+            LineFixture::in_style(&line, Theme::default().dim()),
             " (Alt-j) (Alt-k) (Alt-l)"
         );
     }
@@ -345,7 +348,7 @@ mod tests {
         let exact_width = SettingsLine::INDENT.len() + error_item.len();
 
         assert_eq!(
-            LineFixture::in_style_at(&line, exact_width, Theme.dim()),
+            LineFixture::in_style_at(&line, exact_width, Theme::default().dim()),
             " (Alt-j) (Alt-k) (Alt-l)"
         );
     }

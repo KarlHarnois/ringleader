@@ -246,7 +246,7 @@ mod tests {
     fn the_panel_lists_keys_left_of_their_descriptions_in_two_columns() {
         let (menu, _service) = MenuFixture::looked_up(&MenuFixture::with_pull_request());
 
-        let text = MenuFixture::text(&menu.lines(&Theme));
+        let text = MenuFixture::text(&menu.lines(&Theme::default()));
 
         assert_eq!(
             text,
@@ -264,16 +264,16 @@ mod tests {
     fn keys_show_in_the_accent_color() {
         let (menu, _service) = MenuFixture::looked_up(&MenuFixture::with_pull_request());
 
-        let style = MenuFixture::style_of(&menu.lines(&Theme), "T");
+        let style = MenuFixture::style_of(&menu.lines(&Theme::default()), "T");
 
-        assert_eq!(style, Theme.accent());
+        assert_eq!(style, Theme::default().accent());
     }
 
     #[test]
     fn a_session_with_a_pull_request_shows_its_open_key_undimmed() {
         let (menu, _service) = MenuFixture::looked_up(&MenuFixture::with_pull_request());
 
-        let style = MenuFixture::style_of(&menu.lines(&Theme), "o");
+        let style = MenuFixture::style_of(&menu.lines(&Theme::default()), "o");
 
         assert!(!style.add_modifier.contains(Modifier::DIM));
     }
@@ -282,7 +282,7 @@ mod tests {
     fn a_session_without_a_pull_request_dims_its_open_key() {
         let (menu, _service) = MenuFixture::looked_up(&MenuFixture::without_pull_request());
 
-        let style = MenuFixture::style_of(&menu.lines(&Theme), "o");
+        let style = MenuFixture::style_of(&menu.lines(&Theme::default()), "o");
 
         assert!(style.add_modifier.contains(Modifier::DIM));
     }
@@ -295,7 +295,7 @@ mod tests {
             "no terminal emulator found".to_string(),
         ));
 
-        let text = MenuFixture::text(&menu.lines(&Theme));
+        let text = MenuFixture::text(&menu.lines(&Theme::default()));
         assert_eq!(text.last().unwrap(), "no terminal emulator found");
     }
 

@@ -1,0 +1,10 @@
+selected = { bg = "#333333", bold = true }
+accent = { fg = "bright_cyan" }
+dim = { fg = "240" }
+border = { fg = "default" }
+
+[state]
+exited = { fg = "#a7534e" }
+
+[pull_request]
+merged = { fg = "magenta", bold = true }

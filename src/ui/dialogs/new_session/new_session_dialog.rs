@@ -405,7 +405,7 @@ mod tests {
         }
 
         fn in_warning_color(dialog: &NewSessionDialog) -> String {
-            let warning = Theme.warning().fg;
+            let warning = Theme::default().warning().fg;
             let screen = Self::screen(dialog, Self::FULL_HEIGHT);
             screen
                 .content()
@@ -431,7 +431,7 @@ mod tests {
         ) -> Buffer {
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
             terminal
-                .draw(|frame| dialog.render(frame, frame.area(), labels, &Theme))
+                .draw(|frame| dialog.render(frame, frame.area(), labels, &Theme::default()))
                 .unwrap();
             terminal.backend().buffer().clone()
         }

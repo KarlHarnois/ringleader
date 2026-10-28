@@ -70,14 +70,21 @@ impl<'a> SessionTable<'a> {
     }
 
     pub fn render(&self, frame: &mut Frame, area: Rect) {
-        let block = Block::default().borders(Borders::ALL).title(" Sessions ");
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(self.theme.border())
+            .title(" Sessions ")
+            .title_style(self.theme.title());
         let inner = block.inner(area);
         frame.render_widget(block, area);
         let width = usize::from(inner.width);
         let columns = self.columns(width);
         let mut lines = Vec::new();
         if self.shows_header() {
-            lines.push(Line::styled(self.header(&columns), self.theme.emphasis()));
+            lines.push(Line::styled(
+                self.header(&columns),
+                self.theme.table_header(),
+            ));
         }
         if !self.has_rows() {
             Self::render_empty(lines, frame, inner);
@@ -199,6 +206,9 @@ impl<'a> SessionTable<'a> {
 
     fn underlined(&self, spans: Vec<Span<'static>>, width: usize) -> Line<'static> {
         let mut line = Line::from(spans);
+        for span in &mut line.spans {
+            span.style = self.theme.without_base_colors(span.style);
+        }
         let padding = width.saturating_sub(line.width());
         line.push_span(Span::raw(" ".repeat(padding)));
         line.patch_style(self.theme.selected_out_of_focus())
@@ -212,7 +222,7 @@ impl<'a> SessionTable<'a> {
     ) -> Vec<Span<'static>> {
         let indicator = StateIndicator::new(row.state(), self.tick);
         let mut spans = vec![
-            Span::styled(branch.prefix(), self.theme.dim()),
+            Span::styled(branch.prefix(), self.theme.branch_prefix()),
             Span::styled(indicator.glyph().to_string(), indicator.style(&self.theme)),
         ];
         spans.extend(self.colored_cells(row, columns));
@@ -222,7 +232,7 @@ impl<'a> SessionTable<'a> {
     fn colored_cells(&self, row: &SessionSummary, columns: &TableColumns) -> Vec<Span<'static>> {
         let cells = Self::cells(row);
         let text = columns.row(&cells);
-        let agent = vec![Span::styled(cells.agent().to_string(), self.theme.dim())];
+        let agent = vec![Span::styled(cells.agent().to_string(), self.theme.agent())];
         let mut colored = ColoredRow::new(&text, self.theme.base())
             .skip(&columns.name_cell(row.name()))
             .color_first(cells.agent(), agent);
@@ -302,7 +312,10 @@ mod tests {
     use ratatui::style::{Color, Modifier};
 
     use super::*;
-    use crate::domain::{DiffStat, PullRequestReview, RepoGroup, SessionState, UnmanagedSession};
+    use crate::domain::{
+        AnsiColor, DiffStat, PullRequestReview, RepoGroup, SessionState, StyleSpec, ThemeColor,
+        ThemeOverrides, ThemeRole, ThemeSpec, UnmanagedSession,
+    };
     use crate::test_support::ServiceFixture;
 
     struct TableFixture;
@@ -371,7 +384,10 @@ mod tests {
             tick: u64,
             height: u16,
         ) -> Terminal<TestBackend> {
-            Self::draw_table(SessionTable::new(tree, selection, tick, Theme), height)
+            Self::draw_table(
+                SessionTable::new(tree, selection, tick, Theme::default()),
+                height,
+            )
         }
 
         fn render_out_of_focus(
@@ -379,13 +395,22 @@ mod tests {
             cursor: &str,
             marked: &[&str],
         ) -> Terminal<TestBackend> {
+            Self::render_out_of_focus_with(rows, cursor, marked, Theme::default())
+        }
+
+        fn render_out_of_focus_with(
+            rows: &[SessionSummary],
+            cursor: &str,
+            marked: &[&str],
+            theme: Theme,
+        ) -> Terminal<TestBackend> {
             let cursor = ListSelection::Session(cursor.to_string());
             let marked = marked
                 .iter()
                 .map(|name| ListSelection::Session(name.to_string()))
                 .collect();
             let tree = SessionTree::new(rows, &HashSet::new());
-            let table = SessionTable::new(tree, Some(&cursor), 0, Theme)
+            let table = SessionTable::new(tree, Some(&cursor), 0, theme)
                 .with_marked(marked)
                 .out_of_focus();
             Self::draw_table(table, 6)
@@ -678,6 +703,20 @@ mod tests {
     }
 
     #[test]
+    fn a_themed_out_of_focus_background_reaches_the_row_text() {
+        let rows = [TableFixture::managed("fix-auth", SessionState::Waiting)];
+        let out_of_focus = StyleSpec::default().with_background(ThemeColor::Ansi(AnsiColor::Blue));
+        let theme = Theme::new(&ThemeSpec::new(
+            ThemeOverrides::default().with(ThemeRole::SelectedOutOfFocus, out_of_focus),
+        ));
+
+        let terminal = TableFixture::render_out_of_focus_with(&rows, "fix-auth", &[], theme);
+        let name = &terminal.backend().buffer()[(5, 2)];
+
+        assert_eq!((name.symbol(), name.bg), ("x", Color::Blue));
+    }
+
+    #[test]
     fn an_out_of_focus_cursor_row_keeps_its_colors() {
         let rows = [TableFixture::managed("fix-auth", SessionState::Waiting)];
 
@@ -833,9 +872,14 @@ mod tests {
 
         terminal
             .draw(|frame| {
-                SessionTable::new(SessionTree::new(&rows, &HashSet::new()), None, 0, Theme)
-                    .for_tier(LayoutTier::Minimal)
-                    .render(frame, frame.area())
+                SessionTable::new(
+                    SessionTree::new(&rows, &HashSet::new()),
+                    None,
+                    0,
+                    Theme::default(),
+                )
+                .for_tier(LayoutTier::Minimal)
+                .render(frame, frame.area())
             })
             .unwrap();
 
@@ -848,8 +892,13 @@ mod tests {
 
         terminal
             .draw(|frame| {
-                SessionTable::new(SessionTree::new(&[], &HashSet::new()), None, 0, Theme)
-                    .render(frame, frame.area())
+                SessionTable::new(
+                    SessionTree::new(&[], &HashSet::new()),
+                    None,
+                    0,
+                    Theme::default(),
+                )
+                .render(frame, frame.area())
             })
             .unwrap();
 

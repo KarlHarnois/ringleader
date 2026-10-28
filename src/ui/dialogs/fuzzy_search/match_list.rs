@@ -77,6 +77,7 @@ impl MatchList {
 
 #[cfg(test)]
 mod tests {
+    use ratatui::style::Modifier;
     use ratatui::text::Span;
 
     use super::*;
@@ -95,7 +96,7 @@ mod tests {
         }
 
         fn faint(index: usize) -> Line<'static> {
-            Line::from(Span::styled(index.to_string(), Theme.dim()))
+            Line::from(Span::styled(index.to_string(), Theme::default().dim()))
         }
 
         fn press_times(list: &mut MatchList, code: KeyCode, times: usize) {
@@ -164,40 +165,41 @@ mod tests {
         let mut list = ListFixture::holding(&[4, 2]);
         ListFixture::press(&mut list, KeyCode::Down, KeyModifiers::NONE);
 
-        let lines = list.lines(2, &Theme, |index| index.to_string());
+        let lines = list.lines(2, &Theme::default(), |index| index.to_string());
 
-        assert_eq!(lines[0].style, Theme.base());
-        assert_eq!(lines[1].style, Theme.selected());
+        assert_eq!(lines[0].style, Theme::default().base());
+        assert_eq!(lines[1].style, Theme::default().selected());
     }
 
     #[test]
     fn a_rows_own_span_styles_survive_the_highlight() {
         let list = ListFixture::holding(&[4]);
 
-        let lines = list.lines(1, &Theme, |index| {
-            Line::from(Span::styled(index.to_string(), Theme.emphasis()))
+        let lines = list.lines(1, &Theme::default(), |index| {
+            Line::from(Span::styled(index.to_string(), Theme::default().emphasis()))
         });
 
-        assert_eq!(lines[0].style, Theme.selected());
-        assert_eq!(lines[0].spans[0].style, Theme.emphasis());
+        let rendered = lines[0].style.patch(lines[0].spans[0].style);
+        assert!(rendered.add_modifier.contains(Modifier::BOLD));
     }
 
     #[test]
     fn the_selected_row_drops_faint_text_because_faint_fades_into_the_reversed_bar() {
         let list = ListFixture::holding(&[4]);
 
-        let lines = list.lines(1, &Theme, ListFixture::faint);
+        let lines = list.lines(1, &Theme::default(), ListFixture::faint);
 
-        assert_eq!(lines[0].spans[0].style, Theme.base());
+        let rendered = lines[0].style.patch(lines[0].spans[0].style);
+        assert_eq!(rendered, Theme::default().selected());
     }
 
     #[test]
     fn an_unselected_row_keeps_its_faint_text() {
         let list = ListFixture::holding(&[4, 2]);
 
-        let lines = list.lines(2, &Theme, ListFixture::faint);
+        let lines = list.lines(2, &Theme::default(), ListFixture::faint);
 
-        assert_eq!(lines[1].spans[0].style, Theme.dim());
+        assert_eq!(lines[1].spans[0].style, Theme::default().dim());
     }
 
     #[test]

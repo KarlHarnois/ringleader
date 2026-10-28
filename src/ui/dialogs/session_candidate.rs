@@ -112,7 +112,7 @@ mod tests {
         }
 
         fn text_in(candidate: &SessionCandidate, style: Style) -> String {
-            let spans = candidate.spans(Self::WIDTH, &Theme);
+            let spans = candidate.spans(Self::WIDTH, &Theme::default());
             let styled = spans.iter().filter(|span| span.style == style);
             styled.map(|span| span.content.as_ref()).collect()
         }
@@ -135,14 +135,17 @@ mod tests {
     fn the_repo_prefix_is_dim() {
         let candidate = CandidateFixture::prefixed("docs");
 
-        assert_eq!(CandidateFixture::text_in(&candidate, Theme.dim()), "alpha/");
+        assert_eq!(
+            CandidateFixture::text_in(&candidate, Theme::default().dim()),
+            "alpha/"
+        );
     }
 
     #[test]
     fn the_session_name_is_bold() {
         let candidate = CandidateFixture::prefixed("docs");
 
-        let bold = CandidateFixture::text_in(&candidate, Theme.emphasis());
+        let bold = CandidateFixture::text_in(&candidate, Theme::default().emphasis());
 
         assert_eq!(bold.trim_end(), "docs");
     }
@@ -151,21 +154,33 @@ mod tests {
     fn matched_letters_are_bold_and_underlined() {
         let candidate = CandidateFixture::matching("fix-auth", "fa");
 
-        assert_eq!(CandidateFixture::text_in(&candidate, Theme.matched()), "fa");
+        assert_eq!(
+            CandidateFixture::text_in(&candidate, Theme::default().matched()),
+            "fa"
+        );
     }
 
     #[test]
     fn a_match_cut_off_by_the_width_leaves_the_ellipsis_plain() {
         let candidate = CandidateFixture::matching("abcdefghijklmnopqrstuvwxyz", "n");
 
-        assert_eq!(CandidateFixture::text_in(&candidate, Theme.matched()), "");
+        assert_eq!(
+            CandidateFixture::text_in(&candidate, Theme::default().matched()),
+            ""
+        );
     }
 
     #[test]
     fn a_matched_repo_letter_drops_dim_because_bold_and_faint_cancel_in_some_terminals() {
         let candidate = CandidateFixture::matching("docs", "ph");
 
-        assert_eq!(CandidateFixture::text_in(&candidate, Theme.matched()), "ph");
-        assert_eq!(CandidateFixture::text_in(&candidate, Theme.dim()), "ala/");
+        assert_eq!(
+            CandidateFixture::text_in(&candidate, Theme::default().matched()),
+            "ph"
+        );
+        assert_eq!(
+            CandidateFixture::text_in(&candidate, Theme::default().dim()),
+            "ala/"
+        );
     }
 }

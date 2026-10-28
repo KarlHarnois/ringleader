@@ -83,7 +83,7 @@ impl<'a> RepoHeading<'a> {
 
     fn name_span(&self, theme: &Theme, room: usize) -> Span<'static> {
         let name = TextFit::new(&self.group.to_string()).right_truncated(room);
-        Span::styled(name, theme.emphasis())
+        Span::styled(name, theme.repo_name())
     }
 
     fn tail_spans(&self, tick: u64, theme: &Theme) -> Vec<Span<'static>> {
@@ -151,7 +151,7 @@ mod tests {
         }
 
         fn text_within(heading: &RepoHeading, width: usize) -> String {
-            let spans = heading.spans(0, &Theme, width);
+            let spans = heading.spans(0, &Theme::default(), width);
             spans.iter().map(|span| span.content.as_ref()).collect()
         }
     }

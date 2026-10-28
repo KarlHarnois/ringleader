@@ -1,3 +1,7 @@
+use ratatui::text::{Line, Span};
+
+use crate::ui::theme::Theme;
+
 type Hint = (&'static str, &'static str);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,6 +52,7 @@ impl KeyHints {
     ];
     const WIDE_GAP: &'static str = "   ";
     const NARROW_GAP: &'static str = "  ";
+    const MARGIN: &'static str = " ";
 
     pub fn on_session() -> Self {
         Self {
@@ -67,14 +72,37 @@ impl KeyHints {
         }
     }
 
+    pub fn line(&self, width: usize, theme: &Theme) -> Line<'static> {
+        let (shown, gap) = self.layout(width);
+        let spans: Vec<Span<'static>> = shown
+            .iter()
+            .enumerate()
+            .flat_map(|(index, (key, action))| {
+                let lead = if index == 0 { Self::MARGIN } else { gap };
+                [
+                    Span::styled(lead, theme.hint_bar_text()),
+                    Span::styled(*key, theme.hint_bar_key()),
+                    Span::styled(format!(" {action}"), theme.hint_bar_text()),
+                ]
+            })
+            .collect();
+        Line::from(spans)
+    }
+
+    #[cfg(test)]
     pub fn text(&self, width: usize) -> String {
+        let (shown, gap) = self.layout(width);
+        Self::joined(&shown, gap)
+    }
+
+    fn layout(&self, width: usize) -> (Vec<Hint>, &'static str) {
         let shown = self.fitted(width);
         let gap = if Self::width_of(&shown, Self::WIDE_GAP) <= width {
             Self::WIDE_GAP
         } else {
             Self::NARROW_GAP
         };
-        Self::joined(&shown, gap)
+        (shown, gap)
     }
 
     fn fitted(&self, width: usize) -> Vec<Hint> {
@@ -97,7 +125,7 @@ impl KeyHints {
             .iter()
             .map(|(key, action)| format!("{key} {action}"))
             .collect();
-        format!(" {}", labels.join(gap))
+        format!("{}{}", Self::MARGIN, labels.join(gap))
     }
 }
 
@@ -167,5 +195,24 @@ mod tests {
             KeyHints::without_selection().text(95),
             " n new   u usage   ? help   q quit"
         );
+    }
+
+    #[test]
+    fn the_bar_styles_keys_apart_from_their_actions() {
+        let theme = Theme::default();
+
+        let line = KeyHints::without_selection().line(95, &theme);
+
+        assert_eq!(
+            (line.spans[1].content.as_ref(), line.spans[1].style),
+            ("n", theme.hint_bar_key())
+        );
+    }
+
+    #[test]
+    fn the_styled_bar_reads_like_the_plain_one() {
+        let line = KeyHints::on_session().line(80, &Theme::default());
+
+        assert_eq!(line.to_string(), KeyHints::on_session().text(80));
     }
 }

@@ -29,6 +29,7 @@ use adapters::agent_launch::launcher_command::LauncherCommand;
 use adapters::agent_launch::ringleader_shim::RingleaderShim;
 use adapters::claude::claude_usage_meter::ClaudeUsageMeter;
 use adapters::config_file::toml_config_source::TomlConfigSource;
+use adapters::config_file::toml_theme_source::TomlThemeSource;
 use adapters::direnv::direnv_directory_environment::DirenvDirectoryEnvironment;
 use adapters::filesystem::directory_repo_scanner::DirectoryRepoScanner;
 use adapters::filesystem::directory_scratch_space::DirectoryScratchSpace;
@@ -64,6 +65,7 @@ use application::{
     ServiceError, ServicePorts, SessionService, StatePorts, TmuxPorts,
 };
 use cli::{Cli, CliExit, CliOutput, CliSession, EntryPoints};
+use ui::theme::ColorMode;
 use ui::{
     App, CrosstermInput, CrosstermScreenMode, EventLoop, FinderPopupError, MenuPopupError,
     SessionFinderPopup, SessionMenuPopup, TerminalGuard,
@@ -284,7 +286,8 @@ impl CompositionRoot {
             Box::new(io::stdout()),
             Box::new(JsonFoldStore::new(&state_directory.join("folds.json"))),
             Instant::now(),
-        );
+        )
+        .with_color_mode(self.color_mode());
         let process_warnings = [log_problem, startup_message]
             .into_iter()
             .flatten()
@@ -338,6 +341,10 @@ impl CompositionRoot {
             .unwrap_or_else(|| self.paths.config_file());
         TomlConfigSource::new(&path, &self.paths.worktree_root(), self.paths.home())
             .resolved_from(&self.launch_directory)
+    }
+
+    fn color_mode(&self) -> ColorMode {
+        ColorMode::from_no_color(self.environment.get(ColorMode::VARIABLE))
     }
 
     fn write_template_if_missing(source: &TomlConfigSource) -> Option<String> {
@@ -410,6 +417,7 @@ impl CompositionRoot {
     }
 
     fn state_ports(&self, config_source: TomlConfigSource) -> StatePorts {
+        let theme_source = TomlThemeSource::beside(&config_source.path());
         let clock = Arc::new(SystemClock);
         let registry = JsonSessionRegistry::new(
             &self.paths.state_directory().join("sessions.json"),
@@ -418,6 +426,7 @@ impl CompositionRoot {
         StatePorts::new(
             Arc::new(registry),
             Arc::new(config_source),
+            Arc::new(theme_source),
             clock,
             Arc::new(DirectoryScratchSpace::new(
                 &self.paths.scratch_root(),
@@ -590,14 +599,16 @@ impl EntryPoints for CompositionRoot {
     }
 
     fn find_session(&self, cli: &Cli, client: &str) -> ExitCode {
+        let color_mode = self.color_mode();
         self.run_popup(cli, |service| {
-            Self::show_finder(SessionFinderPopup::new(service, client))
+            Self::show_finder(SessionFinderPopup::new(service, client).with_color_mode(color_mode))
         })
     }
 
     fn show_session_menu(&self, cli: &Cli, client: &str) -> ExitCode {
+        let color_mode = self.color_mode();
         self.run_popup(cli, |service| {
-            Self::show_menu(SessionMenuPopup::new(service, client))
+            Self::show_menu(SessionMenuPopup::new(service, client).with_color_mode(color_mode))
         })
     }
 
@@ -637,6 +648,17 @@ mod tests {
                 })
                 .collect();
             Self { sources }
+        }
+
+        fn except(self, file: &str) -> Self {
+            let excluded = Path::new(Self::SOURCE_DIRECTORY).join(file);
+            Self {
+                sources: self
+                    .sources
+                    .into_iter()
+                    .filter(|(path, _)| *path != excluded)
+                    .collect(),
+            }
         }
 
         fn from_text(text: &str) -> Self {
@@ -820,10 +842,10 @@ mod tests {
     }
 
     #[test]
-    fn no_layer_fixes_a_color_so_the_terminal_theme_decides_every_color() {
+    fn only_the_theme_turns_a_configured_color_into_a_terminal_color() {
         let layers = ["domain", "application", "adapters", "ui", "cli"];
 
-        let uses = LayerImports::of(&layers).uses_of(&[
+        let uses = LayerImports::of(&layers).except("ui/theme.rs").uses_of(&[
             "Color::Rgb",
             "Color::Indexed",
             "Color::from_u32",
