@@ -85,7 +85,7 @@ impl RepoFinder {
     }
 
     pub fn lines(&self, width: usize, room: usize, theme: &Theme) -> Vec<Line<'static>> {
-        let mut lines = vec![Line::from(self.query.shown(width))];
+        let mut lines = vec![Line::styled(self.query.shown(width), theme.prompt())];
         lines.extend(self.summary_lines(width, theme));
         let footer = self.footer(width, theme);
         let rows = room.saturating_sub(lines.len() + footer.len()).max(1);
@@ -169,7 +169,7 @@ mod tests {
 
     use super::*;
     use crate::application::ports::ScanError;
-    use crate::domain::RepoName;
+    use crate::domain::{RepoName, StyleSpec, ThemeColor, ThemeOverrides, ThemeRole, ThemeSpec};
     use crate::test_support::{FakeHostProbe, FakeRepoScanner, FakeWorkspace, ServiceFixture};
 
     struct FinderFixture;
@@ -233,6 +233,13 @@ mod tests {
             finder.pick(service).map(|repo| repo.path().to_path_buf())
         }
 
+        fn prompt_theme() -> Theme {
+            let prompt = StyleSpec::default().with_foreground(ThemeColor::Indexed(231));
+            Theme::new(&ThemeSpec::new(
+                ThemeOverrides::default().with(ThemeRole::Prompt, prompt),
+            ))
+        }
+
         fn text(finder: &RepoFinder) -> String {
             finder
                 .lines(60, 10, &Theme::default())
@@ -246,6 +253,17 @@ mod tests {
                 .collect::<Vec<_>>()
                 .join("\n")
         }
+    }
+
+    #[test]
+    fn the_query_takes_the_prompt_color() {
+        let fixture = FinderFixture::fixture();
+        let finder = FinderFixture::opened(&fixture.service());
+        let theme = FinderFixture::prompt_theme();
+
+        let lines = finder.lines(60, 10, &theme);
+
+        assert_eq!(lines[0].style, theme.prompt());
     }
 
     #[test]
