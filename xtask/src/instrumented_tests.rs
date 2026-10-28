@@ -13,8 +13,7 @@ impl<'a> InstrumentedTests<'a> {
     const REPORT: &'static str = "target/coverage/lcov.info";
     const UNMEASURED_PACKAGE: &'static str = "xtask";
     const CARGO: &'static str = "cargo";
-    const FORGET_PREVIOUS_RUNS: [&'static str; 4] =
-        ["llvm-cov", "clean", "--profraw-only", "--workspace"];
+    const FORGET_PREVIOUS_BUILDS: [&'static str; 3] = ["llvm-cov", "clean", "--workspace"];
     const KEEP_BUILD_ARTIFACTS: &'static str = "--no-clean";
 
     pub fn new(root: &'a Path) -> Self {
@@ -25,7 +24,7 @@ impl<'a> InstrumentedTests<'a> {
         let report = self.root.join(Self::REPORT);
         Self::create_parent(&report)?;
         self.cargo(GateFailure::coverage_unavailable, |command| {
-            command.args(Self::FORGET_PREVIOUS_RUNS)
+            command.args(Self::FORGET_PREVIOUS_BUILDS)
         })?;
         self.cargo(GateFailure::tests_failed, |command| {
             Self::measure(command, &report)
