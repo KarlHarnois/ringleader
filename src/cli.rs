@@ -24,11 +24,12 @@ use session_commands::SessionCommands;
 
 use crate::application::ports::{Lock, LockError};
 use crate::application::{CorruptRegistry, SessionService};
+use crate::domain::BuildVersion;
 
 #[derive(Debug, Parser)]
 #[command(
     name = "ringleader",
-    version = Cli::VERSION,
+    version = BuildVersion::CURRENT.text(),
     about = "A tmux session manager for AI coding agents"
 )]
 pub struct Cli {
@@ -185,10 +186,6 @@ struct RenameArgs {
 }
 
 impl Cli {
-    const VERSION: &'static str = match option_env!("RINGLEADER_VERSION") {
-        Some(version) => version,
-        None => env!("CARGO_PKG_VERSION"),
-    };
     const LOCK_WAIT_NOTE: &'static str = "waiting for another Ringleader to finish a change";
     const FIND_SESSION: &'static str = "__find-session";
     const SESSION_MENU: &'static str = "__session-menu";
@@ -759,11 +756,6 @@ mod tests {
             let error = Cli::try_parse_from(arguments).unwrap_err();
             Cli::exit_code_for(&error)
         }
-    }
-
-    #[test]
-    fn the_version_drops_the_tag_prefix_to_match_homebrew_builds() {
-        assert!(!Cli::VERSION.starts_with('v'), "{}", Cli::VERSION);
     }
 
     #[test]

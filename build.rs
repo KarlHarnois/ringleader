@@ -8,7 +8,6 @@ struct GitVersion {
 impl GitVersion {
     const VARIABLE: &str = "RINGLEADER_VERSION";
     const TAG_PATTERN: &str = "v*";
-    const TAG_PREFIX: char = 'v';
 
     fn new(package_directory: &Path) -> Self {
         Self {
@@ -46,14 +45,13 @@ impl GitVersion {
     }
 
     fn describe(&self) -> Option<String> {
-        let description = self.git(&[
+        self.git(&[
             "describe",
             "--tags",
             "--match",
             Self::TAG_PATTERN,
             "--dirty",
-        ])?;
-        Some(description.trim_start_matches(Self::TAG_PREFIX).to_string())
+        ])
     }
 
     fn git_path(&self, directory_flag: &str) -> Option<PathBuf> {
