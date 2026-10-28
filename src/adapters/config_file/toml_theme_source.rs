@@ -133,7 +133,7 @@ impl TomlThemeSource {
     }
 
     fn role_style(name: &str, value: toml::Value) -> Result<(ThemeRole, StyleSpec), String> {
-        let role = Self::role_named(name).ok_or_else(|| format!("unknown theme role `{name}`"))?;
+        let role = Self::role_named(name).ok_or_else(|| Self::unknown_role(name))?;
         let raw: RawStyle = value
             .try_into()
             .map_err(|error| format!("`{name}`: {error}"))?;
@@ -141,6 +141,25 @@ impl TomlThemeSource {
             .into_style()
             .map_err(|failure| format!("`{name}`: {failure}"))?;
         Ok((role, style))
+    }
+
+    fn unknown_role(name: &str) -> String {
+        let unknown = format!("unknown theme role `{name}`");
+        match name.split_once('.') {
+            Some((group, _)) if Self::is_group(group) => {
+                format!("{unknown}: `[{group}]` takes {}", Self::roles_in(group))
+            }
+            _ => unknown,
+        }
+    }
+
+    fn roles_in(group: &str) -> String {
+        let prefix = format!("{group}.");
+        let roles: Vec<&str> = Self::ROLE_NAMES
+            .iter()
+            .filter_map(|(name, _)| name.strip_prefix(&prefix))
+            .collect();
+        roles.join(", ")
     }
 
     fn role_named(name: &str) -> Option<ThemeRole> {
@@ -310,7 +329,22 @@ mod tests {
     fn an_unknown_role_inside_a_group_names_the_dotted_role() {
         let failures = ThemeFileFixture::containing("[repo]\nnmae = { bold = true }\n").failures();
 
-        assert_eq!(failures, ["unknown theme role `repo.nmae`"]);
+        assert_eq!(
+            failures,
+            ["unknown theme role `repo.nmae`: `[repo]` takes name"]
+        );
+    }
+
+    #[test]
+    fn a_style_written_on_a_group_points_at_the_groups_roles() {
+        let failures = ThemeFileFixture::containing("state = { fg = \"red\" }\n").failures();
+
+        assert_eq!(
+            failures,
+            [
+                "unknown theme role `state.fg`: `[state]` takes working, waiting, exited, stopped, unmanaged"
+            ]
+        );
     }
 
     #[test]
