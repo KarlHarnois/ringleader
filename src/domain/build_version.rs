@@ -11,10 +11,7 @@ impl BuildVersion {
 
     pub const fn of_description(description: &'static str) -> Self {
         let text = match description.as_bytes() {
-            [Self::TAG_PREFIX, version @ ..] => match std::str::from_utf8(version) {
-                Ok(version) => version,
-                Err(_) => description,
-            },
+            [Self::TAG_PREFIX, ..] => description.split_at(1).1,
             _ => description,
         };
         Self { text }
