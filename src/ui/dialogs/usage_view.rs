@@ -304,7 +304,7 @@ mod tests {
         }
 
         fn rows_within(view: &UsageView, width: usize, height: usize) -> Vec<String> {
-            view.lines(width, height, &Theme)
+            view.lines(width, height, &Theme::default())
                 .iter()
                 .map(ToString::to_string)
                 .collect()

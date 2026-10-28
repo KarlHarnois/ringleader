@@ -70,7 +70,10 @@ impl<'a> SessionTable<'a> {
     }
 
     pub fn render(&self, frame: &mut Frame, area: Rect) {
-        let block = Block::default().borders(Borders::ALL).title(" Sessions ");
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(self.theme.border())
+            .title(" Sessions ");
         let inner = block.inner(area);
         frame.render_widget(block, area);
         let width = usize::from(inner.width);
@@ -371,7 +374,10 @@ mod tests {
             tick: u64,
             height: u16,
         ) -> Terminal<TestBackend> {
-            Self::draw_table(SessionTable::new(tree, selection, tick, Theme), height)
+            Self::draw_table(
+                SessionTable::new(tree, selection, tick, Theme::default()),
+                height,
+            )
         }
 
         fn render_out_of_focus(
@@ -385,7 +391,7 @@ mod tests {
                 .map(|name| ListSelection::Session(name.to_string()))
                 .collect();
             let tree = SessionTree::new(rows, &HashSet::new());
-            let table = SessionTable::new(tree, Some(&cursor), 0, Theme)
+            let table = SessionTable::new(tree, Some(&cursor), 0, Theme::default())
                 .with_marked(marked)
                 .out_of_focus();
             Self::draw_table(table, 6)
@@ -833,9 +839,14 @@ mod tests {
 
         terminal
             .draw(|frame| {
-                SessionTable::new(SessionTree::new(&rows, &HashSet::new()), None, 0, Theme)
-                    .for_tier(LayoutTier::Minimal)
-                    .render(frame, frame.area())
+                SessionTable::new(
+                    SessionTree::new(&rows, &HashSet::new()),
+                    None,
+                    0,
+                    Theme::default(),
+                )
+                .for_tier(LayoutTier::Minimal)
+                .render(frame, frame.area())
             })
             .unwrap();
 
@@ -848,8 +859,13 @@ mod tests {
 
         terminal
             .draw(|frame| {
-                SessionTable::new(SessionTree::new(&[], &HashSet::new()), None, 0, Theme)
-                    .render(frame, frame.area())
+                SessionTable::new(
+                    SessionTree::new(&[], &HashSet::new()),
+                    None,
+                    0,
+                    Theme::default(),
+                )
+                .render(frame, frame.area())
             })
             .unwrap();
 

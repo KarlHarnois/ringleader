@@ -102,7 +102,7 @@ mod tests {
 
         fn text(dialog: &RenameSessionDialog) -> String {
             dialog
-                .lines(70, DialogLabels::full(), &Theme)
+                .lines(70, DialogLabels::full(), &Theme::default())
                 .iter()
                 .map(|line| {
                     line.spans

@@ -151,7 +151,7 @@ mod tests {
         }
 
         fn text_within(heading: &RepoHeading, width: usize) -> String {
-            let spans = heading.spans(0, &Theme, width);
+            let spans = heading.spans(0, &Theme::default(), width);
             spans.iter().map(|span| span.content.as_ref()).collect()
         }
     }

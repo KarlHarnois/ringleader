@@ -202,7 +202,7 @@ mod tests {
 
         fn text(picker: &RepoPicker) -> String {
             picker
-                .lines(60, 10, Theme.base(), &Theme)
+                .lines(60, 10, Theme::default().base(), &Theme::default())
                 .iter()
                 .map(|line| {
                     line.spans

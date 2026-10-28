@@ -36,6 +36,62 @@ Both installs bring Ringleader's own tmux and git, and leave yours untouched.
 
 Sessions run on Ringleader's own tmux server. The server ignores your tmux config, and its sessions do not show in your `tmux ls`. Ctrl-Q detaches you from a session and returns you to the TUI or the shell you attached from. Ctrl-Space opens a menu of session actions.
 
+## Theme
+
+**To change the TUI's colors, write a `theme.toml` file next to the config.** Ringleader reads the file at startup and when you press `r`. A role that the file leaves out keeps its default style, whose colors come from your terminal's palette.
+
+```toml
+selected = { bg = "#333333", bold = true }
+dim = { fg = "240" }
+
+[state]
+exited = { fg = "red" }
+```
+
+A dotted role goes under its table: `state.exited` is `exited` under `[state]`.
+
+| Role | What it colors |
+|---|---|
+| `base` | all text and the background |
+| `selected` | the cursor row and the focused field |
+| `selected_out_of_focus` | the cursor row while the terminal lacks focus |
+| `selected_text` | selected text in a prompt |
+| `accent` | the hot-key letters in the session menu |
+| `dim` | hints, separators, and secondary columns |
+| `emphasis` | headings and the table header |
+| `matched` | the letters a search matched |
+| `error` | errors |
+| `warning` | warnings |
+| `insertions` | added-line counts |
+| `deletions` | removed-line counts |
+| `approved` | an approved pull request |
+| `border` | the borders of panels and dialogs |
+| `state.working` | a working session |
+| `state.waiting` | a session that waits for you |
+| `state.exited` | a session whose agent exited |
+| `state.stopped` | a stopped session |
+| `state.unmanaged` | a tmux session that Ringleader did not create |
+| `pull_request.open` | an open pull request |
+| `pull_request.draft` | a draft pull request |
+| `pull_request.merged` | a merged pull request |
+| `pull_request.closed` | a closed pull request |
+
+A role's style replaces the role's whole default. A style takes `fg` and `bg`, each a color. A style also takes these modifiers, each `true` or `false`:
+
+- `bold`
+- `dim`
+- `italic`
+- `underlined`
+- `reversed`
+- `crossed_out`
+
+A color takes one of these forms:
+
+- `default`, which keeps the terminal's color
+- an ANSI name, such as `red` or `bright_cyan`
+- a number from 0 to 255
+- `#rrggbb`
+
 ## CLI
 
 ```

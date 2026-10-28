@@ -235,7 +235,7 @@ mod tests {
 
         fn text(finder: &RepoFinder) -> String {
             finder
-                .lines(60, 10, &Theme)
+                .lines(60, 10, &Theme::default())
                 .iter()
                 .map(|line| {
                     line.spans
@@ -443,7 +443,7 @@ mod tests {
         FinderFixture::press(&mut finder, KeyCode::Down, KeyModifiers::NONE);
         FinderFixture::press(&mut finder, KeyCode::Down, KeyModifiers::NONE);
 
-        let shown = finder.lines(60, 3, &Theme);
+        let shown = finder.lines(60, 3, &Theme::default());
 
         assert_eq!(shown.len(), 3);
         assert_eq!(shown[2].spans[0].content, "~/work/api-gateway");

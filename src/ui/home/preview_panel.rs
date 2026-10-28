@@ -37,7 +37,7 @@ impl<'a> PreviewPanel<'a> {
     }
 
     pub fn render(&self, frame: &mut Frame, area: Rect) {
-        let block = Self::frame();
+        let block = Self::frame().border_style(self.theme.border());
         let inner = block.inner(area);
         frame.render_widget(block, area);
         if let Some(row) = self.row {
@@ -138,7 +138,8 @@ mod tests {
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
             terminal
                 .draw(|frame| {
-                    PreviewPanel::new(Some(&row), capture, Theme).render(frame, frame.area())
+                    PreviewPanel::new(Some(&row), capture, Theme::default())
+                        .render(frame, frame.area())
                 })
                 .unwrap();
             let buffer = terminal.backend().buffer();
@@ -229,7 +230,8 @@ mod tests {
 
         terminal
             .draw(|frame| {
-                PreviewPanel::new(Some(&row), Some(&capture), Theme).render(frame, frame.area())
+                PreviewPanel::new(Some(&row), Some(&capture), Theme::default())
+                    .render(frame, frame.area())
             })
             .unwrap();
 
@@ -245,7 +247,9 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(70, 10)).unwrap();
 
         terminal
-            .draw(|frame| PreviewPanel::new(None, None, Theme).render(frame, frame.area()))
+            .draw(|frame| {
+                PreviewPanel::new(None, None, Theme::default()).render(frame, frame.area())
+            })
             .unwrap();
 
         let buffer = terminal.backend().buffer();

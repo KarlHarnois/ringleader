@@ -29,6 +29,7 @@ use adapters::agent_launch::launcher_command::LauncherCommand;
 use adapters::agent_launch::ringleader_shim::RingleaderShim;
 use adapters::claude::claude_usage_meter::ClaudeUsageMeter;
 use adapters::config_file::toml_config_source::TomlConfigSource;
+use adapters::config_file::toml_theme_source::TomlThemeSource;
 use adapters::direnv::direnv_directory_environment::DirenvDirectoryEnvironment;
 use adapters::filesystem::directory_repo_scanner::DirectoryRepoScanner;
 use adapters::filesystem::directory_scratch_space::DirectoryScratchSpace;
@@ -410,6 +411,7 @@ impl CompositionRoot {
     }
 
     fn state_ports(&self, config_source: TomlConfigSource) -> StatePorts {
+        let theme_source = TomlThemeSource::beside(&config_source.path());
         let clock = Arc::new(SystemClock);
         let registry = JsonSessionRegistry::new(
             &self.paths.state_directory().join("sessions.json"),
@@ -418,6 +420,7 @@ impl CompositionRoot {
         StatePorts::new(
             Arc::new(registry),
             Arc::new(config_source),
+            Arc::new(theme_source),
             clock,
             Arc::new(DirectoryScratchSpace::new(
                 &self.paths.scratch_root(),
@@ -639,6 +642,17 @@ mod tests {
             Self { sources }
         }
 
+        fn except(self, file: &str) -> Self {
+            let excluded = Path::new(Self::SOURCE_DIRECTORY).join(file);
+            Self {
+                sources: self
+                    .sources
+                    .into_iter()
+                    .filter(|(path, _)| *path != excluded)
+                    .collect(),
+            }
+        }
+
         fn from_text(text: &str) -> Self {
             Self {
                 sources: vec![(PathBuf::from("example.rs"), text.to_string())],
@@ -820,10 +834,10 @@ mod tests {
     }
 
     #[test]
-    fn no_layer_fixes_a_color_so_the_terminal_theme_decides_every_color() {
+    fn only_the_theme_turns_a_configured_color_into_a_terminal_color() {
         let layers = ["domain", "application", "adapters", "ui", "cli"];
 
-        let uses = LayerImports::of(&layers).uses_of(&[
+        let uses = LayerImports::of(&layers).except("ui/theme.rs").uses_of(&[
             "Color::Rgb",
             "Color::Indexed",
             "Color::from_u32",

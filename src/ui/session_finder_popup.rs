@@ -18,6 +18,7 @@ use crate::application::{CorruptRegistry, ServiceError, SessionService};
 pub struct SessionFinderPopup {
     service: SessionService,
     client: String,
+    theme: Theme,
 }
 
 impl SessionFinderPopup {
@@ -28,6 +29,7 @@ impl SessionFinderPopup {
         Self {
             service,
             client: client.to_string(),
+            theme: Theme::default(),
         }
     }
 
@@ -41,6 +43,7 @@ impl SessionFinderPopup {
         B::Error: Send + Sync + 'static,
         I: InputSource,
     {
+        self.load_theme();
         let mut finder = Dialog::find_session(self.load_sessions()?.rows());
         while let Choice::Session(name) = self.choose(terminal, &mut input, &mut finder)? {
             match self.service.switch_client(&name, &self.client) {
@@ -49,6 +52,11 @@ impl SessionFinderPopup {
             }
         }
         Ok(())
+    }
+
+    fn load_theme(&mut self) {
+        self.service.load_theme();
+        self.theme = Theme::new(self.service.theme());
     }
 
     fn show_failure(finder: &mut Dialog, error: &ServiceError) {
@@ -76,7 +84,7 @@ impl SessionFinderPopup {
     {
         loop {
             terminal
-                .draw(|frame| finder.fill(frame, &Theme))
+                .draw(|frame| finder.fill(frame, &self.theme))
                 .map_err(io::Error::other)?;
             let event = input.next_event(Self::IDLE_WAIT)?;
             if let Some(choice) = event.and_then(|event| self.answer(finder, &event)) {

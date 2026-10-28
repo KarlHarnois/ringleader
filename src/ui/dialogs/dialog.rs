@@ -161,6 +161,7 @@ impl Dialog {
     fn render_at(&self, frame: &mut Frame, (area, labels): (Rect, DialogLabels), theme: &Theme) {
         let block = Block::default()
             .borders(Borders::ALL)
+            .border_style(theme.border())
             .title(self.title())
             .padding(self.padding());
         let inner = block.inner(area);
@@ -272,7 +273,9 @@ mod tests {
             let service = ServiceFixture::new().service();
             let dialog = Dialog::open(opening, &service);
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-            terminal.draw(|frame| dialog.render(frame, &Theme)).unwrap();
+            terminal
+                .draw(|frame| dialog.render(frame, &Theme::default()))
+                .unwrap();
             terminal
         }
 
@@ -284,7 +287,9 @@ mod tests {
             let typed = Event::Paste(query.to_string());
             dialog.handle_event(&typed, &ServiceFixture::new().service());
             let mut terminal = Terminal::new(TestBackend::new(40, 12)).unwrap();
-            terminal.draw(|frame| dialog.fill(frame, &Theme)).unwrap();
+            terminal
+                .draw(|frame| dialog.fill(frame, &Theme::default()))
+                .unwrap();
             terminal
         }
 

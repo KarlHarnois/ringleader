@@ -53,7 +53,7 @@ mod tests {
         fn texts(column: &LabelColumn, rows: &[&str]) -> Vec<String> {
             let rows = rows.iter().map(|row| vec![Span::raw(row.to_string())]);
             column
-                .lines(rows, &Theme)
+                .lines(rows, &Theme::default())
                 .iter()
                 .map(ToString::to_string)
                 .collect()

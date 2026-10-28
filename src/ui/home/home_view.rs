@@ -190,9 +190,9 @@ mod tests {
             terminal
                 .draw(|frame| {
                     HomeView::new(
-                        SessionTable::new(tree(), selection.as_ref(), 0, Theme),
-                        PreviewPanel::new(selected, None, Theme),
-                        StatusBar::new(Theme),
+                        SessionTable::new(tree(), selection.as_ref(), 0, Theme::default()),
+                        PreviewPanel::new(selected, None, Theme::default()),
+                        StatusBar::new(Theme::default()),
                     )
                     .render(frame)
                 })

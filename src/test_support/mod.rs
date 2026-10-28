@@ -34,6 +34,7 @@ pub use fakes::fake_repo_scanner::FakeRepoScanner;
 pub use fakes::fake_scratch_space::FakeScratchSpace;
 pub use fakes::fake_session_registry::FakeSessionRegistry;
 pub use fakes::fake_terminal_emulator::FakeTerminalEmulator;
+pub use fakes::fake_theme_source::FakeThemeSource;
 pub use fakes::fake_usage_meter::FakeUsageMeter;
 pub use fakes::fake_web_browser::FakeWebBrowser;
 pub use fakes::fake_workspace::FakeWorkspace;

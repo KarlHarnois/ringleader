@@ -19,6 +19,7 @@ use crate::application::{CorruptRegistry, ServiceError, SessionService};
 pub struct SessionMenuPopup {
     service: SessionService,
     client: String,
+    theme: Theme,
 }
 
 impl SessionMenuPopup {
@@ -28,6 +29,7 @@ impl SessionMenuPopup {
         Self {
             service,
             client: client.to_string(),
+            theme: Theme::default(),
         }
     }
 
@@ -41,12 +43,13 @@ impl SessionMenuPopup {
         B::Error: Send + Sync + 'static,
         I: InputSource,
     {
+        self.load_theme();
         self.service.load_registry(CorruptRegistry::Report)?;
         let name = self.service.client_session(&self.client)?;
         let mut panel = Panel::Menu(SessionMenu::open(&name, &self.service));
         loop {
             terminal
-                .draw(|frame| panel.render(frame, &Theme))
+                .draw(|frame| panel.render(frame, &self.theme))
                 .map_err(io::Error::other)?;
             let event = input.next_event(Self::TICK)?;
             panel.poll(Instant::now(), &self.service);
@@ -58,6 +61,11 @@ impl SessionMenuPopup {
                 None => return Ok(()),
             };
         }
+    }
+
+    fn load_theme(&mut self) {
+        self.service.load_theme();
+        self.theme = Theme::new(self.service.theme());
     }
 
     fn pressed(event: &Event) -> Option<&KeyEvent> {

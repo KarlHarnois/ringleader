@@ -35,7 +35,7 @@ impl DeleteSessionsDialog {
     }
 
     pub fn lines(&self, width: usize, height: usize, theme: &Theme) -> Vec<Line<'static>> {
-        let room = height.saturating_sub(self.widest_hint_rows(width) + 1);
+        let room = height.saturating_sub(self.widest_hint_rows(width, theme) + 1);
         let mut lines = self.scroll.window(self.session_list(width, theme), room);
         lines.push(Line::from(""));
         let hints = self.scroll.hint(self.hints());
@@ -43,9 +43,9 @@ impl DeleteSessionsDialog {
         lines
     }
 
-    fn widest_hint_rows(&self, width: usize) -> usize {
+    fn widest_hint_rows(&self, width: usize, theme: &Theme) -> usize {
         let widest = ScrollWindow::scrolling_hint(self.hints());
-        TextFit::new(&widest).styled_lines(width, Theme.dim()).len()
+        TextFit::new(&widest).styled_lines(width, theme.dim()).len()
     }
 
     fn session_list(&self, width: usize, theme: &Theme) -> Vec<Line<'static>> {
@@ -166,7 +166,7 @@ mod tests {
         }
 
         fn text(dialog: &DeleteSessionsDialog) -> String {
-            let lines = dialog.lines(Self::WIDTH, Self::ROOM_FOR_EVERY_LINE, &Theme);
+            let lines = dialog.lines(Self::WIDTH, Self::ROOM_FOR_EVERY_LINE, &Theme::default());
             let rows: Vec<String> = lines.iter().map(ToString::to_string).collect();
             rows.join("\n")
         }
@@ -256,7 +256,7 @@ mod tests {
             let lines = dialog.lines(
                 BatchDeleteFixture::WIDTH,
                 BatchDeleteFixture::ROOM_FOR_FOUR_LINES,
-                &Theme,
+                &Theme::default(),
             );
             lines
                 .iter()

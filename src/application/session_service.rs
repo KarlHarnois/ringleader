@@ -6,7 +6,7 @@ use super::batch_report::BatchReport;
 use super::pending::Pending;
 use super::ports::{
     ClientView, Clock, ConfigError, ConfigSource, HostProbe, PullRequestError, RegistryError,
-    ReturnRequest, SessionRegistry,
+    ReturnRequest, SessionRegistry, ThemeError, ThemeSource,
 };
 use super::pull_request_catalog::PullRequestCatalog;
 use super::reconciliation::Reconciliation;
@@ -35,7 +35,7 @@ use crate::application::{AddRepoRequest, RepoAddition};
 use crate::application::{DeleteConfirmation, DeleteImpact};
 use crate::domain::{
     Config, DiffStat, KeyBindings, PullRequest, Repo, RepoGroup, Session, SessionObservation,
-    SessionSize, SessionSummary,
+    SessionSize, SessionSummary, ThemeSpec,
 };
 
 pub struct SessionService {
@@ -44,6 +44,9 @@ pub struct SessionService {
     rereads_failing: bool,
     registry: Arc<dyn SessionRegistry>,
     config_source: Arc<dyn ConfigSource>,
+    theme: ThemeSpec,
+    theme_error: Option<ThemeError>,
+    theme_source: Arc<dyn ThemeSource>,
     monitor: SessionMonitor,
     lifecycle: SessionLifecycle,
     access: SessionAccess,
@@ -74,6 +77,9 @@ impl SessionService {
             rereads_failing: false,
             registry: ports.state().registry(),
             config_source: ports.state().config_source(),
+            theme: ThemeSpec::default(),
+            theme_error: None,
+            theme_source: ports.state().theme_source(),
         }
     }
 
@@ -109,6 +115,27 @@ impl SessionService {
 
     pub fn read_only_reason(&self) -> Option<&ConfigError> {
         self.config.error()
+    }
+
+    pub fn load_theme(&mut self) {
+        match self.theme_source.load() {
+            Ok(overrides) => {
+                self.theme = ThemeSpec::new(overrides);
+                self.theme_error = None;
+            }
+            Err(error) => {
+                log::warn!("kept the previous theme: {error}");
+                self.theme_error = Some(error);
+            }
+        }
+    }
+
+    pub fn theme(&self) -> &ThemeSpec {
+        &self.theme
+    }
+
+    pub fn theme_error(&self) -> Option<&ThemeError> {
+        self.theme_error.as_ref()
     }
 
     pub fn discover_repos(&self) -> Pending<RepoDiscovery> {

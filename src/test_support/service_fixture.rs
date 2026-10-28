@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use super::{
     FakeClock, FakeConfigSource, FakeDirectoryEnvironment, FakeHostProbe, FakeMultiplexer,
     FakePullRequests, FakeRepoPages, FakeRepoScanner, FakeScratchSpace, FakeSessionRegistry,
-    FakeTerminalEmulator, FakeUsageMeter, FakeWebBrowser, FakeWorkspace,
+    FakeTerminalEmulator, FakeThemeSource, FakeUsageMeter, FakeWebBrowser, FakeWorkspace,
 };
 use crate::application::ports::{
     ConfigError, MergeOutcome, MultiplexerError, ScratchSpace, WorktreeEntry,
@@ -26,6 +26,7 @@ pub struct ServiceFixture {
     diff_workspace: Option<Arc<FakeWorkspace>>,
     multiplexer: Arc<FakeMultiplexer>,
     config_source: Arc<FakeConfigSource>,
+    theme_source: Arc<FakeThemeSource>,
     scanner: Arc<FakeRepoScanner>,
     host: Arc<FakeHostProbe>,
     pull_requests: Arc<FakePullRequests>,
@@ -69,6 +70,7 @@ impl ServiceFixture {
             diff_workspace: None,
             multiplexer: Arc::new(FakeMultiplexer::new()),
             config_source: Arc::new(FakeConfigSource::with_config(Self::config())),
+            theme_source: Arc::new(FakeThemeSource::default()),
             scanner: Arc::new(FakeRepoScanner::finding(vec![Self::repo()])),
             host: Arc::new(Self::host_for(&[])),
             pull_requests: Arc::new(FakePullRequests::new()),
@@ -273,6 +275,10 @@ impl ServiceFixture {
 
     pub fn config_source(&self) -> &FakeConfigSource {
         &self.config_source
+    }
+
+    pub fn theme_source(&self) -> &FakeThemeSource {
+        &self.theme_source
     }
 
     pub fn scanner(&self) -> &FakeRepoScanner {
@@ -561,6 +567,7 @@ impl ServiceFixture {
             StatePorts::new(
                 self.registry.clone(),
                 self.config_source.clone(),
+                self.theme_source.clone(),
                 self.clock.clone(),
                 self.scratch_space.clone(),
             ),

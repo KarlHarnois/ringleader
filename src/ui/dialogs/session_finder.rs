@@ -229,7 +229,7 @@ mod tests {
 
         fn rows(finder: &SessionFinder) -> Vec<String> {
             finder
-                .lines(Self::WIDTH, Self::HEIGHT, &Theme)
+                .lines(Self::WIDTH, Self::HEIGHT, &Theme::default())
                 .iter()
                 .map(ToString::to_string)
                 .collect()
