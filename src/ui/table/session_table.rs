@@ -206,6 +206,9 @@ impl<'a> SessionTable<'a> {
 
     fn underlined(&self, spans: Vec<Span<'static>>, width: usize) -> Line<'static> {
         let mut line = Line::from(spans);
+        for span in &mut line.spans {
+            span.style = self.theme.without_base_colors(span.style);
+        }
         let padding = width.saturating_sub(line.width());
         line.push_span(Span::raw(" ".repeat(padding)));
         line.patch_style(self.theme.selected_out_of_focus())
@@ -309,7 +312,10 @@ mod tests {
     use ratatui::style::{Color, Modifier};
 
     use super::*;
-    use crate::domain::{DiffStat, PullRequestReview, RepoGroup, SessionState, UnmanagedSession};
+    use crate::domain::{
+        AnsiColor, DiffStat, PullRequestReview, RepoGroup, SessionState, StyleSpec, ThemeColor,
+        ThemeOverrides, ThemeRole, ThemeSpec, UnmanagedSession,
+    };
     use crate::test_support::ServiceFixture;
 
     struct TableFixture;
@@ -389,13 +395,22 @@ mod tests {
             cursor: &str,
             marked: &[&str],
         ) -> Terminal<TestBackend> {
+            Self::render_out_of_focus_with(rows, cursor, marked, Theme::default())
+        }
+
+        fn render_out_of_focus_with(
+            rows: &[SessionSummary],
+            cursor: &str,
+            marked: &[&str],
+            theme: Theme,
+        ) -> Terminal<TestBackend> {
             let cursor = ListSelection::Session(cursor.to_string());
             let marked = marked
                 .iter()
                 .map(|name| ListSelection::Session(name.to_string()))
                 .collect();
             let tree = SessionTree::new(rows, &HashSet::new());
-            let table = SessionTable::new(tree, Some(&cursor), 0, Theme::default())
+            let table = SessionTable::new(tree, Some(&cursor), 0, theme)
                 .with_marked(marked)
                 .out_of_focus();
             Self::draw_table(table, 6)
@@ -685,6 +700,20 @@ mod tests {
         let last_cell = &terminal.backend().buffer()[(48, 2)];
 
         assert!(last_cell.modifier.contains(Modifier::UNDERLINED));
+    }
+
+    #[test]
+    fn a_themed_out_of_focus_background_reaches_the_row_text() {
+        let rows = [TableFixture::managed("fix-auth", SessionState::Waiting)];
+        let out_of_focus = StyleSpec::default().with_background(ThemeColor::Ansi(AnsiColor::Blue));
+        let theme = Theme::new(&ThemeSpec::new(
+            ThemeOverrides::default().with(ThemeRole::SelectedOutOfFocus, out_of_focus),
+        ));
+
+        let terminal = TableFixture::render_out_of_focus_with(&rows, "fix-auth", &[], theme);
+        let name = &terminal.backend().buffer()[(5, 2)];
+
+        assert_eq!((name.symbol(), name.bg), ("x", Color::Blue));
     }
 
     #[test]

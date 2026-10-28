@@ -82,12 +82,21 @@ impl Theme {
         self.style(ThemeRole::SelectedOutOfFocus)
     }
 
-    pub fn on_selection(&self, mut style: Style) -> Style {
+    pub fn on_selection(&self, style: Style) -> Style {
         let (base, dim) = (self.base(), self.dim());
+        let mut style = self.without_base_colors(style);
         style
             .add_modifier
             .remove(dim.add_modifier.difference(base.add_modifier));
-        if style.fg == base.fg || style.fg == dim.fg {
+        if style.fg == dim.fg {
+            style.fg = None;
+        }
+        style
+    }
+
+    pub fn without_base_colors(&self, mut style: Style) -> Style {
+        let base = self.base();
+        if style.fg == base.fg {
             style.fg = None;
         }
         if style.bg == base.bg {
