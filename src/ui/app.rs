@@ -4,6 +4,7 @@ use std::time::Instant;
 
 use crossterm::event::{Event, KeyEvent, KeyEventKind};
 use ratatui::Frame;
+use ratatui::widgets::Block;
 
 use super::blocking_operation::{BlockingOperation, DeleteStep, OperationOutcome};
 use super::dialogs::{Dialog, DialogOpening, DialogSlot, DialogStep};
@@ -271,6 +272,7 @@ impl App {
     pub fn render(&self, frame: &mut Frame) {
         let status = Self::status_bar(self.theme, &self.status, &self.home);
         let table = self.home.table(self.tick, self.theme);
+        frame.render_widget(Block::default().style(self.theme.base()), frame.area());
         HomeView::new(table, self.home.preview_panel(self.theme), status).render(frame);
         self.dialogs.render(frame, &self.theme);
     }
@@ -535,9 +537,9 @@ mod tests {
     };
     use crate::application::{CreateRequest, DeleteImpact};
     use crate::domain::{
-        AgentUsage, Config, ConfigDraft, DiffStat, LimitWindow, PullRequestState, Session,
-        SessionState, StyleSpec, ThemeColor, ThemeOverrides, ThemeRole, ThemeSpec, UsageLimit,
-        UsageRow,
+        AgentUsage, AnsiColor, Config, ConfigDraft, DiffStat, LimitWindow, PullRequestState,
+        Session, SessionState, StyleSpec, ThemeColor, ThemeOverrides, ThemeRole, ThemeSpec,
+        UsageLimit, UsageRow,
     };
     use crate::test_support::{
         CapturedWriter, Deadline, FakeConfigSource, FakeFoldStore, FakeLock, FakeMultiplexer,
@@ -712,6 +714,12 @@ mod tests {
                 .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
                 .collect::<Vec<_>>()
                 .join("\n")
+        }
+
+        fn background_at(app: &App, position: (u16, u16)) -> Color {
+            let mut terminal = Terminal::new(TestBackend::new(100, 28)).unwrap();
+            terminal.draw(|frame| app.render(frame)).unwrap();
+            terminal.backend().buffer()[position].bg
         }
 
         fn status_color(app: &App, width: u16) -> Option<Color> {
@@ -2011,6 +2019,22 @@ mod tests {
         app.start_up(Vec::new()).unwrap();
 
         assert_eq!(app.theme.error().fg, None);
+    }
+
+    #[test]
+    fn a_themed_base_background_fills_the_empty_screen() {
+        let fixture = AppFixture::two_waiting_sessions();
+        fixture
+            .theme_source()
+            .replace(ThemeOverrides::default().with(
+                ThemeRole::Base,
+                StyleSpec::default().with_background(ThemeColor::Ansi(AnsiColor::Blue)),
+            ));
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        app.start_up(Vec::new()).unwrap();
+
+        assert_eq!(AppFixture::background_at(&app, (20, 20)), Color::Blue);
     }
 
     #[test]

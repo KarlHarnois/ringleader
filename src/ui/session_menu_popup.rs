@@ -139,6 +139,7 @@ impl Panel {
     fn render(&self, frame: &mut Frame, theme: &Theme) {
         let block = Block::default()
             .borders(Borders::TOP)
+            .style(theme.base())
             .border_style(theme.dialog_border())
             .title(self.title())
             .title_style(theme.title())

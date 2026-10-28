@@ -161,6 +161,7 @@ impl Dialog {
     fn render_at(&self, frame: &mut Frame, (area, labels): (Rect, DialogLabels), theme: &Theme) {
         let block = Block::default()
             .borders(Borders::ALL)
+            .style(theme.base())
             .border_style(theme.dialog_border())
             .title(self.title())
             .title_style(theme.title())
