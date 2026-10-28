@@ -87,8 +87,11 @@ impl Theme {
         style
             .add_modifier
             .remove(dim.add_modifier.difference(base.add_modifier));
-        if style.fg == dim.fg {
-            style.fg = base.fg;
+        if style.fg == base.fg || style.fg == dim.fg {
+            style.fg = None;
+        }
+        if style.bg == base.bg {
+            style.bg = None;
         }
         style
     }
@@ -311,7 +314,7 @@ mod tests {
         let dim = StyleSpec::default().with_foreground(ThemeColor::Indexed(240));
         let theme = ThemeFixture::with(ThemeRole::Dim, dim);
 
-        assert_eq!(theme.on_selection(theme.dim()).fg, theme.base().fg);
+        assert_eq!(theme.on_selection(theme.dim()).fg, None);
     }
 
     #[test]
@@ -376,5 +379,15 @@ mod tests {
                 .add_modifier
                 .contains(Modifier::BOLD)
         );
+    }
+
+    #[test]
+    fn a_selected_background_shows_through_text_that_only_inherits_base() {
+        let selected = StyleSpec::default().with_background(ThemeColor::Rgb(0x33, 0x33, 0x33));
+        let theme = ThemeFixture::with(ThemeRole::Selected, selected);
+
+        let rendered = theme.selected().patch(theme.on_selection(theme.emphasis()));
+
+        assert_eq!(rendered.bg, Some(Color::Rgb(0x33, 0x33, 0x33)));
     }
 }

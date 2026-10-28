@@ -77,6 +77,7 @@ impl MatchList {
 
 #[cfg(test)]
 mod tests {
+    use ratatui::style::Modifier;
     use ratatui::text::Span;
 
     use super::*;
@@ -178,8 +179,8 @@ mod tests {
             Line::from(Span::styled(index.to_string(), Theme::default().emphasis()))
         });
 
-        assert_eq!(lines[0].style, Theme::default().selected());
-        assert_eq!(lines[0].spans[0].style, Theme::default().emphasis());
+        let rendered = lines[0].style.patch(lines[0].spans[0].style);
+        assert!(rendered.add_modifier.contains(Modifier::BOLD));
     }
 
     #[test]
@@ -188,7 +189,8 @@ mod tests {
 
         let lines = list.lines(1, &Theme::default(), ListFixture::faint);
 
-        assert_eq!(lines[0].spans[0].style, Theme::default().base());
+        let rendered = lines[0].style.patch(lines[0].spans[0].style);
+        assert_eq!(rendered, Theme::default().selected());
     }
 
     #[test]
