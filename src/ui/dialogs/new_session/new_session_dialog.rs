@@ -480,12 +480,25 @@ mod tests {
         }
 
         fn last_cell_of_row_with(dialog: &NewSessionDialog, theme: &Theme, text: &str) -> Cell {
+            Self::cells_from(dialog, theme, text)
+                .last()
+                .unwrap()
+                .clone()
+        }
+
+        fn cells_from(dialog: &NewSessionDialog, theme: &Theme, text: &str) -> Vec<Cell> {
             let screen = Self::themed_screen(dialog, theme);
-            let row = Self::rows(&screen, |cell| cell.symbol())
+            let rows = Self::rows(&screen, |cell| cell.symbol());
+            let (row, line) = rows
                 .lines()
-                .position(|row| row.contains(text))
+                .enumerate()
+                .find(|(_, line)| line.contains(text))
                 .unwrap();
-            screen[(Self::WIDTH - 1, u16::try_from(row).unwrap())].clone()
+            let start = line[..line.find(text).unwrap()].chars().count();
+            let row = u16::try_from(row).unwrap();
+            (u16::try_from(start).unwrap()..Self::WIDTH)
+                .map(|column| screen[(column, row)].clone())
+                .collect()
         }
 
         fn cursor_cell(dialog: &NewSessionDialog, theme: &Theme) -> Cell {
@@ -1475,6 +1488,22 @@ mod tests {
         let edge = DialogFixture::last_cell_of_row_with(&dialog, &theme, "fix the tests");
 
         assert_eq!(Some(edge.bg), theme.prompt().bg);
+    }
+
+    #[test]
+    fn an_unfocused_prompt_keeps_the_prompt_background_under_its_cursor() {
+        let (mut dialog, service) =
+            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
+        let theme = DialogFixture::prompt_theme();
+        DialogFixture::type_text(&mut dialog, &service, "fix the tests");
+        for _ in 0.."tests".len() {
+            DialogFixture::press(&mut dialog, &service, KeyCode::Left);
+        }
+
+        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
+        let cells = DialogFixture::cells_from(&dialog, &theme, "fix the tests");
+
+        assert!(cells.iter().all(|cell| Some(cell.bg) == theme.prompt().bg));
     }
 
     #[test]

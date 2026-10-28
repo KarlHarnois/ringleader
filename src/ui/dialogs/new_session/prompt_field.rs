@@ -183,8 +183,8 @@ impl PromptStyle {
     pub fn unfocused(theme: &Theme) -> Self {
         Self {
             text: theme.prompt(),
-            cursor: theme.base(),
-            selection: theme.base(),
+            cursor: theme.prompt(),
+            selection: theme.prompt(),
         }
     }
 
