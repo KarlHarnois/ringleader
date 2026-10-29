@@ -52,9 +52,9 @@ impl RenameSessionDialog {
     pub fn lines(&self, width: usize, labels: DialogLabels, theme: &Theme) -> Vec<Line<'static>> {
         let room = width.saturating_sub(labels.width());
         let old = TextFit::new(self.session.name().as_str()).right_truncated(room);
-        let new = self.new.visible(room, Some(Self::CURSOR));
+        let new = TextFit::new(&self.new.visible(room, Some(Self::CURSOR))).padded(room);
         let mut lines = labels.labeled("Old", vec![Line::from(old)]);
-        lines.extend(labels.labeled("New", vec![Line::from(new)]));
+        lines.extend(labels.labeled("New", vec![Line::styled(new, theme.prompt())]));
         lines.push(Line::from(""));
         let error = self.error.as_deref().unwrap_or_default();
         lines.extend(TextFit::new(error).styled_lines(width, theme.error()));
@@ -79,13 +79,17 @@ impl RenameSessionDialog {
 #[cfg(test)]
 mod tests {
     use crossterm::event::KeyModifiers;
+    use ratatui::style::Style;
 
     use super::*;
+    use crate::domain::{StyleSpec, ThemeColor, ThemeOverrides, ThemeRole, ThemeSpec};
     use crate::test_support::ServiceFixture;
 
     struct RenameFixture;
 
     impl RenameFixture {
+        const WIDTH: usize = 70;
+
         fn dialog() -> RenameSessionDialog {
             RenameSessionDialog::open(ServiceFixture::session("fix-auth"))
         }
@@ -102,16 +106,34 @@ mod tests {
 
         fn text(dialog: &RenameSessionDialog) -> String {
             dialog
-                .lines(70, DialogLabels::full(), &Theme::default())
+                .lines(Self::WIDTH, DialogLabels::full(), &Theme::default())
                 .iter()
                 .map(|line| {
-                    line.spans
+                    let text: String = line
+                        .spans
                         .iter()
                         .map(|span| span.content.as_ref())
-                        .collect::<String>()
+                        .collect();
+                    text.trim_end().to_string()
                 })
                 .collect::<Vec<_>>()
                 .join("\n")
+        }
+
+        fn new_name_width(dialog: &RenameSessionDialog) -> usize {
+            let new_line = &dialog.lines(Self::WIDTH, DialogLabels::full(), &Theme::default())[1];
+            new_line.spans.last().unwrap().content.chars().count()
+        }
+
+        fn new_name_style(dialog: &RenameSessionDialog, theme: &Theme) -> Style {
+            let new_line = &dialog.lines(Self::WIDTH, DialogLabels::full(), theme)[1];
+            new_line.spans.last().unwrap().style
+        }
+
+        fn prompt_theme() -> Theme {
+            let prompt = StyleSpec::default().with_foreground(ThemeColor::Indexed(46));
+            let overrides = ThemeOverrides::default().with(ThemeRole::Prompt, prompt);
+            Theme::new(&ThemeSpec::new(overrides))
         }
 
         fn rename(old: &str, new: &str) -> DialogStep {
@@ -138,6 +160,31 @@ mod tests {
         assert_eq!(
             RenameFixture::text(&dialog),
             "Old       fix-auth\nNew       fix-login█\n\n\nEnter rename · Esc cancel"
+        );
+    }
+
+    #[test]
+    fn the_new_name_is_drawn_in_the_prompt_color() {
+        let mut dialog = RenameFixture::dialog();
+        let theme = RenameFixture::prompt_theme();
+
+        RenameFixture::type_text(&mut dialog, "fix-login");
+
+        assert_eq!(
+            RenameFixture::new_name_style(&dialog, &theme).fg,
+            theme.prompt().fg
+        );
+    }
+
+    #[test]
+    fn the_new_name_fills_its_field_so_a_prompt_background_spans_the_field() {
+        let mut dialog = RenameFixture::dialog();
+
+        RenameFixture::type_text(&mut dialog, "fix");
+
+        assert_eq!(
+            RenameFixture::new_name_width(&dialog),
+            RenameFixture::WIDTH - DialogLabels::full().width()
         );
     }
 
