@@ -1472,6 +1472,19 @@ mod tests {
     }
 
     #[test]
+    fn the_name_is_drawn_in_the_prompt_color() {
+        let service = DialogFixture::launched_in_repo().service();
+        let mut dialog = NewSessionDialog::open(&service, None);
+        let theme = DialogFixture::prompt_theme();
+
+        DialogFixture::type_text(&mut dialog, &service, "fix-auth");
+
+        assert!(
+            DialogFixture::in_style_color(&dialog, &theme, theme.prompt()).starts_with("fix-auth█")
+        );
+    }
+
+    #[test]
     fn a_focused_prompt_draws_its_text_and_chevron_in_the_prompt_color() {
         let (mut dialog, service) =
             DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
@@ -1479,10 +1492,7 @@ mod tests {
 
         DialogFixture::type_text(&mut dialog, &service, "fix");
 
-        assert_eq!(
-            DialogFixture::in_style_color(&dialog, &theme, theme.prompt()),
-            "❯ fix"
-        );
+        assert!(DialogFixture::in_style_color(&dialog, &theme, theme.prompt()).ends_with("❯ fix"));
     }
 
     #[test]

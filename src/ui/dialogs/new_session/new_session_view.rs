@@ -112,7 +112,7 @@ impl<'a> NewSessionView<'a> {
         let cursor = self
             .is_focused(NewSessionField::Name)
             .then_some(Self::CURSOR);
-        let name_line = Line::from(self.name.visible(field_width, cursor));
+        let name_line = Line::styled(self.name.visible(field_width, cursor), theme.prompt());
         let repo_style = self.focus_style(NewSessionField::Repo, theme);
         let repo_lines = self.repos.lines(field_width, repo_room, repo_style, theme);
         let mut lines = labels.labeled(NewSessionField::Name.label(), vec![name_line]);

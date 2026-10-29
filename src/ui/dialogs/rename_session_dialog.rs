@@ -54,7 +54,7 @@ impl RenameSessionDialog {
         let old = TextFit::new(self.session.name().as_str()).right_truncated(room);
         let new = self.new.visible(room, Some(Self::CURSOR));
         let mut lines = labels.labeled("Old", vec![Line::from(old)]);
-        lines.extend(labels.labeled("New", vec![Line::from(new)]));
+        lines.extend(labels.labeled("New", vec![Line::styled(new, theme.prompt())]));
         lines.push(Line::from(""));
         let error = self.error.as_deref().unwrap_or_default();
         lines.extend(TextFit::new(error).styled_lines(width, theme.error()));
@@ -79,8 +79,10 @@ impl RenameSessionDialog {
 #[cfg(test)]
 mod tests {
     use crossterm::event::KeyModifiers;
+    use ratatui::style::Style;
 
     use super::*;
+    use crate::domain::{StyleSpec, ThemeColor, ThemeOverrides, ThemeRole, ThemeSpec};
     use crate::test_support::ServiceFixture;
 
     struct RenameFixture;
@@ -114,6 +116,17 @@ mod tests {
                 .join("\n")
         }
 
+        fn new_name_style(dialog: &RenameSessionDialog, theme: &Theme) -> Style {
+            let new_line = &dialog.lines(70, DialogLabels::full(), theme)[1];
+            new_line.spans.last().unwrap().style
+        }
+
+        fn prompt_theme() -> Theme {
+            let prompt = StyleSpec::default().with_foreground(ThemeColor::Indexed(46));
+            let overrides = ThemeOverrides::default().with(ThemeRole::Prompt, prompt);
+            Theme::new(&ThemeSpec::new(overrides))
+        }
+
         fn rename(old: &str, new: &str) -> DialogStep {
             DialogStep::Request(AppRequest::Block(BlockingOperation::Rename {
                 old: old.to_string(),
@@ -138,6 +151,19 @@ mod tests {
         assert_eq!(
             RenameFixture::text(&dialog),
             "Old       fix-auth\nNew       fix-login█\n\n\nEnter rename · Esc cancel"
+        );
+    }
+
+    #[test]
+    fn the_new_name_is_drawn_in_the_prompt_color() {
+        let mut dialog = RenameFixture::dialog();
+        let theme = RenameFixture::prompt_theme();
+
+        RenameFixture::type_text(&mut dialog, "fix-login");
+
+        assert_eq!(
+            RenameFixture::new_name_style(&dialog, &theme).fg,
+            theme.prompt().fg
         );
     }
 
