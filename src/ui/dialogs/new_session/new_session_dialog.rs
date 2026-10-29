@@ -1491,7 +1491,9 @@ mod tests {
         let theme = DialogFixture::prompt_theme();
 
         DialogFixture::type_text(&mut dialog, &service, "fix");
-        let after_cursor = &DialogFixture::cells_from(&dialog, &theme, "fix█")[5];
+        let shown_name = "fix█";
+        let cells = DialogFixture::cells_from(&dialog, &theme, shown_name);
+        let after_cursor = &cells[shown_name.chars().count()];
 
         assert_eq!(Some(after_cursor.bg), theme.prompt().bg);
     }
