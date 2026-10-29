@@ -1504,7 +1504,12 @@ mod tests {
 
         DialogFixture::type_text(&mut dialog, &service, "fix");
 
-        assert!(DialogFixture::in_style_color(&dialog, &theme, theme.prompt()).ends_with("❯ fix"));
+        let in_prompt_color = DialogFixture::in_style_color(&dialog, &theme, theme.prompt());
+
+        assert_eq!(
+            in_prompt_color.split_whitespace().collect::<Vec<_>>(),
+            ["fix-auth", "❯", "fix"]
+        );
     }
 
     #[test]
