@@ -1485,6 +1485,18 @@ mod tests {
     }
 
     #[test]
+    fn the_name_background_reaches_past_the_typed_text() {
+        let service = DialogFixture::launched_in_repo().service();
+        let mut dialog = NewSessionDialog::open(&service, None);
+        let theme = DialogFixture::prompt_theme();
+
+        DialogFixture::type_text(&mut dialog, &service, "fix");
+        let after_cursor = &DialogFixture::cells_from(&dialog, &theme, "fix█")[5];
+
+        assert_eq!(Some(after_cursor.bg), theme.prompt().bg);
+    }
+
+    #[test]
     fn a_focused_prompt_draws_its_text_and_chevron_in_the_prompt_color() {
         let (mut dialog, service) =
             DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
