@@ -20,6 +20,7 @@ A role that the file leaves out keeps its default style. Every default style use
 | `selected` |  | the cursor row and the focused field |
 | `selected_out_of_focus` |  | the cursor row while the terminal lacks focus |
 | `selected_text` |  | selected text in a prompt |
+| `prompt` |  | the text you type in a prompt, and the prompt box's cursor |
 | `accent` |  | hot keys in the session menu |
 | `dim` |  | secondary text |
 | `emphasis` |  | names and headings |

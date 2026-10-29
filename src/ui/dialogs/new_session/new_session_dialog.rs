@@ -242,10 +242,12 @@ mod tests {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::buffer::{Buffer, Cell};
-    use ratatui::style::Modifier;
+    use ratatui::style::{Modifier, Style};
 
     use super::*;
-    use crate::domain::{Agent, Repo, RepoName};
+    use crate::domain::{
+        Agent, Repo, RepoName, StyleSpec, ThemeColor, ThemeOverrides, ThemeRole, ThemeSpec,
+    };
     use crate::test_support::{FakeHostProbe, FakeRepoScanner, ServiceFixture};
 
     struct DialogFixture;
@@ -429,11 +431,91 @@ mod tests {
             height: u16,
             labels: DialogLabels,
         ) -> Buffer {
-            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            Self::drawn(
+                dialog,
+                Rect::new(0, 0, width, height),
+                labels,
+                &Theme::default(),
+            )
+        }
+
+        fn themed_screen(dialog: &NewSessionDialog, theme: &Theme) -> Buffer {
+            let area = Rect::new(0, 0, Self::WIDTH, Self::FULL_HEIGHT);
+            Self::drawn(dialog, area, DialogLabels::full(), theme)
+        }
+
+        fn drawn(
+            dialog: &NewSessionDialog,
+            area: Rect,
+            labels: DialogLabels,
+            theme: &Theme,
+        ) -> Buffer {
+            let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
             terminal
-                .draw(|frame| dialog.render(frame, frame.area(), labels, &Theme::default()))
+                .draw(|frame| dialog.render(frame, frame.area(), labels, theme))
                 .unwrap();
             terminal.backend().buffer().clone()
+        }
+
+        fn prompt_theme() -> Theme {
+            let selected = StyleSpec::default().with_background(ThemeColor::Indexed(235));
+            let prompt = StyleSpec::default()
+                .with_foreground(ThemeColor::Indexed(231))
+                .with_background(ThemeColor::Indexed(236));
+            let overrides = ThemeOverrides::default()
+                .with(ThemeRole::Selected, selected)
+                .with(ThemeRole::Prompt, prompt);
+            Theme::new(&ThemeSpec::new(overrides))
+        }
+
+        fn in_style_color(dialog: &NewSessionDialog, theme: &Theme, style: Style) -> String {
+            let screen = Self::themed_screen(dialog, theme);
+            let in_color: String = screen
+                .content()
+                .iter()
+                .filter(|cell| Some(cell.fg) == style.fg)
+                .map(Cell::symbol)
+                .collect();
+            in_color.trim_end().to_string()
+        }
+
+        fn last_cell_of_row_with(dialog: &NewSessionDialog, theme: &Theme, text: &str) -> Cell {
+            Self::cells_from(dialog, theme, text)
+                .last()
+                .unwrap()
+                .clone()
+        }
+
+        fn first_cell_of_row_with(dialog: &NewSessionDialog, theme: &Theme, text: &str) -> Cell {
+            let screen = Self::themed_screen(dialog, theme);
+            let rows = Self::rows(&screen, |cell| cell.symbol());
+            let row = rows.lines().position(|line| line.contains(text)).unwrap();
+            screen[(0, u16::try_from(row).unwrap())].clone()
+        }
+
+        fn cells_from(dialog: &NewSessionDialog, theme: &Theme, text: &str) -> Vec<Cell> {
+            let screen = Self::themed_screen(dialog, theme);
+            let rows = Self::rows(&screen, |cell| cell.symbol());
+            let (row, line) = rows
+                .lines()
+                .enumerate()
+                .find(|(_, line)| line.contains(text))
+                .unwrap();
+            let start = line[..line.find(text).unwrap()].chars().count();
+            let row = u16::try_from(row).unwrap();
+            (u16::try_from(start).unwrap()..Self::WIDTH)
+                .map(|column| screen[(column, row)].clone())
+                .collect()
+        }
+
+        fn cursor_cell(dialog: &NewSessionDialog, theme: &Theme) -> Cell {
+            let screen = Self::themed_screen(dialog, theme);
+            screen
+                .content()
+                .iter()
+                .find(|cell| Self::is_cursor(cell))
+                .unwrap()
+                .clone()
         }
 
         fn compact_text(dialog: &NewSessionDialog) -> String {
@@ -1387,6 +1469,91 @@ mod tests {
 
         assert!(focused);
         assert!(!DialogFixture::shows_a_cursor(&dialog));
+    }
+
+    #[test]
+    fn a_focused_prompt_draws_its_text_and_chevron_in_the_prompt_color() {
+        let (mut dialog, service) =
+            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
+        let theme = DialogFixture::prompt_theme();
+
+        DialogFixture::type_text(&mut dialog, &service, "fix");
+
+        assert_eq!(
+            DialogFixture::in_style_color(&dialog, &theme, theme.prompt()),
+            "❯ fix"
+        );
+    }
+
+    #[test]
+    fn a_prompt_background_reaches_the_right_edge_of_the_prompt_box() {
+        let (mut dialog, service) =
+            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
+        let theme = DialogFixture::prompt_theme();
+
+        DialogFixture::type_text(&mut dialog, &service, "fix the tests");
+        let edge = DialogFixture::last_cell_of_row_with(&dialog, &theme, "fix the tests");
+
+        assert_eq!(Some(edge.bg), theme.prompt().bg);
+    }
+
+    #[test]
+    fn an_unfocused_prompt_keeps_the_prompt_background_under_its_cursor() {
+        let (mut dialog, service) =
+            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
+        let theme = DialogFixture::prompt_theme();
+        DialogFixture::type_text(&mut dialog, &service, "fix the tests");
+        for _ in 0.."tests".len() {
+            DialogFixture::press(&mut dialog, &service, KeyCode::Left);
+        }
+
+        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
+        let cells = DialogFixture::cells_from(&dialog, &theme, "fix the tests");
+
+        assert!(cells.iter().all(|cell| Some(cell.bg) == theme.prompt().bg));
+    }
+
+    #[test]
+    fn a_prompt_background_reaches_the_left_edge_of_the_prompt_box() {
+        let (mut dialog, service) =
+            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
+        let theme = DialogFixture::prompt_theme();
+
+        DialogFixture::type_text(&mut dialog, &service, "fix the tests");
+        let edge = DialogFixture::first_cell_of_row_with(&dialog, &theme, "fix the tests");
+
+        assert_eq!(Some(edge.bg), theme.prompt().bg);
+    }
+
+    #[test]
+    fn a_selection_in_the_prompt_keeps_the_prompt_background() {
+        let (mut dialog, service) =
+            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
+        let theme = DialogFixture::prompt_theme();
+        DialogFixture::type_text(&mut dialog, &service, "fix the tests");
+        let select_left = KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT);
+
+        for _ in 0.."tests".len() {
+            dialog.handle_key(&select_left, &service);
+        }
+        let cells = DialogFixture::cells_from(&dialog, &theme, "fix the tests");
+
+        assert!(cells.iter().all(|cell| Some(cell.bg) == theme.prompt().bg));
+    }
+
+    #[test]
+    fn the_prompt_cursor_is_a_block_in_the_prompt_color_not_a_selected_row() {
+        let (mut dialog, service) =
+            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
+        let theme = DialogFixture::prompt_theme();
+
+        DialogFixture::type_text(&mut dialog, &service, "fix");
+        let cursor = DialogFixture::cursor_cell(&dialog, &theme);
+
+        assert_eq!(
+            (Some(cursor.fg), Some(cursor.bg)),
+            (theme.prompt().fg, theme.prompt().bg)
+        );
     }
 
     #[test]

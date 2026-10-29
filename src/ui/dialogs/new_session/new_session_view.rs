@@ -137,11 +137,26 @@ impl<'a> NewSessionView<'a> {
         let block = self.prompt_block(theme);
         let inner = block.inner(area);
         frame.render_widget(block, area);
+        frame
+            .buffer_mut()
+            .set_style(Self::prompt_rows(area, inner), theme.prompt());
         frame.render_widget(
-            Span::styled(Self::CHEVRON, self.rule_style(theme)),
+            Span::styled(Self::CHEVRON, self.chevron_style(theme)),
             Self::chevron_area(area, inner),
         );
         self.prompt.render(frame, inner, self.prompt_style(theme));
+    }
+
+    fn prompt_rows(panel: Rect, inner: Rect) -> Rect {
+        Rect {
+            x: panel.x,
+            width: panel.width,
+            ..inner
+        }
+    }
+
+    fn chevron_style(&self, theme: &Theme) -> Style {
+        theme.without_base_colors(self.rule_style(theme))
     }
 
     fn chevron_area(panel: Rect, inner: Rect) -> Rect {

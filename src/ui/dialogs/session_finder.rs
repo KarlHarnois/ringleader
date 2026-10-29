@@ -1,6 +1,7 @@
 use std::iter::once;
 
 use crossterm::event::{KeyCode, KeyEvent};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
 use super::dialog::DialogStep;
@@ -133,9 +134,13 @@ impl SessionFinder {
         let padded_query = TextFit::new(&query).padded(query_room);
         let padded_count = TextFit::new(&count).padded(count_room);
         Line::from(vec![
-            Span::raw(padded_query),
-            Span::styled(padded_count, theme.dim()),
+            Span::styled(padded_query, theme.prompt()),
+            Span::styled(padded_count, Self::count_style(theme)),
         ])
+    }
+
+    fn count_style(theme: &Theme) -> Style {
+        theme.prompt().patch(theme.without_base_colors(theme.dim()))
     }
 
     fn rule(width: usize, theme: &Theme) -> Line<'static> {
@@ -177,7 +182,9 @@ mod tests {
     use crossterm::event::KeyModifiers;
 
     use super::*;
-    use crate::domain::SessionState;
+    use crate::domain::{
+        SessionState, StyleSpec, ThemeColor, ThemeOverrides, ThemeRole, ThemeSpec,
+    };
     use crate::test_support::ServiceFixture;
 
     struct FinderFixture;
@@ -235,6 +242,23 @@ mod tests {
                 .collect()
         }
 
+        fn prompt_theme() -> Theme {
+            let prompt = StyleSpec::default()
+                .with_foreground(ThemeColor::Indexed(231))
+                .with_background(ThemeColor::Indexed(236));
+            let overrides = ThemeOverrides::default().with(ThemeRole::Prompt, prompt);
+            Theme::new(&ThemeSpec::new(overrides))
+        }
+
+        fn query_style(finder: &SessionFinder, theme: &Theme) -> Style {
+            Self::query_row_styles(finder, theme)[0]
+        }
+
+        fn query_row_styles(finder: &SessionFinder, theme: &Theme) -> Vec<Style> {
+            let lines = finder.lines(Self::WIDTH, Self::HEIGHT, theme);
+            lines[0].spans.iter().map(|span| span.style).collect()
+        }
+
         fn attach(name: &str) -> DialogStep {
             DialogStep::CloseWith(AppRequest::Attach(name.to_string()))
         }
@@ -262,6 +286,24 @@ mod tests {
                 FinderFixture::full_width(" docs"),
             ]
         );
+    }
+
+    #[test]
+    fn the_query_takes_the_prompt_color() {
+        let theme = FinderFixture::prompt_theme();
+
+        let style = FinderFixture::query_style(&FinderFixture::finder(), &theme);
+
+        assert_eq!(style, theme.prompt());
+    }
+
+    #[test]
+    fn a_prompt_background_runs_under_the_count_to_the_end_of_the_query_row() {
+        let theme = FinderFixture::prompt_theme();
+
+        let styles = FinderFixture::query_row_styles(&FinderFixture::finder(), &theme);
+
+        assert!(styles.iter().all(|style| style.bg == theme.prompt().bg));
     }
 
     #[test]

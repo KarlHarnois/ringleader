@@ -14,6 +14,7 @@ pub enum ThemeRole {
     Selected,
     SelectedOutOfFocus,
     SelectedText,
+    Prompt,
     Accent,
     Dim,
     Emphasis,
@@ -66,6 +67,7 @@ impl ThemeSpec {
             ThemeRole::SelectedText,
             DefaultStyle::modified(TextModifier::Underlined),
         ),
+        (ThemeRole::Prompt, DefaultStyle::Own(None, None)),
         (ThemeRole::Accent, DefaultStyle::colored(AnsiColor::Cyan)),
         (ThemeRole::Dim, DefaultStyle::modified(TextModifier::Dim)),
         (
@@ -182,11 +184,12 @@ impl ThemeSpec {
 }
 
 impl ThemeRole {
-    pub const ALL: [ThemeRole; 34] = [
+    pub const ALL: [ThemeRole; 35] = [
         ThemeRole::Base,
         ThemeRole::Selected,
         ThemeRole::SelectedOutOfFocus,
         ThemeRole::SelectedText,
+        ThemeRole::Prompt,
         ThemeRole::Accent,
         ThemeRole::Dim,
         ThemeRole::Emphasis,
