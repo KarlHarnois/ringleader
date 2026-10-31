@@ -15,7 +15,7 @@
 
 **An orphaned scratch directory is a scratch directory that no registry entry and no live tmux session claims.** A stopped session keeps its registry entry, so its scratch directory and every file in it stay.
 
-- Decide which scratch directories are orphaned only under the write lock, from the registry reread under that lock. A listing taken before the lock can predate another process's create.
+- Retire only a directory found orphaned under the write lock, from the registry reread under that lock. A listing taken before the lock can predate another process's create.
 - Keep an orphaned scratch directory that a live process runs in.
 - While a corrupt registry that Ringleader moved aside still exists, keep every orphaned scratch directory. The stopped sessions in that copy can still claim them.
 - Retire an orphaned scratch directory under the write lock, and purge retired directories outside the write lock. Removing several gigabytes under the write lock blocks every CLI command.
