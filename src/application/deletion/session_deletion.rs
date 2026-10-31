@@ -97,7 +97,6 @@ impl SessionDeletion {
             self.multiplexer.kill_session(row.session().tmux_name())?;
         }
         self.registry.save(remaining)?;
-        self.scratch.discard(row.session().worktree_path());
         Ok(DeleteOutcome::forgotten(row.session()))
     }
 
@@ -915,18 +914,21 @@ mod tests {
     }
 
     #[test]
-    fn forget_discards_the_scratch_directory_because_no_session_will_use_it_again() {
-        let fixture = DeleteFixture::live_fixture();
+    fn forget_retires_the_scratch_directory_because_no_session_will_use_it_again() {
+        let space = FakeScratchSpace::default().with_directories_of(&[DeleteFixture::worktree()]);
+        let fixture = DeleteFixture::live_fixture().with_scratch_space(space);
 
         fixture
             .service()
             .delete_session("fix-auth", &DeleteConfirmation::force().forgetting())
             .unwrap();
 
+        let scratch = fixture.scratch_space();
         assert_eq!(
-            fixture.scratch_space().removed(),
-            [DeleteFixture::worktree()]
+            scratch.retired(),
+            [scratch.directory(&DeleteFixture::worktree())]
         );
+        assert!(scratch.removed().is_empty());
     }
 
     #[test]

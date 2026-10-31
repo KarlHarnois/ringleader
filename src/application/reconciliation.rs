@@ -45,6 +45,14 @@ impl Reconciliation {
         &self.observations
     }
 
+    pub fn observations_without(&self, tmux_name: &str) -> Vec<SessionObservation> {
+        self.observations
+            .iter()
+            .filter(|observation| observation.tmux_name() != tmux_name)
+            .cloned()
+            .collect()
+    }
+
     pub fn entries(&self) -> &[Session] {
         &self.entries
     }
