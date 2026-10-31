@@ -565,6 +565,18 @@ mod tests {
     }
 
     #[test]
+    fn a_moved_aside_registry_is_a_warning_because_deletes_keep_every_orphan_while_it_exists() {
+        let registry = FakeSessionRegistry::with_sessions(vec![DoctorFixture::session()])
+            .with_moved_aside_copy();
+        let fixture = DoctorFixture::healthy().with_registry(registry);
+
+        assert!(DoctorFixture::has_warning(
+            &fixture,
+            "corrupt registry /state/ringleader/sessions.json.corrupt-1 keeps every orphaned scratch directory"
+        ));
+    }
+
+    #[test]
     fn an_orphaned_scratch_directory_is_a_warning() {
         let space = FakeScratchSpace::default().with_directories_of(&[
             ServiceFixture::worktree_path("fix-auth"),

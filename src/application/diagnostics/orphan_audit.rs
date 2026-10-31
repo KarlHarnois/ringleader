@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use super::doctor_report::DoctorReport;
 use crate::application::ServicePorts;
-use crate::application::ports::{HostProbe, ScratchSpace, Workspace};
+use crate::application::ports::{HostProbe, ScratchSpace, SessionRegistry, Workspace};
 use crate::application::reconciliation::Reconciliation;
 use crate::application::scratch_claims::ScratchClaims;
 use crate::domain::{Config, Session};
@@ -13,6 +13,7 @@ pub struct OrphanAudit {
     workspace: Arc<dyn Workspace>,
     host: Arc<dyn HostProbe>,
     scratch: Arc<dyn ScratchSpace>,
+    registry: Arc<dyn SessionRegistry>,
 }
 
 impl OrphanAudit {
@@ -21,10 +22,12 @@ impl OrphanAudit {
             workspace: ports.repos().workspace(),
             host: ports.repos().host(),
             scratch: ports.state().scratch_space(),
+            registry: ports.state().registry(),
         }
     }
 
     pub fn audit_scratch(&self, reconciliation: &Reconciliation, report: &mut DoctorReport) {
+        self.report_moved_aside_registries(report);
         let Ok(directories) = self.scratch.directories() else {
             return;
         };
@@ -37,6 +40,15 @@ impl OrphanAudit {
             report.warning(format!(
                 "orphaned scratch directory {}, no session claims it",
                 orphan.display()
+            ));
+        }
+    }
+
+    fn report_moved_aside_registries(&self, report: &mut DoctorReport) {
+        for copy in self.registry.moved_aside_copies().unwrap_or_default() {
+            report.warning(format!(
+                "corrupt registry {} keeps every orphaned scratch directory until it is restored or removed",
+                copy.display()
             ));
         }
     }
