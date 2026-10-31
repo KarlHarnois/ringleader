@@ -567,7 +567,7 @@ mod tests {
     #[test]
     fn a_moved_aside_registry_is_a_warning_because_deletes_keep_other_orphans_while_it_exists() {
         let registry = FakeSessionRegistry::with_sessions(vec![DoctorFixture::session()])
-            .with_moved_aside_copy();
+            .with_moved_aside_copy("/state/ringleader/sessions.json.corrupt-1");
         let fixture = DoctorFixture::healthy().with_registry(registry);
 
         assert!(DoctorFixture::has_warning(

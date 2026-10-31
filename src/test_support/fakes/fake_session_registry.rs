@@ -14,7 +14,7 @@ struct RegistryState {
     saves: usize,
     failing_saves: bool,
     load_error: Option<RegistryError>,
-    moved_aside: bool,
+    moved_aside_copy: Option<PathBuf>,
 }
 
 impl FakeSessionRegistry {
@@ -38,8 +38,8 @@ impl FakeSessionRegistry {
         self
     }
 
-    pub fn with_moved_aside_copy(self) -> Self {
-        self.state.lock().unwrap().moved_aside = true;
+    pub fn with_moved_aside_copy(self, path: &str) -> Self {
+        self.state.lock().unwrap().moved_aside_copy = Some(PathBuf::from(path));
         self
     }
 
@@ -79,7 +79,7 @@ impl FakeSessionRegistry {
     }
 
     pub fn was_moved_aside(&self) -> bool {
-        self.state.lock().unwrap().moved_aside
+        self.state.lock().unwrap().moved_aside_copy.is_some()
     }
 }
 
@@ -107,15 +107,14 @@ impl SessionRegistry for FakeSessionRegistry {
 
     fn move_aside_corrupt(&self) -> Result<PathBuf, RegistryError> {
         let mut state = self.state.lock().unwrap();
-        state.moved_aside = true;
+        state.moved_aside_copy = Some(PathBuf::from(Self::MOVED_ASIDE_PATH));
         state.load_error = None;
         state.sessions.clear();
         Ok(PathBuf::from(Self::MOVED_ASIDE_PATH))
     }
 
     fn moved_aside_copies(&self) -> Result<Vec<PathBuf>, RegistryError> {
-        let moved_aside = self.state.lock().unwrap().moved_aside;
-        let copies = moved_aside.then(|| PathBuf::from(Self::MOVED_ASIDE_PATH));
-        Ok(copies.into_iter().collect())
+        let copy = self.state.lock().unwrap().moved_aside_copy.clone();
+        Ok(copy.into_iter().collect())
     }
 }

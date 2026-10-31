@@ -127,10 +127,10 @@ mod tests {
             Self { service }
         }
 
-        fn with_moved_aside_registry() -> Self {
+        fn with_moved_aside_registry(copy: &str) -> Self {
             let service = ServiceFixture::new()
                 .with_scratch_space(Self::space())
-                .with_registry(FakeSessionRegistry::empty().with_moved_aside_copy());
+                .with_registry(FakeSessionRegistry::empty().with_moved_aside_copy(copy));
             Self { service }
         }
 
@@ -195,20 +195,22 @@ mod tests {
     #[test]
     fn a_moved_aside_registry_keeps_other_orphans_because_it_can_hold_stopped_sessions() {
         let capture = LogCapture::installed();
-        let fixture = SweepFixture::with_moved_aside_registry();
+        let fixture =
+            SweepFixture::with_moved_aside_registry("/state/ringleader/sessions.json.corrupt-7");
 
         fixture.retire_orphans();
 
         assert!(fixture.service.scratch_space().retired().is_empty());
         assert_eq!(
-            capture.count_containing("sessions.json.corrupt-1 can still claim them"),
+            capture.count_containing("sessions.json.corrupt-7 can still claim them"),
             1
         );
     }
 
     #[test]
     fn a_moved_aside_registry_still_retires_the_deleted_sessions_own_directory() {
-        let fixture = SweepFixture::with_moved_aside_registry();
+        let fixture =
+            SweepFixture::with_moved_aside_registry("/state/ringleader/sessions.json.corrupt-8");
 
         fixture.retire_orphans_after(SweepFixture::ORPHAN);
 
