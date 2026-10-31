@@ -425,6 +425,11 @@ impl Multiplexer for FakeMultiplexer {
         Ok(self.edit(|state| state.pane_pids.get(tmux_name).cloned().unwrap_or_default()))
     }
 
+    fn pane_pids_by_session(&self) -> Result<HashMap<String, Vec<u32>>, MultiplexerError> {
+        self.call("pane_pids_by_session", "")?;
+        Ok(self.edit(|state| state.pane_pids.clone()))
+    }
+
     fn caller_in_other_tmux(&self) -> bool {
         self.edit(|state| state.caller_in_other_tmux)
     }

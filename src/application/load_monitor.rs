@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::failure_streaks::FailureStreaks;
@@ -15,6 +16,7 @@ pub struct LoadMonitor {
 }
 
 impl LoadMonitor {
+    const PANE_LISTING_STREAK: &'static str = "the pane listing";
     const PROCESS_TABLE_STREAK: &'static str = "the process table";
 
     pub fn new(ports: &ServicePorts) -> Self {
@@ -36,10 +38,7 @@ impl LoadMonitor {
     }
 
     fn sample_now(&self, sessions: &[SessionSummary]) -> Result<LoadSample, ServiceError> {
-        let panes: Vec<(&SessionSummary, Vec<u32>)> = sessions
-            .iter()
-            .filter_map(|session| Some((session, self.pane_pids(session)?)))
-            .collect();
+        let panes = self.panes_of(sessions);
         let processes = self.processes()?;
         Ok(panes.iter().fold(
             LoadSample::new(processes),
@@ -47,9 +46,23 @@ impl LoadMonitor {
         ))
     }
 
-    fn pane_pids(&self, session: &SessionSummary) -> Option<Vec<u32>> {
-        let listed = self.multiplexer.pane_pids(session.tmux_name());
-        self.track_pane_failure(session.name(), &listed);
+    fn panes_of<'a>(&self, sessions: &'a [SessionSummary]) -> Vec<(&'a SessionSummary, Vec<u32>)> {
+        let Some(listed) = self.pane_pids_by_session() else {
+            return Vec::new();
+        };
+        sessions
+            .iter()
+            .map(|session| (session, Self::pane_pids_of(&listed, session)))
+            .collect()
+    }
+
+    fn pane_pids_of(listed: &HashMap<String, Vec<u32>>, session: &SessionSummary) -> Vec<u32> {
+        listed.get(session.tmux_name()).cloned().unwrap_or_default()
+    }
+
+    fn pane_pids_by_session(&self) -> Option<HashMap<String, Vec<u32>>> {
+        let listed = self.multiplexer.pane_pids_by_session();
+        self.track_pane_listing_failure(&listed);
         listed.ok()
     }
 
@@ -59,13 +72,16 @@ impl LoadMonitor {
         sampled
     }
 
-    fn track_pane_failure(&self, name: &str, listed: &Result<Vec<u32>, MultiplexerError>) {
+    fn track_pane_listing_failure(
+        &self,
+        listed: &Result<HashMap<String, Vec<u32>>, MultiplexerError>,
+    ) {
         match listed {
-            Ok(_) => self.failures.end(name),
+            Ok(_) => self.failures.end(Self::PANE_LISTING_STREAK),
             Err(error) => self.failures.warn_once(
-                name,
+                Self::PANE_LISTING_STREAK,
                 &format!(
-                    "left {name} out of the resource view, its panes could not be listed: {error}"
+                    "left every session out of the load figures, their panes could not be listed: {error}"
                 ),
             ),
         }
@@ -122,11 +138,20 @@ mod tests {
             ServiceFixture::session(name).tmux_name().to_string()
         }
 
-        fn monitor(multiplexer: FakeMultiplexer, meter: FakeProcessMeter) -> LoadMonitor {
-            let fixture = ServiceFixture::new()
+        fn fix_auth_and_docs() -> FakeMultiplexer {
+            FakeMultiplexer::new()
+                .with_pane_pids(&Self::tmux_name("fix-auth"), &[Self::PANE])
+                .with_pane_pids(&Self::tmux_name("docs"), &[Self::OTHER_PANE])
+        }
+
+        fn service(multiplexer: FakeMultiplexer, meter: FakeProcessMeter) -> ServiceFixture {
+            ServiceFixture::new()
                 .with_multiplexer(multiplexer)
-                .with_process_meter(meter);
-            LoadMonitor::new(&fixture.ports())
+                .with_process_meter(meter)
+        }
+
+        fn monitor(multiplexer: FakeMultiplexer, meter: FakeProcessMeter) -> LoadMonitor {
+            LoadMonitor::new(&Self::service(multiplexer, meter).ports())
         }
 
         fn sampled(
@@ -143,6 +168,14 @@ mod tests {
 
         fn names(loads: &[SessionLoad]) -> Vec<&str> {
             loads.iter().map(SessionLoad::name).collect()
+        }
+
+        fn pane_listings(fixture: &ServiceFixture) -> usize {
+            let calls = fixture.multiplexer().calls();
+            calls
+                .iter()
+                .filter(|call| call.starts_with("pane_pids"))
+                .count()
         }
     }
 
@@ -183,20 +216,42 @@ mod tests {
     }
 
     #[test]
-    fn a_session_whose_panes_cannot_be_listed_is_left_out() {
+    fn every_session_is_left_out_while_the_panes_cannot_be_listed() {
         let failure = MultiplexerError::Failed {
             subcommand: "list-panes".to_string(),
-            detail: "can't find session".to_string(),
+            detail: "server exited unexpectedly".to_string(),
         };
-        let multiplexer = FakeMultiplexer::new().failing("pane_pids", failure);
+        let multiplexer =
+            MonitorFixture::fix_auth_and_docs().failing("pane_pids_by_session", failure);
         let monitor = MonitorFixture::monitor(multiplexer, FakeProcessMeter::new());
 
         let loads = MonitorFixture::loads(
             &monitor,
-            &[MonitorFixture::row("fix-auth", SessionState::Waiting)],
+            &[
+                MonitorFixture::row("fix-auth", SessionState::Waiting),
+                MonitorFixture::row("docs", SessionState::Working),
+            ],
         );
 
         assert!(loads.is_empty());
+    }
+
+    #[test]
+    fn one_pane_listing_serves_every_session_so_a_sample_costs_the_same_however_many_run() {
+        let fixture =
+            MonitorFixture::service(MonitorFixture::fix_auth_and_docs(), FakeProcessMeter::new());
+        let monitor = LoadMonitor::new(&fixture.ports());
+
+        let sampled = MonitorFixture::sampled(
+            &monitor,
+            &[
+                MonitorFixture::row("fix-auth", SessionState::Waiting),
+                MonitorFixture::row("docs", SessionState::Working),
+            ],
+        );
+
+        assert!(sampled.is_ok());
+        assert_eq!(MonitorFixture::pane_listings(&fixture), 1);
     }
 
     #[test]
@@ -224,15 +279,7 @@ mod tests {
 
     #[test]
     fn each_session_is_given_only_its_own_panes() {
-        let multiplexer = FakeMultiplexer::new()
-            .with_pane_pids(
-                &MonitorFixture::tmux_name("fix-auth"),
-                &[MonitorFixture::PANE],
-            )
-            .with_pane_pids(
-                &MonitorFixture::tmux_name("docs"),
-                &[MonitorFixture::OTHER_PANE],
-            );
+        let multiplexer = MonitorFixture::fix_auth_and_docs();
         let meter = MonitorFixture::idle_then(vec![
             MonitorFixture::process(MonitorFixture::PANE, 1, 100),
             MonitorFixture::process(MonitorFixture::OTHER_PANE, 1, 700),
