@@ -17,18 +17,20 @@ impl SessionLoad {
     const BUSIEST_HEADING: &'static str = "Its busiest processes:";
     const DIAGNOSIS_ASK: &'static str = "Diagnose what causes this load and how to reduce it.";
 
-    pub fn new(name: &str, mut processes: Vec<ProcessLoad>) -> Self {
-        let cpu = processes.iter().map(ProcessLoad::cpu).sum();
-        let memory = processes.iter().map(ProcessLoad::memory).sum();
-        processes.sort_by_key(|process| Reverse(process.busyness()));
-        processes.truncate(Self::BUSIEST_KEPT);
+    pub fn new(name: &str, processes: Vec<ProcessLoad>) -> Self {
         Self {
             name: name.to_string(),
             repo: None,
-            cpu,
-            memory,
-            busiest: processes,
+            cpu: processes.iter().map(ProcessLoad::cpu).sum(),
+            memory: processes.iter().map(ProcessLoad::memory).sum(),
+            busiest: Self::busiest_of(processes),
         }
+    }
+
+    fn busiest_of(mut processes: Vec<ProcessLoad>) -> Vec<ProcessLoad> {
+        processes.sort_by_key(|process| Reverse(process.busyness()));
+        processes.truncate(Self::BUSIEST_KEPT);
+        processes
     }
 
     pub fn in_repo(self, repo: Option<&Path>) -> Self {
