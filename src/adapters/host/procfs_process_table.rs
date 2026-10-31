@@ -2,6 +2,7 @@ use std::fs;
 use std::io;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::time::Duration;
 
 use super::live_process::LiveProcess;
@@ -138,14 +139,14 @@ impl ProcessStat {
     }
 
     fn cpu_time(&self) -> Option<Duration> {
-        let ticks = self.count(Self::USER_TICKS)? + self.count(Self::SYSTEM_TICKS)?;
+        let ticks = self.field::<u64>(Self::USER_TICKS)? + self.field::<u64>(Self::SYSTEM_TICKS)?;
         let ticks_per_second = ProcfsProcessTable::configured(libc::_SC_CLK_TCK)?;
         let nanoseconds = ticks.saturating_mul(Self::NANOSECONDS_PER_SECOND) / ticks_per_second;
         Some(Duration::from_nanos(nanoseconds))
     }
 
     fn resident_memory(&self) -> Option<MemorySize> {
-        let pages = self.count(Self::RESIDENT_PAGES)?;
+        let pages: u64 = self.field(Self::RESIDENT_PAGES)?;
         let page_size = ProcfsProcessTable::configured(libc::_SC_PAGESIZE)?;
         Some(MemorySize::of_bytes(pages.saturating_mul(page_size)))
     }
@@ -155,18 +156,14 @@ impl ProcessStat {
     }
 
     fn parent(&self) -> Option<u32> {
-        self.number(Self::PARENT)
+        self.field(Self::PARENT)
     }
 
     fn session(&self) -> Option<u32> {
-        self.number(Self::SESSION)
+        self.field(Self::SESSION)
     }
 
-    fn number(&self, index: usize) -> Option<u32> {
-        self.fields_after_name.get(index)?.parse().ok()
-    }
-
-    fn count(&self, index: usize) -> Option<u64> {
+    fn field<T: FromStr>(&self, index: usize) -> Option<T> {
         self.fields_after_name.get(index)?.parse().ok()
     }
 }
