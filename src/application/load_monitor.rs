@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use super::failure_streaks::FailureStreaks;
 use super::pending::Pending;
-use super::ports::{Multiplexer, ProcessMeter, ProcessMeterError};
+use super::ports::{Multiplexer, MultiplexerError, ProcessMeter, ProcessMeterError};
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
 use crate::domain::{LoadSample, ProcessSample, SessionState, SessionSummary};
@@ -49,28 +49,35 @@ impl LoadMonitor {
 
     fn pane_pids(&self, session: &SessionSummary) -> Option<Vec<u32>> {
         let listed = self.multiplexer.pane_pids(session.tmux_name());
-        match &listed {
-            Ok(_) => self.failures.end(session.name()),
-            Err(error) => self.failures.warn_once(
-                session.name(),
-                &format!(
-                    "left {} out of the resource view, its panes could not be listed: {error}",
-                    session.name()
-                ),
-            ),
-        }
+        self.track_pane_failure(session.name(), &listed);
         listed.ok()
     }
 
     fn processes(&self) -> Result<ProcessSample, ProcessMeterError> {
         let sampled = self.meter.sample();
-        match &sampled {
+        self.track_process_table_failure(&sampled);
+        sampled
+    }
+
+    fn track_pane_failure(&self, name: &str, listed: &Result<Vec<u32>, MultiplexerError>) {
+        match listed {
+            Ok(_) => self.failures.end(name),
+            Err(error) => self.failures.warn_once(
+                name,
+                &format!(
+                    "left {name} out of the resource view, its panes could not be listed: {error}"
+                ),
+            ),
+        }
+    }
+
+    fn track_process_table_failure(&self, sampled: &Result<ProcessSample, ProcessMeterError>) {
+        match sampled {
             Ok(_) => self.failures.end(Self::PROCESS_TABLE_STREAK),
             Err(error) => self
                 .failures
                 .warn_once(Self::PROCESS_TABLE_STREAK, &error.to_string()),
         }
-        sampled
     }
 }
 
