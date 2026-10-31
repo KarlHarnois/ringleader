@@ -199,6 +199,11 @@ mod tests {
             });
             environment
         }
+
+        fn end(mut child: std::process::Child) {
+            child.kill().unwrap();
+            child.wait().unwrap();
+        }
     }
 
     #[test]
@@ -229,11 +234,10 @@ mod tests {
 
     #[test]
     fn a_child_is_measured_with_its_parent_and_program_from_its_stat_file() {
-        let mut child = ProcessMarker::new().sleeping_child();
+        let child = ProcessMarker::new().sleeping_child();
 
         let figures = TableFixture::figures_once_running(child.id(), "sleep");
-        child.kill().unwrap();
-        child.wait().unwrap();
+        TableFixture::end(child);
 
         let figures = figures.unwrap();
         assert_eq!(figures.parent(), std::process::id());
@@ -257,11 +261,10 @@ mod tests {
         let marker = ProcessMarker::new();
         let (name, value) = marker.variable();
         let entry = format!("{}={}", name.to_string_lossy(), value.to_string_lossy());
-        let mut child = marker.sleeping_child();
+        let child = marker.sleeping_child();
 
         let environment = TableFixture::environment_once_holding(child.id(), &entry);
-        child.kill().unwrap();
-        child.wait().unwrap();
+        TableFixture::end(child);
 
         assert!(environment.contains(&entry));
     }
