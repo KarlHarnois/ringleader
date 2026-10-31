@@ -143,7 +143,7 @@ impl App {
     }
 
     pub fn poll(&mut self, now: Instant) {
-        self.scratch_purge.poll();
+        self.scratch_purge.poll(&self.service);
         let outcome = self.home.poll(now, &mut self.service);
         self.status.failure(outcome);
     }
