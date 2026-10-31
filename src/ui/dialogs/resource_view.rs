@@ -347,6 +347,13 @@ mod tests {
         fn press(view: &mut ResourceView, code: KeyCode) -> DialogStep {
             view.handle_key(&KeyEvent::new(code, KeyModifiers::NONE))
         }
+
+        fn diagnosed_session(step: DialogStep) -> String {
+            let DialogStep::Open(DialogOpening::Diagnosis(load)) = step else {
+                panic!("expected a diagnosis, got {step:?}");
+            };
+            load.name().to_string()
+        }
     }
 
     #[test]
@@ -507,10 +514,7 @@ mod tests {
 
         let step = ViewFixture::press(&mut view, KeyCode::Char('n'));
 
-        let DialogStep::Open(DialogOpening::Diagnosis(load)) = step else {
-            panic!("expected a diagnosis, got {step:?}");
-        };
-        assert_eq!(load.name(), "fix-auth");
+        assert_eq!(ViewFixture::diagnosed_session(step), "fix-auth");
     }
 
     #[test]
@@ -520,10 +524,7 @@ mod tests {
 
         let step = ViewFixture::press(&mut view, KeyCode::Char('n'));
 
-        let DialogStep::Open(DialogOpening::Diagnosis(load)) = step else {
-            panic!("expected a diagnosis, got {step:?}");
-        };
-        assert_eq!(load.name(), "docs");
+        assert_eq!(ViewFixture::diagnosed_session(step), "docs");
     }
 
     #[test]
