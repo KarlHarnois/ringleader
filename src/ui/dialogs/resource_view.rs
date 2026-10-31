@@ -294,6 +294,20 @@ mod tests {
             ])
         }
 
+        fn panes_spent(
+            seconds: u64,
+            fix_auth_milliseconds: u64,
+            docs_milliseconds: u64,
+        ) -> ProcessSample {
+            ProcessSample::new(
+                Duration::from_secs(seconds),
+                vec![
+                    Self::process(Self::FIX_AUTH_PANE, 1, fix_auth_milliseconds),
+                    Self::process(Self::DOCS_PANE, 1, docs_milliseconds),
+                ],
+            )
+        }
+
         fn settled_after(&self, samples: u32) -> ResourceView {
             let mut view = ResourceView::default();
             let start = Instant::now();
@@ -478,16 +492,11 @@ mod tests {
 
     #[test]
     fn the_selection_follows_its_session_when_the_order_changes() {
-        let at = |seconds, fix_auth_milliseconds, docs_milliseconds| {
-            ProcessSample::new(
-                Duration::from_secs(seconds),
-                vec![
-                    ViewFixture::process(ViewFixture::FIX_AUTH_PANE, 1, fix_auth_milliseconds),
-                    ViewFixture::process(ViewFixture::DOCS_PANE, 1, docs_milliseconds),
-                ],
-            )
-        };
-        let fixture = ViewFixture::sampling(vec![at(0, 0, 0), at(1, 500, 100), at(2, 600, 900)]);
+        let fixture = ViewFixture::sampling(vec![
+            ViewFixture::panes_spent(0, 0, 0),
+            ViewFixture::panes_spent(1, 500, 100),
+            ViewFixture::panes_spent(2, 600, 900),
+        ]);
         let mut view = fixture.settled();
         ViewFixture::press(&mut view, KeyCode::Char('j'));
 
