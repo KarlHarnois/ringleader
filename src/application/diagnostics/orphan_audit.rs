@@ -35,7 +35,7 @@ impl OrphanAudit {
         );
         for orphan in claims.orphans(directories) {
             report.warning(format!(
-                "orphaned scratch directory {}, the next delete removes it",
+                "orphaned scratch directory {}, no session claims it",
                 orphan.display()
             ));
         }

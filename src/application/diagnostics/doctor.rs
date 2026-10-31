@@ -580,7 +580,7 @@ mod tests {
             .collect();
         assert_eq!(
             orphan_warnings,
-            ["warning: orphaned scratch directory /scratch/forgotten, the next delete removes it"]
+            ["warning: orphaned scratch directory /scratch/forgotten, no session claims it"]
         );
     }
 
