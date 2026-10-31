@@ -882,13 +882,13 @@ mod tests {
     }
 
     #[test]
-    fn a_delete_retires_orphaned_scratch_directories_and_keeps_a_paused_session_one() {
-        let paused = ServiceFixture::session("paused");
+    fn a_delete_retires_orphaned_scratch_directories_and_keeps_a_stopped_sessions_directory() {
+        let stopped = ServiceFixture::session("stopped");
         let forgotten = ServiceFixture::worktree_path("forgotten");
         let space = FakeScratchSpace::default()
-            .with_directories_of(&[paused.worktree_path().to_path_buf(), forgotten.clone()]);
+            .with_directories_of(&[stopped.worktree_path().to_path_buf(), forgotten.clone()]);
         let fixture = DeleteFixture::live_fixture()
-            .with_sessions(&[DeleteFixture::session(), paused])
+            .with_sessions(&[DeleteFixture::session(), stopped])
             .with_scratch_space(space);
 
         fixture
