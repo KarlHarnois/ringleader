@@ -478,10 +478,11 @@ mod tests {
                 .with_resident_memory(MemorySize::of_bytes(mebibytes * Self::MEBIBYTE))
         }
 
-        fn session_lines(stdout: &str) -> Vec<&str> {
+        fn session_names(stdout: &str) -> Vec<&str> {
             stdout
                 .lines()
                 .filter(|line| !line.starts_with(' '))
+                .filter_map(|line| line.split_whitespace().next())
                 .collect()
         }
     }
@@ -512,11 +513,10 @@ mod tests {
 
         harness.run(&["top"]);
 
-        let names: Vec<String> = TopFixture::session_lines(&harness.stdout())
-            .iter()
-            .filter_map(|line| line.split_whitespace().next().map(str::to_string))
-            .collect();
-        assert_eq!(names, ["docs", "fix-auth"]);
+        assert_eq!(
+            TopFixture::session_names(&harness.stdout()),
+            ["docs", "fix-auth"]
+        );
     }
 
     #[test]
