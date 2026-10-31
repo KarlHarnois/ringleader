@@ -106,7 +106,7 @@ impl Dialog {
         &mut self,
         now: Instant,
         service: &SessionService,
-        rows_to_sample: Option<&[SessionSummary]>,
+        rows_to_sample: &[SessionSummary],
     ) {
         match self {
             Self::NewSession(dialog) => dialog.poll(),

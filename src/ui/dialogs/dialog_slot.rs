@@ -31,7 +31,7 @@ impl DialogSlot {
         &mut self,
         now: Instant,
         service: &SessionService,
-        rows_to_sample: Option<&[SessionSummary]>,
+        rows_to_sample: &[SessionSummary],
     ) {
         if let Some(dialog) = &mut self.dialog {
             dialog.poll(now, service, rows_to_sample);

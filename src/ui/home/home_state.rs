@@ -91,8 +91,8 @@ impl HomeState {
         format!("{} {count} · {}", Self::VISUAL_MODE, Self::VISUAL_KEYS)
     }
 
-    pub fn rows_to_sample(&self) -> Option<&[SessionSummary]> {
-        self.focused.then(|| self.sessions.rows())
+    pub fn rows_to_sample(&self) -> &[SessionSummary] {
+        self.sessions.rows()
     }
 
     pub fn key_hints(&self) -> KeyHints {

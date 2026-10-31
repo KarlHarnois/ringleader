@@ -3385,15 +3385,14 @@ mod tests {
     }
 
     #[test]
-    fn the_resource_view_samples_nothing_while_the_tui_lacks_focus() {
+    fn the_open_resource_view_keeps_sampling_while_the_tui_lacks_focus_for_a_user_watching_it() {
         let fixture = AppFixture::sampling_fix_auth();
         let mut app = AppFixture::started(&fixture, 100, 28);
         app.handle_event(&Event::FocusLost);
+
         AppFixture::press(&mut app, 'U');
 
-        app.on_tick(Instant::now());
-
-        assert_eq!(fixture.process_meter().samples_taken(), 0);
+        assert!(AppFixture::sample_until_shown(&mut app, "42.0%"));
     }
 
     #[test]

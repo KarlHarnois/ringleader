@@ -37,7 +37,7 @@ impl ResourceView {
         &mut self,
         now: Instant,
         service: &SessionService,
-        rows_to_sample: Option<&[SessionSummary]>,
+        rows_to_sample: &[SessionSummary],
     ) {
         self.feed.poll(now, service, rows_to_sample);
         self.keep_a_listed_session_selected();
@@ -322,9 +322,9 @@ mod tests {
         }
 
         fn settle(&self, view: &mut ResourceView, now: Instant) {
-            view.poll(now, &self.service, Some(&self.rows));
+            view.poll(now, &self.service, &self.rows);
             let settled = Deadline::for_background_work().wait_until(|| {
-                view.poll(now, &self.service, Some(&self.rows));
+                view.poll(now, &self.service, &self.rows);
                 !view.feed.is_sampling()
             });
             assert!(settled, "the sample never finished");

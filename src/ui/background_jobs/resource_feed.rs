@@ -29,16 +29,8 @@ impl ResourceFeed {
         self.pending.is_some()
     }
 
-    pub fn poll(
-        &mut self,
-        now: Instant,
-        service: &SessionService,
-        rows_to_sample: Option<&[SessionSummary]>,
-    ) {
+    pub fn poll(&mut self, now: Instant, service: &SessionService, rows: &[SessionSummary]) {
         self.collect();
-        let Some(rows) = rows_to_sample else {
-            return;
-        };
         if self.pending.is_none() && self.is_due(now) {
             self.pending = Some(service.sample_load(rows));
             self.next_sample = Some(now + LoadSample::INTERVAL);
@@ -106,9 +98,9 @@ mod tests {
 
         fn settle(feed: &mut ResourceFeed, now: Instant, service: &SessionService) {
             let rows = [Self::row()];
-            feed.poll(now, service, Some(&rows));
+            feed.poll(now, service, &rows);
             let settled = Deadline::for_background_work().wait_until(|| {
-                feed.poll(now, service, Some(&rows));
+                feed.poll(now, service, &rows);
                 !feed.is_sampling()
             });
             assert!(settled, "the sample never finished");
@@ -127,11 +119,7 @@ mod tests {
         let fixture = FeedFixture::sampling(Vec::new());
         let mut feed = ResourceFeed::default();
 
-        feed.poll(
-            Instant::now(),
-            &fixture.service(),
-            Some(&[FeedFixture::row()]),
-        );
+        feed.poll(Instant::now(), &fixture.service(), &[FeedFixture::row()]);
 
         assert!(feed.is_sampling());
     }
@@ -158,7 +146,7 @@ mod tests {
         feed.poll(
             start + LoadSample::INTERVAL - Duration::from_millis(1),
             &service,
-            Some(&[FeedFixture::row()]),
+            &[FeedFixture::row()],
         );
 
         assert!(!feed.is_sampling());
@@ -175,7 +163,7 @@ mod tests {
         feed.poll(
             start + LoadSample::INTERVAL,
             &service,
-            Some(&[FeedFixture::row()]),
+            &[FeedFixture::row()],
         );
 
         assert!(feed.is_sampling());
@@ -209,10 +197,10 @@ mod tests {
         let service = fixture.service();
         let mut feed = ResourceFeed::default();
         let rows = [FeedFixture::row()];
-        feed.poll(Instant::now(), &service, Some(&rows));
+        feed.poll(Instant::now(), &service, &rows);
         held.wait_for(1);
 
-        feed.poll(Instant::now() + LoadSample::INTERVAL, &service, Some(&rows));
+        feed.poll(Instant::now() + LoadSample::INTERVAL, &service, &rows);
 
         assert!(feed.is_sampling());
         held.release();
@@ -230,16 +218,5 @@ mod tests {
 
         assert_eq!(feed.reading(), &ResourceReading::Unreadable);
         assert_eq!(log.count_containing("example denial of the feed"), 1);
-    }
-
-    #[test]
-    fn the_feed_starts_no_sample_while_the_tui_lacks_focus() {
-        let fixture = FeedFixture::sampling(Vec::new());
-        let mut feed = ResourceFeed::default();
-
-        feed.poll(Instant::now(), &fixture.service(), None);
-
-        assert_eq!(fixture.process_meter().samples_taken(), 0);
-        assert!(!feed.is_sampling());
     }
 }
