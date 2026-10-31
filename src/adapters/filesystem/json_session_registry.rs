@@ -68,17 +68,19 @@ impl JsonSessionRegistry {
             .collect()
     }
 
-    fn moved_aside_among(entries: fs::ReadDir) -> Vec<PathBuf> {
-        entries
-            .filter_map(Result::ok)
-            .filter(|entry| {
-                entry
-                    .file_name()
-                    .to_string_lossy()
-                    .starts_with(Self::MOVED_ASIDE_PREFIX)
-            })
-            .map(|entry| entry.path())
-            .collect()
+    fn moved_aside_among(entries: fs::ReadDir) -> io::Result<Vec<PathBuf>> {
+        let paths = entries
+            .map(|entry| entry.map(|entry| entry.path()))
+            .collect::<io::Result<Vec<PathBuf>>>()?;
+        Ok(paths
+            .into_iter()
+            .filter(|path| Self::is_moved_aside(path))
+            .collect())
+    }
+
+    fn is_moved_aside(path: &Path) -> bool {
+        path.file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with(Self::MOVED_ASIDE_PREFIX))
     }
 }
 
@@ -118,7 +120,7 @@ impl SessionRegistry for JsonSessionRegistry {
             return Ok(Vec::new());
         };
         match fs::read_dir(directory) {
-            Ok(entries) => Ok(Self::moved_aside_among(entries)),
+            Ok(entries) => Self::moved_aside_among(entries).map_err(|error| self.io_error(error)),
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Vec::new()),
             Err(error) => Err(self.io_error(error)),
         }
