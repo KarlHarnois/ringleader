@@ -37,6 +37,12 @@ impl DirectoryScratchSpace {
         }
     }
 
+    fn sorted_entries_of(directory: &Path) -> io::Result<Vec<PathBuf>> {
+        let mut entries = Self::entries_of(directory)?;
+        entries.sort();
+        Ok(entries)
+    }
+
     fn entries_of(directory: &Path) -> io::Result<Vec<PathBuf>> {
         match fs::read_dir(directory) {
             Ok(entries) => entries.map(|entry| Ok(entry?.path())).collect(),
@@ -169,8 +175,8 @@ impl ScratchSpace for DirectoryScratchSpace {
 
     fn purge_retired(&self) -> Result<(), ScratchSpaceError> {
         let retired = self.retired_root();
-        let directories =
-            Self::entries_of(&retired).map_err(|error| Self::failure("list", &retired, &error))?;
+        let directories = Self::sorted_entries_of(&retired)
+            .map_err(|error| Self::failure("list", &retired, &error))?;
         let failures: Vec<ScratchSpaceError> = directories
             .iter()
             .filter_map(|directory| self.remove_directory(directory).err())
@@ -580,7 +586,7 @@ mod tests {
     }
 
     #[test]
-    fn a_purge_keeps_only_the_retired_directory_that_holds_a_mount() {
+    fn a_purge_goes_on_past_a_retired_directory_that_holds_a_mount() {
         let fixture = ScratchFixture::new();
         fixture.retire_created();
         fixture.retire_scratch_of(Path::new(ScratchFixture::OTHER_WORKTREE));
