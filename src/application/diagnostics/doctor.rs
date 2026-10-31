@@ -193,7 +193,7 @@ mod tests {
     use crate::application::ports::{MultiplexerError, RegistryError, Workspace, WorktreeEntry};
     use crate::domain::{Repo, RepoName, Session};
     use crate::test_support::{
-        FakeMultiplexer, FakeSessionRegistry, FakeWorkspace, ServiceFixture,
+        FakeMultiplexer, FakeScratchSpace, FakeSessionRegistry, FakeWorkspace, ServiceFixture,
     };
 
     struct DoctorFixture;
@@ -562,6 +562,26 @@ mod tests {
             &fixture,
             "worktree_root /elsewhere, which differs from the config"
         ));
+    }
+
+    #[test]
+    fn an_orphaned_scratch_directory_is_a_warning() {
+        let space = FakeScratchSpace::default().with_directories_of(&[
+            ServiceFixture::worktree_path("fix-auth"),
+            ServiceFixture::worktree_path("forgotten"),
+        ]);
+        let fixture = DoctorFixture::healthy().with_scratch_space(space);
+
+        let lines = DoctorFixture::lines(&fixture);
+
+        let orphan_warnings: Vec<&String> = lines
+            .iter()
+            .filter(|line| line.contains("orphaned scratch directory"))
+            .collect();
+        assert_eq!(
+            orphan_warnings,
+            ["warning: orphaned scratch directory /scratch/forgotten, the next delete removes it"]
+        );
     }
 
     #[test]

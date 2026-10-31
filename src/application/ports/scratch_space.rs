@@ -6,6 +6,9 @@ pub trait ScratchSpace: Send + Sync {
     fn directory(&self, worktree: &Path) -> PathBuf;
     fn create(&self, worktree: &Path) -> Result<(), ScratchSpaceError>;
     fn remove(&self, worktree: &Path) -> Result<(), ScratchSpaceError>;
+    fn directories(&self) -> Result<Vec<PathBuf>, ScratchSpaceError>;
+    fn retire(&self, directory: &Path) -> Result<(), ScratchSpaceError>;
+    fn purge_retired(&self) -> Result<(), ScratchSpaceError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -20,6 +23,8 @@ pub enum ScratchSpaceError {
         "the scratch directory {path} holds a mount point, unmount it before removing the directory"
     )]
     HoldsMount { path: PathBuf },
+    #[error("{path} is not a scratch directory, so Ringleader kept it")]
+    Foreign { path: PathBuf },
 }
 
 #[cfg(test)]

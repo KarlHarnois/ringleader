@@ -97,6 +97,7 @@ impl SessionDeletion {
             self.multiplexer.kill_session(row.session().tmux_name())?;
         }
         self.registry.save(remaining)?;
+        self.scratch.discard(row.session().worktree_path());
         Ok(DeleteOutcome::forgotten(row.session()))
     }
 
@@ -242,7 +243,8 @@ mod tests {
     use super::*;
     use crate::application::deletion::deletion_guards::BranchPresence;
     use crate::application::ports::{
-        DirtyState, MultiplexerError, UnmergedCommits, Workspace, WorkspaceError, WorktreeEntry,
+        DirtyState, MultiplexerError, ScratchSpace, UnmergedCommits, Workspace, WorkspaceError,
+        WorktreeEntry,
     };
     use crate::application::session_service::SessionService;
     use crate::domain::{AgentPane, NamingScheme, Registration, TmuxAddress};
@@ -860,7 +862,7 @@ mod tests {
     }
 
     #[test]
-    fn forget_removes_only_the_registry_entry() {
+    fn forget_keeps_the_worktree_and_the_branch() {
         let fixture = DeleteFixture::live_fixture().with_workspace(
             ServiceFixture::workspace_for(&[&DeleteFixture::session()])
                 .with_invalid_repo(DeleteFixture::repo()),
@@ -876,9 +878,55 @@ mod tests {
             Some((DeleteFixture::worktree().as_path(), "fix-auth"))
         );
         assert!(fixture.workspace().state_changing_calls().is_empty());
-        assert!(fixture.scratch_space().removed().is_empty());
         assert!(fixture.registry().sessions().is_empty());
         assert!(fixture.multiplexer().live_names().is_empty());
+    }
+
+    #[test]
+    fn a_delete_retires_orphaned_scratch_directories_and_keeps_a_paused_session_one() {
+        let paused = ServiceFixture::session("paused");
+        let forgotten = ServiceFixture::worktree_path("forgotten");
+        let space = FakeScratchSpace::default()
+            .with_directories_of(&[paused.worktree_path().to_path_buf(), forgotten.clone()]);
+        let fixture = DeleteFixture::live_fixture()
+            .with_sessions(&[DeleteFixture::session(), paused])
+            .with_scratch_space(space);
+
+        fixture
+            .service()
+            .delete_session("fix-auth", &DeleteConfirmation::force())
+            .unwrap();
+
+        let scratch = fixture.scratch_space();
+        assert_eq!(scratch.retired(), [scratch.directory(&forgotten)]);
+    }
+
+    #[test]
+    fn a_refused_delete_retires_nothing() {
+        let space = FakeScratchSpace::default()
+            .with_directories_of(&[ServiceFixture::worktree_path("forgotten")]);
+        let fixture = DeleteFixture::live_fixture()
+            .with_workspace(DeleteFixture::dirty_workspace(2))
+            .with_scratch_space(space);
+
+        DeleteFixture::unconfirmed(&mut fixture.service()).unwrap_err();
+
+        assert!(fixture.scratch_space().retired().is_empty());
+    }
+
+    #[test]
+    fn forget_discards_the_scratch_directory_because_no_session_will_use_it_again() {
+        let fixture = DeleteFixture::live_fixture();
+
+        fixture
+            .service()
+            .delete_session("fix-auth", &DeleteConfirmation::force().forgetting())
+            .unwrap();
+
+        assert_eq!(
+            fixture.scratch_space().removed(),
+            [DeleteFixture::worktree()]
+        );
     }
 
     #[test]

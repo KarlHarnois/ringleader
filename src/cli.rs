@@ -348,8 +348,17 @@ impl Cli {
         }
         let result = self.dispatch(service, session);
         lock.release();
+        self.purge_retired_scratch(service, session);
         session.wait_for_startup_input(service);
         session.finish(result)
+    }
+
+    fn purge_retired_scratch(&self, service: &SessionService, session: &CliSession) {
+        if matches!(self.command, Some(CliCommand::Delete(_))) {
+            service
+                .start_scratch_purge()
+                .wait_unless(|| session.is_signaled());
+        }
     }
 
     fn restore_server_socket(service: &SessionService, session: &mut CliSession) {

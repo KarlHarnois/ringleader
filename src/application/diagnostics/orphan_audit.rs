@@ -4,12 +4,15 @@ use std::sync::Arc;
 
 use super::doctor_report::DoctorReport;
 use crate::application::ServicePorts;
-use crate::application::ports::{HostProbe, Workspace};
+use crate::application::ports::{HostProbe, ScratchSpace, Workspace};
+use crate::application::reconciliation::Reconciliation;
+use crate::application::scratch_claims::ScratchClaims;
 use crate::domain::{Config, Session};
 
 pub struct OrphanAudit {
     workspace: Arc<dyn Workspace>,
     host: Arc<dyn HostProbe>,
+    scratch: Arc<dyn ScratchSpace>,
 }
 
 impl OrphanAudit {
@@ -17,6 +20,24 @@ impl OrphanAudit {
         Self {
             workspace: ports.repos().workspace(),
             host: ports.repos().host(),
+            scratch: ports.state().scratch_space(),
+        }
+    }
+
+    pub fn audit_scratch(&self, reconciliation: &Reconciliation, report: &mut DoctorReport) {
+        let Ok(directories) = self.scratch.directories() else {
+            return;
+        };
+        let claims = ScratchClaims::new(
+            self.scratch.as_ref(),
+            reconciliation.entries(),
+            reconciliation.observations(),
+        );
+        for orphan in claims.orphans(directories) {
+            report.warning(format!(
+                "orphaned scratch directory {}, the next delete removes it",
+                orphan.display()
+            ));
         }
     }
 

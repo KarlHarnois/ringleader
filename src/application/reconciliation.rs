@@ -41,6 +41,10 @@ impl Reconciliation {
         self.observations = observations;
     }
 
+    pub fn observations(&self) -> &[SessionObservation] {
+        &self.observations
+    }
+
     pub fn entries(&self) -> &[Session] {
         &self.entries
     }

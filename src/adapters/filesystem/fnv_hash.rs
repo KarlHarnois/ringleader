@@ -6,6 +6,7 @@ impl FnvHash {
     const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
     const PRIME: u64 = 0x0000_0100_0000_01b3;
     const HALF_WIDTH: u32 = 32;
+    const SHORT_HEX_DIGITS: usize = 8;
 
     pub fn of(bytes: &[u8]) -> Self {
         let value = bytes.iter().fold(Self::OFFSET_BASIS, |hash, byte| {
@@ -20,7 +21,14 @@ impl FnvHash {
 
     pub fn short_hex(&self) -> String {
         let folded = (self.value >> Self::HALF_WIDTH) ^ (self.value & u64::from(u32::MAX));
-        format!("{folded:08x}")
+        format!("{folded:0width$x}", width = Self::SHORT_HEX_DIGITS)
+    }
+
+    pub fn is_short_hex(text: &str) -> bool {
+        text.len() == Self::SHORT_HEX_DIGITS
+            && text
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
     }
 }
 
@@ -43,5 +51,17 @@ mod tests {
     fn a_short_hex_folds_the_two_halves_together() {
         assert_eq!(FnvHash::of(b"").short_hex(), "4fd0bfc1");
         assert_eq!(FnvHash::of(b"a").short_hex(), "296230c0");
+    }
+
+    #[test]
+    fn a_short_hex_is_recognized() {
+        assert!(FnvHash::is_short_hex(&FnvHash::of(b"a").short_hex()));
+    }
+
+    #[test]
+    fn other_text_is_not_a_short_hex() {
+        for text in ["296230c", "296230c00", "296230C0", "retired!", ".retired"] {
+            assert!(!FnvHash::is_short_hex(text), "{text}");
+        }
     }
 }

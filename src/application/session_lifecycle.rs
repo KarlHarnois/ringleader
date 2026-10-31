@@ -2,8 +2,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::agent_hooks::AgentHooks;
+use super::pending::Pending;
 use super::ports::{HostProbe, Multiplexer};
 use super::reconciliation::{ManagedRow, Reconciliation};
+use super::scratch_sweep::ScratchSweep;
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
 use crate::application::CreateRequest;
@@ -29,6 +31,7 @@ pub struct SessionLifecycle {
     creation: SessionCreation,
     renaming: SessionRenaming,
     deletion: SessionDeletion,
+    scratch_sweep: ScratchSweep,
     restart: SessionRestart,
     stopping: SessionStop,
     merging: SessionMerge,
@@ -48,6 +51,7 @@ impl SessionLifecycle {
             creation: SessionCreation::new(ports, Arc::clone(&hooks)),
             renaming: SessionRenaming::new(ports, Arc::clone(&hooks)),
             deletion: SessionDeletion::new(ports),
+            scratch_sweep: ScratchSweep::new(ports),
             restart: SessionRestart::new(ports, Arc::clone(&hooks)),
             stopping: SessionStop::new(ports),
             merging: SessionMerge::new(ports),
@@ -121,7 +125,14 @@ impl SessionLifecycle {
             self.refuse_launch_inside(row.session())?;
         }
         let remaining = reconciliation.entries_without(name);
-        self.deletion.delete(&row, &remaining, confirmation)
+        let outcome = self.deletion.delete(&row, &remaining, confirmation)?;
+        self.scratch_sweep
+            .retire_orphans(&remaining, reconciliation.observations());
+        Ok(outcome)
+    }
+
+    pub fn start_scratch_purge(&self) -> Pending<()> {
+        self.scratch_sweep.start_purge()
     }
 
     pub fn restart(

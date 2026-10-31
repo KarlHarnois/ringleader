@@ -996,6 +996,24 @@ mod tests {
     }
 
     #[test]
+    fn a_delete_purges_the_retired_scratch_directories() {
+        let harness = CliHarness::new(CommandFixture::live());
+
+        harness.run(&["delete", "fix-auth", "--force"]);
+
+        assert_eq!(harness.fixture().scratch_space().purges(), 1);
+    }
+
+    #[test]
+    fn a_command_other_than_delete_purges_nothing() {
+        let harness = CliHarness::new(CommandFixture::live());
+
+        harness.run(&["list"]);
+
+        assert_eq!(harness.fixture().scratch_space().purges(), 0);
+    }
+
+    #[test]
     fn unknown_names_exit_two_and_unmanaged_sessions_exit_three() {
         let stranger = ServiceFixture::session("mystery");
         let fixture = ServiceFixture::new().with_multiplexer(
