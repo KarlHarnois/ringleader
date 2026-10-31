@@ -9,7 +9,7 @@
   - `TMPDIR` differs between the process that creates a session and the process that deletes it. Every agent's `TMPDIR` is its own scratch directory, and `nix develop` exports a new `TMPDIR` per shell.
 - Delete keeps a scratch directory that holds a mount point: removing it would delete the files of the mounted filesystem.
 - If the mount table cannot be read, delete keeps every scratch directory.
-- Forget keeps the worktree and the branch. Its scratch directory becomes orphaned, so the same delete retires it.
+- A delete, with or without `--forget`, leaves the session's scratch directory orphaned, so the same delete retires it.
 
 ## Orphaned scratch directories
 

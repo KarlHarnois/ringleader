@@ -7,7 +7,6 @@ use crate::application::ServicePorts;
 use crate::application::checks::unseen_session::UnseenSession;
 use crate::application::ports::{ProcessInfo, SessionRegistry};
 use crate::application::reconciliation::ManagedRow;
-use crate::application::session_scratch::SessionScratch;
 use crate::application::tmux_teardown::{TeardownContexts, TmuxTeardown};
 use crate::domain::{Session, SessionState};
 
@@ -15,7 +14,6 @@ pub struct MainCheckoutDeletion {
     unseen: UnseenSession,
     teardown: TmuxTeardown,
     registry: Arc<dyn SessionRegistry>,
-    scratch: SessionScratch,
 }
 
 impl MainCheckoutDeletion {
@@ -35,7 +33,6 @@ impl MainCheckoutDeletion {
             unseen: UnseenSession::new(ports),
             teardown: TmuxTeardown::new(ports, Self::TEARDOWN_CONTEXTS),
             registry: ports.state().registry(),
-            scratch: SessionScratch::new(ports),
         }
     }
 
@@ -52,7 +49,6 @@ impl MainCheckoutDeletion {
     ) -> Result<DeleteOutcome, ServiceError> {
         confirmation.check(&self.impact(row)?)?;
         self.end_tmux_session(row)?;
-        self.scratch.discard(row.session().worktree_path());
         self.registry.save(remaining)?;
         let stray_session = self.unseen.stray_session_warning(row);
         Ok(DeleteOutcome::checkout_kept(row.session()).with_stray_session(stray_session))
@@ -81,8 +77,9 @@ mod tests {
 
     use super::*;
     use crate::application::SessionService;
+    use crate::application::ports::ScratchSpace;
     use crate::domain::SessionObservation;
-    use crate::test_support::{FakeHostProbe, FakeMultiplexer, ServiceFixture};
+    use crate::test_support::{FakeHostProbe, FakeMultiplexer, FakeScratchSpace, ServiceFixture};
 
     struct CheckoutDeleteFixture;
 
@@ -291,15 +288,16 @@ mod tests {
     }
 
     #[test]
-    fn deleting_a_session_in_the_main_checkout_discards_its_scratch_directory() {
-        let fixture = CheckoutDeleteFixture::waiting();
+    fn deleting_a_session_in_the_main_checkout_retires_its_scratch_directory() {
+        let checkout = CheckoutDeleteFixture::checkout();
+        let fixture = CheckoutDeleteFixture::waiting().with_scratch_space(
+            FakeScratchSpace::default().with_directories_of(&[checkout.to_path_buf()]),
+        );
 
         CheckoutDeleteFixture::force(&fixture).unwrap();
 
-        assert_eq!(
-            fixture.scratch_space().removed(),
-            [CheckoutDeleteFixture::checkout()]
-        );
+        let scratch = fixture.scratch_space();
+        assert_eq!(scratch.retired(), [scratch.directory(checkout)]);
     }
 
     #[test]
