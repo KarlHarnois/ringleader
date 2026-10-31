@@ -2740,7 +2740,7 @@ mod tests {
     }
 
     #[test]
-    fn a_confirmed_delete_purges_the_retired_scratch_directories_off_the_input_thread() {
+    fn a_confirmed_delete_purges_the_retired_scratch_directories() {
         let fixture = AppFixture::deletable();
         let mut app = AppFixture::started(&fixture, 100, 28);
         let measure = app.handle_event(&UiHarness::character('d'));
