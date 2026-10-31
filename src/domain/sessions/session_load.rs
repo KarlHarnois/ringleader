@@ -129,19 +129,18 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+    use crate::test_support::ProcessFiguresFixture;
 
     struct LoadFixture;
 
     impl LoadFixture {
-        const MEBIBYTE: u64 = 1024 * 1024;
-
         fn process(program: &str, cpu_milliseconds: u64, mebibytes: u64) -> ProcessLoad {
             Self::load(Self::figures(1, program, mebibytes), cpu_milliseconds)
         }
 
         fn figures(pid: u32, program: &str, mebibytes: u64) -> ProcessFigures {
             ProcessFigures::new(pid, 0, program)
-                .with_resident_memory(MemorySize::of_bytes(mebibytes * Self::MEBIBYTE))
+                .with_resident_memory(ProcessFiguresFixture::mebibytes(mebibytes))
         }
 
         fn load(figures: ProcessFigures, cpu_milliseconds: u64) -> ProcessLoad {

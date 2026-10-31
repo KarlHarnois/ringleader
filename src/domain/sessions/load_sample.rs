@@ -82,8 +82,8 @@ mod tests {
     use std::path::Path;
 
     use super::*;
-    use crate::domain::{ProcessFigures, SessionState};
-    use crate::test_support::ServiceFixture;
+    use crate::domain::SessionState;
+    use crate::test_support::{ProcessFiguresFixture, ServiceFixture};
 
     struct LoadSampleFixture;
 
@@ -94,17 +94,8 @@ mod tests {
         const STRANGER: u32 = 200;
         const OTHER_PANE: u32 = 300;
 
-        fn process(pid: u32, parent: u32, cpu_milliseconds: u64) -> ProcessFigures {
-            ProcessFigures::new(pid, parent, "example-program")
-                .with_cpu_time(Duration::from_millis(cpu_milliseconds))
-        }
-
-        fn at(seconds: u64, processes: Vec<ProcessFigures>) -> ProcessSample {
-            ProcessSample::new(Duration::from_secs(seconds), processes)
-        }
-
         fn idle_baseline() -> ProcessSample {
-            Self::at(
+            ProcessFiguresFixture::sample_at(
                 0,
                 [
                     Self::PANE,
@@ -113,7 +104,7 @@ mod tests {
                     Self::STRANGER,
                     Self::OTHER_PANE,
                 ]
-                .map(|pid| Self::process(pid, 1, 0))
+                .map(|pid| ProcessFiguresFixture::process(pid, 1, 0))
                 .to_vec(),
             )
         }
@@ -143,15 +134,20 @@ mod tests {
         }
 
         fn pane_tree_beside_a_stranger(milliseconds_each: u64) -> ProcessSample {
-            Self::at(
+            ProcessFiguresFixture::sample_at(
                 1,
                 vec![
-                    Self::process(Self::PANE, 1, milliseconds_each),
-                    Self::process(Self::AGENT, Self::PANE, milliseconds_each),
-                    Self::process(Self::TOOL, Self::AGENT, milliseconds_each),
-                    Self::process(Self::STRANGER, 1, 900),
+                    ProcessFiguresFixture::process(Self::PANE, 1, milliseconds_each),
+                    ProcessFiguresFixture::process(Self::AGENT, Self::PANE, milliseconds_each),
+                    ProcessFiguresFixture::process(Self::TOOL, Self::AGENT, milliseconds_each),
+                    ProcessFiguresFixture::process(Self::STRANGER, 1, 900),
                 ],
             )
+        }
+
+        fn pane_spent(seconds: u64, cpu_milliseconds: u64) -> ProcessSample {
+            let pane = ProcessFiguresFixture::process(Self::PANE, 1, cpu_milliseconds);
+            ProcessFiguresFixture::sample_at(seconds, vec![pane])
         }
 
         fn names(loads: &[SessionLoad]) -> Vec<&str> {
@@ -179,14 +175,8 @@ mod tests {
 
     #[test]
     fn the_cpu_of_a_process_is_the_time_it_spent_between_the_two_samples() {
-        let earlier = LoadSampleFixture::at(
-            0,
-            vec![LoadSampleFixture::process(LoadSampleFixture::PANE, 1, 1000)],
-        );
-        let later = LoadSampleFixture::at(
-            2,
-            vec![LoadSampleFixture::process(LoadSampleFixture::PANE, 1, 1500)],
-        );
+        let earlier = LoadSampleFixture::pane_spent(0, 1000);
+        let later = LoadSampleFixture::pane_spent(2, 1500);
 
         let loads = LoadSampleFixture::loads_between(
             earlier,
@@ -199,11 +189,11 @@ mod tests {
 
     #[test]
     fn sessions_are_sorted_by_cpu_highest_first() {
-        let later = LoadSampleFixture::at(
+        let later = ProcessFiguresFixture::sample_at(
             1,
             vec![
-                LoadSampleFixture::process(LoadSampleFixture::PANE, 1, 100),
-                LoadSampleFixture::process(LoadSampleFixture::OTHER_PANE, 1, 600),
+                ProcessFiguresFixture::process(LoadSampleFixture::PANE, 1, 100),
+                ProcessFiguresFixture::process(LoadSampleFixture::OTHER_PANE, 1, 600),
             ],
         );
 
@@ -229,7 +219,7 @@ mod tests {
 
     #[test]
     fn a_session_whose_pane_process_is_gone_uses_nothing() {
-        let later = LoadSampleFixture::at(1, Vec::new());
+        let later = ProcessFiguresFixture::sample_at(1, Vec::new());
 
         let loads = LoadSampleFixture::loads(later, &[("fix-auth", LoadSampleFixture::PANE)]);
 

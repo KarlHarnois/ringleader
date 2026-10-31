@@ -48,15 +48,14 @@ mod tests {
 
     use super::*;
     use crate::domain::ProcessFigures;
+    use crate::test_support::ProcessFiguresFixture;
 
     struct ReportFixture;
 
     impl ReportFixture {
-        const MEBIBYTE: u64 = 1024 * 1024;
-
         fn process(program: &str, cpu_milliseconds: u64, mebibytes: u64) -> ProcessLoad {
             let figures = ProcessFigures::new(1, 0, program)
-                .with_resident_memory(MemorySize::of_bytes(mebibytes * Self::MEBIBYTE));
+                .with_resident_memory(ProcessFiguresFixture::mebibytes(mebibytes));
             let cpu = CpuPercent::of(
                 Duration::from_millis(cpu_milliseconds),
                 Duration::from_secs(1),

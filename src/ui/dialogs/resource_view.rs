@@ -228,7 +228,9 @@ mod tests {
 
     use super::*;
     use crate::domain::{LoadSample, ProcessFigures, ProcessSample, SessionState};
-    use crate::test_support::{Deadline, FakeMultiplexer, FakeProcessMeter, ServiceFixture};
+    use crate::test_support::{
+        Deadline, FakeMultiplexer, FakeProcessMeter, ProcessFiguresFixture, ServiceFixture,
+    };
 
     struct ViewFixture {
         service: SessionService,
@@ -238,7 +240,6 @@ mod tests {
     impl ViewFixture {
         const WIDTH: usize = 50;
         const HEIGHT: usize = 20;
-        const MEBIBYTE: u64 = 1024 * 1024;
         const FIX_AUTH_PANE: u32 = 100;
         const DOCS_PANE: u32 = 200;
 
@@ -272,19 +273,14 @@ mod tests {
                 })
                 .collect();
             Self::sampling(vec![
-                ProcessSample::new(Duration::ZERO, idle),
-                ProcessSample::new(Duration::from_secs(1), later),
+                ProcessFiguresFixture::sample_at(0, idle),
+                ProcessFiguresFixture::sample_at(1, later),
             ])
         }
 
         fn pane_process(pid: u32, cpu_milliseconds: u64, mebibytes: u64) -> ProcessFigures {
-            Self::process(pid, 1, cpu_milliseconds)
-                .with_resident_memory(MemorySize::of_bytes(mebibytes * Self::MEBIBYTE))
-        }
-
-        fn process(pid: u32, parent: u32, cpu_milliseconds: u64) -> ProcessFigures {
-            ProcessFigures::new(pid, parent, "example-program")
-                .with_cpu_time(Duration::from_millis(cpu_milliseconds))
+            ProcessFiguresFixture::process(pid, 1, cpu_milliseconds)
+                .with_resident_memory(ProcessFiguresFixture::mebibytes(mebibytes))
         }
 
         fn fix_auth_busier() -> Self {
@@ -299,11 +295,11 @@ mod tests {
             fix_auth_milliseconds: u64,
             docs_milliseconds: u64,
         ) -> ProcessSample {
-            ProcessSample::new(
-                Duration::from_secs(seconds),
+            ProcessFiguresFixture::sample_at(
+                seconds,
                 vec![
-                    Self::process(Self::FIX_AUTH_PANE, 1, fix_auth_milliseconds),
-                    Self::process(Self::DOCS_PANE, 1, docs_milliseconds),
+                    ProcessFiguresFixture::process(Self::FIX_AUTH_PANE, 1, fix_auth_milliseconds),
+                    ProcessFiguresFixture::process(Self::DOCS_PANE, 1, docs_milliseconds),
                 ],
             )
         }
@@ -423,8 +419,9 @@ mod tests {
         let pane = ViewFixture::FIX_AUTH_PANE;
         let node = ProcessFigures::new(101, pane, "node")
             .with_cpu_time(Duration::from_millis(900))
-            .with_resident_memory(MemorySize::of_bytes(512 * ViewFixture::MEBIBYTE));
-        let fixture = ViewFixture::idle_then(vec![ViewFixture::process(pane, 1, 0), node]);
+            .with_resident_memory(ProcessFiguresFixture::mebibytes(512));
+        let fixture =
+            ViewFixture::idle_then(vec![ProcessFiguresFixture::process(pane, 1, 0), node]);
 
         let rows = ViewFixture::rows(&fixture.settled());
 

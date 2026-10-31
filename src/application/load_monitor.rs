@@ -99,12 +99,12 @@ impl LoadMonitor {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use super::*;
     use crate::application::ports::MultiplexerError;
     use crate::domain::{ProcessFigures, SessionLoad};
-    use crate::test_support::{FakeMultiplexer, FakeProcessMeter, LogCapture, ServiceFixture};
+    use crate::test_support::{
+        FakeMultiplexer, FakeProcessMeter, LogCapture, ProcessFiguresFixture, ServiceFixture,
+    };
 
     struct MonitorFixture;
 
@@ -114,20 +114,14 @@ mod tests {
         const STRANGER: u32 = 200;
         const OTHER_PANE: u32 = 300;
 
-        fn process(pid: u32, parent: u32, cpu_milliseconds: u64) -> ProcessFigures {
-            ProcessFigures::new(pid, parent, "example-program")
-                .with_cpu_time(Duration::from_millis(cpu_milliseconds))
-        }
-
-        fn at(seconds: u64, processes: Vec<ProcessFigures>) -> ProcessSample {
-            ProcessSample::new(Duration::from_secs(seconds), processes)
-        }
-
         fn idle_then(later: Vec<ProcessFigures>) -> FakeProcessMeter {
             let idle = [Self::PANE, Self::CHILD, Self::STRANGER, Self::OTHER_PANE]
-                .map(|pid| Self::process(pid, 1, 0))
+                .map(|pid| ProcessFiguresFixture::process(pid, 1, 0))
                 .to_vec();
-            FakeProcessMeter::new().with_samples(vec![Self::at(0, idle), Self::at(1, later)])
+            FakeProcessMeter::new().with_samples(vec![
+                ProcessFiguresFixture::sample_at(0, idle),
+                ProcessFiguresFixture::sample_at(1, later),
+            ])
         }
 
         fn row(name: &str, state: SessionState) -> SessionSummary {
@@ -186,9 +180,9 @@ mod tests {
             &[MonitorFixture::PANE],
         );
         let meter = MonitorFixture::idle_then(vec![
-            MonitorFixture::process(MonitorFixture::PANE, 1, 100),
-            MonitorFixture::process(MonitorFixture::CHILD, MonitorFixture::PANE, 200),
-            MonitorFixture::process(MonitorFixture::STRANGER, 1, 900),
+            ProcessFiguresFixture::process(MonitorFixture::PANE, 1, 100),
+            ProcessFiguresFixture::process(MonitorFixture::CHILD, MonitorFixture::PANE, 200),
+            ProcessFiguresFixture::process(MonitorFixture::STRANGER, 1, 900),
         ]);
         let monitor = MonitorFixture::monitor(multiplexer, meter);
 
@@ -281,8 +275,8 @@ mod tests {
     fn each_session_is_given_only_its_own_panes() {
         let multiplexer = MonitorFixture::fix_auth_and_docs();
         let meter = MonitorFixture::idle_then(vec![
-            MonitorFixture::process(MonitorFixture::PANE, 1, 100),
-            MonitorFixture::process(MonitorFixture::OTHER_PANE, 1, 700),
+            ProcessFiguresFixture::process(MonitorFixture::PANE, 1, 100),
+            ProcessFiguresFixture::process(MonitorFixture::OTHER_PANE, 1, 700),
         ]);
         let monitor = MonitorFixture::monitor(multiplexer, meter);
 

@@ -348,10 +348,10 @@ mod tests {
         AttachTarget, ConfigError, DirtyState, MultiplexerError, RegistryError, ReturnRequest,
     };
     use crate::cli::CliExit;
-    use crate::domain::{MemorySize, ProcessFigures, ProcessSample, Repo, RepoName, Session};
+    use crate::domain::{ProcessFigures, ProcessSample, Repo, RepoName, Session};
     use crate::test_support::{
         CapturedWriter, CliHarness, FakeMultiplexer, FakeProcessMeter, FakeRepoScanner,
-        FakeSessionRegistry, ServiceFixture,
+        FakeSessionRegistry, ProcessFiguresFixture, ServiceFixture,
     };
 
     struct CommandFixture;
@@ -436,7 +436,6 @@ mod tests {
     impl TopFixture {
         const FIX_AUTH_PANE: u32 = 100;
         const DOCS_PANE: u32 = 200;
-        const MEBIBYTE: u64 = 1024 * 1024;
 
         fn docs_busier_than_fix_auth() -> ServiceFixture {
             let fix_auth = ServiceFixture::session("fix-auth");
@@ -475,7 +474,7 @@ mod tests {
         fn pane(pid: u32, program: &str, cpu_milliseconds: u64, mebibytes: u64) -> ProcessFigures {
             ProcessFigures::new(pid, 1, program)
                 .with_cpu_time(Duration::from_millis(cpu_milliseconds))
-                .with_resident_memory(MemorySize::of_bytes(mebibytes * Self::MEBIBYTE))
+                .with_resident_memory(ProcessFiguresFixture::mebibytes(mebibytes))
         }
 
         fn session_names(stdout: &str) -> Vec<&str> {
