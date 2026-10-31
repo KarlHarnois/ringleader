@@ -532,6 +532,23 @@ mod tests {
     }
 
     #[test]
+    fn retire_refuses_a_hash_named_directory_outside_the_root_so_a_purge_cannot_reach_it() {
+        let fixture = ScratchFixture::new().created();
+        let outside = fixture.base.path().join(ScratchFixture::WORKTREE_HASH);
+        fs::create_dir(&outside).unwrap();
+
+        let result = fixture.space.retire(&outside);
+
+        assert_eq!(
+            result,
+            Err(ScratchSpaceError::Foreign {
+                path: outside.clone()
+            })
+        );
+        assert!(outside.exists());
+    }
+
+    #[test]
     fn retire_keeps_a_directory_that_holds_a_mount() {
         let fixture = ScratchFixture::new().created().with_mount_inside();
 
