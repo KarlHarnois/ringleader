@@ -348,9 +348,10 @@ impl Cli {
         }
         let result = self.dispatch(service, session);
         lock.release();
-        self.purge_retired_scratch(service, session);
         session.wait_for_startup_input(service);
-        session.finish(result)
+        let exit = session.finish(result);
+        self.purge_retired_scratch(service, session);
+        exit
     }
 
     fn purge_retired_scratch(&self, service: &SessionService, session: &CliSession) {
