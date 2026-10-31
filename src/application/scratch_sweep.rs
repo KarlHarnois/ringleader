@@ -22,13 +22,19 @@ impl ScratchSweep {
         }
     }
 
-    pub fn retire_orphans(&self, entries: &[Session], observations: &[SessionObservation]) {
-        match self.registry.moved_aside_copies() {
-            Ok(copies) if copies.is_empty() => self.retire_unclaimed(entries, observations),
-            Ok(copies) => log::warn!(
-                "kept every orphaned scratch directory, since {} can still claim some",
-                Self::listed(&copies)
-            ),
+    pub fn retire_orphans(
+        &self,
+        deleted: &Session,
+        entries: &[Session],
+        observations: &[SessionObservation],
+    ) {
+        let claims = ScratchClaims::new(self.space.as_ref(), entries, observations);
+        match self.space.directories() {
+            Ok(directories) => {
+                for orphan in claims.orphans(self.sweepable(deleted, directories)) {
+                    self.retire_unless_in_use(&orphan);
+                }
+            }
             Err(error) => log::warn!("kept every orphaned scratch directory: {error}"),
         }
     }
@@ -43,24 +49,28 @@ impl ScratchSweep {
         })
     }
 
+    fn sweepable(&self, deleted: &Session, directories: Vec<PathBuf>) -> Vec<PathBuf> {
+        match self.registry.moved_aside_copies() {
+            Ok(copies) if copies.is_empty() => return directories,
+            Ok(copies) => log::warn!(
+                "kept every other orphaned scratch directory, since {} can still claim them",
+                Self::listed(&copies)
+            ),
+            Err(error) => log::warn!("kept every other orphaned scratch directory: {error}"),
+        }
+        let own = self.space.directory(deleted.worktree_path());
+        directories
+            .into_iter()
+            .filter(|directory| *directory == own)
+            .collect()
+    }
+
     fn listed(copies: &[PathBuf]) -> String {
         copies
             .iter()
             .map(|copy| copy.display().to_string())
             .collect::<Vec<_>>()
             .join(", ")
-    }
-
-    fn retire_unclaimed(&self, entries: &[Session], observations: &[SessionObservation]) {
-        let claims = ScratchClaims::new(self.space.as_ref(), entries, observations);
-        match self.space.directories() {
-            Ok(directories) => {
-                for orphan in claims.orphans(directories) {
-                    self.retire_unless_in_use(&orphan);
-                }
-            }
-            Err(error) => log::warn!("kept every orphaned scratch directory: {error}"),
-        }
     }
 
     fn retire_unless_in_use(&self, orphan: &Path) {
@@ -103,6 +113,7 @@ mod tests {
     impl SweepFixture {
         const ORPHAN: &'static str = "forgotten";
         const RECORDED: &'static str = "fix-auth";
+        const DELETED: &'static str = "example-deleted";
         const ORPHAN_USER: u32 = 4_000_077;
 
         fn with_space(space: FakeScratchSpace) -> Self {
@@ -147,8 +158,13 @@ mod tests {
         }
 
         fn retire_orphans(&self) {
+            self.retire_orphans_after(Self::DELETED);
+        }
+
+        fn retire_orphans_after(&self, deleted: &str) {
             let recorded = ServiceFixture::session(Self::RECORDED);
-            self.sweep().retire_orphans(&[recorded], &[]);
+            let deleted = ServiceFixture::session(deleted);
+            self.sweep().retire_orphans(&deleted, &[recorded], &[]);
         }
     }
 
@@ -177,7 +193,7 @@ mod tests {
     }
 
     #[test]
-    fn a_moved_aside_registry_keeps_every_orphan_because_it_can_hold_stopped_sessions() {
+    fn a_moved_aside_registry_keeps_other_orphans_because_it_can_hold_stopped_sessions() {
         let capture = LogCapture::installed();
         let fixture = SweepFixture::with_moved_aside_registry();
 
@@ -185,8 +201,20 @@ mod tests {
 
         assert!(fixture.service.scratch_space().retired().is_empty());
         assert_eq!(
-            capture.count_containing("sessions.json.corrupt-1 can still claim some"),
+            capture.count_containing("sessions.json.corrupt-1 can still claim them"),
             1
+        );
+    }
+
+    #[test]
+    fn a_moved_aside_registry_still_retires_the_deleted_sessions_own_directory() {
+        let fixture = SweepFixture::with_moved_aside_registry();
+
+        fixture.retire_orphans_after(SweepFixture::ORPHAN);
+
+        assert_eq!(
+            fixture.service.scratch_space().retired(),
+            [fixture.orphan_directory()]
         );
     }
 

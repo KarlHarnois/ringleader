@@ -127,7 +127,8 @@ impl SessionLifecycle {
         let remaining = reconciliation.entries_without(name);
         let outcome = self.deletion.delete(&row, &remaining, confirmation)?;
         let surviving = reconciliation.observations_without(row.session().tmux_name());
-        self.scratch_sweep.retire_orphans(&remaining, &surviving);
+        self.scratch_sweep
+            .retire_orphans(row.session(), &remaining, &surviving);
         Ok(outcome)
     }
 

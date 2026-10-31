@@ -47,7 +47,7 @@ impl OrphanAudit {
     fn report_moved_aside_registries(&self, report: &mut DoctorReport) {
         for copy in self.registry.moved_aside_copies().unwrap_or_default() {
             report.warning(format!(
-                "corrupt registry {} keeps every orphaned scratch directory until it is restored or removed",
+                "corrupt registry {} keeps other sessions' orphaned scratch directories until it is restored or removed",
                 copy.display()
             ));
         }
