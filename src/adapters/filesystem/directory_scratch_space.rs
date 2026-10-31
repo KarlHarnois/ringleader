@@ -45,6 +45,15 @@ impl DirectoryScratchSpace {
         }
     }
 
+    fn refuse_foreign(&self, directory: &Path) -> Result<(), ScratchSpaceError> {
+        if self.is_scratch_directory(directory) {
+            return Ok(());
+        }
+        Err(ScratchSpaceError::Foreign {
+            path: directory.to_path_buf(),
+        })
+    }
+
     fn is_scratch_directory(&self, path: &Path) -> bool {
         let inside_root = path.parent() == Some(self.root.as_path());
         let hash_named = path
@@ -55,17 +64,12 @@ impl DirectoryScratchSpace {
         inside_root && hash_named && real_directory
     }
 
-    fn refuse_foreign(&self, directory: &Path) -> Result<(), ScratchSpaceError> {
-        if self.is_scratch_directory(directory) {
-            return Ok(());
-        }
-        Err(ScratchSpaceError::Foreign {
-            path: directory.to_path_buf(),
-        })
-    }
-
-    fn retired_root(&self) -> PathBuf {
-        self.root.join(Self::RETIRED)
+    fn move_into_retired(&self, directory: &Path) -> io::Result<()> {
+        DirBuilder::new()
+            .recursive(true)
+            .mode(Self::PRIVATE_MODE)
+            .create(self.retired_root())?;
+        fs::rename(directory, self.unused_retired_path(directory))
     }
 
     fn unused_retired_path(&self, directory: &Path) -> PathBuf {
@@ -80,12 +84,8 @@ impl DirectoryScratchSpace {
         }
     }
 
-    fn move_into_retired(&self, directory: &Path) -> io::Result<()> {
-        DirBuilder::new()
-            .recursive(true)
-            .mode(Self::PRIVATE_MODE)
-            .create(self.retired_root())?;
-        fs::rename(directory, self.unused_retired_path(directory))
+    fn retired_root(&self) -> PathBuf {
+        self.root.join(Self::RETIRED)
     }
 
     fn refuse_mounts_within(&self, directory: &Path) -> Result<(), ScratchSpaceError> {
