@@ -1,8 +1,10 @@
+use std::io;
 use std::path::Path;
 use std::sync::Arc;
 
 use super::live_process::LiveProcess;
 use crate::adapters::HostProcessTable;
+use crate::domain::ProcessFigures;
 
 pub trait ProcessScope: Send + Sync {
     fn lists(&self, pid: u32) -> bool;
@@ -40,6 +42,14 @@ impl ProcessTable {
             .filter(|pid| self.scope.lists(*pid))
             .filter_map(|pid| self.read(pid))
             .collect()
+    }
+
+    pub fn figures(&self) -> io::Result<Vec<ProcessFigures>> {
+        Ok(HostProcessTable::listed_pids()?
+            .into_iter()
+            .filter(|pid| self.scope.lists(*pid))
+            .filter_map(HostProcessTable::figures)
+            .collect())
     }
 
     pub fn lineage_of(&self, pid: u32) -> Vec<u32> {

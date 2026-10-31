@@ -28,6 +28,7 @@ pub use fakes::fake_host_probe::FakeHostProbe;
 pub use fakes::fake_interrupts::FakeInterrupts;
 pub use fakes::fake_lock::FakeLock;
 pub use fakes::fake_multiplexer::FakeMultiplexer;
+pub use fakes::fake_process_meter::FakeProcessMeter;
 pub use fakes::fake_pull_requests::FakePullRequests;
 pub use fakes::fake_repo_pages::FakeRepoPages;
 pub use fakes::fake_repo_scanner::FakeRepoScanner;

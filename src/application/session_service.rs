@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::batch_report::BatchReport;
+use super::load_monitor::LoadMonitor;
 use super::pending::Pending;
 use super::ports::{
     ClientView, Clock, ConfigError, ConfigSource, HostProbe, PullRequestError, RegistryError,
@@ -34,8 +35,8 @@ use crate::application::repos::repo_catalog::RepoCatalog;
 use crate::application::{AddRepoRequest, RepoAddition};
 use crate::application::{DeleteConfirmation, DeleteImpact};
 use crate::domain::{
-    Config, DiffStat, KeyBindings, PullRequest, Repo, RepoGroup, Session, SessionObservation,
-    SessionSize, SessionSummary, ThemeSpec,
+    Config, DiffStat, KeyBindings, LoadSample, PullRequest, Repo, RepoGroup, Session,
+    SessionObservation, SessionSize, SessionSummary, ThemeSpec,
 };
 
 pub struct SessionService {
@@ -53,6 +54,7 @@ pub struct SessionService {
     catalog: RepoCatalog,
     pull_request_catalog: PullRequestCatalog,
     usage_catalog: UsageCatalog,
+    load_monitor: LoadMonitor,
     clock: Arc<dyn Clock>,
     host: Arc<dyn HostProbe>,
     doctor: Doctor,
@@ -68,6 +70,7 @@ impl SessionService {
             catalog: RepoCatalog::new(&ports, &context),
             pull_request_catalog: PullRequestCatalog::new(ports.repos().pull_requests()),
             usage_catalog: UsageCatalog::new(ports.agents().usage_meters(), ports.state().clock()),
+            load_monitor: LoadMonitor::new(&ports),
             clock: ports.state().clock(),
             host: ports.repos().host(),
             doctor: Doctor::new(&ports, context.diagnostics().clone()),
@@ -281,6 +284,10 @@ impl SessionService {
 
     pub fn last_usage(&self) -> Option<UsageReading> {
         self.usage_catalog.latest(self.config().agents())
+    }
+
+    pub fn sample_load(&self, rows: &[SessionSummary]) -> Pending<LoadSample> {
+        self.load_monitor.sample(rows)
     }
 
     pub fn now_epoch_seconds(&self) -> u64 {

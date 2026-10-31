@@ -3,8 +3,9 @@ use std::sync::{Arc, Mutex};
 
 use super::{
     FakeClock, FakeConfigSource, FakeDirectoryEnvironment, FakeHostProbe, FakeMultiplexer,
-    FakePullRequests, FakeRepoPages, FakeRepoScanner, FakeScratchSpace, FakeSessionRegistry,
-    FakeTerminalEmulator, FakeThemeSource, FakeUsageMeter, FakeWebBrowser, FakeWorkspace,
+    FakeProcessMeter, FakePullRequests, FakeRepoPages, FakeRepoScanner, FakeScratchSpace,
+    FakeSessionRegistry, FakeTerminalEmulator, FakeThemeSource, FakeUsageMeter, FakeWebBrowser,
+    FakeWorkspace,
 };
 use crate::application::ports::{
     ConfigError, MergeOutcome, MultiplexerError, ScratchSpace, WorktreeEntry,
@@ -37,6 +38,7 @@ pub struct ServiceFixture {
     terminal_emulator: Arc<FakeTerminalEmulator>,
     web_browser: Arc<FakeWebBrowser>,
     usage_meter: Arc<FakeUsageMeter>,
+    process_meter: Arc<FakeProcessMeter>,
     config_error: Option<ConfigError>,
     launch_directory: PathBuf,
     diagnostics: DiagnosticPaths,
@@ -81,6 +83,7 @@ impl ServiceFixture {
             terminal_emulator: Arc::new(FakeTerminalEmulator::default()),
             web_browser: Arc::new(FakeWebBrowser::default()),
             usage_meter: Arc::new(FakeUsageMeter::new()),
+            process_meter: Arc::new(FakeProcessMeter::new()),
             config_error: None,
             launch_directory: PathBuf::from(Self::REPO),
             diagnostics: Self::diagnostics(),
@@ -198,6 +201,13 @@ impl ServiceFixture {
     pub fn with_usage_meter(self, usage_meter: FakeUsageMeter) -> Self {
         Self {
             usage_meter: Arc::new(usage_meter),
+            ..self
+        }
+    }
+
+    pub fn with_process_meter(self, process_meter: FakeProcessMeter) -> Self {
+        Self {
+            process_meter: Arc::new(process_meter),
             ..self
         }
     }
@@ -582,7 +592,7 @@ impl ServiceFixture {
             .with_diff_workspace(self.measuring_workspace()),
             TmuxPorts::new(self.multiplexer.clone()),
             DesktopPorts::new(self.terminal_emulator.clone(), self.web_browser.clone()),
-            AgentPorts::new(vec![self.usage_meter.clone()]),
+            AgentPorts::new(vec![self.usage_meter.clone()], self.process_meter.clone()),
         )
     }
 

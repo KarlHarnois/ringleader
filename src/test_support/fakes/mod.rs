@@ -6,6 +6,7 @@ pub mod fake_host_probe;
 pub mod fake_interrupts;
 pub mod fake_lock;
 pub mod fake_multiplexer;
+pub mod fake_process_meter;
 pub mod fake_pull_requests;
 pub mod fake_repo_pages;
 pub mod fake_repo_scanner;

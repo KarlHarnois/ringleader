@@ -10,6 +10,7 @@ pub mod interrupts;
 pub mod lock;
 pub mod merge_outcome;
 pub mod multiplexer;
+pub mod process_meter;
 pub mod pull_requests;
 pub mod repo_pages;
 pub mod repo_scanner;
@@ -37,6 +38,7 @@ pub use multiplexer::{
     AttachTarget, ClientView, Multiplexer, MultiplexerError, ReturnRequest, ServerConfig,
     ServerState, SessionSpec,
 };
+pub use process_meter::{ProcessMeter, ProcessMeterError};
 pub use pull_requests::{PullRequestError, PullRequests};
 pub use repo_pages::{RepoPageError, RepoPages};
 pub use repo_scanner::{RepoScanner, ScanError, ScanOutcome};

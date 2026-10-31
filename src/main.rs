@@ -48,6 +48,7 @@ use adapters::host::process_table::ProcessTable;
 use adapters::host::signal_hook_interrupts::SignalHookInterrupts;
 use adapters::host::system_clock::SystemClock;
 use adapters::host::system_host_probe::SystemHostProbe;
+use adapters::host::system_process_meter::SystemProcessMeter;
 use adapters::host::xdg_paths::XdgPaths;
 use adapters::ollama::ollama_cloud_quota::OllamaCloudQuota;
 use adapters::opencode::opencode_usage_meter::OpencodeUsageMeter;
@@ -410,7 +411,10 @@ impl CompositionRoot {
                 repos,
                 tmux_ports,
                 desktop,
-                AgentPorts::new(usage_meters),
+                AgentPorts::new(
+                    usage_meters,
+                    Arc::new(SystemProcessMeter::new(self.processes.clone())),
+                ),
             ),
             context,
         )

@@ -1,8 +1,11 @@
 use std::fs;
+use std::io;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use super::live_process::LiveProcess;
+use crate::domain::{MemorySize, ProcessFigures};
 
 pub struct ProcfsProcessTable;
 
@@ -12,13 +15,24 @@ impl ProcfsProcessTable {
     const PROCESS_NAME_LIMIT: usize = 15;
 
     pub fn pids() -> Vec<u32> {
-        let Ok(entries) = fs::read_dir(Self::ROOT) else {
-            return Vec::new();
-        };
-        entries
+        Self::listed_pids().unwrap_or_default()
+    }
+
+    pub fn listed_pids() -> io::Result<Vec<u32>> {
+        let entries = fs::read_dir(Self::ROOT)?;
+        Ok(entries
             .filter_map(Result::ok)
             .filter_map(|entry| entry.file_name().to_string_lossy().parse().ok())
-            .collect()
+            .collect())
+    }
+
+    pub fn figures(pid: u32) -> Option<ProcessFigures> {
+        let stat = ProcessStat::read(pid)?;
+        Some(
+            ProcessFigures::new(pid, stat.parent()?, stat.name())
+                .with_cpu_time(stat.cpu_time()?)
+                .with_resident_memory(stat.resident_memory()?),
+        )
     }
 
     pub fn is_alive(pid: u32) -> bool {
@@ -83,25 +97,57 @@ impl ProcfsProcessTable {
         kept.rsplit_once(' ')
             .map_or(kept, |(whole_words, _)| whole_words)
     }
+
+    fn configured(name: libc::c_int) -> Option<u64> {
+        // SAFETY: sysconf only reads a system configuration value and touches no memory.
+        let value = unsafe { libc::sysconf(name) };
+        u64::try_from(value).ok().filter(|value| *value > 0)
+    }
 }
 
 struct ProcessStat {
+    name: String,
     fields_after_name: Vec<String>,
 }
 
 impl ProcessStat {
+    const NAME_START: char = '(';
     const NAME_END: char = ')';
     const ZOMBIE: &'static str = "Z";
     const STATE: usize = 0;
     const PARENT: usize = 1;
     const SESSION: usize = 3;
+    const USER_TICKS: usize = 11;
+    const SYSTEM_TICKS: usize = 12;
+    const RESIDENT_PAGES: usize = 21;
+    const NANOSECONDS_PER_SECOND: u64 = 1_000_000_000;
 
     fn read(pid: u32) -> Option<Self> {
         let stat = fs::read_to_string(ProcfsProcessTable::directory_of(pid).join("stat")).ok()?;
-        let after_name = stat.get(stat.rfind(Self::NAME_END)? + 2..)?;
+        let name_start = stat.find(Self::NAME_START)? + 1;
+        let name_end = stat.rfind(Self::NAME_END)?;
+        let after_name = stat.get(name_end + 2..)?;
         Some(Self {
+            name: stat.get(name_start..name_end)?.to_string(),
             fields_after_name: after_name.split(' ').map(str::to_string).collect(),
         })
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn cpu_time(&self) -> Option<Duration> {
+        let ticks = self.count(Self::USER_TICKS)? + self.count(Self::SYSTEM_TICKS)?;
+        let ticks_per_second = ProcfsProcessTable::configured(libc::_SC_CLK_TCK)?;
+        let nanoseconds = ticks.saturating_mul(Self::NANOSECONDS_PER_SECOND) / ticks_per_second;
+        Some(Duration::from_nanos(nanoseconds))
+    }
+
+    fn resident_memory(&self) -> Option<MemorySize> {
+        let pages = self.count(Self::RESIDENT_PAGES)?;
+        let page_size = ProcfsProcessTable::configured(libc::_SC_PAGESIZE)?;
+        Some(MemorySize::of_bytes(pages.saturating_mul(page_size)))
     }
 
     fn is_zombie(&self) -> bool {
@@ -119,6 +165,10 @@ impl ProcessStat {
     fn number(&self, index: usize) -> Option<u32> {
         self.fields_after_name.get(index)?.parse().ok()
     }
+
+    fn count(&self, index: usize) -> Option<u64> {
+        self.fields_after_name.get(index)?.parse().ok()
+    }
 }
 
 #[cfg(test)]
@@ -131,6 +181,17 @@ mod tests {
     impl TableFixture {
         fn words(words: &[&str]) -> Vec<String> {
             words.iter().map(|word| word.to_string()).collect()
+        }
+
+        fn figures_once_running(pid: u32, program: &str) -> Option<ProcessFigures> {
+            let mut figures = None;
+            Deadline::for_background_work().wait_until(|| {
+                figures = ProcfsProcessTable::figures(pid);
+                figures
+                    .as_ref()
+                    .is_some_and(|figures| figures.program() == program)
+            });
+            figures
         }
 
         fn environment_once_holding(pid: u32, entry: &str) -> Vec<String> {
@@ -160,6 +221,38 @@ mod tests {
     #[test]
     fn the_pids_hold_this_process() {
         assert!(ProcfsProcessTable::pids().contains(&std::process::id()));
+    }
+
+    #[test]
+    fn the_listed_pids_hold_this_process() {
+        let pids = ProcfsProcessTable::listed_pids().unwrap();
+
+        assert!(pids.contains(&std::process::id()));
+    }
+
+    #[test]
+    fn a_child_is_measured_with_its_parent_and_program_from_its_stat_file() {
+        let mut child = ProcessMarker::new().sleeping_child();
+
+        let figures = TableFixture::figures_once_running(child.id(), "sleep");
+        child.kill().unwrap();
+        child.wait().unwrap();
+
+        let figures = figures.unwrap();
+        assert_eq!(figures.parent(), std::process::id());
+        assert_eq!(figures.program(), "sleep");
+    }
+
+    #[test]
+    fn a_running_process_holds_resident_memory() {
+        let figures = ProcfsProcessTable::figures(std::process::id()).unwrap();
+
+        assert!(figures.resident_memory() > MemorySize::default());
+    }
+
+    #[test]
+    fn a_pid_that_no_process_has_has_no_figures() {
+        assert_eq!(ProcfsProcessTable::figures(u32::MAX), None);
     }
 
     #[test]

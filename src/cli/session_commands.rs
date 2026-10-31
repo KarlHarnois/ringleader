@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::thread;
 
 use super::delete_report::DeleteReport;
 use super::list_report::ListReport;
 use super::repo_argument::RepoArgument;
+use super::top_report::TopReport;
 use super::{
     CliExit, CliSession, CommandStop, DeleteArgs, ListArgs, NewArgs, RenameArgs, RestartArgs,
     SendArgs, StopArgs,
@@ -12,7 +14,7 @@ use crate::application::{
     CreateRequest, DeleteConfirmation, DeleteImpact, DeleteOutcome, HandOff, RestartReport,
     ServiceError, SessionService, StartOutcome, StopReport,
 };
-use crate::domain::{AgentMode, BaseBranch, Checkout, Repo, RepoGroup};
+use crate::domain::{AgentMode, BaseBranch, Checkout, LoadSample, Repo, RepoGroup, SessionLoad};
 
 pub struct SessionCommands<'a> {
     service: &'a mut SessionService,
@@ -50,6 +52,22 @@ impl<'a> SessionCommands<'a> {
             }
         }
         Ok(0)
+    }
+
+    pub fn top(&mut self) -> Result<u8, CommandStop> {
+        let loads = self.loads_over_one_interval()?;
+        for line in TopReport::new(&loads).lines() {
+            self.session.output().line(&line);
+        }
+        Ok(0)
+    }
+
+    fn loads_over_one_interval(&mut self) -> Result<Vec<SessionLoad>, CommandStop> {
+        let rows = self.service.observe()?;
+        let earlier = self.session.wait(&self.service.sample_load(&rows))?;
+        thread::sleep(LoadSample::INTERVAL);
+        let later = self.session.wait(&self.service.sample_load(&rows))?;
+        Ok(later.loads_since(&earlier))
     }
 
     pub fn create(&mut self, args: &NewArgs) -> Result<u8, CommandStop> {
@@ -322,6 +340,7 @@ impl<'a> SessionCommands<'a> {
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};
+    use std::time::Duration;
 
     use signal_hook::consts::{SIGHUP, SIGINT};
 
@@ -329,10 +348,10 @@ mod tests {
         AttachTarget, ConfigError, DirtyState, MultiplexerError, RegistryError, ReturnRequest,
     };
     use crate::cli::CliExit;
-    use crate::domain::{Repo, RepoName, Session};
+    use crate::domain::{MemorySize, ProcessFigures, ProcessSample, Repo, RepoName, Session};
     use crate::test_support::{
-        CapturedWriter, CliHarness, FakeMultiplexer, FakeRepoScanner, FakeSessionRegistry,
-        ServiceFixture,
+        CapturedWriter, CliHarness, FakeMultiplexer, FakeProcessMeter, FakeRepoScanner,
+        FakeSessionRegistry, ServiceFixture,
     };
 
     struct CommandFixture;
@@ -410,6 +429,103 @@ mod tests {
                 detail: "expected `=`".to_string(),
             }
         }
+    }
+
+    struct TopFixture;
+
+    impl TopFixture {
+        const FIX_AUTH_PANE: u32 = 100;
+        const DOCS_PANE: u32 = 200;
+        const MEBIBYTE: u64 = 1024 * 1024;
+
+        fn docs_busier_than_fix_auth() -> ServiceFixture {
+            let fix_auth = ServiceFixture::session("fix-auth");
+            let docs = ServiceFixture::session("docs");
+            ServiceFixture::new()
+                .with_sessions(&[fix_auth.clone(), docs.clone()])
+                .with_workspace(ServiceFixture::workspace_for(&[&fix_auth, &docs]))
+                .with_host(ServiceFixture::host_for(&[&fix_auth, &docs]))
+                .with_multiplexer(
+                    FakeMultiplexer::new()
+                        .with_live(ServiceFixture::waiting(&fix_auth))
+                        .with_live(ServiceFixture::working(&docs))
+                        .with_pane_pids(fix_auth.tmux_name(), &[Self::FIX_AUTH_PANE])
+                        .with_pane_pids(docs.tmux_name(), &[Self::DOCS_PANE]),
+                )
+                .with_process_meter(
+                    FakeProcessMeter::new()
+                        .with_samples(vec![Self::sample(0, 0, 0), Self::sample(1, 100, 600)]),
+                )
+        }
+
+        fn sample(
+            seconds: u64,
+            fix_auth_milliseconds: u64,
+            docs_milliseconds: u64,
+        ) -> ProcessSample {
+            ProcessSample::new(
+                Duration::from_secs(seconds),
+                vec![
+                    Self::pane(Self::FIX_AUTH_PANE, "claude", fix_auth_milliseconds, 300),
+                    Self::pane(Self::DOCS_PANE, "node", docs_milliseconds, 40),
+                ],
+            )
+        }
+
+        fn pane(pid: u32, program: &str, cpu_milliseconds: u64, mebibytes: u64) -> ProcessFigures {
+            ProcessFigures::new(pid, 1, program)
+                .with_cpu_time(Duration::from_millis(cpu_milliseconds))
+                .with_resident_memory(MemorySize::of_bytes(mebibytes * Self::MEBIBYTE))
+        }
+
+        fn session_lines(stdout: &str) -> Vec<&str> {
+            stdout
+                .lines()
+                .filter(|line| !line.starts_with(' '))
+                .collect()
+        }
+    }
+
+    #[test]
+    fn top_prints_each_running_session_with_its_cpu_memory_and_busiest_processes() {
+        let harness = CliHarness::new(TopFixture::docs_busier_than_fix_auth());
+
+        let exit = harness.run(&["top"]);
+
+        assert_eq!(exit, CliExit::Code(0));
+        assert_eq!(
+            harness.stdout(),
+            [
+                "docs                       60.0%    40 MiB",
+                "  node                     60.0%    40 MiB",
+                "fix-auth                   10.0%   300 MiB",
+                "  claude                   10.0%   300 MiB",
+                "",
+            ]
+            .join("\n")
+        );
+    }
+
+    #[test]
+    fn top_sorts_the_sessions_by_cpu_highest_first() {
+        let harness = CliHarness::new(TopFixture::docs_busier_than_fix_auth());
+
+        harness.run(&["top"]);
+
+        let names: Vec<String> = TopFixture::session_lines(&harness.stdout())
+            .iter()
+            .filter_map(|line| line.split_whitespace().next().map(str::to_string))
+            .collect();
+        assert_eq!(names, ["docs", "fix-auth"]);
+    }
+
+    #[test]
+    fn top_takes_no_lock_because_it_changes_nothing() {
+        let harness = CliHarness::new(ServiceFixture::new());
+
+        harness.run(&["top"]);
+
+        assert!(harness.lock_acquisitions().is_empty());
     }
 
     #[test]

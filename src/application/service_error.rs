@@ -1,8 +1,8 @@
 use thiserror::Error;
 
 use super::ports::{
-    ConfigError, HostProbeError, LockError, MultiplexerError, RegistryError, RepoPageError,
-    TerminalEmulatorError, WebBrowserError, WorkspaceError,
+    ConfigError, HostProbeError, LockError, MultiplexerError, ProcessMeterError, RegistryError,
+    RepoPageError, TerminalEmulatorError, WebBrowserError, WorkspaceError,
 };
 use crate::application::DeleteImpact;
 use crate::domain::InvalidName;
@@ -120,6 +120,12 @@ impl From<HostProbeError> for ServiceError {
                 ServiceError::Conflict(message)
             }
         }
+    }
+}
+
+impl From<ProcessMeterError> for ServiceError {
+    fn from(error: ProcessMeterError) -> Self {
+        ServiceError::Failed(error.to_string())
     }
 }
 

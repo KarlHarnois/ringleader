@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use super::ports::{
-    Clock, ConfigSource, DirectoryEnvironment, HostProbe, Multiplexer, PullRequests, RepoPages,
-    RepoScanner, ScratchSpace, SessionRegistry, TerminalEmulator, ThemeSource, UsageMeter,
-    WebBrowser, Workspace,
+    Clock, ConfigSource, DirectoryEnvironment, HostProbe, Multiplexer, ProcessMeter, PullRequests,
+    RepoPages, RepoScanner, ScratchSpace, SessionRegistry, TerminalEmulator, ThemeSource,
+    UsageMeter, WebBrowser, Workspace,
 };
 
 pub struct ServicePorts {
@@ -205,14 +205,25 @@ impl DesktopPorts {
 
 pub struct AgentPorts {
     usage_meters: Vec<Arc<dyn UsageMeter>>,
+    process_meter: Arc<dyn ProcessMeter>,
 }
 
 impl AgentPorts {
-    pub fn new(usage_meters: Vec<Arc<dyn UsageMeter>>) -> Self {
-        Self { usage_meters }
+    pub fn new(
+        usage_meters: Vec<Arc<dyn UsageMeter>>,
+        process_meter: Arc<dyn ProcessMeter>,
+    ) -> Self {
+        Self {
+            usage_meters,
+            process_meter,
+        }
     }
 
     pub fn usage_meters(&self) -> Vec<Arc<dyn UsageMeter>> {
         self.usage_meters.clone()
+    }
+
+    pub fn process_meter(&self) -> Arc<dyn ProcessMeter> {
+        Arc::clone(&self.process_meter)
     }
 }
