@@ -124,7 +124,8 @@ impl ProcessStat {
     const NANOSECONDS_PER_SECOND: u64 = 1_000_000_000;
 
     fn read(pid: u32) -> Option<Self> {
-        let stat = fs::read_to_string(ProcfsProcessTable::directory_of(pid).join("stat")).ok()?;
+        let stat_bytes = fs::read(ProcfsProcessTable::directory_of(pid).join("stat")).ok()?;
+        let stat = String::from_utf8_lossy(&stat_bytes);
         let name_start = stat.find(Self::NAME_START)? + 1;
         let name_end = stat.rfind(Self::NAME_END)?;
         let after_name = stat.get(name_end + 2..)?;
@@ -170,12 +171,18 @@ impl ProcessStat {
 
 #[cfg(test)]
 mod tests {
+    use std::process::{Child, Command, Stdio};
+
     use super::*;
-    use crate::test_support::{Deadline, ProcessMarker};
+    use crate::test_support::{Deadline, ExecutableScript, ProcessMarker};
 
     struct TableFixture;
 
     impl TableFixture {
+        const NAME_CUT_INSIDE_A_CHARACTER: &'static str = "example-résumé";
+        const CUT_NAME_AS_MEASURED: &'static str = "example-résum\u{FFFD}";
+        const WAITING_SCRIPT: &'static str = "#!/bin/sh\nread -r line\n";
+
         fn words(words: &[&str]) -> Vec<String> {
             words.iter().map(|word| word.to_string()).collect()
         }
@@ -200,7 +207,16 @@ mod tests {
             environment
         }
 
-        fn end(mut child: std::process::Child) {
+        fn waiting_script(directory: &Path, name: &str) -> Child {
+            let script = directory.join(name);
+            ExecutableScript::write(&script, Self::WAITING_SCRIPT);
+            Command::new(script)
+                .stdin(Stdio::piped())
+                .spawn()
+                .expect("the waiting script starts")
+        }
+
+        fn end(mut child: Child) {
             child.kill().unwrap();
             child.wait().unwrap();
         }
@@ -242,6 +258,24 @@ mod tests {
         let figures = figures.unwrap();
         assert_eq!(figures.parent(), std::process::id());
         assert_eq!(figures.program(), "sleep");
+    }
+
+    #[test]
+    fn a_program_name_that_the_kernel_cut_inside_a_character_is_still_measured() {
+        let directory = tempfile::tempdir().unwrap();
+        let child = TableFixture::waiting_script(
+            directory.path(),
+            TableFixture::NAME_CUT_INSIDE_A_CHARACTER,
+        );
+
+        let figures =
+            TableFixture::figures_once_running(child.id(), TableFixture::CUT_NAME_AS_MEASURED);
+        TableFixture::end(child);
+
+        assert_eq!(
+            figures.as_ref().map(ProcessFigures::program),
+            Some(TableFixture::CUT_NAME_AS_MEASURED)
+        );
     }
 
     #[test]
