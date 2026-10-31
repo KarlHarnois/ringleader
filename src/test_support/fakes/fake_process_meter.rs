@@ -4,19 +4,24 @@ use std::time::Duration;
 
 use crate::application::ports::{ProcessMeter, ProcessMeterError};
 use crate::domain::ProcessSample;
+use crate::test_support::CallHooks;
 
 #[derive(Default)]
 pub struct FakeProcessMeter {
     state: Mutex<MeterState>,
+    hooks: CallHooks,
 }
 
 #[derive(Default)]
 struct MeterState {
     samples: VecDeque<ProcessSample>,
     denial: Option<String>,
+    samples_taken: usize,
 }
 
 impl FakeProcessMeter {
+    const SAMPLE: &'static str = "sample";
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -30,10 +35,20 @@ impl FakeProcessMeter {
         self.state.lock().unwrap().denial = Some(denial.to_string());
         self
     }
+
+    pub fn on_sample(&self, hook: impl Fn() + Send + Sync + 'static) {
+        self.hooks.add(Self::SAMPLE, hook);
+    }
+
+    pub fn samples_taken(&self) -> usize {
+        self.state.lock().unwrap().samples_taken
+    }
 }
 
 impl ProcessMeter for FakeProcessMeter {
     fn sample(&self) -> Result<ProcessSample, ProcessMeterError> {
+        self.state.lock().unwrap().samples_taken += 1;
+        self.hooks.run(Self::SAMPLE);
         self.state.lock().unwrap().next_sample()
     }
 }

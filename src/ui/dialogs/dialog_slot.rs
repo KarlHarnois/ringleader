@@ -5,6 +5,7 @@ use ratatui::Frame;
 
 use super::dialog::{Dialog, DialogStep};
 use crate::application::SessionService;
+use crate::domain::SessionSummary;
 use crate::ui::keys::back_key::BackKey;
 use crate::ui::theme::Theme;
 
@@ -26,9 +27,14 @@ impl DialogSlot {
         self.dialog = None;
     }
 
-    pub fn poll(&mut self, now: Instant, service: &SessionService) {
+    pub fn poll(
+        &mut self,
+        now: Instant,
+        service: &SessionService,
+        rows_to_sample: Option<&[SessionSummary]>,
+    ) {
         if let Some(dialog) = &mut self.dialog {
-            dialog.poll(now, service);
+            dialog.poll(now, service, rows_to_sample);
         }
     }
 

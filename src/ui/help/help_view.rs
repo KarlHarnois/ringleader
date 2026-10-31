@@ -25,7 +25,7 @@ pub struct HelpView {
 
 impl HelpView {
     const KEYS_HEADING: &'static str = "Keys";
-    const KEYS: [(&'static str, &'static str); 21] = [
+    const KEYS: [(&'static str, &'static str); 22] = [
         ("n", "create a session"),
         ("d", "delete the selected session"),
         (
@@ -62,6 +62,7 @@ impl HelpView {
             "reload the config and the registry and refresh diffs and PRs",
         ),
         ("u", "show how much of each agent's plan is used"),
+        ("U", "show the CPU and memory each running session uses"),
         ("↑ ↓ j k h l", "move the selection"),
         ("gg G", "select the first or the last row"),
         ("H M L", "select the top, middle, or bottom row on screen"),
@@ -261,8 +262,8 @@ mod tests {
         const SHORT_WIDTH: usize = 56;
         const SHORT_HEIGHT: usize = 8;
         const PAST_THE_END: usize = 50;
-        const ROWS_ABOVE_THE_SMALLEST_FULL_SIZE: u16 = 18;
-        const TALL_NARROW_SIZE: (u16, u16) = (79, 40);
+        const ROWS_ABOVE_THE_SMALLEST_FULL_SIZE: u16 = 19;
+        const TALL_NARROW_SIZE: (u16, u16) = (79, 41);
         const TMUX_CONFIG_ROW: &'static str = "tmux config  ~/.local/state/ringleader/tmux.conf";
 
         fn help() -> HelpView {

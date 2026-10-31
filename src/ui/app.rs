@@ -125,7 +125,8 @@ impl App {
         let status = Self::status_bar(self.theme_slot.theme(), &self.status, &self.home);
         let outcome = self.home.tick(now, &mut self.service, &status);
         self.status.failure(outcome);
-        self.dialogs.poll(now, &self.service);
+        self.dialogs
+            .poll(now, &self.service, self.home.rows_to_sample());
     }
 
     pub fn observe(&mut self) {
@@ -539,14 +540,15 @@ mod tests {
     };
     use crate::application::{CreateRequest, DeleteImpact};
     use crate::domain::{
-        AgentUsage, AnsiColor, Config, ConfigDraft, DiffStat, LimitWindow, PullRequestState,
-        Session, SessionState, StyleSpec, ThemeColor, ThemeOverrides, ThemeRole, ThemeSpec,
-        UsageLimit, UsageRow,
+        AgentUsage, AnsiColor, Config, ConfigDraft, DiffStat, LimitWindow, LoadSample,
+        ProcessFigures, ProcessSample, PullRequestState, Session, SessionState, StyleSpec,
+        ThemeColor, ThemeOverrides, ThemeRole, ThemeSpec, UsageLimit, UsageRow,
     };
     use crate::test_support::{
         CapturedWriter, Deadline, FakeConfigSource, FakeFoldStore, FakeLock, FakeMultiplexer,
-        FakePullRequests, FakeRepoPages, FakeSessionRegistry, FakeTerminalEmulator, FakeUsageMeter,
-        FakeWebBrowser, HeldCalls, LogCapture, ServiceFixture, UiHarness,
+        FakeProcessMeter, FakePullRequests, FakeRepoPages, FakeSessionRegistry,
+        FakeTerminalEmulator, FakeUsageMeter, FakeWebBrowser, HeldCalls, LogCapture,
+        ServiceFixture, UiHarness,
     };
     use crate::ui::batch_operation::{BatchOperation, DeleteSessionsStep};
     use crate::ui::blocking_operation::{BrowserPage, CreateStep};
@@ -559,6 +561,7 @@ mod tests {
         const LOG_FILE_OUTSIDE_THE_STATE_DIRECTORY: &'static str = "/logs/ringleader/app.log";
         const DOCS_PAGE: &'static str = "https://github.example.com/example-org/alpha";
         const RESTORED_SOCKET: &'static str = "recreated the socket";
+        const SAMPLED_PANE: u32 = 4242;
 
         fn two_waiting_sessions() -> ServiceFixture {
             Self::waiting_sessions(&[
@@ -790,6 +793,32 @@ mod tests {
             let usage = AgentUsage::new(vec![UsageRow::Limit(limit)]);
             Self::two_waiting_sessions()
                 .with_usage_meter(FakeUsageMeter::new().with_usage("claude", usage))
+        }
+
+        fn sampling_fix_auth() -> ServiceFixture {
+            let session = ServiceFixture::session("fix-auth");
+            let pane = ProcessFigures::new(Self::SAMPLED_PANE, 1, "claude");
+            let busy = pane.clone().with_cpu_time(Duration::from_millis(420));
+            ServiceFixture::new()
+                .with_sessions(std::slice::from_ref(&session))
+                .with_multiplexer(
+                    FakeMultiplexer::new()
+                        .with_live(ServiceFixture::waiting(&session))
+                        .with_pane_pids(session.tmux_name(), &[Self::SAMPLED_PANE]),
+                )
+                .with_process_meter(FakeProcessMeter::new().with_samples(vec![
+                    ProcessSample::new(Duration::ZERO, vec![pane]),
+                    ProcessSample::new(Duration::from_secs(1), vec![busy]),
+                ]))
+        }
+
+        fn sample_until_shown(app: &mut App, text: &str) -> bool {
+            let mut now = Instant::now();
+            Deadline::for_background_work().wait_until(|| {
+                app.on_tick(now);
+                now += LoadSample::INTERVAL;
+                Self::screen(app, 100, 28).contains(text)
+            })
         }
 
         fn spinner(screen: &str) -> Option<char> {
@@ -1369,7 +1398,7 @@ mod tests {
 
         assert_eq!(
             AppFixture::status_line(&app, 100),
-            " n new   u usage   ? help   q quit"
+            " n new   u usage   U resources   ? help   q quit"
         );
     }
 
@@ -3247,6 +3276,79 @@ mod tests {
         UiHarness::settle(&mut app);
 
         assert!(fixture.usage_meter().calls().is_empty());
+    }
+
+    #[test]
+    fn capital_u_opens_the_resource_view_and_closes_it_again() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press(&mut app, 'U');
+        let opened = AppFixture::screen(&app, 100, 28);
+        AppFixture::press(&mut app, 'U');
+
+        assert!(opened.contains("┌ Resources "));
+        assert!(!app.dialogs.is_open());
+    }
+
+    #[test]
+    fn escape_closes_the_resource_view() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, 'U');
+
+        app.handle_event(&UiHarness::key(KeyCode::Esc));
+
+        assert!(!app.dialogs.is_open());
+    }
+
+    #[test]
+    fn the_open_resource_view_shows_the_cpu_of_each_running_session() {
+        let fixture = AppFixture::sampling_fix_auth();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press(&mut app, 'U');
+
+        assert!(AppFixture::sample_until_shown(&mut app, "42.0%"));
+    }
+
+    #[test]
+    fn a_tick_with_the_resource_view_closed_samples_nothing() {
+        let fixture = AppFixture::sampling_fix_auth();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        app.on_tick(Instant::now());
+        UiHarness::settle(&mut app);
+
+        assert_eq!(fixture.process_meter().samples_taken(), 0);
+    }
+
+    #[test]
+    fn a_key_closes_the_resource_view_while_its_sample_is_still_running() {
+        let held = HeldCalls::all();
+        let fixture = AppFixture::sampling_fix_auth();
+        fixture.process_meter().on_sample(held.hook());
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, 'U');
+        app.on_tick(Instant::now());
+        held.wait_for(1);
+
+        AppFixture::press(&mut app, 'U');
+
+        held.release();
+        assert!(!app.dialogs.is_open());
+    }
+
+    #[test]
+    fn the_resource_view_samples_nothing_while_the_tui_lacks_focus() {
+        let fixture = AppFixture::sampling_fix_auth();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        app.handle_event(&Event::FocusLost);
+        AppFixture::press(&mut app, 'U');
+
+        app.on_tick(Instant::now());
+
+        assert_eq!(fixture.process_meter().samples_taken(), 0);
     }
 
     #[test]

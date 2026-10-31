@@ -12,6 +12,7 @@ use super::delete_sessions_dialog::DeleteSessionsDialog;
 use super::dialog_labels::DialogLabels;
 use super::home_path::HomePath;
 use super::rename_session_dialog::RenameSessionDialog;
+use super::resource_view::ResourceView;
 use super::session_finder::SessionFinder;
 use super::usage_view::UsageView;
 use crate::application::{BatchReport, DeleteImpact, SessionService};
@@ -30,12 +31,13 @@ pub enum Dialog {
     Help(Box<HelpView>),
     FindSession(Box<SessionFinder>),
     Usage(Box<UsageView>),
+    Resources(Box<ResourceView>),
 }
 
 impl Dialog {
     const WIDTH: u16 = 76;
     const HEIGHT: u16 = 22;
-    const HELP_HEIGHT: u16 = 40;
+    const HELP_HEIGHT: u16 = 41;
 
     pub fn open(opening: DialogOpening, service: &SessionService) -> Self {
         match opening {
@@ -50,6 +52,7 @@ impl Dialog {
             }
             DialogOpening::Help => Self::help(service),
             DialogOpening::Usage => Self::Usage(Box::new(UsageView::open(service))),
+            DialogOpening::Resources => Self::Resources(Box::default()),
         }
     }
 
@@ -92,10 +95,16 @@ impl Dialog {
         )))
     }
 
-    pub fn poll(&mut self, now: Instant, service: &SessionService) {
+    pub fn poll(
+        &mut self,
+        now: Instant,
+        service: &SessionService,
+        rows_to_sample: Option<&[SessionSummary]>,
+    ) {
         match self {
             Self::NewSession(dialog) => dialog.poll(),
             Self::Usage(view) => view.poll(now, service),
+            Self::Resources(view) => view.poll(now, service, rows_to_sample),
             Self::Delete(_)
             | Self::DeleteSessions(_)
             | Self::Rename(_)
@@ -128,6 +137,7 @@ impl Dialog {
             Self::Help(help) => help.handle_key(key),
             Self::FindSession(finder) => finder.handle_key(key),
             Self::Usage(view) => view.handle_key(key),
+            Self::Resources(view) => view.handle_key(key),
         }
     }
 
@@ -136,7 +146,11 @@ impl Dialog {
             Self::NewSession(dialog) => dialog.paste(text),
             Self::Rename(dialog) => dialog.paste(text),
             Self::FindSession(finder) => finder.paste(text),
-            Self::Delete(_) | Self::DeleteSessions(_) | Self::Help(_) | Self::Usage(_) => {}
+            Self::Delete(_)
+            | Self::DeleteSessions(_)
+            | Self::Help(_)
+            | Self::Usage(_)
+            | Self::Resources(_) => {}
         }
     }
 
@@ -145,7 +159,11 @@ impl Dialog {
             Self::NewSession(dialog) => dialog.fail(error),
             Self::Rename(dialog) => dialog.fail(error),
             Self::FindSession(finder) => finder.fail(error),
-            Self::Delete(_) | Self::DeleteSessions(_) | Self::Help(_) | Self::Usage(_) => {}
+            Self::Delete(_)
+            | Self::DeleteSessions(_)
+            | Self::Help(_)
+            | Self::Usage(_)
+            | Self::Resources(_) => {}
         }
     }
 
@@ -186,6 +204,9 @@ impl Dialog {
                 Self::render_lines(frame, inner, finder.lines(width, height, theme))
             }
             Self::Usage(view) => Self::render_lines(frame, inner, view.lines(width, height, theme)),
+            Self::Resources(view) => {
+                Self::render_lines(frame, inner, view.lines(width, height, theme))
+            }
         }
     }
 
@@ -202,13 +223,14 @@ impl Dialog {
             Self::Help(_) => HelpView::title(),
             Self::FindSession(_) => SessionFinder::TITLE,
             Self::Usage(_) => UsageView::TITLE,
+            Self::Resources(_) => ResourceView::TITLE,
         }
     }
 
     fn padding(&self) -> Padding {
         match self {
             Self::NewSession(_) => Padding::horizontal(1),
-            Self::Usage(_) => Padding::left(1),
+            Self::Usage(_) | Self::Resources(_) => Padding::left(1),
             Self::Delete(_)
             | Self::DeleteSessions(_)
             | Self::Rename(_)
@@ -225,7 +247,8 @@ impl Dialog {
             | Self::DeleteSessions(_)
             | Self::Rename(_)
             | Self::FindSession(_)
-            | Self::Usage(_) => Self::HEIGHT,
+            | Self::Usage(_)
+            | Self::Resources(_) => Self::HEIGHT,
         }
     }
 
@@ -248,6 +271,7 @@ pub enum DialogOpening {
     Rename(Box<Session>),
     Help,
     Usage,
+    Resources,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

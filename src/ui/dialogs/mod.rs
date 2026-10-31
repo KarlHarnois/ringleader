@@ -11,6 +11,7 @@ pub mod home_path;
 pub mod new_session;
 pub mod rename_session_dialog;
 pub mod repo_search;
+pub mod resource_view;
 pub mod scroll_window;
 pub mod session_candidate;
 pub mod session_finder;

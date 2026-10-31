@@ -323,6 +323,10 @@ impl ServiceFixture {
         &self.usage_meter
     }
 
+    pub fn process_meter(&self) -> &FakeProcessMeter {
+        &self.process_meter
+    }
+
     pub fn clock(&self) -> &FakeClock {
         &self.clock
     }

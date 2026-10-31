@@ -167,7 +167,7 @@ mod tests {
 
         assert_eq!(
             BarFixture::render(status, 95),
-            " n new   Enter fold   / find   u usage   ? help   q quit"
+            " n new   Enter fold   / find   u usage   U resources   ? help   q quit"
         );
     }
 
