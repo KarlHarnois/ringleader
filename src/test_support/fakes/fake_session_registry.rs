@@ -15,6 +15,7 @@ struct RegistryState {
     failing_saves: bool,
     load_error: Option<RegistryError>,
     moved_aside_copy: Option<PathBuf>,
+    failing_moved_aside_listing: bool,
 }
 
 impl FakeSessionRegistry {
@@ -40,6 +41,11 @@ impl FakeSessionRegistry {
 
     pub fn with_moved_aside_copy(self, path: &str) -> Self {
         self.state.lock().unwrap().moved_aside_copy = Some(PathBuf::from(path));
+        self
+    }
+
+    pub fn failing_moved_aside_listing(self) -> Self {
+        self.state.lock().unwrap().failing_moved_aside_listing = true;
         self
     }
 
@@ -114,7 +120,13 @@ impl SessionRegistry for FakeSessionRegistry {
     }
 
     fn moved_aside_copies(&self) -> Result<Vec<PathBuf>, RegistryError> {
-        let copy = self.state.lock().unwrap().moved_aside_copy.clone();
-        Ok(copy.into_iter().collect())
+        let state = self.state.lock().unwrap();
+        if state.failing_moved_aside_listing {
+            return Err(RegistryError::Io {
+                path: PathBuf::from("/state/ringleader"),
+                detail: "the state directory is unreadable".to_string(),
+            });
+        }
+        Ok(state.moved_aside_copy.clone().into_iter().collect())
     }
 }

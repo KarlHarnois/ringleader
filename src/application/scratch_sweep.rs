@@ -128,9 +128,13 @@ mod tests {
         }
 
         fn with_moved_aside_registry(copy: &str) -> Self {
+            Self::with_registry(FakeSessionRegistry::empty().with_moved_aside_copy(copy))
+        }
+
+        fn with_registry(registry: FakeSessionRegistry) -> Self {
             let service = ServiceFixture::new()
                 .with_scratch_space(Self::space())
-                .with_registry(FakeSessionRegistry::empty().with_moved_aside_copy(copy));
+                .with_registry(registry);
             Self { service }
         }
 
@@ -203,6 +207,23 @@ mod tests {
         assert!(fixture.service.scratch_space().retired().is_empty());
         assert_eq!(
             capture.count_containing("sessions.json.corrupt-7 can still claim them"),
+            1
+        );
+    }
+
+    #[test]
+    fn a_failed_moved_aside_listing_keeps_other_orphans_since_a_copy_may_exist() {
+        let capture = LogCapture::installed();
+        let fixture =
+            SweepFixture::with_registry(FakeSessionRegistry::empty().failing_moved_aside_listing());
+
+        fixture.retire_orphans();
+
+        assert!(fixture.service.scratch_space().retired().is_empty());
+        assert_eq!(
+            capture.count_containing(
+                "kept every other orphaned scratch directory: cannot access /state/ringleader"
+            ),
             1
         );
     }

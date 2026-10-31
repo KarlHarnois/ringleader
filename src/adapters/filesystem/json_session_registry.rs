@@ -198,6 +198,8 @@ impl SessionEntry {
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::fs::PermissionsExt;
+
     use super::*;
     use crate::test_support::{FakeClock, ServiceFixture};
 
@@ -210,6 +212,8 @@ mod tests {
 
     impl RegistryFixture {
         const NOW: u64 = 1_791_000_500;
+        const UNREADABLE_MODE: u32 = 0o300;
+        const OWNER_MODE: u32 = 0o700;
 
         fn new() -> Self {
             Self {
@@ -376,6 +380,26 @@ mod tests {
             .unwrap();
 
         assert_eq!(fixture.registry().moved_aside_copies().unwrap(), [moved]);
+    }
+
+    #[test]
+    fn an_unreadable_state_directory_fails_the_moved_aside_listing() {
+        let fixture = RegistryFixture::new();
+        let directory = fixture.directory.path();
+        fs::set_permissions(
+            directory,
+            fs::Permissions::from_mode(RegistryFixture::UNREADABLE_MODE),
+        )
+        .unwrap();
+
+        let listing = fixture.registry().moved_aside_copies();
+
+        fs::set_permissions(
+            directory,
+            fs::Permissions::from_mode(RegistryFixture::OWNER_MODE),
+        )
+        .unwrap();
+        assert!(matches!(listing, Err(RegistryError::Io { .. })));
     }
 
     #[test]
