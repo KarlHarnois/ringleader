@@ -23,13 +23,15 @@ impl MemorySize {
         let bytes = u128::from(self.bytes);
         let tenths = Self::rounded(bytes * Self::TENTHS_PER_UNIT, unit_bytes);
         if tenths < Self::TENTHS_SHOWN_UNDER {
-            let (whole, tenth) = (
-                tenths / Self::TENTHS_PER_UNIT,
-                tenths % Self::TENTHS_PER_UNIT,
-            );
-            return format!("{whole}.{tenth} {unit}");
+            return Self::label_with_a_tenth(tenths, unit);
         }
         format!("{} {unit}", Self::rounded(bytes, unit_bytes))
+    }
+
+    fn label_with_a_tenth(tenths: u128, unit: &str) -> String {
+        let whole = tenths / Self::TENTHS_PER_UNIT;
+        let tenth = tenths % Self::TENTHS_PER_UNIT;
+        format!("{whole}.{tenth} {unit}")
     }
 
     fn unit(self) -> Option<(&'static str, u128)> {
