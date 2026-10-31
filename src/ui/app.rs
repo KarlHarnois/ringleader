@@ -106,6 +106,7 @@ impl App {
     fn handle_dialog_event(&mut self, event: &Event) -> AppRequest {
         match self.dialogs.handle_event(event, &self.service) {
             DialogStep::Request(request) | DialogStep::CloseWith(request) => self.request(request),
+            DialogStep::Open(opening) => self.open_if_writable(opening),
             DialogStep::Stay | DialogStep::Close => AppRequest::Continue,
         }
     }
@@ -186,8 +187,11 @@ impl App {
     }
 
     fn open_new_session_then_attach(&mut self, repo: Option<PathBuf>) -> AppRequest {
+        self.open_if_writable(DialogOpening::NewSessionThenAttach(repo))
+    }
+
+    fn open_if_writable(&mut self, opening: DialogOpening) -> AppRequest {
         let gate = Self::gate(&self.home, &self.service);
-        let opening = DialogOpening::NewSessionThenAttach(repo);
         let action = KeyAction::from(gate.writable().map(|()| KeyAction::Open(opening)));
         self.take_action(action)
     }
@@ -3310,6 +3314,47 @@ mod tests {
         AppFixture::press(&mut app, 'U');
 
         assert!(AppFixture::sample_until_shown(&mut app, "42.0%"));
+    }
+
+    #[test]
+    fn n_in_the_resource_view_starts_a_session_prompted_to_diagnose_the_selected_one() {
+        let fixture = AppFixture::sampling_fix_auth();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, 'U');
+        AppFixture::sample_until_shown(&mut app, "42.0%");
+        AppFixture::press(&mut app, 'n');
+
+        let request = AppFixture::submit_new_session(&mut app, "diagnose-fix-auth");
+
+        let AppRequest::Block(BlockingOperation::Create(CreateStep::Stay(create))) = request else {
+            panic!("expected a create that stays in Ringleader, got {request:?}");
+        };
+        assert_eq!(create.repo().path(), Path::new(ServiceFixture::REPO));
+        assert_eq!(
+            create.prompt(),
+            [
+                "The Ringleader session fix-auth uses 42.0% CPU and 0 B of memory.",
+                "Its busiest processes:",
+                "- claude (pid 4242): 42.0% CPU, 0 B",
+                "Diagnose what causes this load and how to reduce it.",
+            ]
+            .join("\n")
+        );
+    }
+
+    #[test]
+    fn n_in_the_resource_view_is_refused_while_the_config_is_broken() {
+        let fixture =
+            AppFixture::sampling_fix_auth().with_broken_config(AppFixture::config_error());
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, 'U');
+        AppFixture::sample_until_shown(&mut app, "42.0%");
+
+        AppFixture::press(&mut app, 'n');
+
+        let screen = AppFixture::screen(&app, 100, 28);
+        assert!(screen.contains("┌ Resources "));
+        assert!(AppFixture::status_line(&app, 100).contains("config error, running read-only"));
     }
 
     #[test]

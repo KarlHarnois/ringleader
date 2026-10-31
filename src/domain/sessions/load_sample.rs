@@ -1,8 +1,10 @@
 use std::cmp::Reverse;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use super::session_load::{ProcessLoad, SessionLoad};
-use crate::domain::{CpuPercent, ProcessSample};
+use super::session_summary::SessionSummary;
+use crate::domain::{CpuPercent, ProcessSample, RepoGroup};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoadSample {
@@ -20,10 +22,11 @@ impl LoadSample {
         }
     }
 
-    pub fn attributing(mut self, session: &str, pane_pids: &[u32]) -> Self {
+    pub fn attributing(mut self, row: &SessionSummary, pane_pids: &[u32]) -> Self {
         let pids = self.processes.trees_from(pane_pids);
         self.sessions.push(SessionProcesses {
-            name: session.to_string(),
+            name: row.name().to_string(),
+            repo: RepoGroup::of(row).path().map(Path::to_path_buf),
             pids,
         });
         self
@@ -47,6 +50,7 @@ impl LoadSample {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SessionProcesses {
     name: String,
+    repo: Option<PathBuf>,
     pids: Vec<u32>,
 }
 
@@ -62,7 +66,7 @@ impl SampleInterval<'_> {
             .iter()
             .filter_map(|pid| self.process_load(*pid))
             .collect();
-        SessionLoad::new(&session.name, processes)
+        SessionLoad::new(&session.name, processes).in_repo(session.repo.as_deref())
     }
 
     fn process_load(&self, pid: u32) -> Option<ProcessLoad> {
@@ -75,8 +79,11 @@ impl SampleInterval<'_> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
-    use crate::domain::ProcessFigures;
+    use crate::domain::{ProcessFigures, SessionState};
+    use crate::test_support::ServiceFixture;
 
     struct LoadSampleFixture;
 
@@ -111,12 +118,16 @@ mod tests {
             )
         }
 
+        fn row(name: &str) -> SessionSummary {
+            SessionSummary::managed(ServiceFixture::session(name), SessionState::Working, false)
+        }
+
         fn loads(later: ProcessSample, sessions: &[(&str, u32)]) -> Vec<SessionLoad> {
             let attributed = |sample: ProcessSample| {
                 sessions
                     .iter()
                     .fold(LoadSample::new(sample), |sample, (name, pane)| {
-                        sample.attributing(name, &[*pane])
+                        sample.attributing(&Self::row(name), &[*pane])
                     })
             };
             attributed(later).loads_since(&attributed(Self::idle_baseline()))
@@ -167,8 +178,9 @@ mod tests {
             2,
             vec![LoadSampleFixture::process(LoadSampleFixture::PANE, 1, 1500)],
         );
+        let row = LoadSampleFixture::row("fix-auth");
         let attributed =
-            |sample| LoadSample::new(sample).attributing("fix-auth", &[LoadSampleFixture::PANE]);
+            |sample| LoadSample::new(sample).attributing(&row, &[LoadSampleFixture::PANE]);
 
         let loads = attributed(later).loads_since(&attributed(earlier));
 
@@ -194,6 +206,15 @@ mod tests {
         );
 
         assert_eq!(LoadSampleFixture::names(&loads), ["docs", "fix-auth"]);
+    }
+
+    #[test]
+    fn a_session_load_names_the_repo_of_its_session() {
+        let later = LoadSampleFixture::pane_tree_beside_a_stranger(0);
+
+        let loads = LoadSampleFixture::loads(later, &[("fix-auth", LoadSampleFixture::PANE)]);
+
+        assert_eq!(loads[0].repo(), Some(Path::new(ServiceFixture::REPO)));
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use crossterm::event::{Event, KeyEvent, KeyEventKind};
@@ -16,7 +16,7 @@ use super::resource_view::ResourceView;
 use super::session_finder::SessionFinder;
 use super::usage_view::UsageView;
 use crate::application::{BatchReport, DeleteImpact, SessionService};
-use crate::domain::{Session, SessionSummary};
+use crate::domain::{Session, SessionLoad, SessionSummary};
 use crate::ui::app::AppRequest;
 use crate::ui::dialogs::new_session::new_session_dialog::NewSessionDialog;
 use crate::ui::help::help_view::HelpView;
@@ -53,7 +53,14 @@ impl Dialog {
             DialogOpening::Help => Self::help(service),
             DialogOpening::Usage => Self::Usage(Box::new(UsageView::open(service))),
             DialogOpening::Resources => Self::Resources(Box::default()),
+            DialogOpening::Diagnosis(load) => Self::diagnosis(&load, service),
         }
+    }
+
+    fn diagnosis(load: &SessionLoad, service: &SessionService) -> Self {
+        let repo = load.repo().map(Path::to_path_buf);
+        let dialog = NewSessionDialog::open(service, repo).with_prompt(&load.diagnosis_prompt());
+        Self::NewSession(Box::new(dialog))
     }
 
     pub fn delete(
@@ -272,6 +279,7 @@ pub enum DialogOpening {
     Help,
     Usage,
     Resources,
+    Diagnosis(Box<SessionLoad>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -280,6 +288,7 @@ pub enum DialogStep {
     Close,
     Request(AppRequest),
     CloseWith(AppRequest),
+    Open(DialogOpening),
 }
 
 #[cfg(test)]

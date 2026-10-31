@@ -27,35 +27,35 @@ impl LoadMonitor {
 
     pub fn sample(&self, rows: &[SessionSummary]) -> Pending<LoadSample> {
         let monitor = self.clone();
-        let running: Vec<RunningSession> = rows
+        let running: Vec<SessionSummary> = rows
             .iter()
             .filter(|row| row.state() != SessionState::Stopped)
-            .map(RunningSession::of)
+            .cloned()
             .collect();
         Pending::start(move || monitor.sample_now(&running))
     }
 
-    fn sample_now(&self, sessions: &[RunningSession]) -> Result<LoadSample, ServiceError> {
-        let panes: Vec<(&RunningSession, Vec<u32>)> = sessions
+    fn sample_now(&self, sessions: &[SessionSummary]) -> Result<LoadSample, ServiceError> {
+        let panes: Vec<(&SessionSummary, Vec<u32>)> = sessions
             .iter()
             .filter_map(|session| Some((session, self.pane_pids(session)?)))
             .collect();
         let processes = self.processes()?;
         Ok(panes.iter().fold(
             LoadSample::new(processes),
-            |sample, (session, pane_pids)| sample.attributing(&session.name, pane_pids),
+            |sample, (session, pane_pids)| sample.attributing(session, pane_pids),
         ))
     }
 
-    fn pane_pids(&self, session: &RunningSession) -> Option<Vec<u32>> {
-        let listed = self.multiplexer.pane_pids(&session.tmux_name);
+    fn pane_pids(&self, session: &SessionSummary) -> Option<Vec<u32>> {
+        let listed = self.multiplexer.pane_pids(session.tmux_name());
         match &listed {
-            Ok(_) => self.failures.end(&session.name),
+            Ok(_) => self.failures.end(session.name()),
             Err(error) => self.failures.warn_once(
-                &session.name,
+                session.name(),
                 &format!(
                     "left {} out of the resource view, its panes could not be listed: {error}",
-                    session.name
+                    session.name()
                 ),
             ),
         }
@@ -71,20 +71,6 @@ impl LoadMonitor {
                 .warn_once(Self::PROCESS_TABLE_STREAK, &error.to_string()),
         }
         sampled
-    }
-}
-
-struct RunningSession {
-    name: String,
-    tmux_name: String,
-}
-
-impl RunningSession {
-    fn of(row: &SessionSummary) -> Self {
-        Self {
-            name: row.name().to_string(),
-            tmux_name: row.tmux_name().to_string(),
-        }
     }
 }
 

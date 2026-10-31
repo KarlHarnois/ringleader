@@ -54,6 +54,11 @@ impl NewSessionDialog {
         }
     }
 
+    pub fn with_prompt(mut self, prompt: &str) -> Self {
+        self.prompt.paste(prompt);
+        self
+    }
+
     pub fn attaching_after_create(self) -> Self {
         Self {
             creation: |request| BlockingOperation::Create(CreateStep::Attach(request)),

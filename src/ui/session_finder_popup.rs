@@ -105,7 +105,10 @@ impl SessionFinderPopup {
         match finder.handle_event(event, &self.service) {
             DialogStep::CloseWith(AppRequest::Attach(name)) => Some(Choice::Session(name)),
             DialogStep::Close => Some(Choice::Dismissed),
-            DialogStep::Stay | DialogStep::Request(_) | DialogStep::CloseWith(_) => None,
+            DialogStep::Stay
+            | DialogStep::Request(_)
+            | DialogStep::CloseWith(_)
+            | DialogStep::Open(_) => None,
         }
     }
 

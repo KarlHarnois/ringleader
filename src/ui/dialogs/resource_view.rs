@@ -7,7 +7,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::style::Style;
 use ratatui::text::Line;
 
-use super::dialog::DialogStep;
+use super::dialog::{DialogOpening, DialogStep};
 use crate::application::SessionService;
 use crate::domain::{CpuPercent, MemorySize, ProcessLoad, SessionLoad, SessionSummary};
 use crate::ui::background_jobs::resource_feed::{ResourceFeed, ResourceReading};
@@ -24,7 +24,7 @@ pub struct ResourceView {
 
 impl ResourceView {
     pub const TITLE: &'static str = " Resources ";
-    const HINTS: &'static str = "↑ ↓ j k choose · U Esc q close";
+    const HINTS: &'static str = "n diagnose · ↑ ↓ j k choose · U Esc q close";
     const MEASURING: &'static str = "Measuring CPU and memory…";
     const NO_RUNNING_SESSION: &'static str = "No session is running.";
     const UNREADABLE: &'static str = "could not read the processes";
@@ -46,6 +46,7 @@ impl ResourceView {
     pub fn handle_key(&mut self, key: &KeyEvent) -> DialogStep {
         match key.code {
             KeyCode::Char('U' | 'q') | KeyCode::Esc => return DialogStep::Close,
+            KeyCode::Char('n') => return self.diagnose_selected(),
             KeyCode::Down | KeyCode::Char('j') => self.move_selection(1),
             KeyCode::Up | KeyCode::Char('k') => self.move_selection(-1),
             _ => {}
@@ -58,6 +59,16 @@ impl ResourceView {
         let mut lines = self.body(width, room, theme);
         lines.push(self.footer(width, theme));
         lines
+    }
+
+    fn diagnose_selected(&self) -> DialogStep {
+        match self.selected_index() {
+            Some(index) => {
+                let load = self.loads()[index].clone();
+                DialogStep::Open(DialogOpening::Diagnosis(Box::new(load)))
+            }
+            None => DialogStep::Stay,
+        }
     }
 
     fn keep_a_listed_session_selected(&mut self) {
@@ -422,7 +433,7 @@ mod tests {
 
         assert_eq!(
             ViewFixture::rows(&view),
-            ["could not read the processes  ↑ ↓ j k choose · U Esc q close"]
+            ["could not read the processes  n diagnose · ↑ ↓ j k choose · U Esc q close"]
         );
     }
 
@@ -484,6 +495,41 @@ mod tests {
         ViewFixture::press(&mut view, KeyCode::Char('j'));
 
         assert!(ViewFixture::rows_within(&view, 2)[0].starts_with("docs "));
+    }
+
+    #[test]
+    fn n_asks_for_a_session_that_diagnoses_the_selected_session() {
+        let mut view = ViewFixture::fix_auth_busier().settled();
+
+        let step = ViewFixture::press(&mut view, KeyCode::Char('n'));
+
+        let DialogStep::Open(DialogOpening::Diagnosis(load)) = step else {
+            panic!("expected a diagnosis, got {step:?}");
+        };
+        assert_eq!(load.name(), "fix-auth");
+    }
+
+    #[test]
+    fn n_diagnoses_the_session_the_selection_moved_to() {
+        let mut view = ViewFixture::fix_auth_busier().settled();
+        ViewFixture::press(&mut view, KeyCode::Char('j'));
+
+        let step = ViewFixture::press(&mut view, KeyCode::Char('n'));
+
+        let DialogStep::Open(DialogOpening::Diagnosis(load)) = step else {
+            panic!("expected a diagnosis, got {step:?}");
+        };
+        assert_eq!(load.name(), "docs");
+    }
+
+    #[test]
+    fn n_before_the_first_reading_asks_for_nothing() {
+        let mut view = ViewFixture::fix_auth_busier().settled_after(1);
+
+        assert_eq!(
+            ViewFixture::press(&mut view, KeyCode::Char('n')),
+            DialogStep::Stay
+        );
     }
 
     #[test]
