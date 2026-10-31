@@ -158,15 +158,19 @@ impl ResourceView {
     }
 
     fn block(&self, load: &SessionLoad, width: usize, theme: &Theme) -> Vec<Line<'static>> {
-        let figures = Self::figures(load.cpu(), load.memory());
-        let heading = Self::row(load.name(), &figures, width);
         let processes = load
             .busiest()
             .iter()
             .map(|process| Self::process_line(process, width, theme));
-        once(Line::styled(heading, self.heading_style(load, theme)))
+        once(self.heading_line(load, width, theme))
             .chain(processes)
             .collect()
+    }
+
+    fn heading_line(&self, load: &SessionLoad, width: usize, theme: &Theme) -> Line<'static> {
+        let figures = Self::figures(load.cpu(), load.memory());
+        let heading = Self::row(load.name(), &figures, width);
+        Line::styled(heading, self.heading_style(load, theme))
     }
 
     fn heading_style(&self, load: &SessionLoad, theme: &Theme) -> Style {
