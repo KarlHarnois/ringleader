@@ -62,11 +62,8 @@ impl ResourceView {
     }
 
     fn diagnose_selected(&self) -> DialogStep {
-        match self.selected_index() {
-            Some(index) => {
-                let load = self.loads()[index].clone();
-                DialogStep::Open(DialogOpening::Diagnosis(Box::new(load)))
-            }
+        match self.selected_load() {
+            Some(load) => DialogStep::Open(DialogOpening::Diagnosis(Box::new(load.clone()))),
             None => DialogStep::Stay,
         }
     }
@@ -88,6 +85,10 @@ impl ResourceView {
 
     fn selected_index(&self) -> Option<usize> {
         self.loads().iter().position(|load| self.is_selected(load))
+    }
+
+    fn selected_load(&self) -> Option<&SessionLoad> {
+        self.loads().iter().find(|load| self.is_selected(load))
     }
 
     fn loads(&self) -> &[SessionLoad] {
