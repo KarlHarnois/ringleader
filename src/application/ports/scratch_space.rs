@@ -8,6 +8,7 @@ pub trait ScratchSpace: Send + Sync {
     fn remove(&self, worktree: &Path) -> Result<(), ScratchSpaceError>;
     fn directories(&self) -> Result<Vec<PathBuf>, ScratchSpaceError>;
     fn retire(&self, directory: &Path) -> Result<(), ScratchSpaceError>;
+    fn retired_directories(&self) -> Result<Vec<PathBuf>, ScratchSpaceError>;
     fn purge_retired(&self) -> Result<(), ScratchSpaceError>;
 }
 

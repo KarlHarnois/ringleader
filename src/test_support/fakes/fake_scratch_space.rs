@@ -13,6 +13,7 @@ struct ScratchState {
     calls: Vec<(&'static str, PathBuf)>,
     failing: Option<&'static str>,
     directories: Vec<PathBuf>,
+    unpurged: Vec<PathBuf>,
 }
 
 impl FakeScratchSpace {
@@ -34,6 +35,15 @@ impl FakeScratchSpace {
             .map(|worktree| self.directory(worktree))
             .collect();
         self.state.lock().unwrap().directories = directories;
+        self
+    }
+
+    pub fn with_unpurged(self, directory: &Path) -> Self {
+        self.state
+            .lock()
+            .unwrap()
+            .unpurged
+            .push(directory.to_path_buf());
         self
     }
 
@@ -108,6 +118,10 @@ impl ScratchSpace for FakeScratchSpace {
 
     fn retire(&self, directory: &Path) -> Result<(), ScratchSpaceError> {
         self.record_at(Self::RETIRE, directory, directory)
+    }
+
+    fn retired_directories(&self) -> Result<Vec<PathBuf>, ScratchSpaceError> {
+        Ok(self.state.lock().unwrap().unpurged.clone())
     }
 
     fn purge_retired(&self) -> Result<(), ScratchSpaceError> {

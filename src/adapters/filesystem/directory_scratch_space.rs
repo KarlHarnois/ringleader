@@ -173,11 +173,14 @@ impl ScratchSpace for DirectoryScratchSpace {
             .map_err(|error| Self::failure("retire", directory, &error))
     }
 
-    fn purge_retired(&self) -> Result<(), ScratchSpaceError> {
+    fn retired_directories(&self) -> Result<Vec<PathBuf>, ScratchSpaceError> {
         let retired = self.retired_root();
-        let directories = Self::sorted_entries_of(&retired)
-            .map_err(|error| Self::failure("list", &retired, &error))?;
-        let failures: Vec<ScratchSpaceError> = directories
+        Self::sorted_entries_of(&retired).map_err(|error| Self::failure("list", &retired, &error))
+    }
+
+    fn purge_retired(&self) -> Result<(), ScratchSpaceError> {
+        let failures: Vec<ScratchSpaceError> = self
+            .retired_directories()?
             .iter()
             .filter_map(|directory| self.remove_directory(directory).err())
             .collect();
@@ -600,6 +603,17 @@ mod tests {
         assert!(matches!(result, Err(ScratchSpaceError::HoldsMount { .. })));
         assert!(mounted.exists());
         assert_eq!(fixture.retired_count(), 1);
+    }
+
+    #[test]
+    fn a_retired_directory_is_listed_until_a_purge_removes_it() {
+        let fixture = ScratchFixture::new();
+        fixture.retire_created();
+        let retired = fixture
+            .retired()
+            .join(format!("{}-0", ScratchFixture::WORKTREE_HASH));
+
+        assert_eq!(fixture.space.retired_directories().unwrap(), [retired]);
     }
 
     #[test]

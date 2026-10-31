@@ -589,6 +589,18 @@ mod tests {
     }
 
     #[test]
+    fn a_retired_directory_still_on_disk_is_a_warning_since_no_listing_shows_it_otherwise() {
+        let space =
+            FakeScratchSpace::default().with_unpurged(Path::new("/scratch/.retired/stuck-0"));
+        let fixture = DoctorFixture::healthy().with_scratch_space(space);
+
+        assert!(DoctorFixture::has_warning(
+            &fixture,
+            "retired scratch directory /scratch/.retired/stuck-0 is still on disk"
+        ));
+    }
+
+    #[test]
     fn a_failed_scratch_listing_is_a_warning() {
         let fixture = DoctorFixture::healthy()
             .with_scratch_space(FakeScratchSpace::default().failing("list"));

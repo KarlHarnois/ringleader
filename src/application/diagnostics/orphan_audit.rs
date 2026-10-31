@@ -28,6 +28,7 @@ impl OrphanAudit {
 
     pub fn audit_scratch(&self, reconciliation: &Reconciliation, report: &mut DoctorReport) {
         self.report_moved_aside_registries(report);
+        self.report_unpurged(report);
         match self.scratch.directories() {
             Ok(directories) => self.report_orphan_scratch(reconciliation, directories, report),
             Err(error) => report.warning(format!(
@@ -51,6 +52,22 @@ impl OrphanAudit {
                 "corrupt registry {} keeps other sessions' orphaned scratch directories until it is restored or removed",
                 copy.display()
             ));
+        }
+    }
+
+    fn report_unpurged(&self, report: &mut DoctorReport) {
+        match self.scratch.retired_directories() {
+            Ok(directories) => {
+                for directory in directories {
+                    report.warning(format!(
+                        "retired scratch directory {} is still on disk, so a purge failed or is still running, see the log",
+                        directory.display()
+                    ));
+                }
+            }
+            Err(error) => report.warning(format!(
+                "cannot check for retired scratch directories: {error}"
+            )),
         }
     }
 
