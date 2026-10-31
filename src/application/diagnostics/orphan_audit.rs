@@ -28,9 +28,38 @@ impl OrphanAudit {
 
     pub fn audit_scratch(&self, reconciliation: &Reconciliation, report: &mut DoctorReport) {
         self.report_moved_aside_registries(report);
-        let Ok(directories) = self.scratch.directories() else {
-            return;
+        match self.scratch.directories() {
+            Ok(directories) => self.report_orphan_scratch(reconciliation, directories, report),
+            Err(error) => report.warning(format!(
+                "cannot check for orphaned scratch directories: {error}"
+            )),
+        }
+    }
+
+    fn report_moved_aside_registries(&self, report: &mut DoctorReport) {
+        let copies = match self.registry.moved_aside_copies() {
+            Ok(copies) => copies,
+            Err(error) => {
+                report.warning(format!(
+                    "cannot check for moved-aside registries, so deletes keep other sessions' orphaned scratch directories: {error}"
+                ));
+                return;
+            }
         };
+        for copy in copies {
+            report.warning(format!(
+                "corrupt registry {} keeps other sessions' orphaned scratch directories until it is restored or removed",
+                copy.display()
+            ));
+        }
+    }
+
+    fn report_orphan_scratch(
+        &self,
+        reconciliation: &Reconciliation,
+        directories: Vec<PathBuf>,
+        report: &mut DoctorReport,
+    ) {
         let claims = ScratchClaims::new(
             self.scratch.as_ref(),
             reconciliation.entries(),
@@ -40,15 +69,6 @@ impl OrphanAudit {
             report.warning(format!(
                 "orphaned scratch directory {}, no session claims it",
                 orphan.display()
-            ));
-        }
-    }
-
-    fn report_moved_aside_registries(&self, report: &mut DoctorReport) {
-        for copy in self.registry.moved_aside_copies().unwrap_or_default() {
-            report.warning(format!(
-                "corrupt registry {} keeps other sessions' orphaned scratch directories until it is restored or removed",
-                copy.display()
             ));
         }
     }

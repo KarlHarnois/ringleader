@@ -577,6 +577,29 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_moved_aside_listing_is_a_warning() {
+        let registry = FakeSessionRegistry::with_sessions(vec![DoctorFixture::session()])
+            .failing_moved_aside_listing();
+        let fixture = DoctorFixture::healthy().with_registry(registry);
+
+        assert!(DoctorFixture::has_warning(
+            &fixture,
+            "cannot check for moved-aside registries"
+        ));
+    }
+
+    #[test]
+    fn a_failed_scratch_listing_is_a_warning() {
+        let fixture = DoctorFixture::healthy()
+            .with_scratch_space(FakeScratchSpace::default().failing("list"));
+
+        assert!(DoctorFixture::has_warning(
+            &fixture,
+            "cannot check for orphaned scratch directories"
+        ));
+    }
+
+    #[test]
     fn an_orphaned_scratch_directory_is_a_warning() {
         let space = FakeScratchSpace::default().with_directories_of(&[
             ServiceFixture::worktree_path("fix-auth"),
