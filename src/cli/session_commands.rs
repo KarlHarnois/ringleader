@@ -1005,7 +1005,16 @@ mod tests {
     }
 
     #[test]
-    fn a_command_other_than_delete_purges_nothing() {
+    fn every_changing_command_purges_as_the_tui_does_after_each_change() {
+        let harness = CliHarness::new(CommandFixture::live());
+
+        harness.run(&["stop", "fix-auth"]);
+
+        assert_eq!(harness.fixture().scratch_space().purges(), 1);
+    }
+
+    #[test]
+    fn a_command_that_changes_nothing_purges_nothing() {
         let harness = CliHarness::new(CommandFixture::live());
 
         harness.run(&["list"]);

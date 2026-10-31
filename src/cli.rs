@@ -354,7 +354,7 @@ impl Cli {
     }
 
     fn purge_retired_scratch(&self, service: &SessionService, session: &CliSession) {
-        if matches!(self.command, Some(CliCommand::Delete(_))) {
+        if self.is_mutating() {
             service
                 .start_scratch_purge()
                 .wait_unless(|| session.is_signaled());
