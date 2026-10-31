@@ -37,8 +37,8 @@ impl DirectoryScratchSpace {
         }
     }
 
-    fn listed_entries(&self) -> io::Result<Vec<PathBuf>> {
-        match fs::read_dir(&self.root) {
+    fn entries_of(directory: &Path) -> io::Result<Vec<PathBuf>> {
+        match fs::read_dir(directory) {
             Ok(entries) => entries.map(|entry| Ok(entry?.path())).collect(),
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Vec::new()),
             Err(error) => Err(error),
@@ -152,8 +152,7 @@ impl ScratchSpace for DirectoryScratchSpace {
     }
 
     fn directories(&self) -> Result<Vec<PathBuf>, ScratchSpaceError> {
-        let entries = self
-            .listed_entries()
+        let entries = Self::entries_of(&self.root)
             .map_err(|error| Self::failure("list", &self.root, &error))?;
         Ok(entries
             .into_iter()
@@ -170,10 +169,13 @@ impl ScratchSpace for DirectoryScratchSpace {
 
     fn purge_retired(&self) -> Result<(), ScratchSpaceError> {
         let retired = self.retired_root();
-        if !retired.exists() {
-            return Ok(());
-        }
-        self.remove_directory(&retired)
+        let directories =
+            Self::entries_of(&retired).map_err(|error| Self::failure("list", &retired, &error))?;
+        let failures: Vec<ScratchSpaceError> = directories
+            .iter()
+            .filter_map(|directory| self.remove_directory(directory).err())
+            .collect();
+        failures.into_iter().next().map_or(Ok(()), Err)
     }
 }
 
@@ -227,7 +229,12 @@ mod tests {
         }
 
         fn with_mount_inside(self) -> Self {
-            let point = fs::canonicalize(self.scratch()).unwrap().join("mnt");
+            let scratch = self.scratch();
+            self.with_mount_in(&scratch)
+        }
+
+        fn with_mount_in(self, directory: &Path) -> Self {
+            let point = fs::canonicalize(directory).unwrap().join("mnt");
             let line = format!(
                 "41 30 0:40 / {} rw - fuse.sshfs host: rw\n",
                 point.display()
@@ -290,8 +297,12 @@ mod tests {
         }
 
         fn retire_created(&self) {
-            self.space.create(Self::worktree()).unwrap();
-            self.space.retire(&self.scratch()).unwrap();
+            self.retire_scratch_of(Self::worktree());
+        }
+
+        fn retire_scratch_of(&self, worktree: &Path) {
+            self.space.create(worktree).unwrap();
+            self.space.retire(&self.space.directory(worktree)).unwrap();
         }
 
         fn mode(path: &Path) -> u32 {
@@ -565,7 +576,24 @@ mod tests {
 
         fixture.space.purge_retired().unwrap();
 
-        assert!(!fixture.retired().exists());
+        assert_eq!(fixture.retired_count(), 0);
+    }
+
+    #[test]
+    fn a_purge_keeps_only_the_retired_directory_that_holds_a_mount() {
+        let fixture = ScratchFixture::new();
+        fixture.retire_created();
+        fixture.retire_scratch_of(Path::new(ScratchFixture::OTHER_WORKTREE));
+        let mounted = fixture
+            .retired()
+            .join(format!("{}-0", ScratchFixture::WORKTREE_HASH));
+        let fixture = fixture.with_mount_in(&mounted);
+
+        let result = fixture.space.purge_retired();
+
+        assert!(matches!(result, Err(ScratchSpaceError::HoldsMount { .. })));
+        assert!(mounted.exists());
+        assert_eq!(fixture.retired_count(), 1);
     }
 
     #[test]
