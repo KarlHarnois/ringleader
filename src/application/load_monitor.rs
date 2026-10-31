@@ -38,7 +38,7 @@ impl LoadMonitor {
     }
 
     fn sample_now(&self, sessions: &[SessionSummary]) -> Result<LoadSample, ServiceError> {
-        let panes = self.panes_of(sessions);
+        let panes = self.panes_of(sessions)?;
         let processes = self.processes()?;
         Ok(panes.iter().fold(
             LoadSample::new(processes),
@@ -46,24 +46,25 @@ impl LoadMonitor {
         ))
     }
 
-    fn panes_of<'a>(&self, sessions: &'a [SessionSummary]) -> Vec<(&'a SessionSummary, Vec<u32>)> {
-        let Some(listed) = self.pane_pids_by_session() else {
-            return Vec::new();
-        };
-        sessions
+    fn panes_of<'a>(
+        &self,
+        sessions: &'a [SessionSummary],
+    ) -> Result<Vec<(&'a SessionSummary, Vec<u32>)>, MultiplexerError> {
+        let listed = self.pane_pids_by_session()?;
+        Ok(sessions
             .iter()
             .map(|session| (session, Self::pane_pids_of(&listed, session)))
-            .collect()
+            .collect())
     }
 
     fn pane_pids_of(listed: &HashMap<String, Vec<u32>>, session: &SessionSummary) -> Vec<u32> {
         listed.get(session.tmux_name()).cloned().unwrap_or_default()
     }
 
-    fn pane_pids_by_session(&self) -> Option<HashMap<String, Vec<u32>>> {
+    fn pane_pids_by_session(&self) -> Result<HashMap<String, Vec<u32>>, MultiplexerError> {
         let listed = self.multiplexer.pane_pids_by_session();
         self.track_pane_listing_failure(&listed);
-        listed.ok()
+        listed
     }
 
     fn processes(&self) -> Result<ProcessSample, ProcessMeterError> {
@@ -81,7 +82,7 @@ impl LoadMonitor {
             Err(error) => self.failures.warn_once(
                 Self::PANE_LISTING_STREAK,
                 &format!(
-                    "left every session out of the load figures, their panes could not be listed: {error}"
+                    "could not measure the sessions' load, their panes could not be listed: {error}"
                 ),
             ),
         }
@@ -210,7 +211,7 @@ mod tests {
     }
 
     #[test]
-    fn every_session_is_left_out_while_the_panes_cannot_be_listed() {
+    fn a_failed_pane_listing_fails_the_sample_so_running_sessions_never_look_stopped() {
         let failure = MultiplexerError::Failed {
             subcommand: "list-panes".to_string(),
             detail: "server exited unexpectedly".to_string(),
@@ -219,7 +220,7 @@ mod tests {
             MonitorFixture::fix_auth_and_docs().failing("pane_pids_by_session", failure);
         let monitor = MonitorFixture::monitor(multiplexer, FakeProcessMeter::new());
 
-        let loads = MonitorFixture::loads(
+        let sampled = MonitorFixture::sampled(
             &monitor,
             &[
                 MonitorFixture::row("fix-auth", SessionState::Waiting),
@@ -227,7 +228,7 @@ mod tests {
             ],
         );
 
-        assert!(loads.is_empty());
+        assert!(sampled.is_err());
     }
 
     #[test]
