@@ -87,8 +87,7 @@ impl ResourceView {
     }
 
     fn selected_index(&self) -> Option<usize> {
-        let selected = self.selected.as_deref()?;
-        self.loads().iter().position(|load| load.name() == selected)
+        self.loads().iter().position(|load| self.is_selected(load))
     }
 
     fn loads(&self) -> &[SessionLoad] {
