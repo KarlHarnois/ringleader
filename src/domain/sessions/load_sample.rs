@@ -123,14 +123,23 @@ mod tests {
         }
 
         fn loads(later: ProcessSample, sessions: &[(&str, u32)]) -> Vec<SessionLoad> {
-            let attributed = |sample: ProcessSample| {
-                sessions
-                    .iter()
-                    .fold(LoadSample::new(sample), |sample, (name, pane)| {
-                        sample.attributing(&Self::row(name), &[*pane])
-                    })
-            };
-            attributed(later).loads_since(&attributed(Self::idle_baseline()))
+            Self::loads_between(Self::idle_baseline(), later, sessions)
+        }
+
+        fn loads_between(
+            earlier: ProcessSample,
+            later: ProcessSample,
+            sessions: &[(&str, u32)],
+        ) -> Vec<SessionLoad> {
+            Self::attributed(later, sessions).loads_since(&Self::attributed(earlier, sessions))
+        }
+
+        fn attributed(sample: ProcessSample, sessions: &[(&str, u32)]) -> LoadSample {
+            sessions
+                .iter()
+                .fold(LoadSample::new(sample), |sample, (name, pane)| {
+                    sample.attributing(&Self::row(name), &[*pane])
+                })
         }
 
         fn pane_tree_beside_a_stranger(milliseconds_each: u64) -> ProcessSample {
@@ -178,11 +187,12 @@ mod tests {
             2,
             vec![LoadSampleFixture::process(LoadSampleFixture::PANE, 1, 1500)],
         );
-        let row = LoadSampleFixture::row("fix-auth");
-        let attributed =
-            |sample| LoadSample::new(sample).attributing(&row, &[LoadSampleFixture::PANE]);
 
-        let loads = attributed(later).loads_since(&attributed(earlier));
+        let loads = LoadSampleFixture::loads_between(
+            earlier,
+            later,
+            &[("fix-auth", LoadSampleFixture::PANE)],
+        );
 
         assert_eq!(loads[0].cpu().to_string(), "25.0%");
     }
