@@ -66,6 +66,7 @@ impl<'a> SessionCommands<'a> {
         let rows = self.service.observe()?;
         let earlier = self.session.wait(&self.service.sample_load(&rows))?;
         thread::sleep(LoadSample::INTERVAL);
+        self.session.stop_if_signaled()?;
         let later = self.session.wait(&self.service.sample_load(&rows))?;
         Ok(later.loads_since(&earlier))
     }
@@ -525,6 +526,21 @@ mod tests {
         harness.run(&["top"]);
 
         assert!(harness.lock_acquisitions().is_empty());
+    }
+
+    #[test]
+    fn an_interrupt_while_top_waits_between_samples_ends_it_without_the_report() {
+        let harness = CliHarness::new(TopFixture::docs_busier_than_fix_auth());
+        let signals = harness.signals().clone();
+        harness
+            .fixture()
+            .process_meter()
+            .on_sample(move || signals.raise(SIGINT));
+
+        let exit = harness.run(&["top"]);
+
+        assert!(matches!(exit, CliExit::Interrupted { signal: SIGINT, .. }));
+        assert_eq!(harness.stdout(), "");
     }
 
     #[test]
