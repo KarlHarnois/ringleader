@@ -1,8 +1,8 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::pending::Pending;
-use super::ports::{HostProbe, ProcessInfo, ScratchSpace};
+use super::ports::{HostProbe, ProcessInfo, ScratchSpace, SessionRegistry};
 use super::scratch_claims::ScratchClaims;
 use super::service_ports::ServicePorts;
 use crate::domain::{Session, SessionObservation};
@@ -10,6 +10,7 @@ use crate::domain::{Session, SessionObservation};
 pub struct ScratchSweep {
     space: Arc<dyn ScratchSpace>,
     host: Arc<dyn HostProbe>,
+    registry: Arc<dyn SessionRegistry>,
 }
 
 impl ScratchSweep {
@@ -17,17 +18,17 @@ impl ScratchSweep {
         Self {
             space: ports.state().scratch_space(),
             host: ports.repos().host(),
+            registry: ports.state().registry(),
         }
     }
 
     pub fn retire_orphans(&self, entries: &[Session], observations: &[SessionObservation]) {
-        let claims = ScratchClaims::new(self.space.as_ref(), entries, observations);
-        match self.space.directories() {
-            Ok(directories) => {
-                for orphan in claims.orphans(directories) {
-                    self.retire_unless_in_use(&orphan);
-                }
-            }
+        match self.registry.moved_aside_copies() {
+            Ok(copies) if copies.is_empty() => self.retire_unclaimed(entries, observations),
+            Ok(copies) => log::warn!(
+                "kept every orphaned scratch directory, since {} can still claim some",
+                Self::listed(&copies)
+            ),
             Err(error) => log::warn!("kept every orphaned scratch directory: {error}"),
         }
     }
@@ -40,6 +41,26 @@ impl ScratchSweep {
             }
             Ok(())
         })
+    }
+
+    fn listed(copies: &[PathBuf]) -> String {
+        copies
+            .iter()
+            .map(|copy| copy.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    fn retire_unclaimed(&self, entries: &[Session], observations: &[SessionObservation]) {
+        let claims = ScratchClaims::new(self.space.as_ref(), entries, observations);
+        match self.space.directories() {
+            Ok(directories) => {
+                for orphan in claims.orphans(directories) {
+                    self.retire_unless_in_use(&orphan);
+                }
+            }
+            Err(error) => log::warn!("kept every orphaned scratch directory: {error}"),
+        }
     }
 
     fn retire_unless_in_use(&self, orphan: &Path) {
@@ -71,7 +92,9 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::test_support::{FakeHostProbe, FakeScratchSpace, LogCapture, ServiceFixture};
+    use crate::test_support::{
+        FakeHostProbe, FakeScratchSpace, FakeSessionRegistry, LogCapture, ServiceFixture,
+    };
 
     struct SweepFixture {
         service: ServiceFixture,
@@ -90,6 +113,13 @@ mod tests {
             let service = ServiceFixture::new()
                 .with_scratch_space(space)
                 .with_host(host);
+            Self { service }
+        }
+
+        fn with_moved_aside_registry() -> Self {
+            let service = ServiceFixture::new()
+                .with_scratch_space(Self::space())
+                .with_registry(FakeSessionRegistry::empty().with_moved_aside_copy());
             Self { service }
         }
 
@@ -144,6 +174,20 @@ mod tests {
         fixture.retire_orphans();
 
         assert!(fixture.service.scratch_space().retired().is_empty());
+    }
+
+    #[test]
+    fn a_moved_aside_registry_keeps_every_orphan_because_it_can_hold_stopped_sessions() {
+        let capture = LogCapture::installed();
+        let fixture = SweepFixture::with_moved_aside_registry();
+
+        fixture.retire_orphans();
+
+        assert!(fixture.service.scratch_space().retired().is_empty());
+        assert_eq!(
+            capture.count_containing("sessions.json.corrupt-1 can still claim some"),
+            1
+        );
     }
 
     #[test]

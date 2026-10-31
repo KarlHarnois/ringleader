@@ -17,6 +17,7 @@
 
 - Decide which scratch directories are orphaned only under the write lock, from the registry reread under that lock. A listing taken before the lock can predate another process's create.
 - Keep an orphaned scratch directory that a live process runs in.
+- While a corrupt registry that Ringleader moved aside still exists, keep every orphaned scratch directory. The stopped sessions in that copy can still claim them.
 - Retire an orphaned scratch directory under the write lock, and purge retired directories outside the write lock. Removing several gigabytes under the write lock blocks every CLI command.
 - A purge keeps a retired directory that holds a mount point.
 - If the mount table cannot be read, a purge keeps every retired directory.

@@ -18,6 +18,8 @@ struct RegistryState {
 }
 
 impl FakeSessionRegistry {
+    const MOVED_ASIDE_PATH: &str = "/state/ringleader/sessions.json.corrupt-1";
+
     pub fn empty() -> Self {
         Self::with_sessions(Vec::new())
     }
@@ -33,6 +35,11 @@ impl FakeSessionRegistry {
 
     pub fn failing_saves(self) -> Self {
         self.state.lock().unwrap().failing_saves = true;
+        self
+    }
+
+    pub fn with_moved_aside_copy(self) -> Self {
+        self.state.lock().unwrap().moved_aside = true;
         self
     }
 
@@ -103,6 +110,12 @@ impl SessionRegistry for FakeSessionRegistry {
         state.moved_aside = true;
         state.load_error = None;
         state.sessions.clear();
-        Ok(PathBuf::from("/state/ringleader/sessions.json.corrupt-1"))
+        Ok(PathBuf::from(Self::MOVED_ASIDE_PATH))
+    }
+
+    fn moved_aside_copies(&self) -> Result<Vec<PathBuf>, RegistryError> {
+        let moved_aside = self.state.lock().unwrap().moved_aside;
+        let copies = moved_aside.then(|| PathBuf::from(Self::MOVED_ASIDE_PATH));
+        Ok(copies.into_iter().collect())
     }
 }

@@ -19,6 +19,7 @@ pub struct JsonSessionRegistry {
 
 impl JsonSessionRegistry {
     pub const SCHEMA_VERSION: u64 = 2;
+    const MOVED_ASIDE_PREFIX: &str = "sessions.json.corrupt-";
 
     pub fn new(path: &Path, clock: Arc<dyn Clock>) -> Self {
         Self {
@@ -66,6 +67,19 @@ impl JsonSessionRegistry {
             })
             .collect()
     }
+
+    fn moved_aside_among(entries: fs::ReadDir) -> Vec<PathBuf> {
+        entries
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(Self::MOVED_ASIDE_PREFIX)
+            })
+            .map(|entry| entry.path())
+            .collect()
+    }
 }
 
 impl SessionRegistry for JsonSessionRegistry {
@@ -89,10 +103,25 @@ impl SessionRegistry for JsonSessionRegistry {
     }
 
     fn move_aside_corrupt(&self) -> Result<PathBuf, RegistryError> {
-        let name = format!("sessions.json.corrupt-{}", self.clock.now_epoch_seconds());
+        let name = format!(
+            "{}{}",
+            Self::MOVED_ASIDE_PREFIX,
+            self.clock.now_epoch_seconds()
+        );
         let destination = self.path().with_file_name(name);
         fs::rename(self.path(), &destination).map_err(|error| self.io_error(error))?;
         Ok(destination)
+    }
+
+    fn moved_aside_copies(&self) -> Result<Vec<PathBuf>, RegistryError> {
+        let Some(directory) = self.path().parent() else {
+            return Ok(Vec::new());
+        };
+        match fs::read_dir(directory) {
+            Ok(entries) => Ok(Self::moved_aside_among(entries)),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Vec::new()),
+            Err(error) => Err(self.io_error(error)),
+        }
     }
 }
 
@@ -333,6 +362,31 @@ mod tests {
                 .join("sessions.json.corrupt-1791000500")
         );
         assert!(!fixture.path().exists());
+    }
+
+    #[test]
+    fn a_moved_aside_registry_is_listed_until_someone_removes_it() {
+        let fixture = RegistryFixture::with_contents("{ not json");
+        let moved = fixture.registry().move_aside_corrupt().unwrap();
+        fixture
+            .registry()
+            .save(&[ServiceFixture::session("fix-auth")])
+            .unwrap();
+
+        assert_eq!(fixture.registry().moved_aside_copies().unwrap(), [moved]);
+    }
+
+    #[test]
+    fn a_missing_state_directory_holds_no_moved_aside_registry() {
+        let fixture = RegistryFixture::new();
+        let missing = fixture
+            .directory
+            .path()
+            .join("missing")
+            .join("sessions.json");
+        let registry = JsonSessionRegistry::new(&missing, Arc::new(FakeClock::at(0)));
+
+        assert!(registry.moved_aside_copies().unwrap().is_empty());
     }
 
     #[test]
