@@ -25,7 +25,8 @@ pub struct ResourceView {
 
 impl ResourceView {
     pub const TITLE: &'static str = " Resources ";
-    const HINTS: &'static str = "n diagnose · ↑ ↓ j k choose · U Esc q close";
+    const SESSION_KEYS_HINT: &'static str = "n diagnose · ↑ ↓ j k choose · ";
+    const CLOSE_HINT: &'static str = "U Esc q close";
     const MEASURING: &'static str = "Measuring CPU and memory…";
     const NO_RUNNING_SESSION: &'static str = "No session is running.";
     const MEASUREMENT_FAILED: &'static str = "could not measure the sessions";
@@ -208,7 +209,14 @@ impl ResourceView {
     }
 
     fn footer(&self, width: usize, theme: &Theme) -> Line<'static> {
-        DialogFooter::new(self.status(), Self::HINTS).line(width, theme)
+        DialogFooter::new(self.status(), &self.hints()).line(width, theme)
+    }
+
+    fn hints(&self) -> String {
+        if self.loads().is_empty() {
+            return Self::CLOSE_HINT.to_string();
+        }
+        format!("{}{}", Self::SESSION_KEYS_HINT, Self::CLOSE_HINT)
     }
 
     fn status(&self) -> &'static str {
@@ -245,7 +253,7 @@ mod tests {
         const DOCS_PANE: u32 = 200;
         const DENIAL: &'static str = "example denial of one sample";
         const MEASUREMENT_FAILED_FOOTER: &'static str =
-            "could not measure the sessions  n diagnose · ↑ ↓ j k choose · U Esc q close";
+            "could not measure the sessions       U Esc q close";
 
         fn sampling(samples: Vec<ProcessSample>) -> Self {
             Self::sampling_from(FakeProcessMeter::new().with_samples(samples))
@@ -490,6 +498,26 @@ mod tests {
         assert_eq!(
             ViewFixture::rows(&view),
             [ViewFixture::MEASUREMENT_FAILED_FOOTER]
+        );
+    }
+
+    #[test]
+    fn a_view_that_lists_no_session_offers_only_the_keys_that_close_it() {
+        let view = ViewFixture::sampling(Vec::new()).settled_after(1);
+
+        assert_eq!(
+            ViewFixture::rows(&view).last().unwrap(),
+            "                                     U Esc q close"
+        );
+    }
+
+    #[test]
+    fn a_view_that_lists_sessions_offers_the_keys_that_act_on_them() {
+        let view = ViewFixture::fix_auth_busier().settled();
+
+        assert_eq!(
+            ViewFixture::rows(&view).last().unwrap(),
+            "       n diagnose · ↑ ↓ j k choose · U Esc q close"
         );
     }
 
