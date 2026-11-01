@@ -253,20 +253,6 @@ mod tests {
     }
 
     #[test]
-    fn a_running_process_holds_resident_memory() {
-        let figures = LibprocProcessTable::figures(std::process::id()).unwrap();
-
-        assert!(figures.resident_memory() > MemorySize::default());
-    }
-
-    #[test]
-    fn a_process_that_ran_has_spent_cpu_time() {
-        let figures = LibprocProcessTable::figures(std::process::id()).unwrap();
-
-        assert!(figures.cpu_time_since(None) > Duration::ZERO);
-    }
-
-    #[test]
     fn a_child_is_read_with_its_parent_and_arguments() {
         let child = ProcessMarker::new().sleeping_child();
 

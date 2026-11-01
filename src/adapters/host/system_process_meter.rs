@@ -32,17 +32,19 @@ impl ProcessMeter for SystemProcessMeter {
 
 #[cfg(test)]
 mod tests {
+    use std::ops::RangeInclusive;
     use std::process::{Child, Command};
     use std::time::Duration;
 
     use super::*;
-    use crate::domain::ProcessFigures;
+    use crate::domain::{MemorySize, ProcessFigures};
     use crate::test_support::{Deadline, ProcessMarker};
 
     struct MeterFixture;
 
     impl MeterFixture {
         const BUSY_LOOP: &'static str = "while :; do :; done";
+        const CPU_TIME_TARGET: Duration = Duration::from_millis(100);
 
         fn busy_child(marker: &ProcessMarker) -> Child {
             Command::new("sh")
@@ -65,9 +67,61 @@ mod tests {
             figures
         }
 
+        fn memory_readings_once_they_agree(meter: &SystemProcessMeter, pid: u32) -> MemoryReadings {
+            let mut readings = MemoryReadings::default();
+            Deadline::for_background_work().wait_until(|| {
+                readings = MemoryReadings::take(meter, pid);
+                readings.agree()
+            });
+            readings
+        }
+
         fn end(mut child: Child) {
             child.kill().unwrap();
             child.wait().unwrap();
+        }
+    }
+
+    #[derive(Debug, Default)]
+    struct MemoryReadings {
+        sampled: Option<MemorySize>,
+        kibibytes_from_ps: Option<u64>,
+    }
+
+    impl MemoryReadings {
+        const BYTES_PER_KIBIBYTE: u64 = 1024;
+
+        fn take(meter: &SystemProcessMeter, pid: u32) -> Self {
+            Self {
+                sampled: meter
+                    .sample()
+                    .unwrap()
+                    .figures_of(pid)
+                    .map(ProcessFigures::resident_memory),
+                kibibytes_from_ps: Self::ask_ps_for_kibibytes(pid),
+            }
+        }
+
+        fn agree(&self) -> bool {
+            self.sampled
+                .zip(self.kibibytes_from_ps)
+                .is_some_and(|(sampled, kibibytes)| {
+                    Self::sizes_within_half_of(kibibytes).contains(&sampled)
+                })
+        }
+
+        fn ask_ps_for_kibibytes(pid: u32) -> Option<u64> {
+            let output = Command::new("ps")
+                .args(["-o", "rss=", "-p", &pid.to_string()])
+                .output()
+                .ok()?;
+            String::from_utf8_lossy(&output.stdout).trim().parse().ok()
+        }
+
+        fn sizes_within_half_of(kibibytes: u64) -> RangeInclusive<MemorySize> {
+            let bytes = kibibytes * Self::BYTES_PER_KIBIBYTE;
+            let half = bytes / 2;
+            MemorySize::of_bytes(bytes - half)..=MemorySize::of_bytes(bytes + half)
         }
     }
 
@@ -85,17 +139,35 @@ mod tests {
     }
 
     #[test]
-    fn a_busy_child_is_sampled_with_the_cpu_time_it_spent() {
+    fn a_busy_child_is_sampled_with_cpu_time_that_keeps_pace_with_the_clock() {
         let marker = ProcessMarker::new();
+        let started = Instant::now();
         let child = MeterFixture::busy_child(&marker);
         let meter = SystemProcessMeter::new(marker.table());
 
         let figures = MeterFixture::figures_once(&meter, child.id(), |figures| {
-            figures.cpu_time_since(None) > Duration::ZERO
+            figures.cpu_time_since(None) >= MeterFixture::CPU_TIME_TARGET
         });
+        let ran_for = started.elapsed();
         MeterFixture::end(child);
 
-        assert!(figures.is_some());
+        let spent = figures.map(|figures| figures.cpu_time_since(None));
+        assert!(
+            spent.is_some_and(|spent| (MeterFixture::CPU_TIME_TARGET..=ran_for).contains(&spent)),
+            "a child busy for {ran_for:?} spent {spent:?} of CPU time"
+        );
+    }
+
+    #[test]
+    fn a_sleeping_child_is_sampled_with_the_resident_memory_that_ps_reports() {
+        let marker = ProcessMarker::new();
+        let child = marker.sleeping_child();
+        let meter = SystemProcessMeter::new(marker.table());
+
+        let readings = MeterFixture::memory_readings_once_they_agree(&meter, child.id());
+        MeterFixture::end(child);
+
+        assert!(readings.agree(), "{readings:?}");
     }
 
     #[test]

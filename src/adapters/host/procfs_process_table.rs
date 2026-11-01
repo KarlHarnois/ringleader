@@ -279,13 +279,6 @@ mod tests {
     }
 
     #[test]
-    fn a_running_process_holds_resident_memory() {
-        let figures = ProcfsProcessTable::figures(std::process::id()).unwrap();
-
-        assert!(figures.resident_memory() > MemorySize::default());
-    }
-
-    #[test]
     fn a_pid_that_no_process_has_has_no_figures() {
         assert_eq!(ProcfsProcessTable::figures(u32::MAX), None);
     }
