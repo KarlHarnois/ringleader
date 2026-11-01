@@ -7,16 +7,19 @@ use super::process_figures::ProcessFigures;
 pub struct ProcessSample {
     taken_at: Duration,
     processes: BTreeMap<u32, ProcessFigures>,
+    children: HashMap<u32, Vec<u32>>,
 }
 
 impl ProcessSample {
     pub fn new(taken_at: Duration, processes: Vec<ProcessFigures>) -> Self {
+        let processes: BTreeMap<u32, ProcessFigures> = processes
+            .into_iter()
+            .map(|process| (process.pid(), process))
+            .collect();
         Self {
             taken_at,
-            processes: processes
-                .into_iter()
-                .map(|process| (process.pid(), process))
-                .collect(),
+            children: Self::children_by_parent(&processes),
+            processes,
         }
     }
 
@@ -29,7 +32,6 @@ impl ProcessSample {
     }
 
     pub fn trees_from(&self, roots: &[u32]) -> Vec<u32> {
-        let children = self.children_by_parent();
         let mut tree = Vec::new();
         let mut reached = HashSet::new();
         let mut waiting: Vec<u32> = roots
@@ -40,15 +42,15 @@ impl ProcessSample {
         while let Some(pid) = waiting.pop() {
             if reached.insert(pid) {
                 tree.push(pid);
-                waiting.extend(children.get(&pid).into_iter().flatten());
+                waiting.extend(self.children.get(&pid).into_iter().flatten());
             }
         }
         tree
     }
 
-    fn children_by_parent(&self) -> HashMap<u32, Vec<u32>> {
+    fn children_by_parent(processes: &BTreeMap<u32, ProcessFigures>) -> HashMap<u32, Vec<u32>> {
         let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
-        for process in self.processes.values() {
+        for process in processes.values() {
             children
                 .entry(process.parent())
                 .or_default()
