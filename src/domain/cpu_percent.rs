@@ -4,35 +4,47 @@ use std::time::Duration;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct CpuPercent {
-    tenths: u64,
+    millionths_of_a_core: u64,
 }
 
 impl CpuPercent {
+    const MILLIONTHS_OF_ONE_CORE: u128 = 1_000_000;
+    const MILLIONTHS_PER_TENTH: u64 = 1_000;
     const TENTHS_PER_PERCENT: u64 = 10;
-    const TENTHS_OF_ONE_CORE: u128 = 1000;
 
     pub fn of(cpu_time: Duration, elapsed: Duration) -> Self {
         let elapsed = elapsed.as_nanos();
         if elapsed == 0 {
             return Self::default();
         }
-        let tenths = (cpu_time.as_nanos() * Self::TENTHS_OF_ONE_CORE + elapsed / 2) / elapsed;
+        let millionths =
+            (cpu_time.as_nanos() * Self::MILLIONTHS_OF_ONE_CORE + elapsed / 2) / elapsed;
         Self {
-            tenths: u64::try_from(tenths).unwrap_or(u64::MAX),
+            millionths_of_a_core: u64::try_from(millionths).unwrap_or(u64::MAX),
         }
     }
 
     fn label(self) -> String {
-        let whole = self.tenths / Self::TENTHS_PER_PERCENT;
-        let tenth = self.tenths % Self::TENTHS_PER_PERCENT;
+        let tenths = self.tenths();
+        let whole = tenths / Self::TENTHS_PER_PERCENT;
+        let tenth = tenths % Self::TENTHS_PER_PERCENT;
         format!("{whole}.{tenth}%")
+    }
+
+    fn tenths(self) -> u64 {
+        let half_a_tenth = Self::MILLIONTHS_PER_TENTH / 2;
+        self.millionths_of_a_core.saturating_add(half_a_tenth) / Self::MILLIONTHS_PER_TENTH
     }
 }
 
 impl Sum for CpuPercent {
     fn sum<I: Iterator<Item = Self>>(shares: I) -> Self {
-        let tenths = shares.fold(0, |total: u64, share| total.saturating_add(share.tenths));
-        Self { tenths }
+        let millionths_of_a_core = shares.fold(0, |total: u64, share| {
+            total.saturating_add(share.millionths_of_a_core)
+        });
+        Self {
+            millionths_of_a_core,
+        }
     }
 }
 
@@ -84,6 +96,15 @@ mod tests {
         .sum();
 
         assert_eq!(total.to_string(), "35.0%");
+    }
+
+    #[test]
+    fn shares_too_small_to_show_still_add_up() {
+        let total: CpuPercent = (0..20)
+            .map(|_| CpuPercent::of(Duration::from_micros(400), Duration::from_secs(1)))
+            .sum();
+
+        assert_eq!(total.to_string(), "0.8%");
     }
 
     #[test]
