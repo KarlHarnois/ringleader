@@ -60,6 +60,15 @@ impl DirectoryScratchSpace {
         })
     }
 
+    fn refuse_unretired(&self, path: &Path) -> Result<(), ScratchSpaceError> {
+        if path.parent() == Some(self.retired_root().as_path()) {
+            return Ok(());
+        }
+        Err(ScratchSpaceError::Foreign {
+            path: path.to_path_buf(),
+        })
+    }
+
     fn is_scratch_directory(&self, path: &Path) -> bool {
         let inside_root = path.parent() == Some(self.root.as_path());
         let hash_named = path
@@ -189,13 +198,9 @@ impl ScratchSpace for DirectoryScratchSpace {
         Self::sorted_entries_of(&retired).map_err(|error| Self::failure("list", &retired, &error))
     }
 
-    fn purge_retired(&self) -> Result<(), ScratchSpaceError> {
-        let failures: Vec<ScratchSpaceError> = self
-            .retired_directories()?
-            .iter()
-            .filter_map(|directory| self.remove_directory(directory).err())
-            .collect();
-        failures.into_iter().next().map_or(Ok(()), Err)
+    fn purge(&self, retired: &Path) -> Result<(), ScratchSpaceError> {
+        self.refuse_unretired(retired)?;
+        self.remove_directory(retired)
     }
 }
 
@@ -218,6 +223,7 @@ mod tests {
         const ROOT: &'static str = "cache/ringleader/tmp";
         const MOUNT_TABLE: &'static str = "mountinfo";
         const SEALED_MODE: u32 = 0o500;
+        const UNREADABLE_MODE: u32 = 0o300;
         const ACCESS_BITS: u32 = 0o777;
 
         fn new() -> Self {
@@ -310,6 +316,10 @@ mod tests {
 
         fn retired(&self) -> PathBuf {
             self.root().join(DirectoryScratchSpace::RETIRED)
+        }
+
+        fn retired_scratch(&self) -> PathBuf {
+            self.retired().join(format!("{}-0", Self::WORKTREE_HASH))
         }
 
         fn retired_count(&self) -> usize {
@@ -601,61 +611,88 @@ mod tests {
     }
 
     #[test]
-    fn purge_removes_every_retired_directory() {
+    fn purge_removes_a_retired_directory() {
         let fixture = ScratchFixture::new();
         fixture.retire_created();
 
-        fixture.space.purge_retired().unwrap();
+        fixture.space.purge(&fixture.retired_scratch()).unwrap();
 
         assert_eq!(fixture.retired_count(), 0);
     }
 
     #[test]
-    fn a_purge_goes_on_past_a_retired_directory_that_holds_a_mount() {
-        let fixture = ScratchFixture::new();
-        fixture.retire_created();
-        fixture.retire_scratch_of(Path::new(ScratchFixture::OTHER_WORKTREE));
-        let mounted = fixture
-            .retired()
-            .join(format!("{}-0", ScratchFixture::WORKTREE_HASH));
-        let fixture = fixture.with_mount_in(&mounted);
-
-        let result = fixture.space.purge_retired();
-
-        assert!(matches!(result, Err(ScratchSpaceError::HoldsMount { .. })));
-        assert!(mounted.exists());
-        assert_eq!(fixture.retired_count(), 1);
-    }
-
-    #[test]
-    fn a_retired_directory_is_listed_until_a_purge_removes_it() {
-        let fixture = ScratchFixture::new();
-        fixture.retire_created();
-        let retired = fixture
-            .retired()
-            .join(format!("{}-0", ScratchFixture::WORKTREE_HASH));
-
-        assert_eq!(fixture.space.retired_directories().unwrap(), [retired]);
-    }
-
-    #[test]
-    fn purging_with_nothing_retired_succeeds() {
+    fn purge_refuses_a_directory_that_was_never_retired() {
         let fixture = ScratchFixture::new().created();
 
-        fixture.space.purge_retired().unwrap();
+        let result = fixture.space.purge(&fixture.scratch());
 
+        assert_eq!(
+            result,
+            Err(ScratchSpaceError::Foreign {
+                path: fixture.scratch()
+            })
+        );
         assert!(fixture.scratch().exists());
     }
 
     #[test]
-    fn an_unreadable_mount_table_keeps_the_retired_directories() {
+    fn purge_keeps_a_retired_directory_that_holds_a_mount() {
+        let fixture = ScratchFixture::new();
+        fixture.retire_created();
+        let mounted = fixture.retired_scratch();
+        let fixture = fixture.with_mount_in(&mounted);
+
+        let result = fixture.space.purge(&mounted);
+
+        assert!(matches!(result, Err(ScratchSpaceError::HoldsMount { .. })));
+        assert!(mounted.exists());
+    }
+
+    #[test]
+    fn an_unreadable_mount_table_keeps_a_retired_directory() {
         let fixture = ScratchFixture::new();
         fixture.retire_created();
         let fixture = fixture.without_mount_table();
 
-        let result = fixture.space.purge_retired();
+        let result = fixture.space.purge(&fixture.retired_scratch());
 
         assert!(result.is_err());
         assert_eq!(fixture.retired_count(), 1);
+    }
+
+    #[test]
+    fn retired_directories_are_listed_in_name_order() {
+        let fixture = ScratchFixture::new();
+        fixture.retire_scratch_of(Path::new(ScratchFixture::OTHER_WORKTREE));
+        fixture.retire_created();
+
+        let listed = fixture.space.retired_directories().unwrap();
+
+        assert_eq!(listed.first(), Some(&fixture.retired_scratch()));
+        assert_eq!(listed.len(), 2);
+    }
+
+    #[test]
+    fn no_retired_root_lists_no_retired_directory() {
+        let fixture = ScratchFixture::new().created();
+
+        assert!(fixture.space.retired_directories().unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_unreadable_retired_root_fails_the_listing() {
+        let fixture = ScratchFixture::new();
+        fixture.retire_created();
+        let retired = fixture.retired();
+        fs::set_permissions(
+            &retired,
+            Permissions::from_mode(ScratchFixture::UNREADABLE_MODE),
+        )
+        .unwrap();
+
+        let listing = fixture.space.retired_directories();
+
+        ScratchFixture::unseal(&retired);
+        assert!(matches!(listing, Err(ScratchSpaceError::Io { .. })));
     }
 }

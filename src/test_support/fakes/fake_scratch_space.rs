@@ -22,6 +22,7 @@ impl FakeScratchSpace {
     const REMOVE: &'static str = "remove";
     const LIST: &'static str = "list";
     const RETIRE: &'static str = "retire";
+    const LIST_RETIRED: &'static str = "list retired";
     const PURGE: &'static str = "purge";
 
     pub fn failing(self, operation: &'static str) -> Self {
@@ -52,7 +53,11 @@ impl FakeScratchSpace {
     }
 
     pub fn purges(&self) -> usize {
-        self.calls_of(Self::PURGE).len()
+        self.calls_of(Self::LIST_RETIRED).len()
+    }
+
+    pub fn purged(&self) -> Vec<PathBuf> {
+        self.calls_of(Self::PURGE)
     }
 
     pub fn created(&self) -> Vec<PathBuf> {
@@ -121,11 +126,12 @@ impl ScratchSpace for FakeScratchSpace {
     }
 
     fn retired_directories(&self) -> Result<Vec<PathBuf>, ScratchSpaceError> {
+        let root = Path::new(Self::ROOT);
+        self.record_at(Self::LIST_RETIRED, root, root)?;
         Ok(self.state.lock().unwrap().unpurged.clone())
     }
 
-    fn purge_retired(&self) -> Result<(), ScratchSpaceError> {
-        let root = Path::new(Self::ROOT);
-        self.record_at(Self::PURGE, root, root)
+    fn purge(&self, retired: &Path) -> Result<(), ScratchSpaceError> {
+        self.record_at(Self::PURGE, retired, retired)
     }
 }

@@ -9,7 +9,7 @@ pub trait ScratchSpace: Send + Sync {
     fn directories(&self) -> Result<Vec<PathBuf>, ScratchSpaceError>;
     fn retire(&self, directory: &Path) -> Result<(), ScratchSpaceError>;
     fn retired_directories(&self) -> Result<Vec<PathBuf>, ScratchSpaceError>;
-    fn purge_retired(&self) -> Result<(), ScratchSpaceError>;
+    fn purge(&self, retired: &Path) -> Result<(), ScratchSpaceError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]

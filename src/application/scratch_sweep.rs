@@ -42,11 +42,26 @@ impl ScratchSweep {
     pub fn start_purge(&self) -> Pending<()> {
         let space = Arc::clone(&self.space);
         Pending::start(move || {
-            if let Err(error) = space.purge_retired() {
-                log::warn!("kept retired scratch directories on disk: {error}");
-            }
+            Self::purge_each_retired(space.as_ref());
             Ok(())
         })
+    }
+
+    fn purge_each_retired(space: &dyn ScratchSpace) {
+        match space.retired_directories() {
+            Ok(directories) => {
+                for directory in directories {
+                    Self::purge(space, &directory);
+                }
+            }
+            Err(error) => log::warn!("kept retired scratch directories on disk: {error}"),
+        }
+    }
+
+    fn purge(space: &dyn ScratchSpace, directory: &Path) {
+        if let Err(error) = space.purge(directory) {
+            log::warn!("kept a retired scratch directory on disk: {error}");
+        }
     }
 
     fn sweepable(&self, deleted: &Session, directories: Vec<PathBuf>) -> Vec<PathBuf> {
@@ -114,6 +129,8 @@ mod tests {
         const ORPHAN: &'static str = "forgotten";
         const RECORDED: &'static str = "fix-auth";
         const DELETED: &'static str = "example-deleted";
+        const FIRST_RETIRED: &'static str = "/scratch/.retired/sweep-first-0";
+        const SECOND_RETIRED: &'static str = "/scratch/.retired/sweep-second-0";
         const ORPHAN_USER: u32 = 4_000_077;
 
         fn with_space(space: FakeScratchSpace) -> Self {
@@ -136,6 +153,12 @@ mod tests {
                 .with_scratch_space(Self::space())
                 .with_registry(registry);
             Self { service }
+        }
+
+        fn unpurged() -> FakeScratchSpace {
+            FakeScratchSpace::default()
+                .with_unpurged(Path::new(Self::FIRST_RETIRED))
+                .with_unpurged(Path::new(Self::SECOND_RETIRED))
         }
 
         fn space() -> FakeScratchSpace {
@@ -269,18 +292,37 @@ mod tests {
     }
 
     #[test]
-    fn a_purge_empties_the_retired_directories() {
-        let fixture = SweepFixture::with_space(FakeScratchSpace::default());
+    fn a_purge_removes_each_retired_directory() {
+        let fixture = SweepFixture::with_space(SweepFixture::unpurged());
 
         fixture.sweep().start_purge().wait_unless(|| false);
 
-        assert_eq!(fixture.service.scratch_space().purges(), 1);
+        assert_eq!(
+            fixture.service.scratch_space().purged(),
+            [
+                PathBuf::from(SweepFixture::FIRST_RETIRED),
+                PathBuf::from(SweepFixture::SECOND_RETIRED)
+            ]
+        );
     }
 
     #[test]
-    fn a_failed_purge_logs_a_warning_and_still_finishes() {
+    fn a_failed_purge_logs_each_kept_directory_so_the_log_explains_each_one() {
         let capture = LogCapture::installed();
-        let fixture = SweepFixture::with_space(FakeScratchSpace::default().failing("purge"));
+        let fixture = SweepFixture::with_space(SweepFixture::unpurged().failing("purge"));
+
+        let outcome = fixture.sweep().start_purge().wait_unless(|| false);
+
+        assert!(matches!(outcome, Some(Ok(()))));
+        for retired in [SweepFixture::FIRST_RETIRED, SweepFixture::SECOND_RETIRED] {
+            assert_eq!(capture.count_containing(retired), 1, "{retired}");
+        }
+    }
+
+    #[test]
+    fn a_failed_retired_listing_logs_a_warning_and_still_finishes() {
+        let capture = LogCapture::installed();
+        let fixture = SweepFixture::with_space(FakeScratchSpace::default().failing("list retired"));
 
         let outcome = fixture.sweep().start_purge().wait_unless(|| false);
 
