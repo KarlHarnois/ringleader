@@ -7,22 +7,29 @@ pub struct ToolTempClaims<'u> {
 }
 
 impl<'u> ToolTempClaims<'u> {
+    const LAUNCH_GRACE_SECONDS: u64 = 600;
+
     pub fn new(scratch: &Path, users: &'u [DirectoryUser]) -> Self {
         Self {
             users: users.iter().filter(|user| user.works_in(scratch)).collect(),
         }
     }
 
-    pub fn abandoned(&self, tool_temps: &[ToolTempDirectory]) -> Vec<PathBuf> {
+    pub fn abandoned(&self, tool_temps: &[ToolTempDirectory], now: u64) -> Vec<PathBuf> {
         let ownerless_kept = self.has_unplaced_owner(tool_temps);
         tool_temps
             .iter()
+            .filter(|tool_temp| !Self::may_be_launching(tool_temp, now))
             .filter(|tool_temp| match tool_temp.owner() {
                 Some(_) => self.owner_of(tool_temp).is_none(),
                 None => !ownerless_kept && !self.is_used(tool_temp.path()),
             })
             .map(|tool_temp| tool_temp.path().to_path_buf())
             .collect()
+    }
+
+    fn may_be_launching(tool_temp: &ToolTempDirectory, now: u64) -> bool {
+        now.saturating_sub(tool_temp.modified_epoch_seconds()) < Self::LAUNCH_GRACE_SECONDS
     }
 
     fn has_unplaced_owner(&self, tool_temps: &[ToolTempDirectory]) -> bool {
@@ -65,6 +72,7 @@ mod tests {
         const LAUNCHER: &'static str = "/scratch/8718940d/nix-develop-4100-7";
         const OWNER: u32 = 4100;
         const STRANGER: u32 = 5200;
+        const NOW: u64 = 1_700_000_100;
 
         fn user(pid: u32, path: &str) -> DirectoryUser {
             DirectoryUser::new(ProcessInfo::new(pid, "example-build"), vec![path.into()])
@@ -79,7 +87,7 @@ mod tests {
         }
 
         fn abandoned(users: &[DirectoryUser], tool_temps: &[ToolTempDirectory]) -> Vec<PathBuf> {
-            ToolTempClaims::new(Path::new(Self::SCRATCH), users).abandoned(tool_temps)
+            ToolTempClaims::new(Path::new(Self::SCRATCH), users).abandoned(tool_temps, Self::NOW)
         }
     }
 
@@ -106,6 +114,17 @@ mod tests {
         let abandoned = ClaimsFixture::abandoned(&[reused], &[ClaimsFixture::launcher()]);
 
         assert_eq!(abandoned, [PathBuf::from(ClaimsFixture::LAUNCHER)]);
+    }
+
+    #[test]
+    fn a_tool_temp_directory_modified_moments_ago_is_claimed_since_a_launch_makes_it_before_any_process_uses_it()
+     {
+        let launching =
+            ClaimsFixture::shell(ClaimsFixture::SHELL).modified_at(ClaimsFixture::NOW - 1);
+
+        let abandoned = ClaimsFixture::abandoned(&[], &[launching]);
+
+        assert!(abandoned.is_empty(), "{abandoned:?}");
     }
 
     #[test]

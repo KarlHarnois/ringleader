@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use super::ports::{HostProbe, ScratchSpace, ScratchSpaceError, ToolTempDirectory};
+use super::ports::{Clock, HostProbe, ScratchSpace, ScratchSpaceError, ToolTempDirectory};
 use super::service_ports::ServicePorts;
 use super::tool_temp_claims::ToolTempClaims;
 use crate::domain::Session;
@@ -9,6 +9,7 @@ use crate::domain::Session;
 pub struct ToolTempSweep {
     space: Arc<dyn ScratchSpace>,
     host: Arc<dyn HostProbe>,
+    clock: Arc<dyn Clock>,
 }
 
 impl ToolTempSweep {
@@ -16,6 +17,7 @@ impl ToolTempSweep {
         Self {
             space: ports.state().scratch_space(),
             host: ports.repos().host(),
+            clock: ports.state().clock(),
         }
     }
 
@@ -37,8 +39,9 @@ impl ToolTempSweep {
         }
         let scanned: Vec<PathBuf> = listed.iter().map(|(scratch, _)| scratch.clone()).collect();
         let users = self.host.directory_users(&scanned);
+        let now = self.clock.now_epoch_seconds();
         for (scratch, tool_temps) in &listed {
-            let abandoned = ToolTempClaims::new(scratch, &users).abandoned(tool_temps);
+            let abandoned = ToolTempClaims::new(scratch, &users).abandoned(tool_temps, now);
             self.retire_each(scratch, &abandoned);
         }
     }
@@ -157,6 +160,18 @@ mod tests {
             SweepFixture::space_with(std::slice::from_ref(&shell)),
             SweepFixture::host_using(shell.path()),
         );
+
+        fixture.retire_in_session();
+
+        assert!(fixture.retired().is_empty());
+    }
+
+    #[test]
+    fn a_sweep_keeps_a_tool_temp_directory_modified_moments_ago() {
+        let shell = SweepFixture::shell_in(SweepFixture::SESSION, "nix-shell.Qr90St")
+            .modified_at(ServiceFixture::NOW);
+        let fixture =
+            SweepFixture::with(SweepFixture::space_with(&[shell]), FakeHostProbe::default());
 
         fixture.retire_in_session();
 

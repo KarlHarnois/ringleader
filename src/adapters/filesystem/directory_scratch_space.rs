@@ -4,6 +4,7 @@ use std::io;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
 
 use super::fnv_hash::FnvHash;
 use super::host_path::HostPath;
@@ -105,6 +106,14 @@ impl DirectoryScratchSpace {
 
     fn is_real_directory(path: &Path) -> bool {
         fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_dir())
+    }
+
+    fn tool_temp(entry: &Path) -> Option<ToolTempDirectory> {
+        let metadata = fs::symlink_metadata(entry)
+            .ok()
+            .filter(fs::Metadata::is_dir)?;
+        let modified = metadata.modified().ok()?.duration_since(UNIX_EPOCH).ok()?;
+        Some(ToolTempName::recognize(entry)?.modified_at(modified.as_secs()))
     }
 
     fn move_into_retired(&self, directory: &Path) -> io::Result<()> {
@@ -241,8 +250,7 @@ impl ScratchSpace for DirectoryScratchSpace {
             .map_err(|error| Self::failure("list", directory, &error))?;
         Ok(entries
             .iter()
-            .filter(|entry| Self::is_real_directory(entry))
-            .filter_map(|entry| ToolTempName::recognize(entry))
+            .filter_map(|entry| Self::tool_temp(entry))
             .collect())
     }
 
@@ -826,15 +834,40 @@ mod tests {
             .unwrap();
 
         listed.sort_by(|first, second| first.path().cmp(second.path()));
+        let named: Vec<(&Path, Option<u32>)> = listed
+            .iter()
+            .map(|tool_temp| (tool_temp.path(), tool_temp.owner()))
+            .collect();
         assert_eq!(
-            listed,
+            named,
             [
-                ToolTempDirectory::owned(
-                    fixture.tool_temp(ScratchFixture::LAUNCHER),
-                    ScratchFixture::LAUNCHER_OWNER
+                (
+                    fixture.tool_temp(ScratchFixture::LAUNCHER).as_path(),
+                    Some(ScratchFixture::LAUNCHER_OWNER)
                 ),
-                ToolTempDirectory::ownerless(fixture.tool_temp(ScratchFixture::SHELL)),
+                (fixture.tool_temp(ScratchFixture::SHELL).as_path(), None),
             ]
+        );
+    }
+
+    #[test]
+    fn a_tool_temp_directory_carries_its_modification_time() {
+        let fixture = ScratchFixture::new().created().with_tool_temps();
+        let shell = fixture.tool_temp(ScratchFixture::SHELL);
+        let modified = fs::metadata(&shell).unwrap().modified().unwrap();
+
+        let listed = fixture
+            .space
+            .tool_temp_directories(&fixture.scratch())
+            .unwrap();
+
+        let listed_shell = listed
+            .iter()
+            .find(|tool_temp| tool_temp.path() == shell)
+            .unwrap();
+        assert_eq!(
+            listed_shell.modified_epoch_seconds(),
+            modified.duration_since(UNIX_EPOCH).unwrap().as_secs()
         );
     }
 

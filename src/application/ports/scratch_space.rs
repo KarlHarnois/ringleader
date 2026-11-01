@@ -21,17 +21,30 @@ pub trait ScratchSpace: Send + Sync {
 pub struct ToolTempDirectory {
     path: PathBuf,
     owner: Option<u32>,
+    modified_epoch_seconds: u64,
 }
 
 impl ToolTempDirectory {
     pub fn ownerless(path: PathBuf) -> Self {
-        Self { path, owner: None }
+        Self {
+            path,
+            owner: None,
+            modified_epoch_seconds: 0,
+        }
     }
 
     pub fn owned(path: PathBuf, owner: u32) -> Self {
         Self {
             path,
             owner: Some(owner),
+            modified_epoch_seconds: 0,
+        }
+    }
+
+    pub fn modified_at(self, epoch_seconds: u64) -> Self {
+        Self {
+            modified_epoch_seconds: epoch_seconds,
+            ..self
         }
     }
 
@@ -41,6 +54,10 @@ impl ToolTempDirectory {
 
     pub fn owner(&self) -> Option<u32> {
         self.owner
+    }
+
+    pub fn modified_epoch_seconds(&self) -> u64 {
+        self.modified_epoch_seconds
     }
 }
 
