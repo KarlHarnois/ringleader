@@ -32,8 +32,16 @@ impl FakeProcessMeter {
     }
 
     pub fn unreadable(self, denial: &str) -> Self {
-        self.state.lock().unwrap().denial = Some(denial.to_string());
+        self.fail(denial);
         self
+    }
+
+    pub fn fail(&self, denial: &str) {
+        self.state.lock().unwrap().denial = Some(denial.to_string());
+    }
+
+    pub fn recover(&self) {
+        self.state.lock().unwrap().denial = None;
     }
 
     pub fn on_sample(&self, hook: impl Fn() + Send + Sync + 'static) {

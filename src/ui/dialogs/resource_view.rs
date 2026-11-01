@@ -69,8 +69,11 @@ impl ResourceView {
     }
 
     fn keep_a_listed_session_selected(&mut self) {
+        let ResourceReading::Loads(loads) = self.feed.reading() else {
+            return;
+        };
         if self.selected_index().is_none() {
-            self.selected = self.loads().first().map(|load| load.name().to_string());
+            self.selected = loads.first().map(|load| load.name().to_string());
         }
     }
 
@@ -233,6 +236,7 @@ mod tests {
     };
 
     struct ViewFixture {
+        services: ServiceFixture,
         service: SessionService,
         rows: Vec<SessionSummary>,
     }
@@ -242,6 +246,7 @@ mod tests {
         const HEIGHT: usize = 20;
         const FIX_AUTH_PANE: u32 = 100;
         const DOCS_PANE: u32 = 200;
+        const DENIAL: &'static str = "example denial of one sample";
 
         fn sampling(samples: Vec<ProcessSample>) -> Self {
             Self::sampling_from(FakeProcessMeter::new().with_samples(samples))
@@ -258,6 +263,7 @@ mod tests {
                 .with_process_meter(meter);
             Self {
                 service: services.service(),
+                services,
                 rows: vec![
                     SessionSummary::managed(fix_auth, SessionState::Working, false),
                     SessionSummary::managed(docs, SessionState::Waiting, false),
@@ -324,6 +330,12 @@ mod tests {
                 !view.feed.is_sampling()
             });
             assert!(settled, "the sample never finished");
+        }
+
+        fn settle_a_failed_sample(&self, view: &mut ResourceView, now: Instant) {
+            self.services.process_meter().fail(Self::DENIAL);
+            self.settle(view, now);
+            self.services.process_meter().recover();
         }
 
         fn rows(view: &ResourceView) -> Vec<String> {
@@ -501,6 +513,22 @@ mod tests {
 
         let rows = ViewFixture::rows(&view);
         assert!(rows[0].starts_with("docs "));
+        assert!(ViewFixture::selected_rows(&view)[0].starts_with("docs "));
+    }
+
+    #[test]
+    fn a_failed_sample_keeps_the_session_the_user_selected() {
+        let fixture = ViewFixture::sampling(vec![
+            ViewFixture::panes_spent(0, 0, 0),
+            ViewFixture::panes_spent(1, 500, 100),
+            ViewFixture::panes_spent(2, 1000, 200),
+        ]);
+        let mut view = fixture.settled();
+        ViewFixture::press(&mut view, KeyCode::Char('j'));
+
+        fixture.settle_a_failed_sample(&mut view, Instant::now() + LoadSample::INTERVAL * 2);
+        fixture.settle(&mut view, Instant::now() + LoadSample::INTERVAL * 3);
+
         assert!(ViewFixture::selected_rows(&view)[0].starts_with("docs "));
     }
 
