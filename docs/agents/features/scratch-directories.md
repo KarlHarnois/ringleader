@@ -9,12 +9,11 @@
   - `TMPDIR` differs between the process that creates a session and the process that deletes it. Every agent's `TMPDIR` is its own scratch directory, and `nix develop` exports a new `TMPDIR` per shell.
 - Delete keeps a scratch directory that holds a mount point: removing it would delete the files of the mounted filesystem.
 - If the mount table cannot be read, delete keeps every scratch directory.
-- A delete, with or without `--forget`, leaves the session's scratch directory orphaned, so the same delete retires it.
 
 ## Orphaned scratch directories
 
 **An orphaned scratch directory is a scratch directory that no registry entry and no live tmux session claims.** A stopped session keeps its registry entry, so its scratch directory and every file in it stay.
 
 - Retire only a directory found orphaned under the write lock, from the registry reread under that lock. A listing taken before the lock can predate another process's create.
+- Purge retired directories outside the write lock. Removing several gigabytes under the write lock blocks every CLI command.
 - While a corrupt registry that Ringleader moved aside still exists, keep every orphaned scratch directory except the deleted session's own. The stopped sessions in that copy can still claim the others.
-- Retire an orphaned scratch directory under the write lock, and purge retired directories outside the write lock. Removing several gigabytes under the write lock blocks every CLI command.
