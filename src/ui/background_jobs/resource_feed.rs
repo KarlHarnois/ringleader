@@ -9,6 +9,7 @@ pub struct ResourceFeed {
     reading: ResourceReading,
     pending: Option<Pending<LoadSample>>,
     next_sample: Option<Instant>,
+    paused: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -24,6 +25,10 @@ impl ResourceFeed {
         &self.reading
     }
 
+    pub fn is_paused(&self) -> bool {
+        self.paused
+    }
+
     #[cfg(test)]
     pub fn is_sampling(&self) -> bool {
         self.pending.is_some()
@@ -36,6 +41,7 @@ impl ResourceFeed {
         sessions_to_sample: Option<&[SessionSummary]>,
     ) -> Result<(), ServiceError> {
         let collected = self.collect();
+        self.paused = sessions_to_sample.is_none();
         if let Some(session_rows) = sessions_to_sample {
             self.start_if_due(now, service, session_rows);
         }

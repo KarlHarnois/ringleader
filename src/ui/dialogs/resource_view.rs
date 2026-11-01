@@ -30,6 +30,7 @@ impl ResourceView {
     const MEASURING: &'static str = "Measuring CPU and memory…";
     const NO_RUNNING_SESSION: &'static str = "No session is running.";
     const MEASUREMENT_FAILED: &'static str = "could not measure the sessions";
+    const TMUX_PAUSED: &'static str = "paused after a tmux timeout";
     const PROCESS_INDENT: &'static str = "  ";
     const CPU_WIDTH: usize = 8;
     const MEMORY_WIDTH: usize = 10;
@@ -221,6 +222,9 @@ impl ResourceView {
     }
 
     fn status(&self) -> &'static str {
+        if self.feed.is_paused() {
+            return Self::TMUX_PAUSED;
+        }
         match self.feed.reading() {
             ResourceReading::Failed => Self::MEASUREMENT_FAILED,
             ResourceReading::Measuring | ResourceReading::Loads(_) => "",
@@ -345,6 +349,10 @@ mod tests {
                 !view.feed.is_sampling()
             });
             assert!(settled, "the sample never finished");
+        }
+
+        fn pause(&self, view: &mut ResourceView, now: Instant) {
+            let _ = view.poll(now, &self.service, None);
         }
 
         fn settle_a_failed_sample(&self, view: &mut ResourceView, now: Instant) {
@@ -520,6 +528,30 @@ mod tests {
             ViewFixture::rows(&view).last().unwrap(),
             "       n diagnose · ↑ ↓ j k choose · U Esc q close"
         );
+    }
+
+    #[test]
+    fn a_paused_view_says_its_figures_have_stopped() {
+        let fixture = ViewFixture::fix_auth_busier();
+        let mut view = fixture.settled();
+
+        fixture.pause(&mut view, Instant::now());
+
+        assert_eq!(
+            ViewFixture::rows(&view).last().unwrap(),
+            "paused after a tmux timeout  n diagnose · ↑ ↓ j k choose · U Esc q close"
+        );
+    }
+
+    #[test]
+    fn a_view_that_samples_again_drops_the_pause_note() {
+        let fixture = ViewFixture::fix_auth_busier();
+        let mut view = fixture.settled();
+        fixture.pause(&mut view, Instant::now());
+
+        fixture.settle(&mut view, Instant::now() + LoadSample::INTERVAL * 2);
+
+        assert!(!ViewFixture::rows(&view).last().unwrap().contains("paused"));
     }
 
     #[test]
