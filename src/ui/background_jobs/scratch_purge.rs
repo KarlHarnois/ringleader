@@ -40,7 +40,7 @@ impl ScratchPurge {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{Deadline, ServiceFixture};
+    use crate::test_support::{Deadline, FakeScratchSpace, ServiceFixture};
 
     struct PurgeFixture;
 
@@ -56,19 +56,21 @@ mod tests {
 
     #[test]
     fn a_started_purge_empties_the_retired_directories() {
-        let fixture = ServiceFixture::new();
+        let fixture =
+            ServiceFixture::new().with_scratch_space(FakeScratchSpace::holding_one_retired());
         let service = fixture.service();
         let mut purge = ScratchPurge::default();
 
         purge.start(&service);
         PurgeFixture::poll_until_finished(&mut purge, &service);
 
-        assert_eq!(fixture.scratch_space().purges(), 1);
+        assert_eq!(fixture.scratch_space().purged().len(), 1);
     }
 
     #[test]
     fn a_finished_purge_lets_the_next_change_start_another() {
-        let fixture = ServiceFixture::new();
+        let fixture =
+            ServiceFixture::new().with_scratch_space(FakeScratchSpace::holding_one_retired());
         let service = fixture.service();
         let mut purge = ScratchPurge::default();
         purge.start(&service);
@@ -77,12 +79,13 @@ mod tests {
         purge.start(&service);
         PurgeFixture::poll_until_finished(&mut purge, &service);
 
-        assert_eq!(fixture.scratch_space().purges(), 2);
+        assert_eq!(fixture.scratch_space().purged().len(), 2);
     }
 
     #[test]
     fn a_change_during_a_purge_runs_one_more_purge_because_the_first_can_miss_its_directory() {
-        let fixture = ServiceFixture::new();
+        let fixture =
+            ServiceFixture::new().with_scratch_space(FakeScratchSpace::holding_one_retired());
         let service = fixture.service();
         let mut purge = ScratchPurge::default();
 
@@ -91,6 +94,6 @@ mod tests {
         purge.start(&service);
         PurgeFixture::poll_until_finished(&mut purge, &service);
 
-        assert_eq!(fixture.scratch_space().purges(), 2);
+        assert_eq!(fixture.scratch_space().purged().len(), 2);
     }
 }

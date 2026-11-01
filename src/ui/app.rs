@@ -552,8 +552,9 @@ mod tests {
     };
     use crate::test_support::{
         CapturedWriter, Deadline, FakeConfigSource, FakeFoldStore, FakeLock, FakeMultiplexer,
-        FakePullRequests, FakeRepoPages, FakeSessionRegistry, FakeTerminalEmulator, FakeUsageMeter,
-        FakeWebBrowser, HeldCalls, LogCapture, ServiceFixture, UiHarness,
+        FakePullRequests, FakeRepoPages, FakeScratchSpace, FakeSessionRegistry,
+        FakeTerminalEmulator, FakeUsageMeter, FakeWebBrowser, HeldCalls, LogCapture,
+        ServiceFixture, UiHarness,
     };
     use crate::ui::batch_operation::{BatchOperation, DeleteSessionsStep};
     use crate::ui::blocking_operation::{BrowserPage, CreateStep};
@@ -2741,7 +2742,8 @@ mod tests {
 
     #[test]
     fn a_confirmed_delete_purges_the_retired_scratch_directories() {
-        let fixture = AppFixture::deletable();
+        let fixture =
+            AppFixture::deletable().with_scratch_space(FakeScratchSpace::holding_one_retired());
         let mut app = AppFixture::started(&fixture, 100, 28);
         let measure = app.handle_event(&UiHarness::character('d'));
         AppFixture::perform(&mut app, measure);
@@ -2751,7 +2753,7 @@ mod tests {
 
         let purged = Deadline::for_background_work().wait_until(|| {
             app.poll(Instant::now());
-            fixture.scratch_space().purges() == 1
+            fixture.scratch_space().purged().len() == 1
         });
         assert!(purged);
     }

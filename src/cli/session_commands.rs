@@ -331,8 +331,8 @@ mod tests {
     use crate::cli::CliExit;
     use crate::domain::{Repo, RepoName, Session};
     use crate::test_support::{
-        CapturedWriter, CliHarness, FakeMultiplexer, FakeRepoScanner, FakeSessionRegistry,
-        ServiceFixture,
+        CapturedWriter, CliHarness, FakeMultiplexer, FakeRepoScanner, FakeScratchSpace,
+        FakeSessionRegistry, ServiceFixture,
     };
 
     struct CommandFixture;
@@ -359,6 +359,10 @@ mod tests {
                     .with_live(ServiceFixture::waiting(&session))
                     .with_return_request(ReturnRequest::NewSession(repo)),
             )
+        }
+
+        fn holding_one_retired() -> ServiceFixture {
+            Self::live().with_scratch_space(FakeScratchSpace::holding_one_retired())
         }
 
         fn live() -> ServiceFixture {
@@ -997,29 +1001,29 @@ mod tests {
 
     #[test]
     fn a_delete_purges_the_retired_scratch_directories() {
-        let harness = CliHarness::new(CommandFixture::live());
+        let harness = CliHarness::new(CommandFixture::holding_one_retired());
 
         harness.run(&["delete", "fix-auth", "--force"]);
 
-        assert_eq!(harness.fixture().scratch_space().purges(), 1);
+        assert_eq!(harness.fixture().scratch_space().purged().len(), 1);
     }
 
     #[test]
     fn every_changing_command_purges_as_the_tui_does_after_each_change() {
-        let harness = CliHarness::new(CommandFixture::live());
+        let harness = CliHarness::new(CommandFixture::holding_one_retired());
 
         harness.run(&["stop", "fix-auth"]);
 
-        assert_eq!(harness.fixture().scratch_space().purges(), 1);
+        assert_eq!(harness.fixture().scratch_space().purged().len(), 1);
     }
 
     #[test]
     fn a_command_that_changes_nothing_purges_nothing() {
-        let harness = CliHarness::new(CommandFixture::live());
+        let harness = CliHarness::new(CommandFixture::holding_one_retired());
 
         harness.run(&["list"]);
 
-        assert_eq!(harness.fixture().scratch_space().purges(), 0);
+        assert!(harness.fixture().scratch_space().purged().is_empty());
     }
 
     #[test]

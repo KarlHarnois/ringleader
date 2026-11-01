@@ -770,7 +770,7 @@ mod tests {
             .on_call("type_when_ready", move || {
                 typing_log.lock().unwrap().push("typing".to_string());
             });
-        let space = FakeScratchSpace::default().recording_purges(Arc::clone(&log));
+        let space = FakeScratchSpace::holding_one_retired().recording_purges(Arc::clone(&log));
         let fixture = ServiceFixture::new()
             .with_config(ServiceFixture::config_with_input())
             .with_multiplexer(multiplexer)
@@ -797,7 +797,7 @@ mod tests {
     fn the_write_lock_is_released_before_the_retired_scratch_is_purged() {
         let log = Arc::new(Mutex::new(Vec::new()));
         let lock = FakeLock::free().recording(Arc::clone(&log));
-        let space = FakeScratchSpace::default().recording_purges(Arc::clone(&log));
+        let space = FakeScratchSpace::holding_one_retired().recording_purges(Arc::clone(&log));
         let harness =
             CliHarness::new(ServiceFixture::new().with_scratch_space(space)).with_lock(lock);
 

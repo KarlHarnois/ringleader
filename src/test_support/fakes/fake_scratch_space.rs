@@ -25,6 +25,7 @@ impl FakeScratchSpace {
     const RETIRE: &'static str = "retire";
     const LIST_RETIRED: &'static str = "list retired";
     const PURGE: &'static str = "purge";
+    const LEFT_RETIRED: &'static str = "/scratch/.retired/example-left-0";
 
     pub fn failing(self, operation: &'static str) -> Self {
         self.state.lock().unwrap().failing = Some(operation);
@@ -45,6 +46,10 @@ impl FakeScratchSpace {
         self
     }
 
+    pub fn holding_one_retired() -> Self {
+        Self::default().with_unpurged(Path::new(Self::LEFT_RETIRED))
+    }
+
     pub fn with_unpurged(self, directory: &Path) -> Self {
         self.state
             .lock()
@@ -56,10 +61,6 @@ impl FakeScratchSpace {
 
     pub fn retired(&self) -> Vec<PathBuf> {
         self.calls_of(Self::RETIRE)
-    }
-
-    pub fn purges(&self) -> usize {
-        self.calls_of(Self::LIST_RETIRED).len()
     }
 
     pub fn purged(&self) -> Vec<PathBuf> {
@@ -134,14 +135,13 @@ impl ScratchSpace for FakeScratchSpace {
     fn retired_directories(&self) -> Result<Vec<PathBuf>, ScratchSpaceError> {
         let root = Path::new(Self::ROOT);
         self.record_at(Self::LIST_RETIRED, root, root)?;
-        let state = self.state.lock().unwrap();
-        if let Some(log) = &state.purge_log {
-            log.lock().unwrap().push(Self::PURGE.to_string());
-        }
-        Ok(state.unpurged.clone())
+        Ok(self.state.lock().unwrap().unpurged.clone())
     }
 
     fn purge(&self, retired: &Path) -> Result<(), ScratchSpaceError> {
+        if let Some(log) = &self.state.lock().unwrap().purge_log {
+            log.lock().unwrap().push(Self::PURGE.to_string());
+        }
         self.record_at(Self::PURGE, retired, retired)
     }
 }
