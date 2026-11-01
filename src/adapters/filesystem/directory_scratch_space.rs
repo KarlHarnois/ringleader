@@ -61,6 +61,7 @@ impl DirectoryScratchSpace {
     }
 
     fn refuse_unretired(&self, path: &Path) -> Result<(), ScratchSpaceError> {
+        self.refuse_linked_retired_root()?;
         let named = path.file_name().is_some();
         if named && path.parent() == Some(self.retired_root().as_path()) {
             return Ok(());
@@ -68,6 +69,18 @@ impl DirectoryScratchSpace {
         Err(ScratchSpaceError::NotRetired {
             path: path.to_path_buf(),
         })
+    }
+
+    fn refuse_linked_retired_root(&self) -> Result<(), ScratchSpaceError> {
+        let retired = self.retired_root();
+        let real_or_absent = match fs::symlink_metadata(&retired) {
+            Ok(metadata) => metadata.is_dir(),
+            Err(error) => error.kind() == io::ErrorKind::NotFound,
+        };
+        if real_or_absent {
+            return Ok(());
+        }
+        Err(ScratchSpaceError::Foreign { path: retired })
     }
 
     fn is_scratch_directory(&self, path: &Path) -> bool {
@@ -189,12 +202,14 @@ impl ScratchSpace for DirectoryScratchSpace {
 
     fn retire(&self, directory: &Path) -> Result<(), ScratchSpaceError> {
         self.refuse_foreign(directory)?;
+        self.refuse_linked_retired_root()?;
         self.refuse_mounts_within(directory)?;
         self.move_into_retired(directory)
             .map_err(|error| Self::failure("retire", directory, &error))
     }
 
     fn retired_directories(&self) -> Result<Vec<PathBuf>, ScratchSpaceError> {
+        self.refuse_linked_retired_root()?;
         let retired = self.retired_root();
         Self::sorted_entries_of(&retired).map_err(|error| Self::failure("list", &retired, &error))
     }
@@ -317,6 +332,13 @@ mod tests {
 
         fn retired(&self) -> PathBuf {
             self.root().join(DirectoryScratchSpace::RETIRED)
+        }
+
+        fn linked_retired_root(&self) -> PathBuf {
+            let target = self.base.path().join("example-target");
+            fs::create_dir(&target).unwrap();
+            std::os::unix::fs::symlink(&target, self.retired()).unwrap();
+            target
         }
 
         fn retired_scratch(&self) -> PathBuf {
@@ -609,6 +631,33 @@ mod tests {
 
         assert!(matches!(result, Err(ScratchSpaceError::HoldsMount { .. })));
         assert!(fixture.scratch().exists());
+    }
+
+    #[test]
+    fn a_symlinked_retired_root_is_never_listed_or_purged_so_its_target_stays() {
+        let fixture = ScratchFixture::new().created();
+        let target = fixture.linked_retired_root();
+        let kept = target.join("keep-me");
+        fs::create_dir(&kept).unwrap();
+
+        let listing = fixture.space.retired_directories();
+        let purge = fixture.space.purge(&fixture.retired().join("keep-me"));
+
+        assert!(listing.is_err());
+        assert!(purge.is_err());
+        assert!(kept.exists());
+    }
+
+    #[test]
+    fn retire_refuses_a_symlinked_retired_root_so_nothing_moves_into_its_target() {
+        let fixture = ScratchFixture::new().created();
+        let target = fixture.linked_retired_root();
+
+        let result = fixture.space.retire(&fixture.scratch());
+
+        assert!(result.is_err());
+        assert!(fixture.scratch().exists());
+        assert_eq!(fs::read_dir(&target).unwrap().count(), 0);
     }
 
     #[test]
