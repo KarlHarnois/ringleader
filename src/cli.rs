@@ -397,6 +397,7 @@ impl Cli {
         match &self.command {
             Some(CliCommand::Repo { action }) => Self::dispatch_repo(action, service, session),
             Some(CliCommand::Send(args)) => SessionCommands::new(service, session).send(args),
+            Some(CliCommand::Top) => SessionCommands::new(service, session).top(),
             Some(command) => Self::dispatch_session(command, service, session),
             None => Ok(0),
         }
@@ -410,7 +411,6 @@ impl Cli {
         let mut commands = SessionCommands::new(service, session);
         match command {
             CliCommand::List(args) => commands.list(args),
-            CliCommand::Top => commands.top(),
             CliCommand::New(args) => commands.create(args),
             CliCommand::Delete(args) => commands.delete(args),
             CliCommand::Attach(args) => commands.attach(&args.name),
@@ -419,6 +419,7 @@ impl Cli {
             CliCommand::Stop(args) => commands.stop_named_or_repo(args),
             CliCommand::Repo { .. }
             | CliCommand::Send(_)
+            | CliCommand::Top
             | CliCommand::Doctor(_)
             | CliCommand::ExecAgent { .. }
             | CliCommand::FindSession { .. }
