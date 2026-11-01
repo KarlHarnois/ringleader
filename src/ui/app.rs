@@ -126,8 +126,7 @@ impl App {
         let status = Self::status_bar(self.theme_slot.theme(), &self.status, &self.home);
         let outcome = self.home.tick(now, &mut self.service, &status);
         self.status.failure(outcome);
-        self.dialogs
-            .poll(now, &self.service, self.home.session_rows());
+        self.poll_dialogs(now);
     }
 
     pub fn observe(&mut self) {
@@ -442,6 +441,15 @@ impl App {
         self.home.refresh_diffs_soon();
         if let Some(name) = select {
             self.home.select(&name, &self.service);
+        }
+    }
+
+    fn poll_dialogs(&mut self, now: Instant) {
+        let polled = self
+            .dialogs
+            .poll(now, &self.service, self.home.sessions_to_sample());
+        if let Err(error) = polled {
+            self.home.pause_after(&error);
         }
     }
 
@@ -3393,6 +3401,40 @@ mod tests {
         AppFixture::press(&mut app, 'U');
 
         assert!(AppFixture::sample_until_shown(&mut app, "42.0%"));
+    }
+
+    #[test]
+    fn a_tmux_timeout_leaves_the_resource_view_no_session_to_sample() {
+        let fixture = AppFixture::sampling_fix_auth();
+        let start = Instant::now();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        fixture
+            .multiplexer()
+            .fail("observe_all", AppFixture::tmux_timeout());
+
+        app.on_tick(start + Duration::from_secs(2));
+        UiHarness::settle(&mut app);
+
+        assert!(app.home.sessions_to_sample().is_none());
+    }
+
+    #[test]
+    fn a_tmux_timeout_in_the_resource_view_pauses_observing() {
+        let fixture = AppFixture::sampling_fix_auth();
+        fixture
+            .multiplexer()
+            .fail("pane_pids_by_session", AppFixture::tmux_timeout());
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, 'U');
+        let failed = AppFixture::sample_until_shown(&mut app, "could not measure the sessions");
+        UiHarness::settle(&mut app);
+        let after_the_timeout = AppFixture::observe_calls(&fixture);
+
+        app.on_tick(Instant::now() + HomeState::TMUX_PAUSE);
+        UiHarness::settle(&mut app);
+
+        assert!(failed);
+        assert_eq!(AppFixture::observe_calls(&fixture), after_the_timeout);
     }
 
     #[test]

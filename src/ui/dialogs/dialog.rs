@@ -15,7 +15,7 @@ use super::rename_session_dialog::RenameSessionDialog;
 use super::resource_view::ResourceView;
 use super::session_finder::SessionFinder;
 use super::usage_view::UsageView;
-use crate::application::{BatchReport, DeleteImpact, SessionService};
+use crate::application::{BatchReport, DeleteImpact, ServiceError, SessionService};
 use crate::domain::{Session, SessionLoad, SessionSummary};
 use crate::ui::app::AppRequest;
 use crate::ui::dialogs::new_session::new_session_dialog::NewSessionDialog;
@@ -106,18 +106,19 @@ impl Dialog {
         &mut self,
         now: Instant,
         service: &SessionService,
-        session_rows: &[SessionSummary],
-    ) {
+        sessions_to_sample: Option<&[SessionSummary]>,
+    ) -> Result<(), ServiceError> {
         match self {
             Self::NewSession(dialog) => dialog.poll(),
             Self::Usage(view) => view.poll(now, service),
-            Self::Resources(view) => view.poll(now, service, session_rows),
+            Self::Resources(view) => return view.poll(now, service, sessions_to_sample),
             Self::Delete(_)
             | Self::DeleteSessions(_)
             | Self::Rename(_)
             | Self::Help(_)
             | Self::FindSession(_) => {}
         }
+        Ok(())
     }
 
     pub fn shows_failures(&self) -> bool {

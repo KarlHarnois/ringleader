@@ -4,7 +4,7 @@ use crossterm::event::Event;
 use ratatui::Frame;
 
 use super::dialog::{Dialog, DialogStep};
-use crate::application::SessionService;
+use crate::application::{ServiceError, SessionService};
 use crate::domain::SessionSummary;
 use crate::ui::keys::back_key::BackKey;
 use crate::ui::theme::Theme;
@@ -31,10 +31,11 @@ impl DialogSlot {
         &mut self,
         now: Instant,
         service: &SessionService,
-        session_rows: &[SessionSummary],
-    ) {
-        if let Some(dialog) = &mut self.dialog {
-            dialog.poll(now, service, session_rows);
+        sessions_to_sample: Option<&[SessionSummary]>,
+    ) -> Result<(), ServiceError> {
+        match &mut self.dialog {
+            Some(dialog) => dialog.poll(now, service, sessions_to_sample),
+            None => Ok(()),
         }
     }
 

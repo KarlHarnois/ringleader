@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use crate::application::{Pending, SessionService};
+use crate::application::{Pending, ServiceError, SessionService};
 use crate::domain::{LoadSample, SessionLoad, SessionSummary};
 
 #[derive(Default)]
@@ -33,9 +33,21 @@ impl ResourceFeed {
         &mut self,
         now: Instant,
         service: &SessionService,
+        sessions_to_sample: Option<&[SessionSummary]>,
+    ) -> Result<(), ServiceError> {
+        let collected = self.collect();
+        if let Some(session_rows) = sessions_to_sample {
+            self.start_if_due(now, service, session_rows);
+        }
+        collected
+    }
+
+    fn start_if_due(
+        &mut self,
+        now: Instant,
+        service: &SessionService,
         session_rows: &[SessionSummary],
     ) {
-        self.collect();
         if self.pending.is_none() && self.is_due(now) {
             self.pending = Some(service.sample_load(session_rows));
             self.next_sample = Some(now + LoadSample::INTERVAL);
@@ -46,15 +58,14 @@ impl ResourceFeed {
         self.next_sample.is_none_or(|next| now >= next)
     }
 
-    fn collect(&mut self) {
+    fn collect(&mut self) -> Result<(), ServiceError> {
         let Some(finished) = self.pending.as_ref().and_then(Pending::poll) else {
-            return;
+            return Ok(());
         };
         self.pending = None;
-        match finished {
-            Ok(sample) => self.show(sample),
-            Err(_) => self.reading = ResourceReading::Failed,
-        }
+        let sample = finished.inspect_err(|_| self.reading = ResourceReading::Failed)?;
+        self.show(sample);
+        Ok(())
     }
 
     fn show(&mut self, sample: LoadSample) {
@@ -104,9 +115,9 @@ mod tests {
 
         fn settle(feed: &mut ResourceFeed, now: Instant, service: &SessionService) {
             let rows = [Self::row()];
-            feed.poll(now, service, &rows);
+            let _ = feed.poll(now, service, Some(&rows));
             let settled = Deadline::for_background_work().wait_until(|| {
-                feed.poll(now, service, &rows);
+                let _ = feed.poll(now, service, Some(&rows));
                 !feed.is_sampling()
             });
             assert!(settled, "the sample never finished");
@@ -125,9 +136,39 @@ mod tests {
         let fixture = FeedFixture::sampling(Vec::new());
         let mut feed = ResourceFeed::default();
 
-        feed.poll(Instant::now(), &fixture.service(), &[FeedFixture::row()]);
+        feed.poll(
+            Instant::now(),
+            &fixture.service(),
+            Some(&[FeedFixture::row()]),
+        )
+        .unwrap();
 
         assert!(feed.is_sampling());
+    }
+
+    #[test]
+    fn a_paused_tmux_starts_no_sample() {
+        let fixture = FeedFixture::sampling(Vec::new());
+        let mut feed = ResourceFeed::default();
+
+        feed.poll(Instant::now(), &fixture.service(), None).unwrap();
+
+        assert!(!feed.is_sampling());
+    }
+
+    #[test]
+    fn a_failed_sample_hands_its_failure_to_the_caller() {
+        let fixture = ServiceFixture::new()
+            .with_process_meter(FakeProcessMeter::new().unreadable("example denial handed back"));
+        let service = fixture.service();
+        let mut feed = ResourceFeed::default();
+        feed.poll(Instant::now(), &service, Some(&[FeedFixture::row()]))
+            .unwrap();
+
+        let handed_back = Deadline::for_background_work()
+            .wait_until(|| feed.poll(Instant::now(), &service, None).is_err());
+
+        assert!(handed_back);
     }
 
     #[test]
@@ -169,8 +210,9 @@ mod tests {
         feed.poll(
             start + LoadSample::INTERVAL - Duration::from_millis(1),
             &service,
-            &[FeedFixture::row()],
-        );
+            Some(&[FeedFixture::row()]),
+        )
+        .unwrap();
 
         assert!(!feed.is_sampling());
     }
@@ -186,8 +228,9 @@ mod tests {
         feed.poll(
             start + LoadSample::INTERVAL,
             &service,
-            &[FeedFixture::row()],
-        );
+            Some(&[FeedFixture::row()]),
+        )
+        .unwrap();
 
         assert!(feed.is_sampling());
     }
@@ -220,10 +263,11 @@ mod tests {
         let service = fixture.service();
         let mut feed = ResourceFeed::default();
         let rows = [FeedFixture::row()];
-        feed.poll(Instant::now(), &service, &rows);
+        feed.poll(Instant::now(), &service, Some(&rows)).unwrap();
         held.wait_for(1);
 
-        feed.poll(Instant::now() + LoadSample::INTERVAL, &service, &rows);
+        feed.poll(Instant::now() + LoadSample::INTERVAL, &service, Some(&rows))
+            .unwrap();
 
         assert!(feed.is_sampling());
         held.release();

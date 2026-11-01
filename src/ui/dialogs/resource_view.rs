@@ -9,7 +9,7 @@ use ratatui::text::Line;
 
 use super::dialog::{DialogOpening, DialogStep};
 use super::dialog_footer::DialogFooter;
-use crate::application::SessionService;
+use crate::application::{ServiceError, SessionService};
 use crate::domain::{CpuPercent, MemorySize, ProcessLoad, SessionLoad, SessionSummary};
 use crate::ui::background_jobs::resource_feed::{ResourceFeed, ResourceReading};
 use crate::ui::table::viewport::Viewport;
@@ -38,10 +38,11 @@ impl ResourceView {
         &mut self,
         now: Instant,
         service: &SessionService,
-        session_rows: &[SessionSummary],
-    ) {
-        self.feed.poll(now, service, session_rows);
+        sessions_to_sample: Option<&[SessionSummary]>,
+    ) -> Result<(), ServiceError> {
+        let polled = self.feed.poll(now, service, sessions_to_sample);
         self.keep_a_listed_session_selected();
+        polled
     }
 
     pub fn handle_key(&mut self, key: &KeyEvent) -> DialogStep {
@@ -338,9 +339,9 @@ mod tests {
         }
 
         fn settle(&self, view: &mut ResourceView, now: Instant) {
-            view.poll(now, &self.service, &self.rows);
+            let _ = view.poll(now, &self.service, Some(&self.rows));
             let settled = Deadline::for_background_work().wait_until(|| {
-                view.poll(now, &self.service, &self.rows);
+                let _ = view.poll(now, &self.service, Some(&self.rows));
                 !view.feed.is_sampling()
             });
             assert!(settled, "the sample never finished");
