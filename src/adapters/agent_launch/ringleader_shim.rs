@@ -66,6 +66,7 @@ impl RingleaderShim {
     }
 
     fn script(&self) -> io::Result<String> {
+        self.require_absolute_build()?;
         let mut lines = vec![Self::INTERPRETER.to_string()];
         for assignment in &self.assignments {
             lines.push(format!("export {}", Self::shell_word(assignment)?));
@@ -73,6 +74,19 @@ impl RingleaderShim {
         let build = Self::shell_word(self.executable.as_os_str())?;
         lines.push(format!("exec {build} \"$@\""));
         Ok(lines.join("\n") + "\n")
+    }
+
+    fn require_absolute_build(&self) -> io::Result<()> {
+        if self.executable.is_absolute() {
+            return Ok(());
+        }
+        Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "cannot write {} into the ringleader shim, it is not an absolute path",
+                self.executable.display()
+            ),
+        ))
     }
 
     fn shell_word(text: &OsStr) -> io::Result<String> {
@@ -329,6 +343,15 @@ mod tests {
         let build = Path::new(OsStr::from_bytes(b"/builds/\xff/ringleader"));
 
         let published = RingleaderShim::new(&fixture.root(), build, &[]).publish();
+
+        assert!(published.is_err());
+    }
+
+    #[test]
+    fn a_build_path_that_is_not_absolute_publishes_no_shim() {
+        let fixture = ShimFixture::new();
+
+        let published = fixture.shim("ringleader").publish();
 
         assert!(published.is_err());
     }
