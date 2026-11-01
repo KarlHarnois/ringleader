@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use crate::application::ports::{ScratchSpace, ScratchSpaceError};
 
@@ -12,16 +12,59 @@ pub struct FakeScratchSpace {
 struct ScratchState {
     calls: Vec<(&'static str, PathBuf)>,
     failing: Option<&'static str>,
+    directories: Vec<PathBuf>,
+    unpurged: Vec<PathBuf>,
+    purge_log: Option<Arc<Mutex<Vec<String>>>>,
 }
 
 impl FakeScratchSpace {
     const ROOT: &'static str = "/scratch";
     const CREATE: &'static str = "create";
     const REMOVE: &'static str = "remove";
+    const LIST: &'static str = "list";
+    const RETIRE: &'static str = "retire";
+    const LIST_RETIRED: &'static str = "list retired";
+    const PURGE: &'static str = "purge";
+    const LEFT_RETIRED: &'static str = "/scratch/.retired/example-left-0";
 
     pub fn failing(self, operation: &'static str) -> Self {
         self.state.lock().unwrap().failing = Some(operation);
         self
+    }
+
+    pub fn with_directories_of(self, worktrees: &[PathBuf]) -> Self {
+        let directories = worktrees
+            .iter()
+            .map(|worktree| self.directory(worktree))
+            .collect();
+        self.state.lock().unwrap().directories = directories;
+        self
+    }
+
+    pub fn recording_purges(self, log: Arc<Mutex<Vec<String>>>) -> Self {
+        self.state.lock().unwrap().purge_log = Some(log);
+        self
+    }
+
+    pub fn holding_one_retired() -> Self {
+        Self::default().with_unpurged(Path::new(Self::LEFT_RETIRED))
+    }
+
+    pub fn with_unpurged(self, directory: &Path) -> Self {
+        self.state
+            .lock()
+            .unwrap()
+            .unpurged
+            .push(directory.to_path_buf());
+        self
+    }
+
+    pub fn retired(&self) -> Vec<PathBuf> {
+        self.calls_of(Self::RETIRE)
+    }
+
+    pub fn purged(&self) -> Vec<PathBuf> {
+        self.calls_of(Self::PURGE)
     }
 
     pub fn created(&self) -> Vec<PathBuf> {
@@ -43,15 +86,24 @@ impl FakeScratchSpace {
     }
 
     fn record(&self, operation: &'static str, worktree: &Path) -> Result<(), ScratchSpaceError> {
+        self.record_at(operation, worktree, &self.directory(worktree))
+    }
+
+    fn record_at(
+        &self,
+        operation: &'static str,
+        called_with: &Path,
+        directory: &Path,
+    ) -> Result<(), ScratchSpaceError> {
         let mut state = self.state.lock().unwrap();
         if state.failing == Some(operation) {
             return Err(ScratchSpaceError::Io {
                 operation,
-                path: self.directory(worktree),
+                path: directory.to_path_buf(),
                 detail: "Permission denied".to_string(),
             });
         }
-        state.calls.push((operation, worktree.to_path_buf()));
+        state.calls.push((operation, called_with.to_path_buf()));
         Ok(())
     }
 }
@@ -68,5 +120,28 @@ impl ScratchSpace for FakeScratchSpace {
 
     fn remove(&self, worktree: &Path) -> Result<(), ScratchSpaceError> {
         self.record(Self::REMOVE, worktree)
+    }
+
+    fn directories(&self) -> Result<Vec<PathBuf>, ScratchSpaceError> {
+        let root = Path::new(Self::ROOT);
+        self.record_at(Self::LIST, root, root)?;
+        Ok(self.state.lock().unwrap().directories.clone())
+    }
+
+    fn retire(&self, directory: &Path) -> Result<(), ScratchSpaceError> {
+        self.record_at(Self::RETIRE, directory, directory)
+    }
+
+    fn retired_directories(&self) -> Result<Vec<PathBuf>, ScratchSpaceError> {
+        let root = Path::new(Self::ROOT);
+        self.record_at(Self::LIST_RETIRED, root, root)?;
+        Ok(self.state.lock().unwrap().unpurged.clone())
+    }
+
+    fn purge(&self, retired: &Path) -> Result<(), ScratchSpaceError> {
+        if let Some(log) = &self.state.lock().unwrap().purge_log {
+            log.lock().unwrap().push(Self::PURGE.to_string());
+        }
+        self.record_at(Self::PURGE, retired, retired)
     }
 }

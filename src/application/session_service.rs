@@ -316,6 +316,10 @@ impl SessionService {
         Ok(outcome)
     }
 
+    pub fn start_scratch_purge(&self) -> Pending<()> {
+        self.lifecycle.start_scratch_purge()
+    }
+
     pub fn rename_session(&mut self, old: &str, new: &str) -> Result<Session, ServiceError> {
         let reconciliation = self.reconcile()?;
         let request = RenameRequest::new(old, new);

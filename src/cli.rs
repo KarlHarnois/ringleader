@@ -349,7 +349,17 @@ impl Cli {
         let result = self.dispatch(service, session);
         lock.release();
         session.wait_for_startup_input(service);
-        session.finish(result)
+        let exit = session.finish(result);
+        self.purge_retired_scratch(service, session);
+        exit
+    }
+
+    fn purge_retired_scratch(&self, service: &SessionService, session: &CliSession) {
+        if self.is_mutating() {
+            service
+                .start_scratch_purge()
+                .wait_unless(|| session.is_signaled());
+        }
     }
 
     fn restore_server_socket(service: &SessionService, session: &mut CliSession) {
@@ -444,7 +454,8 @@ mod tests {
 
     use super::*;
     use crate::test_support::{
-        CapturedWriter, CliHarness, Deadline, FakeLock, FakeMultiplexer, Gate, ServiceFixture,
+        CapturedWriter, CliHarness, Deadline, FakeLock, FakeMultiplexer, FakeScratchSpace, Gate,
+        ServiceFixture,
     };
 
     struct LockFlowFixture;
@@ -747,6 +758,56 @@ mod tests {
         gate.open_now();
         assert_eq!(handle.join().unwrap(), CliExit::Code(0));
         assert_eq!(typed.typed_when_ready("ringleader-fix-auth"), ["/color"]);
+    }
+
+    #[test]
+    fn the_purge_waits_for_the_startup_input_so_a_signal_cannot_drop_the_task() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let typing_log = Arc::clone(&log);
+        let gate = Arc::new(Gate::closed());
+        let multiplexer = FakeMultiplexer::new()
+            .with_typing_gate(Arc::clone(&gate))
+            .on_call("type_when_ready", move || {
+                typing_log.lock().unwrap().push("typing".to_string());
+            });
+        let space = FakeScratchSpace::holding_one_retired().recording_purges(Arc::clone(&log));
+        let fixture = ServiceFixture::new()
+            .with_config(ServiceFixture::config_with_input())
+            .with_multiplexer(multiplexer)
+            .with_scratch_space(space);
+        let harness = CliHarness::new(fixture);
+
+        let handle = thread::spawn(move || {
+            harness.run(&["new", "--name", "Fix Auth", "--repo", "example-project"])
+        });
+
+        assert!(LockFlowFixture::wait_for(
+            &log,
+            "typing",
+            Duration::from_secs(2)
+        ));
+        let purged_early = LockFlowFixture::wait_for(&log, "purge", LockFlowFixture::TYPING_DELAY);
+        gate.open_now();
+        assert_eq!(handle.join().unwrap(), CliExit::Code(0));
+        assert!(!purged_early, "the purge ran before the startup input");
+        assert!(LockFlowFixture::recorded_before(&log, "typing", "purge"));
+    }
+
+    #[test]
+    fn the_write_lock_is_released_before_the_retired_scratch_is_purged() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let lock = FakeLock::free().recording(Arc::clone(&log));
+        let space = FakeScratchSpace::holding_one_retired().recording_purges(Arc::clone(&log));
+        let harness =
+            CliHarness::new(ServiceFixture::new().with_scratch_space(space)).with_lock(lock);
+
+        harness.run(&["new", "--name", "Fix Auth", "--repo", "example-project"]);
+
+        assert!(
+            LockFlowFixture::recorded_before(&log, "release", "purge"),
+            "the purge ran under the write lock: {:?}",
+            log.lock().unwrap()
+        );
     }
 
     struct ParseFixture;
