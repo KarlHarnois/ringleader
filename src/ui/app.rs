@@ -109,6 +109,7 @@ impl App {
     fn handle_dialog_event(&mut self, event: &Event) -> AppRequest {
         match self.dialogs.handle_event(event, &self.service) {
             DialogStep::Request(request) | DialogStep::CloseWith(request) => self.request(request),
+            DialogStep::Open(opening) => self.open_if_writable(opening),
             DialogStep::Stay | DialogStep::Close => AppRequest::Continue,
         }
     }
@@ -128,7 +129,7 @@ impl App {
         let status = Self::status_bar(self.theme_slot.theme(), &self.status, &self.home);
         let outcome = self.home.tick(now, &mut self.service, &status);
         self.status.failure(outcome);
-        self.dialogs.poll(now, &self.service);
+        self.poll_dialogs(now);
     }
 
     pub fn observe(&mut self) {
@@ -189,8 +190,11 @@ impl App {
     }
 
     fn open_new_session_then_attach(&mut self, repo: Option<PathBuf>) -> AppRequest {
+        self.open_if_writable(DialogOpening::NewSessionThenAttach(repo))
+    }
+
+    fn open_if_writable(&mut self, opening: DialogOpening) -> AppRequest {
         let gate = Self::gate(&self.home, &self.service);
-        let opening = DialogOpening::NewSessionThenAttach(repo);
         let action = KeyAction::from(gate.writable().map(|()| KeyAction::Open(opening)));
         self.take_action(action)
     }
@@ -331,7 +335,7 @@ impl App {
                 self.dialogs.open(Dialog::open(opening, &self.service));
             }
             KeyAction::FindSession => {
-                let finder = Dialog::find_session(self.home.sessions().rows());
+                let finder = Dialog::find_session(self.home.session_rows());
                 self.dialogs.open(finder);
             }
             KeyAction::Reload => self.reload(),
@@ -447,6 +451,15 @@ impl App {
         }
     }
 
+    fn poll_dialogs(&mut self, now: Instant) {
+        let polled = self
+            .dialogs
+            .poll(now, &self.service, self.home.sessions_to_sample());
+        if let Err(error) = polled {
+            self.home.pause_after(&error);
+        }
+    }
+
     fn report_failure(&mut self, error: ServiceError) {
         self.home.pause_after(&error);
         match self.dialogs.fail(error.to_string()) {
@@ -546,13 +559,13 @@ mod tests {
     };
     use crate::application::{CreateRequest, DeleteImpact};
     use crate::domain::{
-        AgentUsage, AnsiColor, Config, ConfigDraft, DiffStat, LimitWindow, PullRequestState,
-        Session, SessionState, StyleSpec, ThemeColor, ThemeOverrides, ThemeRole, ThemeSpec,
-        UsageLimit, UsageRow,
+        AgentUsage, AnsiColor, Config, ConfigDraft, DiffStat, LimitWindow, LoadSample,
+        ProcessFigures, ProcessSample, PullRequestState, Session, SessionState, StyleSpec,
+        ThemeColor, ThemeOverrides, ThemeRole, ThemeSpec, UsageLimit, UsageRow,
     };
     use crate::test_support::{
         CapturedWriter, Deadline, FakeConfigSource, FakeFoldStore, FakeLock, FakeMultiplexer,
-        FakePullRequests, FakeRepoPages, FakeScratchSpace, FakeSessionRegistry,
+        FakeProcessMeter, FakePullRequests, FakeRepoPages, FakeScratchSpace, FakeSessionRegistry,
         FakeTerminalEmulator, FakeUsageMeter, FakeWebBrowser, HeldCalls, LogCapture,
         ServiceFixture, UiHarness,
     };
@@ -567,6 +580,7 @@ mod tests {
         const LOG_FILE_OUTSIDE_THE_STATE_DIRECTORY: &'static str = "/logs/ringleader/app.log";
         const DOCS_PAGE: &'static str = "https://github.example.com/example-org/alpha";
         const RESTORED_SOCKET: &'static str = "recreated the socket";
+        const SAMPLED_PANE: u32 = 4242;
 
         fn two_waiting_sessions() -> ServiceFixture {
             Self::waiting_sessions(&[
@@ -798,6 +812,32 @@ mod tests {
             let usage = AgentUsage::new(vec![UsageRow::Limit(limit)]);
             Self::two_waiting_sessions()
                 .with_usage_meter(FakeUsageMeter::new().with_usage("claude", usage))
+        }
+
+        fn sampling_fix_auth() -> ServiceFixture {
+            let session = ServiceFixture::session("fix-auth");
+            let pane = ProcessFigures::new(Self::SAMPLED_PANE, 1, "claude");
+            let busy = pane.clone().with_cpu_time(Duration::from_millis(420));
+            ServiceFixture::new()
+                .with_sessions(std::slice::from_ref(&session))
+                .with_multiplexer(
+                    FakeMultiplexer::new()
+                        .with_live(ServiceFixture::waiting(&session))
+                        .with_pane_pids(session.tmux_name(), &[Self::SAMPLED_PANE]),
+                )
+                .with_process_meter(FakeProcessMeter::new().with_samples(vec![
+                    ProcessSample::new(Duration::ZERO, vec![pane]),
+                    ProcessSample::new(Duration::from_secs(1), vec![busy]),
+                ]))
+        }
+
+        fn sample_until_shown(app: &mut App, text: &str) -> bool {
+            let mut now = Instant::now();
+            Deadline::for_background_work().wait_until(|| {
+                app.on_tick(now);
+                now += LoadSample::INTERVAL;
+                Self::screen(app, 100, 28).contains(text)
+            })
         }
 
         fn spinner(screen: &str) -> Option<char> {
@@ -1377,7 +1417,7 @@ mod tests {
 
         assert_eq!(
             AppFixture::status_line(&app, 100),
-            " n new   u usage   ? help   q quit"
+            " n new   u usage   U resources   ? help   q quit"
         );
     }
 
@@ -3273,6 +3313,153 @@ mod tests {
         UiHarness::settle(&mut app);
 
         assert!(fixture.usage_meter().calls().is_empty());
+    }
+
+    #[test]
+    fn capital_u_opens_the_resource_view_and_closes_it_again() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press(&mut app, 'U');
+        let opened = AppFixture::screen(&app, 100, 28);
+        AppFixture::press(&mut app, 'U');
+
+        assert!(opened.contains("┌ Resources "));
+        assert!(!app.dialogs.is_open());
+    }
+
+    #[test]
+    fn escape_closes_the_resource_view() {
+        let fixture = AppFixture::two_waiting_sessions();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, 'U');
+
+        app.handle_event(&UiHarness::key(KeyCode::Esc));
+
+        assert!(!app.dialogs.is_open());
+    }
+
+    #[test]
+    fn the_open_resource_view_shows_the_cpu_of_each_running_session() {
+        let fixture = AppFixture::sampling_fix_auth();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        AppFixture::press(&mut app, 'U');
+
+        assert!(AppFixture::sample_until_shown(&mut app, "42.0%"));
+    }
+
+    #[test]
+    fn n_in_the_resource_view_starts_a_session_prompted_to_diagnose_the_selected_one() {
+        let fixture = AppFixture::sampling_fix_auth();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, 'U');
+        AppFixture::sample_until_shown(&mut app, "42.0%");
+        AppFixture::press(&mut app, 'n');
+
+        let request = AppFixture::submit_new_session(&mut app, "diagnose-fix-auth");
+
+        let AppRequest::Block(BlockingOperation::Create(CreateStep::Stay(create))) = request else {
+            panic!("expected a create that stays in Ringleader, got {request:?}");
+        };
+        assert_eq!(create.repo().path(), Path::new(ServiceFixture::REPO));
+        assert_eq!(
+            create.prompt(),
+            [
+                "The Ringleader session fix-auth uses 42.0% CPU and 0 B of memory.",
+                "Its busiest processes:",
+                "- claude (pid 4242): 42.0% CPU, 0 B",
+                "Diagnose what causes this load and how to reduce it.",
+            ]
+            .join("\n")
+        );
+    }
+
+    #[test]
+    fn n_in_the_resource_view_is_refused_while_the_config_is_broken() {
+        let fixture =
+            AppFixture::sampling_fix_auth().with_broken_config(AppFixture::config_error());
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, 'U');
+        AppFixture::sample_until_shown(&mut app, "42.0%");
+
+        AppFixture::press(&mut app, 'n');
+
+        let screen = AppFixture::screen(&app, 100, 28);
+        assert!(screen.contains("┌ Resources "));
+        assert!(AppFixture::status_line(&app, 100).contains("config error, running read-only"));
+    }
+
+    #[test]
+    fn a_tick_with_the_resource_view_closed_samples_nothing() {
+        let fixture = AppFixture::sampling_fix_auth();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        app.on_tick(Instant::now());
+        UiHarness::settle(&mut app);
+
+        assert_eq!(fixture.process_meter().samples_taken(), 0);
+    }
+
+    #[test]
+    fn a_key_closes_the_resource_view_while_its_sample_is_still_running() {
+        let held = HeldCalls::all();
+        let fixture = AppFixture::sampling_fix_auth();
+        fixture.process_meter().on_sample(held.hook());
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, 'U');
+        app.on_tick(Instant::now());
+        held.wait_for(1);
+
+        AppFixture::press(&mut app, 'U');
+
+        held.release();
+        assert!(!app.dialogs.is_open());
+    }
+
+    #[test]
+    fn the_open_resource_view_keeps_sampling_while_the_tui_lacks_focus_for_a_user_watching_it() {
+        let fixture = AppFixture::sampling_fix_auth();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        app.handle_event(&Event::FocusLost);
+
+        AppFixture::press(&mut app, 'U');
+
+        assert!(AppFixture::sample_until_shown(&mut app, "42.0%"));
+    }
+
+    #[test]
+    fn a_tmux_timeout_leaves_the_resource_view_no_session_to_sample() {
+        let fixture = AppFixture::sampling_fix_auth();
+        let start = Instant::now();
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        fixture
+            .multiplexer()
+            .fail("observe_all", AppFixture::tmux_timeout());
+
+        app.on_tick(start + Duration::from_secs(2));
+        UiHarness::settle(&mut app);
+
+        assert!(app.home.sessions_to_sample().is_none());
+    }
+
+    #[test]
+    fn a_tmux_timeout_in_the_resource_view_pauses_observing() {
+        let fixture = AppFixture::sampling_fix_auth();
+        fixture
+            .multiplexer()
+            .fail("pane_pids_by_session", AppFixture::tmux_timeout());
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        AppFixture::press(&mut app, 'U');
+        let failed = AppFixture::sample_until_shown(&mut app, "could not measure the sessions");
+        UiHarness::settle(&mut app);
+        let after_the_timeout = AppFixture::observe_calls(&fixture);
+
+        app.on_tick(Instant::now() + HomeState::TMUX_PAUSE);
+        UiHarness::settle(&mut app);
+
+        assert!(failed);
+        assert_eq!(AppFixture::observe_calls(&fixture), after_the_timeout);
     }
 
     #[test]

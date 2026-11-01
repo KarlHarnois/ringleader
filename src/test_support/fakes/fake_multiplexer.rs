@@ -239,6 +239,10 @@ impl FakeMultiplexer {
         self.edit(|state| state.failures.insert(operation, error));
     }
 
+    pub fn recover(&self, operation: &'static str) {
+        self.edit(|state| state.failures.remove(operation));
+    }
+
     pub fn replace_live(&self, observation: SessionObservation) {
         self.end_session(observation.tmux_name());
         self.edit(|state| state.live.push(observation));
@@ -423,6 +427,11 @@ impl Multiplexer for FakeMultiplexer {
     fn pane_pids(&self, tmux_name: &str) -> Result<Vec<u32>, MultiplexerError> {
         self.call("pane_pids", tmux_name)?;
         Ok(self.edit(|state| state.pane_pids.get(tmux_name).cloned().unwrap_or_default()))
+    }
+
+    fn pane_pids_by_session(&self) -> Result<HashMap<String, Vec<u32>>, MultiplexerError> {
+        self.call("pane_pids_by_session", "")?;
+        Ok(self.edit(|state| state.pane_pids.clone()))
     }
 
     fn caller_in_other_tmux(&self) -> bool {

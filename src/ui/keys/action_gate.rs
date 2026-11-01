@@ -59,6 +59,7 @@ impl<'a> ActionGate<'a> {
             KeyCode::Char('r') => KeyAction::Reload,
             KeyCode::Char('?') => KeyAction::Open(DialogOpening::Help),
             KeyCode::Char('u') => KeyAction::Open(DialogOpening::Usage),
+            KeyCode::Char('U') => KeyAction::Open(DialogOpening::Resources),
             KeyCode::Char('/') => KeyAction::FindSession,
             KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 KeyAction::FindSession

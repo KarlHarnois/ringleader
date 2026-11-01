@@ -83,7 +83,10 @@ impl SessionMenuPopup {
             Panel::Menu(menu) => self.answer_menu(menu, key),
             Panel::Usage(mut view) => match view.handle_key(key) {
                 DialogStep::Stay => Some(Panel::Usage(view)),
-                DialogStep::Close | DialogStep::Request(_) | DialogStep::CloseWith(_) => None,
+                DialogStep::Close
+                | DialogStep::Request(_)
+                | DialogStep::CloseWith(_)
+                | DialogStep::Open(_) => None,
             },
         }
     }

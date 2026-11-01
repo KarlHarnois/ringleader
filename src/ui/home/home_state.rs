@@ -91,6 +91,17 @@ impl HomeState {
         format!("{} {count} · {}", Self::VISUAL_MODE, Self::VISUAL_KEYS)
     }
 
+    pub fn session_rows(&self) -> &[SessionSummary] {
+        self.sessions.rows()
+    }
+
+    pub fn sessions_to_sample(&self) -> Option<&[SessionSummary]> {
+        match self.is_tmux_paused() {
+            true => None,
+            false => Some(self.session_rows()),
+        }
+    }
+
     pub fn key_hints(&self) -> KeyHints {
         if self.sessions.selected_heading().is_some() {
             return KeyHints::on_heading();

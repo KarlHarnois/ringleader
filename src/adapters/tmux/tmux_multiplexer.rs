@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread;
@@ -256,6 +257,18 @@ impl Multiplexer for TmuxMultiplexer {
             return Err(TmuxError::failed("list-panes", &output).into());
         }
         Ok(TmuxListing::new(&output).live_pane_pids())
+    }
+
+    fn pane_pids_by_session(&self) -> Result<HashMap<String, Vec<u32>>, MultiplexerError> {
+        let list = TmuxScripts::all_panes(TmuxListing::SESSION_PANE_PID_FORMAT);
+        let output = self.tmux.query(&list)?;
+        if output.has("ringleader-session-pane-pid")
+            || output.succeeded()
+            || output.reports_no_sessions()
+        {
+            return Ok(TmuxListing::new(&output).live_pane_pids_by_session());
+        }
+        Err(TmuxError::failed("list-panes", &output).into())
     }
 
     fn caller_in_own_pane(&self) -> Result<bool, MultiplexerError> {
@@ -1264,6 +1277,85 @@ mod tests {
 
         assert!(dead);
         assert_eq!(pids.len(), 2);
+    }
+
+    #[test]
+    fn pane_pids_by_session_gives_each_session_the_live_panes_its_own_listing_gives() {
+        let fixture = MultiplexerFixture::new();
+        fixture.create("fix-auth").unwrap();
+        fixture.create("docs").unwrap();
+        let agent = fixture.tagged_panes("ringleader-fix-auth").pop().unwrap();
+        fixture
+            .server
+            .text(&["new-window", "-t", "=ringleader-fix-auth:", "sleep", "30"]);
+        fixture
+            .server
+            .text(&["respawn-pane", "-k", "-t", &agent, "true"]);
+        let dead = fixture.server.wait_for(|| {
+            fixture
+                .server
+                .text(&["display-message", "-p", "-t", &agent, "#{pane_dead}"])
+                == "1"
+        });
+        let multiplexer = fixture.server.multiplexer();
+
+        let by_session = multiplexer.pane_pids_by_session().unwrap();
+
+        assert!(dead);
+        assert_eq!(
+            by_session,
+            HashMap::from(["ringleader-fix-auth", "ringleader-docs"].map(|tmux_name| (
+                tmux_name.to_string(),
+                multiplexer.pane_pids(tmux_name).unwrap()
+            )))
+        );
+    }
+
+    #[test]
+    fn an_absent_socket_file_lists_no_pane_pids() {
+        let fixture = MultiplexerFixture::new();
+
+        assert!(
+            fixture
+                .server
+                .multiplexer()
+                .pane_pids_by_session()
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_stale_socket_lists_no_pane_pids() {
+        let fixture = MultiplexerFixture::new();
+        drop(UnixListener::bind(fixture.server.socket()).unwrap());
+
+        assert!(
+            fixture
+                .server
+                .multiplexer()
+                .pane_pids_by_session()
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_live_server_without_sessions_lists_no_pane_pids() {
+        let fixture = MultiplexerFixture::with_holder();
+        fixture
+            .server
+            .text(&["set-option", "-s", "exit-empty", "off"]);
+        fixture.server.text(&["kill-session", "-t", "=holder:"]);
+
+        assert!(
+            fixture
+                .server
+                .multiplexer()
+                .pane_pids_by_session()
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

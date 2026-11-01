@@ -1,5 +1,7 @@
+pub mod load_sample;
 pub mod session;
 pub mod session_classifier;
+pub mod session_load;
 pub mod session_metadata;
 pub mod session_name;
 pub mod session_observation;

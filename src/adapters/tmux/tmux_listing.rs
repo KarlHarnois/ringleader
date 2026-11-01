@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::Path;
 
@@ -16,6 +17,8 @@ impl<'a> TmuxListing<'a> {
     pub const SHELL_TAG: &'static str = "@ringleader_shell";
     pub const METADATA_OPTION: &'static str = "@ringleader_meta";
     pub const PANE_PID_FORMAT: &'static str = "ringleader-pane-pid #{pane_dead} #{pane_pid}";
+    pub const SESSION_PANE_PID_FORMAT: &'static str =
+        "ringleader-session-pane-pid #{pane_dead} #{pane_pid} #{session_name}";
     pub const TTY_FORMAT: &'static str = "ringleader-tty #{pane_dead} #{pane_tty}";
     pub const WINDOW_SIZE_FORMAT: &'static str =
         "ringleader-window-size #{window_width}x#{window_height}";
@@ -140,6 +143,27 @@ impl<'a> TmuxListing<'a> {
             .filter(|(dead, _)| *dead == "0")
             .filter_map(|(_, pid)| pid.parse().ok())
             .collect()
+    }
+
+    pub fn live_pane_pids_by_session(&self) -> HashMap<String, Vec<u32>> {
+        let mut pane_pids: HashMap<String, Vec<u32>> = HashMap::new();
+        let live_panes = self
+            .output
+            .labeled("ringleader-session-pane-pid")
+            .filter_map(Self::live_session_pane);
+        for (session, pid) in live_panes {
+            pane_pids.entry(session.to_string()).or_default().push(pid);
+        }
+        pane_pids
+    }
+
+    fn live_session_pane(row: &str) -> Option<(&str, u32)> {
+        let (dead, pane) = row.split_once(' ')?;
+        let (pid, session) = pane.split_once(' ')?;
+        if dead == Self::DEAD {
+            return None;
+        }
+        Some((session, pid.parse().ok()?))
     }
 
     fn observe_session(rows: &[PaneRow], session: &str) -> SessionObservation {

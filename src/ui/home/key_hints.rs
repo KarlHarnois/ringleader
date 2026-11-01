@@ -19,9 +19,10 @@ impl KeyHints {
     const PULL_REQUEST: Hint = ("o", "PR");
     const PULL: Hint = ("p", "pull");
     const USAGE: Hint = ("u", "usage");
+    const RESOURCES: Hint = ("U", "resources");
     const HELP: Hint = ("?", "help");
     const QUIT: Hint = ("q", "quit");
-    const SESSION_HINTS: [Hint; 10] = [
+    const SESSION_HINTS: [Hint; 11] = [
         Self::NEW,
         Self::DELETE,
         Self::ATTACH,
@@ -30,19 +31,28 @@ impl KeyHints {
         Self::PULL_REQUEST,
         Self::PULL,
         Self::USAGE,
+        Self::RESOURCES,
         Self::HELP,
         Self::QUIT,
     ];
-    const HEADING_HINTS: [Hint; 6] = [
+    const HEADING_HINTS: [Hint; 7] = [
         Self::NEW,
         Self::FOLD,
         Self::FIND,
         Self::USAGE,
+        Self::RESOURCES,
         Self::HELP,
         Self::QUIT,
     ];
-    const NO_SELECTION_HINTS: [Hint; 4] = [Self::NEW, Self::USAGE, Self::HELP, Self::QUIT];
-    const DROP_ORDER: [Hint; 6] = [
+    const NO_SELECTION_HINTS: [Hint; 5] = [
+        Self::NEW,
+        Self::USAGE,
+        Self::RESOURCES,
+        Self::HELP,
+        Self::QUIT,
+    ];
+    const DROP_ORDER: [Hint; 7] = [
+        Self::RESOURCES,
         Self::USAGE,
         Self::PULL,
         Self::FIND,
@@ -134,7 +144,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_ninety_five_column_bar_lists_every_session_hint() {
+    fn a_one_hundred_and_nine_column_bar_lists_every_session_hint() {
+        assert_eq!(
+            KeyHints::on_session().text(109),
+            " n new   d delete   Enter attach   / find   t shell   o PR   p pull   u usage   U resources   ? help   q quit"
+        );
+    }
+
+    #[test]
+    fn a_ninety_five_column_bar_drops_resources_first() {
         assert_eq!(
             KeyHints::on_session().text(95),
             " n new   d delete   Enter attach   / find   t shell   o PR   p pull   u usage   ? help   q quit"
@@ -142,7 +160,7 @@ mod tests {
     }
 
     #[test]
-    fn an_eighty_column_bar_drops_usage_and_pull() {
+    fn an_eighty_column_bar_also_drops_usage_and_pull() {
         assert_eq!(
             KeyHints::on_session().text(80),
             " n new   d delete   Enter attach   / find   t shell   o PR   ? help   q quit"
@@ -169,12 +187,12 @@ mod tests {
     fn a_heading_bar_offers_enter_fold_and_no_session_key() {
         assert_eq!(
             KeyHints::on_heading().text(95),
-            " n new   Enter fold   / find   u usage   ? help   q quit"
+            " n new   Enter fold   / find   u usage   U resources   ? help   q quit"
         );
     }
 
     #[test]
-    fn a_fifty_column_heading_bar_drops_usage_first() {
+    fn a_fifty_column_heading_bar_drops_resources_and_usage_first() {
         assert_eq!(
             KeyHints::on_heading().text(50),
             " n new   Enter fold   / find   ? help   q quit"
@@ -193,7 +211,7 @@ mod tests {
     fn a_bar_without_a_selection_lists_only_keys_that_need_no_session() {
         assert_eq!(
             KeyHints::without_selection().text(95),
-            " n new   u usage   ? help   q quit"
+            " n new   u usage   U resources   ? help   q quit"
         );
     }
 

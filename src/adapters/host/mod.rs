@@ -16,4 +16,5 @@ pub mod procfs_process_table;
 pub mod signal_hook_interrupts;
 pub mod system_clock;
 pub mod system_host_probe;
+pub mod system_process_meter;
 pub mod xdg_paths;

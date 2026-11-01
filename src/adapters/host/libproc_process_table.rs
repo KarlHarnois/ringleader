@@ -1,11 +1,14 @@
+use std::io;
 use std::path::PathBuf;
 use std::ptr;
+use std::time::Duration;
 
 use super::argument_area::ArgumentArea;
 use super::errno::Errno;
 use super::launchd_daemon::LaunchdDaemon;
 use super::live_process::LiveProcess;
 use super::nul_terminated::NulTerminated;
+use crate::domain::{MemorySize, ProcessFigures};
 
 pub struct LibprocProcessTable;
 
@@ -17,12 +20,28 @@ impl LibprocProcessTable {
     const NO_ARGUMENT: u64 = 0;
 
     pub fn pids() -> Vec<u32> {
-        let mut pids = vec![0; Self::pid_count() + Self::PID_HEADROOM];
-        let listed = Self::list_pids(&mut pids);
+        Self::listed_pids().unwrap_or_default()
+    }
+
+    pub fn listed_pids() -> io::Result<Vec<u32>> {
+        let mut pids = vec![0; Self::pid_count()? + Self::PID_HEADROOM];
+        let listed = Self::list_pids(&mut pids)?;
         pids.truncate(listed);
-        pids.into_iter()
+        Ok(pids
+            .into_iter()
             .filter_map(|pid| u32::try_from(pid).ok())
-            .collect()
+            .collect())
+    }
+
+    pub fn figures(pid: u32) -> Option<ProcessFigures> {
+        let pid = libc::c_int::try_from(pid).ok()?;
+        let info = Self::short_info(pid)?;
+        let program = NulTerminated::text(&info.pbsi_comm);
+        let process = ProcessFigures::new(info.pbsi_pid, info.pbsi_ppid, &program);
+        Some(match Self::task_info(pid) {
+            Some(task) => Self::measured(process, &task),
+            None => process,
+        })
     }
 
     pub fn is_alive(pid: u32) -> bool {
@@ -57,17 +76,48 @@ impl LibprocProcessTable {
         process.with_server_shape(server_shape)
     }
 
-    fn pid_count() -> usize {
+    fn pid_count() -> io::Result<usize> {
         // SAFETY: a null buffer asks only for the count, so proc_listallpids writes nothing.
         let count = unsafe { libc::proc_listallpids(ptr::null_mut(), 0) };
-        usize::try_from(count).unwrap_or_default()
+        Ok(usize::try_from(Errno::result(count)?).unwrap_or_default())
     }
 
-    fn list_pids(pids: &mut [libc::pid_t]) -> usize {
+    fn list_pids(pids: &mut [libc::pid_t]) -> io::Result<usize> {
         let size = libc::c_int::try_from(size_of_val(pids)).unwrap_or_default();
         // SAFETY: proc_listallpids writes at most `size` bytes, the size of `pids`.
         let listed = unsafe { libc::proc_listallpids(pids.as_mut_ptr().cast(), size) };
-        usize::try_from(listed).unwrap_or_default().min(pids.len())
+        let listed = usize::try_from(Errno::result(listed)?).unwrap_or_default();
+        Ok(listed.min(pids.len()))
+    }
+
+    fn task_info(pid: libc::c_int) -> Option<libc::proc_taskinfo> {
+        Self::pid_info::<libc::proc_taskinfo>(pid, libc::PROC_PIDTASKINFO, Self::NO_ARGUMENT)
+    }
+
+    fn measured(process: ProcessFigures, task: &libc::proc_taskinfo) -> ProcessFigures {
+        process
+            .with_cpu_time(Self::cpu_time(task))
+            .with_resident_memory(MemorySize::of_bytes(task.pti_resident_size))
+    }
+
+    fn cpu_time(task: &libc::proc_taskinfo) -> Duration {
+        let mach_ticks = task.pti_total_user.saturating_add(task.pti_total_system);
+        let (numerator, denominator) = Self::mach_timebase();
+        let nanoseconds =
+            u128::from(mach_ticks) * u128::from(numerator) / u128::from(denominator.max(1));
+        Duration::from_nanos(u64::try_from(nanoseconds).unwrap_or(u64::MAX))
+    }
+
+    #[expect(
+        deprecated,
+        reason = "libc points to the mach2 crate for its Mach bindings, which Ringleader does not depend on"
+    )]
+    fn mach_timebase() -> (u32, u32) {
+        let mut timebase = libc::mach_timebase_info::default();
+        // SAFETY: mach_timebase_info writes only the two integer fields of the struct on this
+        // stack frame.
+        unsafe { libc::mach_timebase_info(&raw mut timebase) };
+        (timebase.numer, timebase.denom)
     }
 
     fn short_info(pid: libc::c_int) -> Option<libc::proc_bsdshortinfo> {
@@ -153,7 +203,7 @@ impl LibprocProcessTable {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{Deadline, ProcessMarker};
+    use crate::test_support::{Deadline, InheritedPath, ProcessMarker};
 
     struct TableFixture;
 
@@ -169,6 +219,27 @@ mod tests {
             process
         }
 
+        fn figures_once_running(pid: u32, program: &str) -> Option<ProcessFigures> {
+            let mut figures = None;
+            Deadline::for_background_work().wait_until(|| {
+                figures = LibprocProcessTable::figures(pid);
+                figures
+                    .as_ref()
+                    .is_some_and(|figures| figures.program() == program)
+            });
+            figures
+        }
+
+        fn program_behind(command: &str) -> String {
+            let found = InheritedPath::program(command).unwrap();
+            let executable = std::fs::canonicalize(found).unwrap();
+            executable
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+        }
+
         fn end(mut child: std::process::Child) {
             child.kill().unwrap();
             child.wait().unwrap();
@@ -178,6 +249,26 @@ mod tests {
     #[test]
     fn the_pids_hold_this_process() {
         assert!(LibprocProcessTable::pids().contains(&std::process::id()));
+    }
+
+    #[test]
+    fn the_listed_pids_hold_this_process() {
+        let pids = LibprocProcessTable::listed_pids().unwrap();
+
+        assert!(pids.contains(&std::process::id()));
+    }
+
+    #[test]
+    fn a_child_is_measured_with_its_parent_and_program() {
+        let child = ProcessMarker::new().sleeping_child();
+        let program = TableFixture::program_behind("sleep");
+
+        let figures = TableFixture::figures_once_running(child.id(), &program);
+        TableFixture::end(child);
+
+        let figures = figures.unwrap();
+        assert_eq!(figures.parent(), std::process::id());
+        assert_eq!(figures.program(), program);
     }
 
     #[test]
@@ -202,6 +293,11 @@ mod tests {
     #[test]
     fn launchd_is_read_although_another_user_owns_it() {
         assert!(LibprocProcessTable::read(1).is_some());
+    }
+
+    #[test]
+    fn launchd_is_measured_although_another_user_owns_it() {
+        assert!(LibprocProcessTable::figures(1).is_some());
     }
 
     #[test]

@@ -7,6 +7,7 @@ mod list_report;
 mod repo_argument;
 mod repo_commands;
 mod session_commands;
+mod top_report;
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -50,6 +51,8 @@ pub struct Cli {
 enum CliCommand {
     #[command(about = "List every session with its state and diff")]
     List(ListArgs),
+    #[command(about = "Show the CPU and memory each running session uses, busiest first")]
+    Top,
     #[command(about = "Create a session in a new worktree or the main checkout")]
     New(NewArgs),
     #[command(about = "Delete sessions and the worktrees and branches made for them")]
@@ -394,6 +397,7 @@ impl Cli {
         match &self.command {
             Some(CliCommand::Repo { action }) => Self::dispatch_repo(action, service, session),
             Some(CliCommand::Send(args)) => SessionCommands::new(service, session).send(args),
+            Some(CliCommand::Top) => SessionCommands::new(service, session).top(),
             Some(command) => Self::dispatch_session(command, service, session),
             None => Ok(0),
         }
@@ -415,6 +419,7 @@ impl Cli {
             CliCommand::Stop(args) => commands.stop_named_or_repo(args),
             CliCommand::Repo { .. }
             | CliCommand::Send(_)
+            | CliCommand::Top
             | CliCommand::Doctor(_)
             | CliCommand::ExecAgent { .. }
             | CliCommand::FindSession { .. }

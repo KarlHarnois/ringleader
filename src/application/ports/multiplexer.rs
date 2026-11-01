@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
@@ -10,6 +11,7 @@ pub trait Multiplexer: Send + Sync {
     fn create_session(&self, spec: &SessionSpec) -> Result<PathBuf, MultiplexerError>;
     fn kill_session(&self, tmux_name: &str) -> Result<(), MultiplexerError>;
     fn pane_pids(&self, tmux_name: &str) -> Result<Vec<u32>, MultiplexerError>;
+    fn pane_pids_by_session(&self) -> Result<HashMap<String, Vec<u32>>, MultiplexerError>;
     fn caller_session(&self) -> Result<Option<String>, MultiplexerError>;
     fn caller_in_own_pane(&self) -> Result<bool, MultiplexerError>;
     fn caller_in_other_tmux(&self) -> bool;
