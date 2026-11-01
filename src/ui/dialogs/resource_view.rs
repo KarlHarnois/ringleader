@@ -28,7 +28,7 @@ impl ResourceView {
     const HINTS: &'static str = "n diagnose · ↑ ↓ j k choose · U Esc q close";
     const MEASURING: &'static str = "Measuring CPU and memory…";
     const NO_RUNNING_SESSION: &'static str = "No session is running.";
-    const UNREADABLE: &'static str = "could not read the processes";
+    const MEASUREMENT_FAILED: &'static str = "could not measure the sessions";
     const PROCESS_INDENT: &'static str = "  ";
     const CPU_WIDTH: usize = 8;
     const MEMORY_WIDTH: usize = 10;
@@ -97,14 +97,14 @@ impl ResourceView {
     fn loads(&self) -> &[SessionLoad] {
         match self.feed.reading() {
             ResourceReading::Loads(loads) => loads,
-            ResourceReading::Measuring | ResourceReading::Unreadable => &[],
+            ResourceReading::Measuring | ResourceReading::Failed => &[],
         }
     }
 
     fn body(&self, width: usize, room: usize, theme: &Theme) -> Vec<Line<'static>> {
         match self.feed.reading() {
             ResourceReading::Measuring => vec![Line::styled(Self::MEASURING, theme.dim())],
-            ResourceReading::Unreadable => Vec::new(),
+            ResourceReading::Failed => Vec::new(),
             ResourceReading::Loads(loads) if loads.is_empty() => {
                 vec![Line::styled(Self::NO_RUNNING_SESSION, theme.dim())]
             }
@@ -213,7 +213,7 @@ impl ResourceView {
 
     fn status(&self) -> &'static str {
         match self.feed.reading() {
-            ResourceReading::Unreadable => Self::UNREADABLE,
+            ResourceReading::Failed => Self::MEASUREMENT_FAILED,
             ResourceReading::Measuring | ResourceReading::Loads(_) => "",
         }
     }
@@ -226,6 +226,7 @@ mod tests {
     use crossterm::event::KeyModifiers;
 
     use super::*;
+    use crate::application::ports::MultiplexerError;
     use crate::domain::{LoadSample, ProcessFigures, ProcessSample, SessionState};
     use crate::test_support::{
         Deadline, FakeMultiplexer, FakeProcessMeter, ProcessFiguresFixture, ServiceFixture,
@@ -243,6 +244,8 @@ mod tests {
         const FIX_AUTH_PANE: u32 = 100;
         const DOCS_PANE: u32 = 200;
         const DENIAL: &'static str = "example denial of one sample";
+        const MEASUREMENT_FAILED_FOOTER: &'static str =
+            "could not measure the sessions  n diagnose · ↑ ↓ j k choose · U Esc q close";
 
         fn sampling(samples: Vec<ProcessSample>) -> Self {
             Self::sampling_from(FakeProcessMeter::new().with_samples(samples))
@@ -264,6 +267,13 @@ mod tests {
                     SessionSummary::managed(fix_auth, SessionState::Working, false),
                     SessionSummary::managed(docs, SessionState::Waiting, false),
                 ],
+            }
+        }
+
+        fn tmux_timeout() -> MultiplexerError {
+            MultiplexerError::TimedOut {
+                subcommand: "list-panes".to_string(),
+                seconds: 2,
             }
         }
 
@@ -463,7 +473,23 @@ mod tests {
 
         assert_eq!(
             ViewFixture::rows(&view),
-            ["could not read the processes  n diagnose · ↑ ↓ j k choose · U Esc q close"]
+            [ViewFixture::MEASUREMENT_FAILED_FOOTER]
+        );
+    }
+
+    #[test]
+    fn a_failed_pane_listing_leaves_the_view_without_rows() {
+        let fixture = ViewFixture::sampling(Vec::new());
+        fixture
+            .services
+            .multiplexer()
+            .fail("pane_pids_by_session", ViewFixture::tmux_timeout());
+
+        let view = fixture.settled_after(1);
+
+        assert_eq!(
+            ViewFixture::rows(&view),
+            [ViewFixture::MEASUREMENT_FAILED_FOOTER]
         );
     }
 

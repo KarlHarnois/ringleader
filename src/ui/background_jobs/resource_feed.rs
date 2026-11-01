@@ -16,7 +16,7 @@ pub enum ResourceReading {
     #[default]
     Measuring,
     Loads(Vec<SessionLoad>),
-    Unreadable,
+    Failed,
 }
 
 impl ResourceFeed {
@@ -48,7 +48,7 @@ impl ResourceFeed {
         self.pending = None;
         match finished {
             Ok(sample) => self.show(sample),
-            Err(_) => self.reading = ResourceReading::Unreadable,
+            Err(_) => self.reading = ResourceReading::Failed,
         }
     }
 
@@ -109,7 +109,7 @@ mod tests {
         fn cpu(feed: &ResourceFeed) -> Option<String> {
             match feed.reading() {
                 ResourceReading::Loads(loads) => Some(loads[0].cpu().to_string()),
-                ResourceReading::Measuring | ResourceReading::Unreadable => None,
+                ResourceReading::Measuring | ResourceReading::Failed => None,
             }
         }
     }
@@ -216,7 +216,7 @@ mod tests {
 
         FeedFixture::settle(&mut feed, Instant::now(), &service);
 
-        assert_eq!(feed.reading(), &ResourceReading::Unreadable);
+        assert_eq!(feed.reading(), &ResourceReading::Failed);
         assert_eq!(log.count_containing("example denial of the feed"), 1);
     }
 }
