@@ -638,10 +638,9 @@ mod tests {
 
         let contents = HandoffFixture::written(&handoff, &HandoffFixture::launch(&[]));
 
-        assert_eq!(
-            contents.shim_directory(),
-            Some(fixture.shim().publish().unwrap())
-        );
+        let handed = fs::read(contents.shim_directory().unwrap().join("ringleader")).unwrap();
+        let published = fixture.shim().publish().unwrap().join("ringleader");
+        assert_eq!(handed, fs::read(published).unwrap());
     }
 
     #[test]
