@@ -1312,6 +1312,53 @@ mod tests {
     }
 
     #[test]
+    fn an_absent_socket_file_lists_no_pane_pids() {
+        let fixture = MultiplexerFixture::new();
+
+        assert!(
+            fixture
+                .server
+                .multiplexer()
+                .pane_pids_by_session()
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_stale_socket_lists_no_pane_pids() {
+        let fixture = MultiplexerFixture::new();
+        drop(UnixListener::bind(fixture.server.socket()).unwrap());
+
+        assert!(
+            fixture
+                .server
+                .multiplexer()
+                .pane_pids_by_session()
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_live_server_without_sessions_lists_no_pane_pids() {
+        let fixture = MultiplexerFixture::with_holder();
+        fixture
+            .server
+            .text(&["set-option", "-s", "exit-empty", "off"]);
+        fixture.server.text(&["kill-session", "-t", "=holder:"]);
+
+        assert!(
+            fixture
+                .server
+                .multiplexer()
+                .pane_pids_by_session()
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn respawn_revives_the_tagged_pane_while_a_shell_window_is_current() {
         let fixture = MultiplexerFixture::new();
         fixture.create("fix-auth").unwrap();
