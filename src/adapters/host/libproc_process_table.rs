@@ -203,7 +203,7 @@ impl LibprocProcessTable {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{Deadline, ProcessMarker};
+    use crate::test_support::{Deadline, InheritedPath, ProcessMarker};
 
     struct TableFixture;
 
@@ -230,6 +230,16 @@ mod tests {
             figures
         }
 
+        fn program_behind(command: &str) -> String {
+            let found = InheritedPath::program(command).unwrap();
+            let executable = std::fs::canonicalize(found).unwrap();
+            executable
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+        }
+
         fn end(mut child: std::process::Child) {
             child.kill().unwrap();
             child.wait().unwrap();
@@ -251,13 +261,14 @@ mod tests {
     #[test]
     fn a_child_is_measured_with_its_parent_and_program() {
         let child = ProcessMarker::new().sleeping_child();
+        let program = TableFixture::program_behind("sleep");
 
-        let figures = TableFixture::figures_once_running(child.id(), "sleep");
+        let figures = TableFixture::figures_once_running(child.id(), &program);
         TableFixture::end(child);
 
         let figures = figures.unwrap();
         assert_eq!(figures.parent(), std::process::id());
-        assert_eq!(figures.program(), "sleep");
+        assert_eq!(figures.program(), program);
     }
 
     #[test]
