@@ -242,7 +242,7 @@ mod tests {
         WorktreeEntry,
     };
     use crate::application::session_service::SessionService;
-    use crate::domain::{AgentPane, NamingScheme, Registration, SessionObservation, TmuxAddress};
+    use crate::domain::{AgentPane, NamingScheme, Registration, TmuxAddress};
     use crate::test_support::{
         FakeHostProbe, FakeMultiplexer, FakeScratchSpace, FakeSessionRegistry, FakeWorkspace,
         ServiceFixture,
@@ -271,12 +271,6 @@ mod tests {
 
         fn live_fixture() -> ServiceFixture {
             Self::stopped_fixture().with_multiplexer(Self::live_multiplexer())
-        }
-
-        fn renamed_without_prefix(session: &Session) -> SessionObservation {
-            let tmux = TmuxAddress::new(session.name().as_str(), session.socket_path());
-            SessionObservation::new(tmux, ServiceFixture::CREATED_AT)
-                .with_metadata(session.metadata().clone())
         }
 
         fn live_multiplexer() -> FakeMultiplexer {
@@ -913,7 +907,7 @@ mod tests {
         let space = FakeScratchSpace::default()
             .with_directories_of(&[unrecorded.worktree_path().to_path_buf()]);
         let multiplexer = DeleteFixture::live_multiplexer()
-            .with_live(DeleteFixture::renamed_without_prefix(&unrecorded));
+            .with_live(ServiceFixture::renamed_without_prefix(&unrecorded));
         let fixture = DeleteFixture::live_fixture()
             .with_multiplexer(multiplexer)
             .with_scratch_space(space);

@@ -623,6 +623,23 @@ mod tests {
     }
 
     #[test]
+    fn a_live_tmux_session_outside_the_registry_keeps_its_scratch_directory_unlisted() {
+        let unrecorded = ServiceFixture::session("unrecorded");
+        let space = FakeScratchSpace::default()
+            .with_directories_of(&[unrecorded.worktree_path().to_path_buf()]);
+        let multiplexer =
+            FakeMultiplexer::new().with_live(ServiceFixture::renamed_without_prefix(&unrecorded));
+        let fixture = DoctorFixture::healthy()
+            .with_multiplexer(multiplexer)
+            .with_scratch_space(space);
+
+        assert!(!DoctorFixture::has_warning(
+            &fixture,
+            "orphaned scratch directory"
+        ));
+    }
+
+    #[test]
     fn an_orphaned_scratch_directory_is_a_warning() {
         let space = FakeScratchSpace::default().with_directories_of(&[
             ServiceFixture::worktree_path("fix-auth"),

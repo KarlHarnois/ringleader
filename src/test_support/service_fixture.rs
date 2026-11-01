@@ -524,6 +524,11 @@ impl ServiceFixture {
         .with_metadata(session.metadata().clone())
     }
 
+    pub fn renamed_without_prefix(session: &Session) -> SessionObservation {
+        let tmux = TmuxAddress::new(session.name().as_str(), session.socket_path());
+        SessionObservation::new(tmux, Self::CREATED_AT).with_metadata(session.metadata().clone())
+    }
+
     pub fn host_for(sessions: &[&Session]) -> FakeHostProbe {
         let host = FakeHostProbe::default()
             .with_command("claude")
