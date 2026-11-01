@@ -60,7 +60,7 @@ impl OrphanAudit {
             Ok(directories) => {
                 for directory in directories {
                     report.warning(format!(
-                        "retired scratch directory {} is still on disk, so a purge failed or is still running, see the log",
+                        "retired scratch directory {} is still on disk, the next change purges it, see the log if it stays",
                         directory.display()
                     ));
                 }
