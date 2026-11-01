@@ -127,7 +127,7 @@ impl App {
         let outcome = self.home.tick(now, &mut self.service, &status);
         self.status.failure(outcome);
         self.dialogs
-            .poll(now, &self.service, self.home.rows_to_sample());
+            .poll(now, &self.service, self.home.session_rows());
     }
 
     pub fn observe(&mut self) {
@@ -329,7 +329,7 @@ impl App {
                 self.dialogs.open(Dialog::open(opening, &self.service));
             }
             KeyAction::FindSession => {
-                let finder = Dialog::find_session(self.home.sessions().rows());
+                let finder = Dialog::find_session(self.home.session_rows());
                 self.dialogs.open(finder);
             }
             KeyAction::Reload => self.reload(),

@@ -91,7 +91,7 @@ impl HomeState {
         format!("{} {count} · {}", Self::VISUAL_MODE, Self::VISUAL_KEYS)
     }
 
-    pub fn rows_to_sample(&self) -> &[SessionSummary] {
+    pub fn session_rows(&self) -> &[SessionSummary] {
         self.sessions.rows()
     }
 
