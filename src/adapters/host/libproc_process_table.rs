@@ -36,14 +36,12 @@ impl LibprocProcessTable {
     pub fn figures(pid: u32) -> Option<ProcessFigures> {
         let pid = libc::c_int::try_from(pid).ok()?;
         let info = Self::short_info(pid)?;
-        let task =
-            Self::pid_info::<libc::proc_taskinfo>(pid, libc::PROC_PIDTASKINFO, Self::NO_ARGUMENT)?;
         let program = NulTerminated::text(&info.pbsi_comm);
-        Some(
-            ProcessFigures::new(info.pbsi_pid, info.pbsi_ppid, &program)
-                .with_cpu_time(Self::cpu_time(&task))
-                .with_resident_memory(MemorySize::of_bytes(task.pti_resident_size)),
-        )
+        let process = ProcessFigures::new(info.pbsi_pid, info.pbsi_ppid, &program);
+        Some(match Self::task_info(pid) {
+            Some(task) => Self::measured(process, &task),
+            None => process,
+        })
     }
 
     pub fn is_alive(pid: u32) -> bool {
@@ -90,6 +88,16 @@ impl LibprocProcessTable {
         let listed = unsafe { libc::proc_listallpids(pids.as_mut_ptr().cast(), size) };
         let listed = usize::try_from(Errno::result(listed)?).unwrap_or_default();
         Ok(listed.min(pids.len()))
+    }
+
+    fn task_info(pid: libc::c_int) -> Option<libc::proc_taskinfo> {
+        Self::pid_info::<libc::proc_taskinfo>(pid, libc::PROC_PIDTASKINFO, Self::NO_ARGUMENT)
+    }
+
+    fn measured(process: ProcessFigures, task: &libc::proc_taskinfo) -> ProcessFigures {
+        process
+            .with_cpu_time(Self::cpu_time(task))
+            .with_resident_memory(MemorySize::of_bytes(task.pti_resident_size))
     }
 
     fn cpu_time(task: &libc::proc_taskinfo) -> Duration {
@@ -274,6 +282,11 @@ mod tests {
     #[test]
     fn launchd_is_read_although_another_user_owns_it() {
         assert!(LibprocProcessTable::read(1).is_some());
+    }
+
+    #[test]
+    fn launchd_is_measured_although_another_user_owns_it() {
+        assert!(LibprocProcessTable::figures(1).is_some());
     }
 
     #[test]
