@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::pending::Pending;
-use super::ports::{HostProbe, ProcessInfo, ScratchSpace, SessionRegistry};
+use super::ports::{DirectoryUser, HostProbe, ProcessInfo, ScratchSpace, SessionRegistry};
 use super::scratch_claims::ScratchClaims;
 use super::service_ports::ServicePorts;
 use crate::domain::{Session, SessionObservation};
@@ -31,9 +31,7 @@ impl ScratchSweep {
         let claims = ScratchClaims::new(self.space.as_ref(), entries, observations);
         match self.space.directories() {
             Ok(directories) => {
-                for orphan in claims.orphans(self.sweepable(deleted, directories)) {
-                    self.retire_unless_in_use(&orphan);
-                }
+                self.retire_unused(claims.orphans(self.sweepable(deleted, directories)))
             }
             Err(error) => log::warn!("kept every orphaned scratch directory: {error}"),
         }
@@ -88,11 +86,20 @@ impl ScratchSweep {
             .join(", ")
     }
 
-    fn retire_unless_in_use(&self, orphan: &Path) {
-        let users: Vec<ProcessInfo> = self
-            .host
-            .directory_users(&[orphan.to_path_buf()])
+    fn retire_unused(&self, orphans: Vec<PathBuf>) {
+        if orphans.is_empty() {
+            return;
+        }
+        let users = self.host.directory_users(&orphans);
+        for orphan in &orphans {
+            self.retire_unless_in_use(orphan, &users);
+        }
+    }
+
+    fn retire_unless_in_use(&self, orphan: &Path, users: &[DirectoryUser]) {
+        let users: Vec<ProcessInfo> = users
             .iter()
+            .filter(|user| user.works_in(orphan))
             .map(|user| user.process().clone())
             .collect();
         if users.is_empty() {
@@ -123,6 +130,7 @@ impl ScratchSweep {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
 
     use super::*;
     use crate::test_support::{
@@ -135,6 +143,7 @@ mod tests {
 
     impl SweepFixture {
         const ORPHAN: &'static str = "forgotten";
+        const OTHER_ORPHAN: &'static str = "abandoned";
         const RECORDED: &'static str = "fix-auth";
         const DELETED: &'static str = "example-deleted";
         const FIRST_RETIRED: &'static str = "/scratch/.retired/sweep-first-0";
@@ -174,6 +183,20 @@ mod tests {
                 ServiceFixture::worktree_path(Self::RECORDED),
                 ServiceFixture::worktree_path(Self::ORPHAN),
             ])
+        }
+
+        fn space_with_two_orphans() -> FakeScratchSpace {
+            FakeScratchSpace::default().with_directories_of(&[
+                ServiceFixture::worktree_path(Self::RECORDED),
+                ServiceFixture::worktree_path(Self::ORPHAN),
+                ServiceFixture::worktree_path(Self::OTHER_ORPHAN),
+            ])
+        }
+
+        fn other_orphan_directory(&self) -> PathBuf {
+            self.service
+                .scratch_space()
+                .directory(&ServiceFixture::worktree_path(Self::OTHER_ORPHAN))
         }
 
         fn orphan_directory(&self) -> PathBuf {
@@ -225,6 +248,34 @@ mod tests {
         fixture.retire_orphans();
 
         assert!(fixture.service.scratch_space().retired().is_empty());
+    }
+
+    #[test]
+    fn a_process_in_one_orphan_keeps_only_that_orphan() {
+        let fixture = SweepFixture::with(
+            SweepFixture::space_with_two_orphans(),
+            SweepFixture::host_with_a_process_in_the_orphan(),
+        );
+
+        fixture.retire_orphans();
+
+        assert_eq!(
+            fixture.service.scratch_space().retired(),
+            [fixture.other_orphan_directory()]
+        );
+    }
+
+    #[test]
+    fn every_orphan_is_checked_against_one_read_of_the_process_table() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let fixture = SweepFixture::with(
+            SweepFixture::space_with_two_orphans(),
+            FakeHostProbe::default().recording_directory_scans(Arc::clone(&log)),
+        );
+
+        fixture.retire_orphans();
+
+        assert_eq!(*log.lock().unwrap(), ["scan"]);
     }
 
     #[test]
