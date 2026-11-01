@@ -125,6 +125,13 @@ mod tests {
             ])
         }
 
+        fn listing_failure(detail: &str) -> MultiplexerError {
+            MultiplexerError::Failed {
+                subcommand: "list-panes".to_string(),
+                detail: detail.to_string(),
+            }
+        }
+
         fn row(name: &str, state: SessionState) -> SessionSummary {
             SessionSummary::managed(ServiceFixture::session(name), state, false)
         }
@@ -212,10 +219,7 @@ mod tests {
 
     #[test]
     fn a_failed_pane_listing_fails_the_sample_so_running_sessions_never_look_stopped() {
-        let failure = MultiplexerError::Failed {
-            subcommand: "list-panes".to_string(),
-            detail: "server exited unexpectedly".to_string(),
-        };
+        let failure = MonitorFixture::listing_failure("server exited unexpectedly");
         let multiplexer =
             MonitorFixture::fix_auth_and_docs().failing("pane_pids_by_session", failure);
         let monitor = MonitorFixture::monitor(multiplexer, FakeProcessMeter::new());
@@ -229,6 +233,45 @@ mod tests {
         );
 
         assert!(sampled.is_err());
+    }
+
+    #[test]
+    fn a_pane_listing_that_keeps_failing_is_warned_about_once() {
+        let log = LogCapture::installed();
+        let failure = MonitorFixture::listing_failure("example listing failure that lasts");
+        let multiplexer = FakeMultiplexer::new().failing("pane_pids_by_session", failure);
+        let monitor = MonitorFixture::monitor(multiplexer, FakeProcessMeter::new());
+
+        for _ in 0..3 {
+            let _ = MonitorFixture::sampled(&monitor, &[]);
+        }
+
+        assert_eq!(
+            log.count_containing("example listing failure that lasts"),
+            1
+        );
+    }
+
+    #[test]
+    fn a_pane_listing_that_fails_again_after_a_good_listing_is_warned_about_again() {
+        let log = LogCapture::installed();
+        let fixture = MonitorFixture::service(FakeMultiplexer::new(), FakeProcessMeter::new());
+        let monitor = LoadMonitor::new(&fixture.ports());
+        let failure = MonitorFixture::listing_failure("example listing failure that returns");
+        fixture
+            .multiplexer()
+            .fail("pane_pids_by_session", failure.clone());
+        let _ = MonitorFixture::sampled(&monitor, &[]);
+        fixture.multiplexer().recover("pane_pids_by_session");
+        let _ = MonitorFixture::sampled(&monitor, &[]);
+        fixture.multiplexer().fail("pane_pids_by_session", failure);
+
+        let _ = MonitorFixture::sampled(&monitor, &[]);
+
+        assert_eq!(
+            log.count_containing("example listing failure that returns"),
+            2
+        );
     }
 
     #[test]

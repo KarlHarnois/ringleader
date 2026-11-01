@@ -239,6 +239,10 @@ impl FakeMultiplexer {
         self.edit(|state| state.failures.insert(operation, error));
     }
 
+    pub fn recover(&self, operation: &'static str) {
+        self.edit(|state| state.failures.remove(operation));
+    }
+
     pub fn replace_live(&self, observation: SessionObservation) {
         self.end_session(observation.tmux_name());
         self.edit(|state| state.live.push(observation));
