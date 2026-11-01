@@ -454,7 +454,8 @@ mod tests {
 
     use super::*;
     use crate::test_support::{
-        CapturedWriter, CliHarness, Deadline, FakeLock, FakeMultiplexer, Gate, ServiceFixture,
+        CapturedWriter, CliHarness, Deadline, FakeLock, FakeMultiplexer, FakeScratchSpace, Gate,
+        ServiceFixture,
     };
 
     struct LockFlowFixture;
@@ -757,6 +758,23 @@ mod tests {
         gate.open_now();
         assert_eq!(handle.join().unwrap(), CliExit::Code(0));
         assert_eq!(typed.typed_when_ready("ringleader-fix-auth"), ["/color"]);
+    }
+
+    #[test]
+    fn the_write_lock_is_released_before_the_retired_scratch_is_purged() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let lock = FakeLock::free().recording(Arc::clone(&log));
+        let space = FakeScratchSpace::default().recording_purges(Arc::clone(&log));
+        let harness =
+            CliHarness::new(ServiceFixture::new().with_scratch_space(space)).with_lock(lock);
+
+        harness.run(&["new", "--name", "Fix Auth", "--repo", "example-project"]);
+
+        assert!(
+            LockFlowFixture::recorded_before(&log, "release", "purge"),
+            "the purge ran under the write lock: {:?}",
+            log.lock().unwrap()
+        );
     }
 
     struct ParseFixture;

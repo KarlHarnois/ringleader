@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use crate::application::ports::{ScratchSpace, ScratchSpaceError};
 
@@ -14,6 +14,7 @@ struct ScratchState {
     failing: Option<&'static str>,
     directories: Vec<PathBuf>,
     unpurged: Vec<PathBuf>,
+    purge_log: Option<Arc<Mutex<Vec<String>>>>,
 }
 
 impl FakeScratchSpace {
@@ -36,6 +37,11 @@ impl FakeScratchSpace {
             .map(|worktree| self.directory(worktree))
             .collect();
         self.state.lock().unwrap().directories = directories;
+        self
+    }
+
+    pub fn recording_purges(self, log: Arc<Mutex<Vec<String>>>) -> Self {
+        self.state.lock().unwrap().purge_log = Some(log);
         self
     }
 
@@ -128,7 +134,11 @@ impl ScratchSpace for FakeScratchSpace {
     fn retired_directories(&self) -> Result<Vec<PathBuf>, ScratchSpaceError> {
         let root = Path::new(Self::ROOT);
         self.record_at(Self::LIST_RETIRED, root, root)?;
-        Ok(self.state.lock().unwrap().unpurged.clone())
+        let state = self.state.lock().unwrap();
+        if let Some(log) = &state.purge_log {
+            log.lock().unwrap().push(Self::PURGE.to_string());
+        }
+        Ok(state.unpurged.clone())
     }
 
     fn purge(&self, retired: &Path) -> Result<(), ScratchSpaceError> {
