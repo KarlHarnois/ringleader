@@ -168,7 +168,7 @@ mod tests {
     }
 
     #[test]
-    fn the_ringleader_links_live_in_the_runtime_directory() {
+    fn the_ringleader_shims_live_in_the_runtime_directory() {
         let paths = PathsFixture::with(&[("XDG_RUNTIME_DIR", "/run/user/1000")]);
 
         assert_eq!(
