@@ -8,6 +8,7 @@ use ratatui::text::{Line, Span};
 use super::compact_count::CompactCount;
 use super::compact_duration::CompactDuration;
 use super::dialog::DialogStep;
+use super::dialog_footer::DialogFooter;
 use super::scroll_window::ScrollWindow;
 use crate::application::{AgentReading, SessionService};
 use crate::domain::{
@@ -32,7 +33,6 @@ impl UsageView {
     const INDENT: &'static str = "  ";
     const LABEL_WIDTH: usize = 16;
     const LONGEST_LABEL: usize = Self::LABEL_WIDTH - 1;
-    const MINIMUM_GAP: usize = 2;
     const BAR_CELLS: usize = 10;
     const FILLED_CELL: &'static str = "█";
     const EMPTY_CELL: &'static str = "░";
@@ -209,10 +209,7 @@ impl UsageView {
     fn footer(&self, width: usize, theme: &Theme) -> Line<'static> {
         let status = self.status();
         let hint = self.scroll.hint(Self::CLOSE_HINT);
-        let used = status.chars().count() + hint.chars().count();
-        let gap = width.saturating_sub(used).max(Self::MINIMUM_GAP);
-        let footer = format!("{status}{}{hint}", " ".repeat(gap));
-        Line::styled(footer, theme.hint())
+        DialogFooter::new(&status, &hint).line(width, theme)
     }
 
     fn status(&self) -> String {

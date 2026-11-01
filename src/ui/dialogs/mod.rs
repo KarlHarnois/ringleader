@@ -4,6 +4,7 @@ pub mod confirmation_keys;
 pub mod delete_session_dialog;
 pub mod delete_sessions_dialog;
 pub mod dialog;
+pub mod dialog_footer;
 pub mod dialog_labels;
 pub mod dialog_slot;
 pub mod fuzzy_search;

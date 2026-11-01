@@ -8,6 +8,7 @@ use ratatui::style::Style;
 use ratatui::text::Line;
 
 use super::dialog::{DialogOpening, DialogStep};
+use super::dialog_footer::DialogFooter;
 use crate::application::SessionService;
 use crate::domain::{CpuPercent, MemorySize, ProcessLoad, SessionLoad, SessionSummary};
 use crate::ui::background_jobs::resource_feed::{ResourceFeed, ResourceReading};
@@ -31,7 +32,6 @@ impl ResourceView {
     const PROCESS_INDENT: &'static str = "  ";
     const CPU_WIDTH: usize = 8;
     const MEMORY_WIDTH: usize = 10;
-    const MINIMUM_GAP: usize = 2;
 
     pub fn poll(
         &mut self,
@@ -208,11 +208,7 @@ impl ResourceView {
     }
 
     fn footer(&self, width: usize, theme: &Theme) -> Line<'static> {
-        let status = self.status();
-        let used = status.chars().count() + Self::HINTS.chars().count();
-        let gap = width.saturating_sub(used).max(Self::MINIMUM_GAP);
-        let footer = format!("{status}{}{}", " ".repeat(gap), Self::HINTS);
-        Line::styled(footer, theme.hint())
+        DialogFooter::new(self.status(), Self::HINTS).line(width, theme)
     }
 
     fn status(&self) -> &'static str {
