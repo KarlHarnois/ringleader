@@ -193,7 +193,7 @@ mod tests {
     use crate::application::ports::{MultiplexerError, RegistryError, Workspace, WorktreeEntry};
     use crate::domain::{Repo, RepoName, Session};
     use crate::test_support::{
-        FakeMultiplexer, FakeSessionRegistry, FakeWorkspace, ServiceFixture,
+        FakeMultiplexer, FakeScratchSpace, FakeSessionRegistry, FakeWorkspace, ServiceFixture,
     };
 
     struct DoctorFixture;
@@ -562,6 +562,101 @@ mod tests {
             &fixture,
             "worktree_root /elsewhere, which differs from the config"
         ));
+    }
+
+    #[test]
+    fn a_moved_aside_registry_is_a_warning_because_deletes_keep_other_orphans_while_it_exists() {
+        let registry = FakeSessionRegistry::with_sessions(vec![DoctorFixture::session()])
+            .with_moved_aside_copy("/state/ringleader/sessions.json.corrupt-1");
+        let fixture = DoctorFixture::healthy().with_registry(registry);
+
+        assert!(DoctorFixture::has_warning(
+            &fixture,
+            "corrupt registry /state/ringleader/sessions.json.corrupt-1 keeps other sessions' orphaned scratch directories"
+        ));
+    }
+
+    #[test]
+    fn a_failed_moved_aside_listing_is_a_warning() {
+        let registry = FakeSessionRegistry::with_sessions(vec![DoctorFixture::session()])
+            .failing_moved_aside_listing();
+        let fixture = DoctorFixture::healthy().with_registry(registry);
+
+        assert!(DoctorFixture::has_warning(
+            &fixture,
+            "cannot check for moved-aside registries"
+        ));
+    }
+
+    #[test]
+    fn a_retired_directory_still_on_disk_is_a_warning_since_no_listing_shows_it_otherwise() {
+        let space =
+            FakeScratchSpace::default().with_unpurged(Path::new("/scratch/.retired/stuck-0"));
+        let fixture = DoctorFixture::healthy().with_scratch_space(space);
+
+        assert!(DoctorFixture::has_warning(
+            &fixture,
+            "retired scratch directory /scratch/.retired/stuck-0 is still on disk"
+        ));
+    }
+
+    #[test]
+    fn a_failed_retired_listing_is_a_warning() {
+        let fixture = DoctorFixture::healthy()
+            .with_scratch_space(FakeScratchSpace::default().failing("list retired"));
+
+        assert!(DoctorFixture::has_warning(
+            &fixture,
+            "cannot check for retired scratch directories"
+        ));
+    }
+
+    #[test]
+    fn a_failed_scratch_listing_is_a_warning() {
+        let fixture = DoctorFixture::healthy()
+            .with_scratch_space(FakeScratchSpace::default().failing("list"));
+
+        assert!(DoctorFixture::has_warning(
+            &fixture,
+            "cannot check for orphaned scratch directories"
+        ));
+    }
+
+    #[test]
+    fn a_live_tmux_session_outside_the_registry_keeps_its_scratch_directory_unlisted() {
+        let unrecorded = ServiceFixture::session("unrecorded");
+        let space = FakeScratchSpace::default()
+            .with_directories_of(&[unrecorded.worktree_path().to_path_buf()]);
+        let multiplexer =
+            FakeMultiplexer::new().with_live(ServiceFixture::renamed_without_prefix(&unrecorded));
+        let fixture = DoctorFixture::healthy()
+            .with_multiplexer(multiplexer)
+            .with_scratch_space(space);
+
+        assert!(!DoctorFixture::has_warning(
+            &fixture,
+            "orphaned scratch directory"
+        ));
+    }
+
+    #[test]
+    fn an_orphaned_scratch_directory_is_a_warning() {
+        let space = FakeScratchSpace::default().with_directories_of(&[
+            ServiceFixture::worktree_path("fix-auth"),
+            ServiceFixture::worktree_path("forgotten"),
+        ]);
+        let fixture = DoctorFixture::healthy().with_scratch_space(space);
+
+        let lines = DoctorFixture::lines(&fixture);
+
+        let orphan_warnings: Vec<&String> = lines
+            .iter()
+            .filter(|line| line.contains("orphaned scratch directory"))
+            .collect();
+        assert_eq!(
+            orphan_warnings,
+            ["warning: orphaned scratch directory /scratch/forgotten, no session claims it"]
+        );
     }
 
     #[test]

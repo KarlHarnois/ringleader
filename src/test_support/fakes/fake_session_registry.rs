@@ -14,10 +14,13 @@ struct RegistryState {
     saves: usize,
     failing_saves: bool,
     load_error: Option<RegistryError>,
-    moved_aside: bool,
+    moved_aside_copy: Option<PathBuf>,
+    failing_moved_aside_listing: bool,
 }
 
 impl FakeSessionRegistry {
+    const MOVED_ASIDE_PATH: &str = "/state/ringleader/sessions.json.corrupt-1";
+
     pub fn empty() -> Self {
         Self::with_sessions(Vec::new())
     }
@@ -33,6 +36,16 @@ impl FakeSessionRegistry {
 
     pub fn failing_saves(self) -> Self {
         self.state.lock().unwrap().failing_saves = true;
+        self
+    }
+
+    pub fn with_moved_aside_copy(self, path: &str) -> Self {
+        self.state.lock().unwrap().moved_aside_copy = Some(PathBuf::from(path));
+        self
+    }
+
+    pub fn failing_moved_aside_listing(self) -> Self {
+        self.state.lock().unwrap().failing_moved_aside_listing = true;
         self
     }
 
@@ -72,7 +85,7 @@ impl FakeSessionRegistry {
     }
 
     pub fn was_moved_aside(&self) -> bool {
-        self.state.lock().unwrap().moved_aside
+        self.state.lock().unwrap().moved_aside_copy.is_some()
     }
 }
 
@@ -100,9 +113,20 @@ impl SessionRegistry for FakeSessionRegistry {
 
     fn move_aside_corrupt(&self) -> Result<PathBuf, RegistryError> {
         let mut state = self.state.lock().unwrap();
-        state.moved_aside = true;
+        state.moved_aside_copy = Some(PathBuf::from(Self::MOVED_ASIDE_PATH));
         state.load_error = None;
         state.sessions.clear();
-        Ok(PathBuf::from("/state/ringleader/sessions.json.corrupt-1"))
+        Ok(PathBuf::from(Self::MOVED_ASIDE_PATH))
+    }
+
+    fn moved_aside_copies(&self) -> Result<Vec<PathBuf>, RegistryError> {
+        let state = self.state.lock().unwrap();
+        if state.failing_moved_aside_listing {
+            return Err(RegistryError::Io {
+                path: PathBuf::from("/state/ringleader"),
+                detail: "the state directory is unreadable".to_string(),
+            });
+        }
+        Ok(state.moved_aside_copy.clone().into_iter().collect())
     }
 }

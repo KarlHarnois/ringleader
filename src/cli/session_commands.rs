@@ -352,7 +352,7 @@ mod tests {
     use crate::domain::{ProcessFigures, ProcessSample, Repo, RepoName, Session};
     use crate::test_support::{
         CapturedWriter, CliHarness, FakeMultiplexer, FakeProcessMeter, FakeRepoScanner,
-        FakeSessionRegistry, ProcessFiguresFixture, ServiceFixture,
+        FakeScratchSpace, FakeSessionRegistry, ProcessFiguresFixture, ServiceFixture,
     };
 
     struct CommandFixture;
@@ -379,6 +379,10 @@ mod tests {
                     .with_live(ServiceFixture::waiting(&session))
                     .with_return_request(ReturnRequest::NewSession(repo)),
             )
+        }
+
+        fn holding_one_retired() -> ServiceFixture {
+            Self::live().with_scratch_space(FakeScratchSpace::holding_one_retired())
         }
 
         fn live() -> ServiceFixture {
@@ -1124,6 +1128,33 @@ mod tests {
         harness.run(&["delete", "fix-auth", "--forget", "--force"]);
 
         assert!(harness.stdout().contains("left the worktree"));
+    }
+
+    #[test]
+    fn a_delete_purges_the_retired_scratch_directories() {
+        let harness = CliHarness::new(CommandFixture::holding_one_retired());
+
+        harness.run(&["delete", "fix-auth", "--force"]);
+
+        assert_eq!(harness.fixture().scratch_space().purged().len(), 1);
+    }
+
+    #[test]
+    fn every_changing_command_purges_as_the_tui_does_after_each_change() {
+        let harness = CliHarness::new(CommandFixture::holding_one_retired());
+
+        harness.run(&["stop", "fix-auth"]);
+
+        assert_eq!(harness.fixture().scratch_space().purged().len(), 1);
+    }
+
+    #[test]
+    fn a_command_that_changes_nothing_purges_nothing() {
+        let harness = CliHarness::new(CommandFixture::holding_one_retired());
+
+        harness.run(&["list"]);
+
+        assert!(harness.fixture().scratch_space().purged().is_empty());
     }
 
     #[test]

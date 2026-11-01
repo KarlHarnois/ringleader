@@ -8,6 +8,7 @@ pub trait SessionRegistry {
     fn load(&self) -> Result<Vec<Session>, RegistryError>;
     fn save(&self, sessions: &[Session]) -> Result<(), RegistryError>;
     fn move_aside_corrupt(&self) -> Result<PathBuf, RegistryError>;
+    fn moved_aside_copies(&self) -> Result<Vec<PathBuf>, RegistryError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]

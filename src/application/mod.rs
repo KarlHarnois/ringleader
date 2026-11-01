@@ -17,6 +17,8 @@ pub mod repo_merge;
 pub mod repo_stop_plan;
 pub mod repos;
 pub mod restart_report;
+pub mod scratch_claims;
+pub mod scratch_sweep;
 pub mod service_context;
 pub mod service_error;
 pub mod service_ports;

@@ -15,6 +15,7 @@ use crate::application::{
     CorruptRegistry, EphemeralShell, HandOff, ServiceError, SessionService, ShellOutcome,
 };
 use crate::domain::RepoGroup;
+use crate::ui::background_jobs::scratch_purge::ScratchPurge;
 use crate::ui::home::bell::Bell;
 use crate::ui::home::home_state::HomeState;
 use crate::ui::home::home_view::HomeView;
@@ -28,6 +29,7 @@ use crate::ui::keys::visual_gate::VisualGate;
 pub struct App {
     service: SessionService,
     write_lock: Box<dyn Lock>,
+    scratch_purge: ScratchPurge,
     home: HomeState,
     key_sequence: KeySequence,
     dialogs: DialogSlot,
@@ -51,6 +53,7 @@ impl App {
         Self {
             service,
             write_lock,
+            scratch_purge: ScratchPurge::default(),
             home: HomeState::new(now, Bell::new(bell_sink), folds),
             key_sequence: KeySequence::default(),
             dialogs: DialogSlot::default(),
@@ -141,6 +144,7 @@ impl App {
     }
 
     pub fn poll(&mut self, now: Instant) {
+        self.scratch_purge.poll(&self.service);
         let outcome = self.home.poll(now, &mut self.service);
         self.status.failure(outcome);
     }
@@ -225,7 +229,10 @@ impl App {
 
     fn perform_change(&mut self, operation: BlockingOperation) -> OperationOutcome {
         match self.under_write_lock(|app| app.perform_under_lock(operation)) {
-            Ok(outcome) => outcome,
+            Ok(outcome) => {
+                self.scratch_purge.start(&self.service);
+                outcome
+            }
             Err(error) => {
                 self.observe();
                 OperationOutcome::Failed(error.into())
@@ -558,7 +565,7 @@ mod tests {
     };
     use crate::test_support::{
         CapturedWriter, Deadline, FakeConfigSource, FakeFoldStore, FakeLock, FakeMultiplexer,
-        FakeProcessMeter, FakePullRequests, FakeRepoPages, FakeSessionRegistry,
+        FakeProcessMeter, FakePullRequests, FakeRepoPages, FakeScratchSpace, FakeSessionRegistry,
         FakeTerminalEmulator, FakeUsageMeter, FakeWebBrowser, HeldCalls, LogCapture,
         ServiceFixture, UiHarness,
     };
@@ -2771,6 +2778,24 @@ mod tests {
             " deleted fix-auth, branch tip {}",
             ServiceFixture::TIP
         )));
+    }
+
+    #[test]
+    fn a_confirmed_delete_purges_the_retired_scratch_directories() {
+        let fixture =
+            AppFixture::deletable().with_scratch_space(FakeScratchSpace::holding_one_retired());
+        let mut app = AppFixture::started(&fixture, 100, 28);
+        let measure = app.handle_event(&UiHarness::character('d'));
+        AppFixture::perform(&mut app, measure);
+
+        let delete = app.handle_event(&UiHarness::key(KeyCode::Enter));
+        AppFixture::perform(&mut app, delete);
+
+        let purged = Deadline::for_background_work().wait_until(|| {
+            app.poll(Instant::now());
+            fixture.scratch_space().purged().len() == 1
+        });
+        assert!(purged);
     }
 
     #[test]

@@ -19,6 +19,7 @@ pub struct JsonSessionRegistry {
 
 impl JsonSessionRegistry {
     pub const SCHEMA_VERSION: u64 = 2;
+    const MOVED_ASIDE_PREFIX: &str = "sessions.json.corrupt-";
 
     pub fn new(path: &Path, clock: Arc<dyn Clock>) -> Self {
         Self {
@@ -66,6 +67,21 @@ impl JsonSessionRegistry {
             })
             .collect()
     }
+
+    fn moved_aside_among(entries: fs::ReadDir) -> io::Result<Vec<PathBuf>> {
+        let paths = entries
+            .map(|entry| entry.map(|entry| entry.path()))
+            .collect::<io::Result<Vec<PathBuf>>>()?;
+        Ok(paths
+            .into_iter()
+            .filter(|path| Self::is_moved_aside(path))
+            .collect())
+    }
+
+    fn is_moved_aside(path: &Path) -> bool {
+        path.file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with(Self::MOVED_ASIDE_PREFIX))
+    }
 }
 
 impl SessionRegistry for JsonSessionRegistry {
@@ -89,10 +105,25 @@ impl SessionRegistry for JsonSessionRegistry {
     }
 
     fn move_aside_corrupt(&self) -> Result<PathBuf, RegistryError> {
-        let name = format!("sessions.json.corrupt-{}", self.clock.now_epoch_seconds());
+        let name = format!(
+            "{}{}",
+            Self::MOVED_ASIDE_PREFIX,
+            self.clock.now_epoch_seconds()
+        );
         let destination = self.path().with_file_name(name);
         fs::rename(self.path(), &destination).map_err(|error| self.io_error(error))?;
         Ok(destination)
+    }
+
+    fn moved_aside_copies(&self) -> Result<Vec<PathBuf>, RegistryError> {
+        let Some(directory) = self.path().parent() else {
+            return Ok(Vec::new());
+        };
+        match fs::read_dir(directory) {
+            Ok(entries) => Self::moved_aside_among(entries).map_err(|error| self.io_error(error)),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Vec::new()),
+            Err(error) => Err(self.io_error(error)),
+        }
     }
 }
 
@@ -167,6 +198,8 @@ impl SessionEntry {
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::fs::PermissionsExt;
+
     use super::*;
     use crate::test_support::{FakeClock, ServiceFixture};
 
@@ -179,6 +212,8 @@ mod tests {
 
     impl RegistryFixture {
         const NOW: u64 = 1_791_000_500;
+        const UNREADABLE_MODE: u32 = 0o300;
+        const OWNER_MODE: u32 = 0o700;
 
         fn new() -> Self {
             Self {
@@ -333,6 +368,51 @@ mod tests {
                 .join("sessions.json.corrupt-1791000500")
         );
         assert!(!fixture.path().exists());
+    }
+
+    #[test]
+    fn a_moved_aside_registry_is_listed_until_someone_removes_it() {
+        let fixture = RegistryFixture::with_contents("{ not json");
+        let moved = fixture.registry().move_aside_corrupt().unwrap();
+        fixture
+            .registry()
+            .save(&[ServiceFixture::session("fix-auth")])
+            .unwrap();
+
+        assert_eq!(fixture.registry().moved_aside_copies().unwrap(), [moved]);
+    }
+
+    #[test]
+    fn an_unreadable_state_directory_fails_the_moved_aside_listing() {
+        let fixture = RegistryFixture::new();
+        let directory = fixture.directory.path();
+        fs::set_permissions(
+            directory,
+            fs::Permissions::from_mode(RegistryFixture::UNREADABLE_MODE),
+        )
+        .unwrap();
+
+        let listing = fixture.registry().moved_aside_copies();
+
+        fs::set_permissions(
+            directory,
+            fs::Permissions::from_mode(RegistryFixture::OWNER_MODE),
+        )
+        .unwrap();
+        assert!(matches!(listing, Err(RegistryError::Io { .. })));
+    }
+
+    #[test]
+    fn a_missing_state_directory_holds_no_moved_aside_registry() {
+        let fixture = RegistryFixture::new();
+        let missing = fixture
+            .directory
+            .path()
+            .join("missing")
+            .join("sessions.json");
+        let registry = JsonSessionRegistry::new(&missing, Arc::new(FakeClock::at(0)));
+
+        assert!(registry.moved_aside_copies().unwrap().is_empty());
     }
 
     #[test]

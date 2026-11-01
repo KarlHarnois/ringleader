@@ -4,12 +4,16 @@ use std::sync::Arc;
 
 use super::doctor_report::DoctorReport;
 use crate::application::ServicePorts;
-use crate::application::ports::{HostProbe, Workspace};
+use crate::application::ports::{HostProbe, ScratchSpace, SessionRegistry, Workspace};
+use crate::application::reconciliation::Reconciliation;
+use crate::application::scratch_claims::ScratchClaims;
 use crate::domain::{Config, Session};
 
 pub struct OrphanAudit {
     workspace: Arc<dyn Workspace>,
     host: Arc<dyn HostProbe>,
+    scratch: Arc<dyn ScratchSpace>,
+    registry: Arc<dyn SessionRegistry>,
 }
 
 impl OrphanAudit {
@@ -17,6 +21,72 @@ impl OrphanAudit {
         Self {
             workspace: ports.repos().workspace(),
             host: ports.repos().host(),
+            scratch: ports.state().scratch_space(),
+            registry: ports.state().registry(),
+        }
+    }
+
+    pub fn audit_scratch(&self, reconciliation: &Reconciliation, report: &mut DoctorReport) {
+        self.report_moved_aside_registries(report);
+        self.report_unpurged(report);
+        match self.scratch.directories() {
+            Ok(directories) => self.report_orphan_scratch(reconciliation, directories, report),
+            Err(error) => report.warning(format!(
+                "cannot check for orphaned scratch directories: {error}"
+            )),
+        }
+    }
+
+    fn report_moved_aside_registries(&self, report: &mut DoctorReport) {
+        let copies = match self.registry.moved_aside_copies() {
+            Ok(copies) => copies,
+            Err(error) => {
+                report.warning(format!(
+                    "cannot check for moved-aside registries, so deletes keep other sessions' orphaned scratch directories: {error}"
+                ));
+                return;
+            }
+        };
+        for copy in copies {
+            report.warning(format!(
+                "corrupt registry {} keeps other sessions' orphaned scratch directories until it is restored or removed",
+                copy.display()
+            ));
+        }
+    }
+
+    fn report_unpurged(&self, report: &mut DoctorReport) {
+        match self.scratch.retired_directories() {
+            Ok(directories) => {
+                for directory in directories {
+                    report.warning(format!(
+                        "retired scratch directory {} is still on disk, the next change purges it, see the log if it stays",
+                        directory.display()
+                    ));
+                }
+            }
+            Err(error) => report.warning(format!(
+                "cannot check for retired scratch directories: {error}"
+            )),
+        }
+    }
+
+    fn report_orphan_scratch(
+        &self,
+        reconciliation: &Reconciliation,
+        directories: Vec<PathBuf>,
+        report: &mut DoctorReport,
+    ) {
+        let claims = ScratchClaims::new(
+            self.scratch.as_ref(),
+            reconciliation.entries(),
+            reconciliation.observations(),
+        );
+        for orphan in claims.orphans(directories) {
+            report.warning(format!(
+                "orphaned scratch directory {}, no session claims it",
+                orphan.display()
+            ));
         }
     }
 

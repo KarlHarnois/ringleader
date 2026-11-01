@@ -54,6 +54,7 @@ impl RegistryAudit {
         if let Some(config) = config {
             self.orphans.audit(reconciliation.entries(), config, report);
         }
+        self.orphans.audit_scratch(reconciliation, report);
     }
 
     fn audit_entry(
