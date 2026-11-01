@@ -61,8 +61,9 @@ impl SessionStop {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::application::ports::{ScratchSpace, ToolTempDirectory};
     use crate::domain::{AgentPane, Session, SessionObservation, SessionState};
-    use crate::test_support::{FakeHostProbe, FakeMultiplexer, ServiceFixture};
+    use crate::test_support::{FakeHostProbe, FakeMultiplexer, FakeScratchSpace, ServiceFixture};
 
     struct StopFixture;
 
@@ -158,6 +159,20 @@ mod tests {
         StopFixture::stop(&fixture).unwrap();
 
         assert_eq!(fixture.host().terminated(), [StopFixture::DEV_SERVER]);
+    }
+
+    #[test]
+    fn stopping_retires_the_abandoned_tool_temp_directories_of_its_scratch_directory() {
+        let shell = FakeScratchSpace::default()
+            .directory(StopFixture::session().worktree_path())
+            .join("nix-shell.Ab12Cd");
+        let space = FakeScratchSpace::default()
+            .with_tool_temps(&[ToolTempDirectory::ownerless(shell.clone())]);
+        let fixture = StopFixture::waiting().with_scratch_space(space);
+
+        StopFixture::stop(&fixture).unwrap();
+
+        assert_eq!(fixture.scratch_space().retired_tool_temps(), [shell]);
     }
 
     #[test]

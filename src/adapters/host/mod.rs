@@ -13,6 +13,7 @@ pub mod process_environment;
 pub mod process_table;
 #[cfg(target_os = "linux")]
 pub mod procfs_process_table;
+pub mod scanned_roots;
 pub mod signal_hook_interrupts;
 pub mod system_clock;
 pub mod system_host_probe;

@@ -146,9 +146,11 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use super::*;
-    use crate::application::ports::MultiplexerError;
+    use crate::application::ports::{MultiplexerError, ScratchSpace, ToolTempDirectory};
     use crate::domain::AgentPane;
-    use crate::test_support::{FakeMultiplexer, FakeSessionRegistry, ServiceFixture};
+    use crate::test_support::{
+        FakeMultiplexer, FakeScratchSpace, FakeSessionRegistry, ServiceFixture,
+    };
 
     struct RestartFixture;
 
@@ -386,6 +388,20 @@ mod tests {
             launch.env_assignments(),
             [fixture.tmpdir_assignment("fix-auth")]
         );
+    }
+
+    #[test]
+    fn restart_retires_the_abandoned_tool_temp_directories_of_its_scratch_directory() {
+        let shell = FakeScratchSpace::default()
+            .directory(RestartFixture::session().worktree_path())
+            .join("nix-shell.Ab12Cd");
+        let space = FakeScratchSpace::default()
+            .with_tool_temps(&[ToolTempDirectory::ownerless(shell.clone())]);
+        let fixture = RestartFixture::exited().with_scratch_space(space);
+
+        RestartFixture::restart(&fixture).unwrap();
+
+        assert_eq!(fixture.scratch_space().retired_tool_temps(), [shell]);
     }
 
     #[test]

@@ -9,8 +9,11 @@ use std::time::{Duration, Instant};
 use super::live_process::LiveProcess;
 use super::process_environment::ProcessEnvironment;
 use super::process_table::ProcessTable;
+use super::scanned_roots::ScannedRoots;
 use crate::adapters::filesystem::host_path::HostPath;
-use crate::application::ports::{DirectoryAccess, HostProbe, HostProbeError, ProcessInfo};
+use crate::application::ports::{
+    DirectoryAccess, DirectoryUser, HostProbe, HostProbeError, ProcessInfo,
+};
 
 pub struct SystemHostProbe {
     search_path: OsString,
@@ -89,6 +92,19 @@ impl SystemHostProbe {
             .filter(|process| !self.is_own(process) && !self.runs_tmux(process))
     }
 
+    fn user_within(&self, process: &LiveProcess, roots: &ScannedRoots) -> Option<DirectoryUser> {
+        let mut paths: Vec<PathBuf> = process
+            .cwd()
+            .map(Path::to_path_buf)
+            .into_iter()
+            .chain(self.processes.temp_directories_of(process.pid()))
+            .filter_map(|path| roots.spelled_from_root(&path))
+            .collect();
+        paths.sort();
+        paths.dedup();
+        (!paths.is_empty()).then(|| DirectoryUser::new(process.info(), paths))
+    }
+
     fn runs_tmux(&self, process: &LiveProcess) -> bool {
         process.is_tmux()
             || self
@@ -161,6 +177,15 @@ impl HostProbe for SystemHostProbe {
         self.others_in(&processes, path)
             .filter(|process| !excluded_sessions.contains(&process.session()))
             .map(LiveProcess::info)
+            .collect()
+    }
+
+    fn directory_users(&self, within: &[PathBuf]) -> Vec<DirectoryUser> {
+        let roots = ScannedRoots::new(within);
+        self.processes
+            .all()
+            .iter()
+            .filter_map(|process| self.user_within(process, &roots))
             .collect()
     }
 
@@ -556,6 +581,52 @@ mod tests {
         child.kill().unwrap();
         child.wait().unwrap();
         assert!(listed.is_empty(), "{listed:?}");
+    }
+
+    #[test]
+    fn a_process_whose_temp_directory_lies_in_a_scanned_directory_uses_it() {
+        let scratch = tempfile::tempdir().unwrap();
+        let shell = scratch.path().join("nix-shell.Ab12Cd");
+        let marker = ProcessMarker::new();
+        let mut child = marker.sleeping_child_with_temp(&shell);
+        let probe = ProbeFixture::probe_on(marker.table());
+
+        let users = probe.directory_users(&[scratch.path().to_path_buf()]);
+
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert_eq!(users.len(), 1, "{users:?}");
+        assert!(users[0].works_in(&shell));
+    }
+
+    #[test]
+    fn a_process_working_in_a_scanned_directory_uses_it() {
+        let scratch = tempfile::tempdir().unwrap();
+        let marker = ProcessMarker::new();
+        let mut child = marker.sleeping_child_in(scratch.path());
+        let probe = ProbeFixture::probe_on(marker.table());
+
+        let users = probe.directory_users(&[scratch.path().to_path_buf()]);
+
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert_eq!(users.len(), 1, "{users:?}");
+        assert_eq!(users[0].process().pid(), child.id());
+    }
+
+    #[test]
+    fn a_process_outside_every_scanned_directory_uses_none() {
+        let scratch = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        let marker = ProcessMarker::new();
+        let mut child = marker.sleeping_child_with_temp(elsewhere.path());
+        let probe = ProbeFixture::probe_on(marker.table());
+
+        let users = probe.directory_users(&[scratch.path().to_path_buf()]);
+
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert!(users.is_empty(), "{users:?}");
     }
 
     #[test]

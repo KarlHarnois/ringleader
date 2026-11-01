@@ -238,8 +238,8 @@ mod tests {
     use super::*;
     use crate::application::deletion::deletion_guards::BranchPresence;
     use crate::application::ports::{
-        DirtyState, MultiplexerError, ScratchSpace, UnmergedCommits, Workspace, WorkspaceError,
-        WorktreeEntry,
+        DirtyState, MultiplexerError, ScratchSpace, ToolTempDirectory, UnmergedCommits, Workspace,
+        WorkspaceError, WorktreeEntry,
     };
     use crate::application::session_service::SessionService;
     use crate::domain::{AgentPane, NamingScheme, Registration, TmuxAddress};
@@ -921,9 +921,35 @@ mod tests {
     }
 
     #[test]
-    fn a_refused_delete_retires_nothing() {
+    fn a_delete_retires_the_abandoned_tool_temp_directories_of_every_session() {
+        let stopped = ServiceFixture::session("stopped");
+        let shell = FakeScratchSpace::default()
+            .directory(stopped.worktree_path())
+            .join("nix-shell.Ab12Cd");
         let space = FakeScratchSpace::default()
-            .with_directories_of(&[ServiceFixture::worktree_path("forgotten")]);
+            .with_directories_of(&[stopped.worktree_path().to_path_buf()])
+            .with_tool_temps(&[ToolTempDirectory::ownerless(shell.clone())]);
+        let fixture = DeleteFixture::live_fixture()
+            .with_sessions(&[DeleteFixture::session(), stopped])
+            .with_scratch_space(space);
+
+        fixture
+            .service()
+            .delete_session("fix-auth", &DeleteConfirmation::force())
+            .unwrap();
+
+        assert_eq!(fixture.scratch_space().retired_tool_temps(), [shell]);
+    }
+
+    #[test]
+    fn a_refused_delete_retires_nothing() {
+        let forgotten = ServiceFixture::worktree_path("forgotten");
+        let shell = FakeScratchSpace::default()
+            .directory(&forgotten)
+            .join("nix-shell.Ab12Cd");
+        let space = FakeScratchSpace::default()
+            .with_directories_of(&[forgotten])
+            .with_tool_temps(&[ToolTempDirectory::ownerless(shell)]);
         let fixture = DeleteFixture::live_fixture()
             .with_workspace(DeleteFixture::dirty_workspace(2))
             .with_scratch_space(space);
@@ -931,6 +957,7 @@ mod tests {
         DeleteFixture::unconfirmed(&mut fixture.service()).unwrap_err();
 
         assert!(fixture.scratch_space().retired().is_empty());
+        assert!(fixture.scratch_space().retired_tool_temps().is_empty());
     }
 
     #[test]

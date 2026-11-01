@@ -8,6 +8,7 @@ use super::reconciliation::{ManagedRow, Reconciliation};
 use super::scratch_sweep::ScratchSweep;
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
+use super::tool_temp_sweep::ToolTempSweep;
 use crate::application::CreateRequest;
 use crate::application::DeleteOutcome;
 use crate::application::StartOutcome;
@@ -32,6 +33,7 @@ pub struct SessionLifecycle {
     renaming: SessionRenaming,
     deletion: SessionDeletion,
     scratch_sweep: ScratchSweep,
+    tool_temp_sweep: ToolTempSweep,
     restart: SessionRestart,
     stopping: SessionStop,
     merging: SessionMerge,
@@ -52,6 +54,7 @@ impl SessionLifecycle {
             renaming: SessionRenaming::new(ports, Arc::clone(&hooks)),
             deletion: SessionDeletion::new(ports),
             scratch_sweep: ScratchSweep::new(ports),
+            tool_temp_sweep: ToolTempSweep::new(ports),
             restart: SessionRestart::new(ports, Arc::clone(&hooks)),
             stopping: SessionStop::new(ports),
             merging: SessionMerge::new(ports),
@@ -129,6 +132,7 @@ impl SessionLifecycle {
         let surviving = reconciliation.observations_without(row.session().tmux_name());
         self.scratch_sweep
             .retire_orphans(row.session(), &remaining, &surviving);
+        self.tool_temp_sweep.retire_abandoned_everywhere();
         Ok(outcome)
     }
 
@@ -145,14 +149,19 @@ impl SessionLifecycle {
     ) -> Result<StartOutcome, ServiceError> {
         let row = self.quiet_target(reconciliation, name)?;
         self.sync_server_config(config.key_bindings())?;
-        self.restart
-            .restart(&row, reconciliation, config, config_path)
+        let outcome = self
+            .restart
+            .restart(&row, reconciliation, config, config_path)?;
+        self.tool_temp_sweep.retire_abandoned_in(row.session());
+        Ok(outcome)
     }
 
     pub fn stop(&self, reconciliation: &Reconciliation, name: &str) -> Result<(), ServiceError> {
         let row = self.managed_target(reconciliation, name)?;
         self.refuse_own_session(&row, "stop")?;
-        self.stopping.stop(&row)
+        self.stopping.stop(&row)?;
+        self.tool_temp_sweep.retire_abandoned_in(row.session());
+        Ok(())
     }
 
     pub fn merge_upstream(

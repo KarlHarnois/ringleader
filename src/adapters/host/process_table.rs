@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::live_process::LiveProcess;
@@ -22,6 +22,10 @@ pub struct ProcessTable {
 }
 
 impl ProcessTable {
+    pub const TEMP_VARIABLES: [&'static str; 5] =
+        ["TMPDIR", "TMP", "TEMP", "TEMPDIR", "NIX_BUILD_TOP"];
+    const ASSIGNMENT: char = '=';
+
     pub fn new() -> Self {
         Self::within(Arc::new(EveryProcess))
     }
@@ -50,6 +54,15 @@ impl ProcessTable {
             current = self.read(pid).map(|process| process.parent());
         }
         lineage
+    }
+
+    pub fn temp_directories_of(&self, pid: u32) -> Vec<PathBuf> {
+        HostProcessTable::environment(pid)
+            .iter()
+            .filter_map(|variable| variable.split_once(Self::ASSIGNMENT))
+            .filter(|(name, _)| Self::TEMP_VARIABLES.contains(name))
+            .map(|(_, value)| PathBuf::from(value))
+            .collect()
     }
 
     pub fn is_alive(&self, pid: u32) -> bool {
@@ -106,6 +119,19 @@ mod tests {
         assert_eq!(lineage.first(), Some(&std::process::id()));
         assert_eq!(lineage.last(), Some(&1));
         assert!(!lineage.contains(&0));
+    }
+
+    #[test]
+    fn the_temp_directory_variables_of_a_process_are_read_from_its_environment() {
+        let temp = tempfile::tempdir().unwrap();
+        let marker = ProcessMarker::new();
+        let child = marker.sleeping_child_with_temp(temp.path());
+        let table = marker.table();
+
+        let temp_directories = table.temp_directories_of(child.id());
+
+        TableFixture::end(child);
+        assert_eq!(temp_directories, [temp.path()]);
     }
 
     #[test]
