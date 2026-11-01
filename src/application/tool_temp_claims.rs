@@ -3,14 +3,16 @@ use std::path::{Path, PathBuf};
 use super::ports::{DirectoryUser, ToolTempDirectory};
 
 pub struct ToolTempClaims<'u> {
+    scratch: &'u Path,
     users: Vec<&'u DirectoryUser>,
 }
 
 impl<'u> ToolTempClaims<'u> {
     const LAUNCH_GRACE_SECONDS: u64 = 600;
 
-    pub fn new(scratch: &Path, users: &'u [DirectoryUser]) -> Self {
+    pub fn new(scratch: &'u Path, users: &'u [DirectoryUser]) -> Self {
         Self {
+            scratch,
             users: users.iter().filter(|user| user.works_in(scratch)).collect(),
         }
     }
@@ -41,7 +43,7 @@ impl<'u> ToolTempClaims<'u> {
         tool_temps
             .iter()
             .filter_map(|tool_temp| self.owner_of(tool_temp))
-            .any(|owner| !ownerless.iter().any(|path| owner.works_in(path)))
+            .any(|owner| !owner.works_only_in(&ownerless, self.scratch))
     }
 
     fn owner_of(&self, tool_temp: &ToolTempDirectory) -> Option<&DirectoryUser> {
@@ -76,6 +78,11 @@ mod tests {
 
         fn user(pid: u32, path: &str) -> DirectoryUser {
             DirectoryUser::new(ProcessInfo::new(pid, "example-build"), vec![path.into()])
+        }
+
+        fn user_with(pid: u32, paths: &[&str]) -> DirectoryUser {
+            let paths = paths.iter().map(PathBuf::from).collect();
+            DirectoryUser::new(ProcessInfo::new(pid, "example-build"), paths)
         }
 
         fn shell(path: &str) -> ToolTempDirectory {
@@ -152,6 +159,24 @@ mod tests {
         let tool_temps = [
             ClaimsFixture::launcher(),
             ClaimsFixture::shell(ClaimsFixture::SHELL),
+        ];
+
+        let abandoned = ClaimsFixture::abandoned(&[idle_shell], &tool_temps);
+
+        assert!(abandoned.is_empty(), "{abandoned:?}");
+    }
+
+    #[test]
+    fn every_shell_directory_is_claimed_while_an_idle_owner_inherits_a_path_into_another_shell_directory()
+     {
+        let idle_shell = ClaimsFixture::user_with(
+            ClaimsFixture::OWNER,
+            &[ClaimsFixture::SCRATCH, ClaimsFixture::OTHER_SHELL],
+        );
+        let tool_temps = [
+            ClaimsFixture::launcher(),
+            ClaimsFixture::shell(ClaimsFixture::SHELL),
+            ClaimsFixture::shell(ClaimsFixture::OTHER_SHELL),
         ];
 
         let abandoned = ClaimsFixture::abandoned(&[idle_shell], &tool_temps);

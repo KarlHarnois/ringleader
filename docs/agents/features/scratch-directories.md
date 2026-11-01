@@ -23,4 +23,4 @@
 
 - List the tool temp directories before reading the process table: a folder made after the read has no user yet.
 - Keep a tool temp directory modified in the last ten minutes. A launch through direnv makes its folder before any process uses it.
-- If an owner uses none of the ownerless tool temp directories in its scratch directory, keep all of them. An idle interactive shell does not show which folder is its own.
+- If an owner uses a path in its scratch directory outside every ownerless tool temp directory, keep all of them. An idle interactive shell hides its own folder. It can also inherit a path into another folder.

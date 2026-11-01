@@ -99,6 +99,17 @@ impl DirectoryUser {
     pub fn works_in(&self, directory: &Path) -> bool {
         self.paths.iter().any(|path| path.starts_with(directory))
     }
+
+    pub fn works_only_in(&self, directories: &[&Path], within: &Path) -> bool {
+        self.paths
+            .iter()
+            .filter(|path| path.starts_with(within))
+            .all(|path| {
+                directories
+                    .iter()
+                    .any(|directory| path.starts_with(directory))
+            })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
