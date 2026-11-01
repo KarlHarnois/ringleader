@@ -63,15 +63,13 @@ impl ToolTempDirectory {
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum ScratchSpaceError {
-    #[error("cannot {operation} the scratch directory {path}: {detail}")]
+    #[error("cannot {operation} {path}: {detail}")]
     Io {
         operation: &'static str,
         path: PathBuf,
         detail: String,
     },
-    #[error(
-        "the scratch directory {path} holds a mount point, unmount it before removing the directory"
-    )]
+    #[error("{path} holds a mount point, unmount it before removing the directory")]
     HoldsMount { path: PathBuf },
     #[error("{path} is not a scratch directory, so Ringleader kept it")]
     Foreign { path: PathBuf },

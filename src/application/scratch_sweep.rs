@@ -347,10 +347,7 @@ mod tests {
         fixture.retire_orphans();
 
         assert!(fixture.service.scratch_space().retired().is_empty());
-        assert_eq!(
-            capture.count_containing("cannot list the scratch directory /scratch"),
-            1
-        );
+        assert_eq!(capture.count_containing("cannot list /scratch"), 1);
     }
 
     #[test]
@@ -361,7 +358,7 @@ mod tests {
         fixture.retire_orphans();
 
         assert_eq!(
-            capture.count_containing("cannot retire the scratch directory /scratch/forgotten"),
+            capture.count_containing("cannot retire /scratch/forgotten"),
             1
         );
     }

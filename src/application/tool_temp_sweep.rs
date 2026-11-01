@@ -260,7 +260,7 @@ mod tests {
         fixture.retire_in_session();
 
         assert_eq!(
-            capture.count_containing("kept an abandoned tool temp directory: cannot retire tool temp the scratch directory /scratch/fix-auth/nix-shell.Mn78Op"),
+            capture.count_containing("kept an abandoned tool temp directory: cannot retire tool temp /scratch/fix-auth/nix-shell.Mn78Op"),
             1
         );
     }

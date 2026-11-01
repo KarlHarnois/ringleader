@@ -117,7 +117,7 @@ mod tests {
 
         scratch.discard(&ServiceFixture::worktree_path("discard-fails"));
 
-        let warning = "kept a scratch directory on disk: cannot remove the scratch directory /scratch/discard-fails";
+        let warning = "kept a scratch directory on disk: cannot remove /scratch/discard-fails";
         assert_eq!(capture.count_containing(warning), 1);
     }
 }
