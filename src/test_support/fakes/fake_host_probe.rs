@@ -1,8 +1,10 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
-use crate::application::ports::{DirectoryAccess, HostProbe, HostProbeError, ProcessInfo};
+use crate::application::ports::{
+    DirectoryAccess, DirectoryUser, HostProbe, HostProbeError, ProcessInfo,
+};
 
 #[derive(Default)]
 pub struct FakeHostProbe {
@@ -21,18 +23,23 @@ struct HostState {
     servers: HashSet<PathBuf>,
     own: HashSet<u32>,
     terminated: Vec<u32>,
+    scan_log: Option<Arc<Mutex<Vec<String>>>>,
 }
 
 #[derive(Clone)]
 struct FakeProcess {
     info: ProcessInfo,
     cwd: PathBuf,
+    temp_directory: Option<PathBuf>,
     session: u32,
     survives_sigterm: bool,
     server_socket: Option<PathBuf>,
 }
 
 impl FakeHostProbe {
+    const ELSEWHERE: &'static str = "/elsewhere";
+    const SCAN: &'static str = "scan";
+
     pub fn with_command(self, command: &str) -> Self {
         let resolved = PathBuf::from("/bin").join(command);
         self.state
@@ -99,6 +106,21 @@ impl FakeHostProbe {
         self
     }
 
+    pub fn with_temp_user(self, pid: u32, command: &str, temp_directory: &Path) -> Self {
+        self.add_process(pid, command, Path::new(Self::ELSEWHERE), 0, false);
+        let mut state = self.state.lock().unwrap();
+        if let Some(process) = state.processes.last_mut() {
+            process.temp_directory = Some(temp_directory.to_path_buf());
+        }
+        drop(state);
+        self
+    }
+
+    pub fn recording_directory_scans(self, log: Arc<Mutex<Vec<String>>>) -> Self {
+        self.state.lock().unwrap().scan_log = Some(log);
+        self
+    }
+
     pub fn serving(self, pid: u32, socket: &Path) -> Self {
         let mut state = self.state.lock().unwrap();
         for process in state
@@ -145,6 +167,7 @@ impl FakeHostProbe {
         self.state.lock().unwrap().processes.push(FakeProcess {
             info: ProcessInfo::new(pid, command),
             cwd: cwd.to_path_buf(),
+            temp_directory: None,
             session,
             survives_sigterm: survives,
             server_socket: None,
@@ -205,6 +228,18 @@ impl HostProbe for FakeHostProbe {
             .collect()
     }
 
+    fn directory_users(&self, within: &[PathBuf]) -> Vec<DirectoryUser> {
+        let state = self.state.lock().unwrap();
+        if let Some(log) = &state.scan_log {
+            log.lock().unwrap().push(Self::SCAN.to_string());
+        }
+        state
+            .processes
+            .iter()
+            .filter_map(|process| process.user_within(within))
+            .collect()
+    }
+
     fn processes_under_server(&self, path: &Path, socket: &Path) -> Vec<ProcessInfo> {
         let state = self.state.lock().unwrap();
         state
@@ -256,5 +291,16 @@ impl HostProbe for FakeHostProbe {
             Some(pid) => Err(HostProbeError::OwnProcess { pid }),
             None => Ok(()),
         }
+    }
+}
+
+impl FakeProcess {
+    fn user_within(&self, within: &[PathBuf]) -> Option<DirectoryUser> {
+        let paths: Vec<PathBuf> = std::iter::once(&self.cwd)
+            .chain(&self.temp_directory)
+            .filter(|path| within.iter().any(|root| path.starts_with(root)))
+            .cloned()
+            .collect();
+        (!paths.is_empty()).then(|| DirectoryUser::new(self.info.clone(), paths))
     }
 }

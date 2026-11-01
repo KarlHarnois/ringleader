@@ -13,7 +13,6 @@ impl ArgumentArea {
         self.strings_after_executable().take(self.count()).collect()
     }
 
-    #[cfg(test)]
     pub fn environment(&self) -> Vec<String> {
         self.strings_after_executable()
             .skip(self.count())

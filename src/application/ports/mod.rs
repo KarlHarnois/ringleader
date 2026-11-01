@@ -29,7 +29,7 @@ pub use directory_environment::{DirectoryEnvironment, DirectoryEnvironmentError,
 pub use dirty_state::DirtyState;
 pub use fold_store::{FoldStore, FoldStoreError};
 pub use head::Head;
-pub use host_probe::{DirectoryAccess, HostProbe, HostProbeError, ProcessInfo};
+pub use host_probe::{DirectoryAccess, DirectoryUser, HostProbe, HostProbeError, ProcessInfo};
 pub use interrupts::Interrupts;
 pub use lock::{Lock, LockError};
 pub use merge_outcome::MergeOutcome;
@@ -40,7 +40,7 @@ pub use multiplexer::{
 pub use pull_requests::{PullRequestError, PullRequests};
 pub use repo_pages::{RepoPageError, RepoPages};
 pub use repo_scanner::{RepoScanner, ScanError, ScanOutcome};
-pub use scratch_space::{ScratchSpace, ScratchSpaceError};
+pub use scratch_space::{ScratchSpace, ScratchSpaceError, ToolTempDirectory};
 pub use session_registry::{RegistryError, SessionRegistry};
 pub use terminal_emulator::{TerminalEmulator, TerminalEmulatorError};
 pub use theme_source::{ThemeError, ThemeSource};

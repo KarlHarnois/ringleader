@@ -8,7 +8,8 @@ use std::path::{Path, PathBuf};
 use super::fnv_hash::FnvHash;
 use super::host_path::HostPath;
 use super::mount_source::MountSource;
-use crate::application::ports::{ScratchSpace, ScratchSpaceError};
+use super::tool_temp_name::ToolTempName;
+use crate::application::ports::{ScratchSpace, ScratchSpaceError, ToolTempDirectory};
 
 pub struct DirectoryScratchSpace {
     root: PathBuf,
@@ -54,6 +55,22 @@ impl DirectoryScratchSpace {
         })
     }
 
+    fn refuse_unrecognized_tool_temp(&self, path: &Path) -> Result<(), ScratchSpaceError> {
+        let in_scratch = path
+            .parent()
+            .is_some_and(|parent| self.is_scratch_directory(parent));
+        if in_scratch && Self::is_tool_temp(path) {
+            return Ok(());
+        }
+        Err(ScratchSpaceError::NotToolTemp {
+            path: path.to_path_buf(),
+        })
+    }
+
+    fn is_tool_temp(path: &Path) -> bool {
+        Self::is_real_directory(path) && ToolTempName::recognize(path).is_some()
+    }
+
     fn refuse_unretired(&self, path: &Path) -> Result<(), ScratchSpaceError> {
         self.refuse_linked_retired_root()?;
         let named = path.file_name().is_some();
@@ -83,8 +100,11 @@ impl DirectoryScratchSpace {
             .file_name()
             .and_then(OsStr::to_str)
             .is_some_and(FnvHash::is_short_hex);
-        let real_directory = fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_dir());
-        inside_root && hash_named && real_directory
+        inside_root && hash_named && Self::is_real_directory(path)
+    }
+
+    fn is_real_directory(path: &Path) -> bool {
+        fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_dir())
     }
 
     fn move_into_retired(&self, directory: &Path) -> io::Result<()> {
@@ -212,6 +232,27 @@ impl ScratchSpace for DirectoryScratchSpace {
         self.refuse_unretired(retired)?;
         self.remove_directory(retired)
     }
+
+    fn tool_temp_directories(
+        &self,
+        directory: &Path,
+    ) -> Result<Vec<ToolTempDirectory>, ScratchSpaceError> {
+        let entries = Self::entries_of(directory)
+            .map_err(|error| Self::failure("list", directory, &error))?;
+        Ok(entries
+            .iter()
+            .filter(|entry| Self::is_real_directory(entry))
+            .filter_map(|entry| ToolTempName::recognize(entry))
+            .collect())
+    }
+
+    fn retire_tool_temp(&self, tool_temp: &Path) -> Result<(), ScratchSpaceError> {
+        self.refuse_unrecognized_tool_temp(tool_temp)?;
+        self.refuse_linked_retired_root()?;
+        self.refuse_mounts_within(tool_temp)?;
+        self.move_into_retired(tool_temp)
+            .map_err(|error| Self::failure("retire", tool_temp, &error))
+    }
 }
 
 #[cfg(test)]
@@ -235,6 +276,9 @@ mod tests {
         const SEALED_MODE: u32 = 0o500;
         const UNREADABLE_MODE: u32 = 0o300;
         const ACCESS_BITS: u32 = 0o777;
+        const SHELL: &'static str = "nix-shell.Ab12Cd";
+        const LAUNCHER: &'static str = "nix-develop-4100-7";
+        const LAUNCHER_OWNER: u32 = 4100;
 
         fn new() -> Self {
             let base = tempfile::tempdir().unwrap();
@@ -350,6 +394,20 @@ mod tests {
         fn retire_scratch_of(&self, worktree: &Path) {
             self.space.create(worktree).unwrap();
             self.space.retire(&self.space.directory(worktree)).unwrap();
+        }
+
+        fn with_tool_temps(self) -> Self {
+            let scratch = self.scratch();
+            for directory in [Self::SHELL, Self::LAUNCHER, "claude-1000"] {
+                fs::create_dir(scratch.join(directory)).unwrap();
+            }
+            fs::write(scratch.join("nix-shell.Ef34Gh"), "not a folder").unwrap();
+            std::os::unix::fs::symlink(self.base.path(), scratch.join("nix-shell.Gh56Ij")).unwrap();
+            self
+        }
+
+        fn tool_temp(&self, name: &str) -> PathBuf {
+            self.scratch().join(name)
         }
 
         fn mode(path: &Path) -> u32 {
@@ -756,5 +814,92 @@ mod tests {
 
         ScratchFixture::unseal(&retired);
         assert!(matches!(listing, Err(ScratchSpaceError::Io { .. })));
+    }
+
+    #[test]
+    fn the_tool_temp_directories_are_the_real_nix_folders_and_no_other_entry() {
+        let fixture = ScratchFixture::new().created().with_tool_temps();
+
+        let mut listed = fixture
+            .space
+            .tool_temp_directories(&fixture.scratch())
+            .unwrap();
+
+        listed.sort_by(|first, second| first.path().cmp(second.path()));
+        assert_eq!(
+            listed,
+            [
+                ToolTempDirectory::owned(
+                    fixture.tool_temp(ScratchFixture::LAUNCHER),
+                    ScratchFixture::LAUNCHER_OWNER
+                ),
+                ToolTempDirectory::ownerless(fixture.tool_temp(ScratchFixture::SHELL)),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_missing_scratch_directory_holds_no_tool_temp_directory() {
+        let fixture = ScratchFixture::new();
+
+        let listed = fixture.space.tool_temp_directories(&fixture.scratch());
+
+        assert_eq!(listed, Ok(Vec::new()));
+    }
+
+    #[test]
+    fn retiring_a_tool_temp_directory_moves_it_into_the_retired_root() {
+        let fixture = ScratchFixture::new().created().with_tool_temps();
+        let shell = fixture.tool_temp(ScratchFixture::SHELL);
+
+        fixture.space.retire_tool_temp(&shell).unwrap();
+
+        assert!(!shell.exists());
+        assert!(
+            fixture
+                .retired()
+                .join(format!("{}-0", ScratchFixture::SHELL))
+                .is_dir()
+        );
+    }
+
+    #[test]
+    fn retiring_keeps_an_entry_that_is_not_a_tool_temp_directory() {
+        let fixture = ScratchFixture::new().created().with_tool_temps();
+        let other = fixture.tool_temp("claude-1000");
+
+        let result = fixture.space.retire_tool_temp(&other);
+
+        assert_eq!(
+            result,
+            Err(ScratchSpaceError::NotToolTemp {
+                path: other.clone()
+            })
+        );
+        assert!(other.is_dir());
+    }
+
+    #[test]
+    fn retiring_keeps_a_nix_folder_outside_every_scratch_directory() {
+        let fixture = ScratchFixture::new().created();
+        let outside = fixture.base.path().join(ScratchFixture::SHELL);
+        fs::create_dir(&outside).unwrap();
+
+        let result = fixture.space.retire_tool_temp(&outside);
+
+        assert!(matches!(result, Err(ScratchSpaceError::NotToolTemp { .. })));
+        assert!(outside.is_dir());
+    }
+
+    #[test]
+    fn retiring_keeps_a_tool_temp_directory_that_holds_a_mount() {
+        let fixture = ScratchFixture::new().created().with_tool_temps();
+        let shell = fixture.tool_temp(ScratchFixture::SHELL);
+        let fixture = fixture.with_mount_in(&shell);
+
+        let result = fixture.space.retire_tool_temp(&shell);
+
+        assert!(matches!(result, Err(ScratchSpaceError::HoldsMount { .. })));
+        assert!(shell.is_dir());
     }
 }

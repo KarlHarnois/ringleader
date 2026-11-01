@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::adapters::HostProcessTable;
 use crate::adapters::host::process_table::{ProcessScope, ProcessTable};
+use crate::test_support::Deadline;
 
 static MARKER_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -17,6 +18,7 @@ pub struct ProcessMarker {
 impl ProcessMarker {
     pub const NAME: &'static str = "RINGLEADER_TEST_PROCESS";
     const SLEEP_SECONDS: &'static str = "30";
+    const OTHER_TEMP_VARIABLES: [&'static str; 4] = ["TMP", "TEMP", "TEMPDIR", "NIX_BUILD_TOP"];
 
     pub fn new() -> Self {
         let sequence = MARKER_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -34,14 +36,26 @@ impl ProcessMarker {
     }
 
     pub fn sleeping_child(&self) -> Child {
-        self.sleep_command().spawn().expect("a marked sleep starts")
+        self.started(&mut self.sleep_command())
     }
 
     pub fn sleeping_child_in(&self, directory: &Path) -> Child {
-        self.sleep_command()
-            .current_dir(directory)
-            .spawn()
-            .expect("a marked sleep starts in the directory")
+        self.started(self.sleep_command().current_dir(directory))
+    }
+
+    pub fn sleeping_child_with_temp(&self, temp_directory: &Path) -> Child {
+        let mut command = self.sleep_command();
+        for inherited in Self::OTHER_TEMP_VARIABLES {
+            command.env_remove(inherited);
+        }
+        self.started(command.env("TMPDIR", temp_directory))
+    }
+
+    fn started(&self, command: &mut Command) -> Child {
+        let child = command.spawn().expect("a marked sleep starts");
+        let started = Deadline::for_background_work().wait_until(|| self.lists(child.id()));
+        assert!(started, "the marked sleep never ran");
+        child
     }
 
     fn sleep_command(&self) -> Command {

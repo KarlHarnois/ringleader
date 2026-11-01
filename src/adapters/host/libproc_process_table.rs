@@ -37,7 +37,6 @@ impl LibprocProcessTable {
         Self::short_info(pid).map(|info| Self::described(pid, &info))
     }
 
-    #[cfg(test)]
     pub fn environment(pid: u32) -> Vec<String> {
         let pid = libc::c_int::try_from(pid).unwrap_or_default();
         ArgumentArea::new(Self::argument_area(pid)).environment()

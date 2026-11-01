@@ -31,6 +31,8 @@ pub mod session_stop;
 pub mod start;
 pub mod stop_report;
 pub mod tmux_teardown;
+pub mod tool_temp_claims;
+pub mod tool_temp_sweep;
 pub mod usage_catalog;
 pub mod usage_reading;
 

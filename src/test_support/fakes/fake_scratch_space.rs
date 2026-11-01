@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use crate::application::ports::{ScratchSpace, ScratchSpaceError};
+use crate::application::ports::{ScratchSpace, ScratchSpaceError, ToolTempDirectory};
 
 #[derive(Default)]
 pub struct FakeScratchSpace {
@@ -15,6 +15,8 @@ struct ScratchState {
     directories: Vec<PathBuf>,
     unpurged: Vec<PathBuf>,
     purge_log: Option<Arc<Mutex<Vec<String>>>>,
+    tool_temps: Vec<ToolTempDirectory>,
+    listing_log: Option<Arc<Mutex<Vec<String>>>>,
 }
 
 impl FakeScratchSpace {
@@ -25,6 +27,8 @@ impl FakeScratchSpace {
     const RETIRE: &'static str = "retire";
     const LIST_RETIRED: &'static str = "list retired";
     const PURGE: &'static str = "purge";
+    const LIST_TOOL_TEMPS: &'static str = "list tool temps";
+    const RETIRE_TOOL_TEMP: &'static str = "retire tool temp";
     const LEFT_RETIRED: &'static str = "/scratch/.retired/example-left-0";
 
     pub fn failing(self, operation: &'static str) -> Self {
@@ -46,6 +50,16 @@ impl FakeScratchSpace {
         self
     }
 
+    pub fn with_tool_temps(self, tool_temps: &[ToolTempDirectory]) -> Self {
+        self.state.lock().unwrap().tool_temps = tool_temps.to_vec();
+        self
+    }
+
+    pub fn recording_tool_temp_listings(self, log: Arc<Mutex<Vec<String>>>) -> Self {
+        self.state.lock().unwrap().listing_log = Some(log);
+        self
+    }
+
     pub fn holding_one_retired() -> Self {
         Self::default().with_unpurged(Path::new(Self::LEFT_RETIRED))
     }
@@ -61,6 +75,10 @@ impl FakeScratchSpace {
 
     pub fn retired(&self) -> Vec<PathBuf> {
         self.calls_of(Self::RETIRE)
+    }
+
+    pub fn retired_tool_temps(&self) -> Vec<PathBuf> {
+        self.calls_of(Self::RETIRE_TOOL_TEMP)
     }
 
     pub fn purged(&self) -> Vec<PathBuf> {
@@ -143,5 +161,26 @@ impl ScratchSpace for FakeScratchSpace {
             log.lock().unwrap().push(Self::PURGE.to_string());
         }
         self.record_at(Self::PURGE, retired, retired)
+    }
+
+    fn tool_temp_directories(
+        &self,
+        directory: &Path,
+    ) -> Result<Vec<ToolTempDirectory>, ScratchSpaceError> {
+        if let Some(log) = &self.state.lock().unwrap().listing_log {
+            log.lock().unwrap().push(Self::LIST_TOOL_TEMPS.to_string());
+        }
+        self.record_at(Self::LIST_TOOL_TEMPS, directory, directory)?;
+        let state = self.state.lock().unwrap();
+        Ok(state
+            .tool_temps
+            .iter()
+            .filter(|tool_temp| tool_temp.path().parent() == Some(directory))
+            .cloned()
+            .collect())
+    }
+
+    fn retire_tool_temp(&self, tool_temp: &Path) -> Result<(), ScratchSpaceError> {
+        self.record_at(Self::RETIRE_TOOL_TEMP, tool_temp, tool_temp)
     }
 }

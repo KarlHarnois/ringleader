@@ -47,7 +47,6 @@ impl ProcfsProcessTable {
         )
     }
 
-    #[cfg(test)]
     pub fn environment(pid: u32) -> Vec<String> {
         let environ = fs::read(Self::directory_of(pid).join("environ")).unwrap_or_default();
         Self::nul_separated(&environ)

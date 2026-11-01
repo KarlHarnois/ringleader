@@ -10,6 +10,38 @@ pub trait ScratchSpace: Send + Sync {
     fn retire(&self, directory: &Path) -> Result<(), ScratchSpaceError>;
     fn retired_directories(&self) -> Result<Vec<PathBuf>, ScratchSpaceError>;
     fn purge(&self, retired: &Path) -> Result<(), ScratchSpaceError>;
+    fn tool_temp_directories(
+        &self,
+        directory: &Path,
+    ) -> Result<Vec<ToolTempDirectory>, ScratchSpaceError>;
+    fn retire_tool_temp(&self, tool_temp: &Path) -> Result<(), ScratchSpaceError>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolTempDirectory {
+    path: PathBuf,
+    owner: Option<u32>,
+}
+
+impl ToolTempDirectory {
+    pub fn ownerless(path: PathBuf) -> Self {
+        Self { path, owner: None }
+    }
+
+    pub fn owned(path: PathBuf, owner: u32) -> Self {
+        Self {
+            path,
+            owner: Some(owner),
+        }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn owner(&self) -> Option<u32> {
+        self.owner
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -28,6 +60,10 @@ pub enum ScratchSpaceError {
     Foreign { path: PathBuf },
     #[error("{path} is not a retired scratch directory, so Ringleader kept it")]
     NotRetired { path: PathBuf },
+    #[error(
+        "{path} is not a temp directory that a tool left in a scratch directory, so Ringleader kept it"
+    )]
+    NotToolTemp { path: PathBuf },
     #[error(
         "{path} is not a real directory, so Ringleader retires and purges nothing until it is replaced with one"
     )]

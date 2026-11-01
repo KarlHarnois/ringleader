@@ -16,3 +16,10 @@
 
 - Retire only a directory found orphaned under the write lock, from the registry reread under that lock. A listing taken before the lock can predate another process's create.
 - Purge retired directories outside the write lock. Removing several gigabytes under the write lock blocks every CLI command.
+
+## Tool temp directories
+
+**A tool temp directory is a folder that a tool leaves directly inside a scratch directory.** An owned tool temp directory names its owner, the process that made it. An ownerless tool temp directory names no process. A process uses every path that holds its working directory or one of its temp directory variables.
+
+- List the tool temp directories before reading the process table: a folder made after the read has no user yet.
+- If an owner uses none of the ownerless tool temp directories in its scratch directory, keep all of them. An idle interactive shell does not show which folder is its own.

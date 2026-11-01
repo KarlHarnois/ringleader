@@ -15,6 +15,7 @@ pub trait HostProbe: Send + Sync {
     }
     fn directory_access(&self, path: &Path) -> Option<DirectoryAccess>;
     fn processes_in(&self, path: &Path, excluded_sessions: &[u32]) -> Vec<ProcessInfo>;
+    fn directory_users(&self, within: &[PathBuf]) -> Vec<DirectoryUser>;
     fn processes_under_server(&self, path: &Path, socket: &Path) -> Vec<ProcessInfo>;
     fn tmux_server_serves(&self, socket: &Path) -> bool;
     fn session_processes(&self, sessions: &[u32]) -> Vec<ProcessInfo>;
@@ -77,6 +78,26 @@ impl ProcessInfo {
 impl fmt::Display for ProcessInfo {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(formatter, "{} ({})", self.pid, self.command)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DirectoryUser {
+    process: ProcessInfo,
+    paths: Vec<PathBuf>,
+}
+
+impl DirectoryUser {
+    pub fn new(process: ProcessInfo, paths: Vec<PathBuf>) -> Self {
+        Self { process, paths }
+    }
+
+    pub fn process(&self) -> &ProcessInfo {
+        &self.process
+    }
+
+    pub fn works_in(&self, directory: &Path) -> bool {
+        self.paths.iter().any(|path| path.starts_with(directory))
     }
 }
 

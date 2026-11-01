@@ -89,7 +89,12 @@ impl ScratchSweep {
     }
 
     fn retire_unless_in_use(&self, orphan: &Path) {
-        let users = self.host.processes_in(orphan, &[]);
+        let users: Vec<ProcessInfo> = self
+            .host
+            .directory_users(&[orphan.to_path_buf()])
+            .iter()
+            .map(|user| user.process().clone())
+            .collect();
         if users.is_empty() {
             self.retire(orphan);
         } else {
@@ -216,6 +221,22 @@ mod tests {
             SweepFixture::space(),
             SweepFixture::host_with_a_process_in_the_orphan(),
         );
+
+        fixture.retire_orphans();
+
+        assert!(fixture.service.scratch_space().retired().is_empty());
+    }
+
+    #[test]
+    fn an_orphan_that_a_surviving_process_uses_as_its_temp_directory_is_kept() {
+        let orphan = FakeScratchSpace::default()
+            .directory(&ServiceFixture::worktree_path(SweepFixture::ORPHAN));
+        let host = FakeHostProbe::default().with_temp_user(
+            SweepFixture::ORPHAN_USER,
+            "example-build",
+            &orphan.join("nix-shell.Ab12Cd"),
+        );
+        let fixture = SweepFixture::with(SweepFixture::space(), host);
 
         fixture.retire_orphans();
 
