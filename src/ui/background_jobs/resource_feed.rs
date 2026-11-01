@@ -53,9 +53,10 @@ impl ResourceFeed {
     }
 
     fn show(&mut self, sample: LoadSample) {
-        if let Some(previous) = &self.previous {
-            self.reading = ResourceReading::Loads(sample.loads_since(previous));
-        }
+        self.reading = match &self.previous {
+            Some(previous) => ResourceReading::Loads(sample.loads_since(previous)),
+            None => ResourceReading::Measuring,
+        };
         self.previous = Some(sample);
     }
 }
@@ -131,6 +132,23 @@ mod tests {
         let mut feed = ResourceFeed::default();
 
         FeedFixture::settle(&mut feed, Instant::now(), &service);
+
+        assert_eq!(feed.reading(), &ResourceReading::Measuring);
+    }
+
+    #[test]
+    fn a_good_sample_after_a_failed_first_one_shows_the_feed_measuring() {
+        let fixture = FeedFixture::sampling(vec![FeedFixture::pane_spent(0, 0)]);
+        let service = fixture.service();
+        let mut feed = ResourceFeed::default();
+        let start = Instant::now();
+        fixture
+            .process_meter()
+            .fail("example denial of the first sample");
+        FeedFixture::settle(&mut feed, start, &service);
+        fixture.process_meter().recover();
+
+        FeedFixture::settle(&mut feed, start + LoadSample::INTERVAL, &service);
 
         assert_eq!(feed.reading(), &ResourceReading::Measuring);
     }
