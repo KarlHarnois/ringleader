@@ -118,7 +118,7 @@ impl AgentHandoff {
             Some(Ok(folder)) => contents.with_shim_directory(&folder),
             Some(Err(error)) => {
                 log::warn!(
-                    "could not link ringleader for the agent, it keeps the PATH it inherits: {error}"
+                    "could not publish ringleader for the agent, it keeps the PATH it inherits: {error}"
                 );
                 contents
             }
@@ -288,6 +288,14 @@ mod tests {
         fn skilled_handoff(&self, plugin_root: &Path) -> AgentHandoff {
             self.handoff(&[])
                 .with_built_in_skill(BuiltInSkill::new(plugin_root))
+        }
+
+        fn shim(&self) -> RingleaderShim {
+            RingleaderShim::new(
+                &self.handoff_directory().with_file_name("bin"),
+                Path::new("/builds/example/ringleader"),
+                &[],
+            )
         }
 
         fn offering() -> AgentLaunch {
@@ -624,25 +632,20 @@ mod tests {
     }
 
     #[test]
-    fn a_handoff_names_the_folder_that_links_the_launching_ringleader() {
+    fn a_handoff_names_the_folder_that_runs_the_launching_ringleader() {
         let fixture = HandoffFixture::new();
-        let shim = RingleaderShim::new(
-            &fixture.handoff_directory().with_file_name("bin"),
-            Path::new("/builds/example/ringleader"),
-        );
-        let handoff = fixture.handoff(&[]).with_shim(shim);
+        let handoff = fixture.handoff(&[]).with_shim(fixture.shim());
 
         let contents = HandoffFixture::written(&handoff, &HandoffFixture::launch(&[]));
 
-        let folder = contents.shim_directory().unwrap();
         assert_eq!(
-            fs::read_link(folder.join("ringleader")).unwrap(),
-            Path::new("/builds/example/ringleader")
+            contents.shim_directory(),
+            Some(fixture.shim().publish().unwrap())
         );
     }
 
     #[test]
-    fn a_shim_that_cannot_be_linked_leaves_the_launch_without_it() {
+    fn a_shim_that_cannot_be_published_leaves_the_launch_without_it() {
         let fixture = HandoffFixture::new();
         let blocker = fixture.handoff_directory().with_file_name("blocker");
         fs::create_dir_all(blocker.parent().unwrap()).unwrap();
@@ -650,6 +653,7 @@ mod tests {
         let shim = RingleaderShim::new(
             &blocker.join("bin"),
             Path::new("/builds/example/ringleader"),
+            &[],
         );
         let handoff = fixture.handoff(&[]).with_shim(shim);
 

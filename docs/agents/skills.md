@@ -24,6 +24,6 @@
 - Pass `--plugin-dir` to claude right after the program, on every launch. Claude never restores the flag when it resumes a conversation.
 - Merge the folder that holds the built-in skills into the `OPENCODE_CONFIG_CONTENT` that opencode already gets. Never replace the variable: the user's value carries the user's own settings.
 - Never set `OPENCODE_CONFIG_DIR`: opencode 2 then ignores the user's whole global config.
-- Put the folder that links `ringleader` to the launching build first on the agent's `PATH`, after the `.envrc` loads. A session inherits the `PATH` of whatever created it. Without the link, its `ringleader` can be another build or none.
+- Put the folder whose `ringleader` runs the launching build first on the agent's `PATH`, after the `.envrc` loads. The folder's `ringleader` sets the variables that `pinnedTools` names to the launching build's values. A session inherits the `PATH` of whatever created it. Without the folder, its `ringleader` can be another build or none.
 - If publishing the built-in skills fails, log the failure and launch the agent without them.
 - Keep the `built_in_skills = false` opt-out: a managed Claude Code policy can stop claude from starting with `--plugin-dir`. The opt-out turns off every built-in skill at once.
