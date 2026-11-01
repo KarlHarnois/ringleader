@@ -22,7 +22,8 @@ pub struct ProcessTable {
 }
 
 impl ProcessTable {
-    const TEMP_VARIABLES: [&'static str; 5] = ["TMPDIR", "TMP", "TEMP", "TEMPDIR", "NIX_BUILD_TOP"];
+    pub const TEMP_VARIABLES: [&'static str; 5] =
+        ["TMPDIR", "TMP", "TEMP", "TEMPDIR", "NIX_BUILD_TOP"];
     const ASSIGNMENT: char = '=';
 
     pub fn new() -> Self {
