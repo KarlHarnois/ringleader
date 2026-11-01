@@ -601,6 +601,17 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_retired_listing_is_a_warning() {
+        let fixture = DoctorFixture::healthy()
+            .with_scratch_space(FakeScratchSpace::default().failing("list retired"));
+
+        assert!(DoctorFixture::has_warning(
+            &fixture,
+            "cannot check for retired scratch directories"
+        ));
+    }
+
+    #[test]
     fn a_failed_scratch_listing_is_a_warning() {
         let fixture = DoctorFixture::healthy()
             .with_scratch_space(FakeScratchSpace::default().failing("list"));
