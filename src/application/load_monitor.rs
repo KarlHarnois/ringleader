@@ -316,6 +316,22 @@ mod tests {
     }
 
     #[test]
+    fn a_process_table_that_fails_again_after_a_good_sample_is_warned_about_again() {
+        let log = LogCapture::installed();
+        let fixture = MonitorFixture::service(FakeMultiplexer::new(), FakeProcessMeter::new());
+        let monitor = LoadMonitor::new(&fixture.ports());
+        fixture.process_meter().fail("example denial that returns");
+        let _ = MonitorFixture::sampled(&monitor, &[]);
+        fixture.process_meter().recover();
+        let _ = MonitorFixture::sampled(&monitor, &[]);
+        fixture.process_meter().fail("example denial that returns");
+
+        let _ = MonitorFixture::sampled(&monitor, &[]);
+
+        assert_eq!(log.count_containing("example denial that returns"), 2);
+    }
+
+    #[test]
     fn each_session_is_given_only_its_own_panes() {
         let multiplexer = MonitorFixture::fix_auth_and_docs();
         let meter = MonitorFixture::idle_then(vec![
