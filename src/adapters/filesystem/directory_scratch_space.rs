@@ -75,7 +75,14 @@ impl DirectoryScratchSpace {
             .recursive(true)
             .mode(Self::PRIVATE_MODE)
             .create(self.retired_root())?;
-        fs::rename(directory, self.unused_retired_path(directory))
+        let destination = self.unused_retired_path(directory);
+        match fs::rename(directory, &destination) {
+            Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {
+                Self::grant_owner_access(directory)?;
+                fs::rename(directory, &destination)
+            }
+            result => result,
+        }
     }
 
     fn unused_retired_path(&self, directory: &Path) -> PathBuf {
@@ -123,10 +130,14 @@ impl DirectoryScratchSpace {
         if !metadata.is_dir() {
             return Ok(());
         }
-        let mut permissions = metadata.permissions();
-        permissions.set_mode(permissions.mode() | Self::OWNER_ACCESS_BITS);
-        fs::set_permissions(path, permissions)?;
+        Self::grant_owner_access(path)?;
         fs::read_dir(path)?.try_for_each(|entry| Self::open_to_owner(&entry?.path()))
+    }
+
+    fn grant_owner_access(path: &Path) -> io::Result<()> {
+        let mut permissions = fs::symlink_metadata(path)?.permissions();
+        permissions.set_mode(permissions.mode() | Self::OWNER_ACCESS_BITS);
+        fs::set_permissions(path, permissions)
     }
 
     fn failure(operation: &'static str, path: &Path, error: &io::Error) -> ScratchSpaceError {
@@ -532,6 +543,17 @@ mod tests {
         fixture.retire_created();
 
         assert_eq!(fixture.retired_count(), 2);
+    }
+
+    #[test]
+    fn retire_opens_a_sealed_scratch_directory_since_a_move_rewrites_its_parent_link() {
+        let fixture = ScratchFixture::new().created();
+        ScratchFixture::seal(&fixture.scratch());
+
+        fixture.space.retire(&fixture.scratch()).unwrap();
+
+        assert!(!fixture.scratch().exists());
+        assert_eq!(fixture.retired_count(), 1);
     }
 
     #[test]
