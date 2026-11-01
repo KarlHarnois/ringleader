@@ -28,6 +28,10 @@ pub enum ScratchSpaceError {
     Foreign { path: PathBuf },
     #[error("{path} is not a retired scratch directory, so Ringleader kept it")]
     NotRetired { path: PathBuf },
+    #[error(
+        "{path} is not a real directory, so Ringleader retires and purges nothing until it is replaced with one"
+    )]
+    LinkedRetiredRoot { path: PathBuf },
 }
 
 #[cfg(test)]

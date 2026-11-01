@@ -80,7 +80,7 @@ impl DirectoryScratchSpace {
         if real_or_absent {
             return Ok(());
         }
-        Err(ScratchSpaceError::Foreign { path: retired })
+        Err(ScratchSpaceError::LinkedRetiredRoot { path: retired })
     }
 
     fn is_scratch_directory(&self, path: &Path) -> bool {
@@ -643,8 +643,14 @@ mod tests {
         let listing = fixture.space.retired_directories();
         let purge = fixture.space.purge(&fixture.retired().join("keep-me"));
 
-        assert!(listing.is_err());
-        assert!(purge.is_err());
+        assert!(matches!(
+            listing,
+            Err(ScratchSpaceError::LinkedRetiredRoot { .. })
+        ));
+        assert!(matches!(
+            purge,
+            Err(ScratchSpaceError::LinkedRetiredRoot { .. })
+        ));
         assert!(kept.exists());
     }
 
@@ -655,7 +661,10 @@ mod tests {
 
         let result = fixture.space.retire(&fixture.scratch());
 
-        assert!(result.is_err());
+        assert!(matches!(
+            result,
+            Err(ScratchSpaceError::LinkedRetiredRoot { .. })
+        ));
         assert!(fixture.scratch().exists());
         assert_eq!(fs::read_dir(&target).unwrap().count(), 0);
     }

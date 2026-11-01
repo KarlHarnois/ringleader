@@ -107,7 +107,10 @@ impl ScratchSweep {
                 "retired the orphaned scratch directory {}",
                 orphan.display()
             ),
-            Err(error) => log::warn!("kept an orphaned scratch directory: {error}"),
+            Err(error) => log::warn!(
+                "kept the orphaned scratch directory {}: {error}",
+                orphan.display()
+            ),
         }
     }
 }
