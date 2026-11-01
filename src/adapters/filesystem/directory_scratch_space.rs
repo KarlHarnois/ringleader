@@ -37,12 +37,6 @@ impl DirectoryScratchSpace {
         }
     }
 
-    fn sorted_entries_of(directory: &Path) -> io::Result<Vec<PathBuf>> {
-        let mut entries = Self::entries_of(directory)?;
-        entries.sort();
-        Ok(entries)
-    }
-
     fn entries_of(directory: &Path) -> io::Result<Vec<PathBuf>> {
         match fs::read_dir(directory) {
             Ok(entries) => entries.map(|entry| Ok(entry?.path())).collect(),
@@ -211,7 +205,7 @@ impl ScratchSpace for DirectoryScratchSpace {
     fn retired_directories(&self) -> Result<Vec<PathBuf>, ScratchSpaceError> {
         self.refuse_linked_retired_root()?;
         let retired = self.retired_root();
-        Self::sorted_entries_of(&retired).map_err(|error| Self::failure("list", &retired, &error))
+        Self::entries_of(&retired).map_err(|error| Self::failure("list", &retired, &error))
     }
 
     fn purge(&self, retired: &Path) -> Result<(), ScratchSpaceError> {
@@ -738,18 +732,6 @@ mod tests {
 
         assert!(result.is_err());
         assert_eq!(fixture.retired_count(), 1);
-    }
-
-    #[test]
-    fn retired_directories_are_listed_in_name_order() {
-        let fixture = ScratchFixture::new();
-        fixture.retire_scratch_of(Path::new(ScratchFixture::OTHER_WORKTREE));
-        fixture.retire_created();
-
-        let listed = fixture.space.retired_directories().unwrap();
-
-        assert_eq!(listed.first(), Some(&fixture.retired_scratch()));
-        assert_eq!(listed.len(), 2);
     }
 
     #[test]
