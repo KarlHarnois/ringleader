@@ -37,9 +37,9 @@ impl ResourceView {
         &mut self,
         now: Instant,
         service: &SessionService,
-        rows_to_sample: &[SessionSummary],
+        session_rows: &[SessionSummary],
     ) {
-        self.feed.poll(now, service, rows_to_sample);
+        self.feed.poll(now, service, session_rows);
         self.keep_a_listed_session_selected();
     }
 

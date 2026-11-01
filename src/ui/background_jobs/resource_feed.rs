@@ -29,10 +29,15 @@ impl ResourceFeed {
         self.pending.is_some()
     }
 
-    pub fn poll(&mut self, now: Instant, service: &SessionService, rows: &[SessionSummary]) {
+    pub fn poll(
+        &mut self,
+        now: Instant,
+        service: &SessionService,
+        session_rows: &[SessionSummary],
+    ) {
         self.collect();
         if self.pending.is_none() && self.is_due(now) {
-            self.pending = Some(service.sample_load(rows));
+            self.pending = Some(service.sample_load(session_rows));
             self.next_sample = Some(now + LoadSample::INTERVAL);
         }
     }

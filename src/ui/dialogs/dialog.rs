@@ -106,12 +106,12 @@ impl Dialog {
         &mut self,
         now: Instant,
         service: &SessionService,
-        rows_to_sample: &[SessionSummary],
+        session_rows: &[SessionSummary],
     ) {
         match self {
             Self::NewSession(dialog) => dialog.poll(),
             Self::Usage(view) => view.poll(now, service),
-            Self::Resources(view) => view.poll(now, service, rows_to_sample),
+            Self::Resources(view) => view.poll(now, service, session_rows),
             Self::Delete(_)
             | Self::DeleteSessions(_)
             | Self::Rename(_)
