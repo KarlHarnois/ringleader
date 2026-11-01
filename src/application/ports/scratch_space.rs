@@ -26,6 +26,8 @@ pub enum ScratchSpaceError {
     HoldsMount { path: PathBuf },
     #[error("{path} is not a scratch directory, so Ringleader kept it")]
     Foreign { path: PathBuf },
+    #[error("{path} is not a retired scratch directory, so Ringleader kept it")]
+    NotRetired { path: PathBuf },
 }
 
 #[cfg(test)]

@@ -61,10 +61,11 @@ impl DirectoryScratchSpace {
     }
 
     fn refuse_unretired(&self, path: &Path) -> Result<(), ScratchSpaceError> {
-        if path.parent() == Some(self.retired_root().as_path()) {
+        let named = path.file_name().is_some();
+        if named && path.parent() == Some(self.retired_root().as_path()) {
             return Ok(());
         }
-        Err(ScratchSpaceError::Foreign {
+        Err(ScratchSpaceError::NotRetired {
             path: path.to_path_buf(),
         })
     }
@@ -628,11 +629,32 @@ mod tests {
 
         assert_eq!(
             result,
-            Err(ScratchSpaceError::Foreign {
+            Err(ScratchSpaceError::NotRetired {
                 path: fixture.scratch()
             })
         );
         assert!(fixture.scratch().exists());
+    }
+
+    #[test]
+    fn purge_refuses_the_parent_of_the_retired_root_so_live_directories_stay() {
+        let fixture = ScratchFixture::new();
+        fixture.retire_created();
+        fixture
+            .space
+            .create(Path::new(ScratchFixture::OTHER_WORKTREE))
+            .unwrap();
+        let parent = fixture.retired().join("..");
+
+        let result = fixture.space.purge(&parent);
+
+        assert!(matches!(result, Err(ScratchSpaceError::NotRetired { .. })));
+        assert!(
+            fixture
+                .space
+                .directory(Path::new(ScratchFixture::OTHER_WORKTREE))
+                .exists()
+        );
     }
 
     #[test]
