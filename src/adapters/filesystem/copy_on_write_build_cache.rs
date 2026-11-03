@@ -17,48 +17,6 @@ impl CopyOnWriteBuildCache {
             tree: TreeCloner::new(),
         }
     }
-
-    fn real_directory_modified(path: &Path) -> Option<SystemTime> {
-        let metadata = fs::symlink_metadata(path).ok()?;
-        metadata.is_dir().then(|| metadata.modified().ok())?
-    }
-
-    fn modified(path: &Path) -> Option<SystemTime> {
-        fs::symlink_metadata(path).ok()?.modified().ok()
-    }
-
-    fn newest_child(directory: &Path) -> Option<SystemTime> {
-        fs::read_dir(directory)
-            .ok()?
-            .flatten()
-            .filter_map(|entry| Self::modified(&entry.path()))
-            .max()
-    }
-
-    fn clone_or_remove(&self, source: &Path, destination: &Path) -> Result<(), String> {
-        let cloned = self.tree.clone_tree(source, destination);
-        if cloned.is_err() {
-            Self::remove_partial_clone(destination);
-        }
-        cloned
-    }
-
-    fn remove_partial_clone(destination: &Path) {
-        match fs::remove_dir_all(destination) {
-            Err(error) if error.kind() != io::ErrorKind::NotFound => log::warn!(
-                "cannot remove the partial build cache {}: {error}",
-                destination.display()
-            ),
-            _ => {}
-        }
-    }
-
-    fn create_parent(destination: &Path) -> Result<(), String> {
-        match destination.parent() {
-            Some(parent) => fs::create_dir_all(parent).map_err(|error| error.to_string()),
-            None => Ok(()),
-        }
-    }
 }
 
 impl BuildCache for CopyOnWriteBuildCache {
@@ -83,6 +41,50 @@ impl BuildCache for CopyOnWriteBuildCache {
                 destination: destination.to_path_buf(),
                 detail,
             })
+    }
+}
+
+impl CopyOnWriteBuildCache {
+    fn real_directory_modified(path: &Path) -> Option<SystemTime> {
+        let metadata = fs::symlink_metadata(path).ok()?;
+        metadata.is_dir().then(|| metadata.modified().ok())?
+    }
+
+    fn newest_child(directory: &Path) -> Option<SystemTime> {
+        fs::read_dir(directory)
+            .ok()?
+            .flatten()
+            .filter_map(|entry| Self::modified(&entry.path()))
+            .max()
+    }
+
+    fn modified(path: &Path) -> Option<SystemTime> {
+        fs::symlink_metadata(path).ok()?.modified().ok()
+    }
+
+    fn create_parent(destination: &Path) -> Result<(), String> {
+        match destination.parent() {
+            Some(parent) => fs::create_dir_all(parent).map_err(|error| error.to_string()),
+            None => Ok(()),
+        }
+    }
+
+    fn clone_or_remove(&self, source: &Path, destination: &Path) -> Result<(), String> {
+        let cloned = self.tree.clone_tree(source, destination);
+        if cloned.is_err() {
+            Self::remove_partial_clone(destination);
+        }
+        cloned
+    }
+
+    fn remove_partial_clone(destination: &Path) {
+        match fs::remove_dir_all(destination) {
+            Err(error) if error.kind() != io::ErrorKind::NotFound => log::warn!(
+                "cannot remove the partial build cache {}: {error}",
+                destination.display()
+            ),
+            _ => {}
+        }
     }
 }
 
