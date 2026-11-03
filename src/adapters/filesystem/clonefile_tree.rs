@@ -17,8 +17,8 @@ impl ClonefileTree {
         let source = Self::c_path(source)?;
         let destination = Self::c_path(destination)?;
         // SAFETY: both pointers come from CStrings that outlive the call, and clonefile only
-        // reads them. clonefile copies a whole directory tree with its file times, and fails
-        // instead of falling back to a full copy on a volume without clones.
+        // reads them. On a volume without clones, clonefile fails instead of falling back to a
+        // full copy.
         let cloned =
             unsafe { libc::clonefile(source.as_ptr(), destination.as_ptr(), Self::CLONE_FLAGS) };
         Errno::result(cloned)

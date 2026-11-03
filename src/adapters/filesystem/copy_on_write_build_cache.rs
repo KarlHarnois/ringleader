@@ -1,4 +1,5 @@
 use std::fs;
+use std::io;
 use std::iter::once;
 use std::path::Path;
 use std::time::SystemTime;
@@ -29,6 +30,24 @@ impl CopyOnWriteBuildCache {
             .max()
     }
 
+    fn clone_or_remove(&self, source: &Path, destination: &Path) -> Result<(), String> {
+        let cloned = self.tree.clone_tree(source, destination);
+        if cloned.is_err() {
+            Self::remove_partial_clone(destination);
+        }
+        cloned
+    }
+
+    fn remove_partial_clone(destination: &Path) {
+        match fs::remove_dir_all(destination) {
+            Err(error) if error.kind() != io::ErrorKind::NotFound => log::warn!(
+                "cannot remove the partial build cache {}: {error}",
+                destination.display()
+            ),
+            _ => {}
+        }
+    }
+
     fn create_parent(destination: &Path) -> Result<(), String> {
         match destination.parent() {
             Some(parent) => fs::create_dir_all(parent).map_err(|error| error.to_string()),
@@ -53,7 +72,7 @@ impl BuildCache for CopyOnWriteBuildCache {
             });
         }
         Self::create_parent(destination)
-            .and_then(|()| self.tree.clone_tree(source, destination))
+            .and_then(|()| self.clone_or_remove(source, destination))
             .map_err(|detail| BuildCacheError::Copy {
                 origin: source.to_path_buf(),
                 destination: destination.to_path_buf(),
@@ -64,7 +83,8 @@ impl BuildCache for CopyOnWriteBuildCache {
 
 #[cfg(test)]
 mod tests {
-    use std::fs::File;
+    use std::fs::{File, Permissions};
+    use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
     use std::time::Duration;
 
@@ -75,6 +95,16 @@ mod tests {
     }
 
     impl CacheFixture {
+        const UNREADABLE: u32 = 0o000;
+
+        fn unreadable_build(&self, relative: &str) -> PathBuf {
+            let build = self.directory_built_at(relative, 100);
+            let output = build.join("output");
+            fs::write(&output, "built").unwrap();
+            fs::set_permissions(&output, Permissions::from_mode(Self::UNREADABLE)).unwrap();
+            build
+        }
+
         fn new() -> Self {
             Self {
                 directory: tempfile::tempdir().unwrap(),
@@ -149,5 +179,20 @@ mod tests {
             matches!(result, Err(BuildCacheError::Copy { .. })),
             "{result:?}"
         );
+    }
+
+    #[test]
+    fn a_failed_copy_leaves_no_partial_tree_in_the_worktree() {
+        let fixture = CacheFixture::new();
+        let source = fixture.unreadable_build("source/target");
+        let destination = fixture.path("new/target");
+
+        let result = CacheFixture::cache().copy(&source, &destination);
+
+        assert!(
+            matches!(result, Err(BuildCacheError::Copy { .. })),
+            "{result:?}"
+        );
+        assert!(!destination.exists());
     }
 }

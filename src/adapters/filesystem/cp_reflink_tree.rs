@@ -1,5 +1,3 @@
-use std::fs;
-use std::io;
 use std::path::Path;
 use std::process::Command;
 
@@ -24,14 +22,6 @@ impl CpReflinkTree {
     }
 
     pub fn clone_tree(&self, source: &Path, destination: &Path) -> Result<(), String> {
-        let cloned = self.run_cp(source, destination);
-        if cloned.is_err() {
-            Self::remove_partial_clone(destination);
-        }
-        cloned
-    }
-
-    fn run_cp(&self, source: &Path, destination: &Path) -> Result<(), String> {
         let mut command = Command::new(Self::PROGRAM);
         command
             .args(Self::CLONE_PRESERVING_BUILD_TIMES)
@@ -56,21 +46,11 @@ impl CpReflinkTree {
             more => format!("{first}, and {more} more failures"),
         }
     }
-
-    fn remove_partial_clone(destination: &Path) {
-        match fs::remove_dir_all(destination) {
-            Err(error) if error.kind() != io::ErrorKind::NotFound => log::warn!(
-                "cannot remove the partial build cache {}: {error}",
-                destination.display()
-            ),
-            _ => {}
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::fs::Permissions;
+    use std::fs::{self, Permissions};
     use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
 
@@ -107,16 +87,6 @@ mod tests {
         fn clone_tree(&self) -> Result<(), String> {
             CpReflinkTree::new().clone_tree(&self.source(), &self.destination())
         }
-    }
-
-    #[test]
-    fn a_failed_clone_leaves_no_partial_tree_in_the_worktree() {
-        let fixture = TreeFixture::with_unreadable_outputs(&["output"]);
-
-        let result = fixture.clone_tree();
-
-        assert!(result.is_err());
-        assert!(!fixture.destination().exists());
     }
 
     #[test]
