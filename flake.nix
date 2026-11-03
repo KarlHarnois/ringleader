@@ -49,6 +49,10 @@
 
       crateVersion = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).package.version;
 
+      revisionSuffix =
+        nixpkgs.lib.optionalString (self ? shortRev || self ? dirtyShortRev)
+          "-g${self.shortRev or self.dirtyShortRev}";
+
       pinnedTools = pkgs: {
         RINGLEADER_TMUX = pkgs.tmux;
         RINGLEADER_GIT = pkgs.gitMinimal;
@@ -139,6 +143,7 @@
             // {
               cargoArtifacts = craneLib.buildDepsOnly (buildArgs // { cargoCheckCommand = "true"; });
               nativeBuildInputs = [ pkgs.makeWrapper ];
+              RINGLEADER_VERSION = crateVersion + revisionSuffix;
               postInstall = ''
                 wrapProgram $out/bin/ringleader ${pinnedToolDefaults tools}
               '';
