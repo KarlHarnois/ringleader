@@ -160,8 +160,14 @@
 
       devShells = forEachSystem (pkgs: {
         default = pkgs.mkShell {
-          packages = developmentPackages pkgs;
-          env = llvmCoverageEnv pkgs;
+          packages =
+            developmentPackages pkgs ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.mold ];
+          env =
+            llvmCoverageEnv pkgs
+            // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+              "CARGO_TARGET_${pkgs.stdenv.hostPlatform.rust.cargoEnvVarTarget}_RUSTFLAGS" =
+                "-C link-arg=-fuse-ld=mold";
+            };
           shellHook = ''
             if [[ -z ''${CI:-} ]]; then
               export CARGO_BUILD_JOBS=''${CARGO_BUILD_JOBS:-2}
