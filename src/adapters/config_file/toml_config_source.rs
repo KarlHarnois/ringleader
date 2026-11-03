@@ -63,8 +63,9 @@ bell_on_waiting = false
 scan_depth = 3
 
 # Optional. Repos found by scanning the launch directory need no entry here.
-# Use [[repos]] only to pin a custom name, a custom base_branch, or a repo
-# that should always appear in the picker. Explicit entries win on path collision.
+# Use [[repos]] only to pin a custom name, a custom base_branch, build_cache_dirs,
+# or a repo that should always appear in the picker. Explicit entries win on path
+# collision.
 # [[repos]]
 # name = "example-project"
 # path = "~/projects/example-project"
