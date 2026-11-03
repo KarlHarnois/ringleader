@@ -1,4 +1,9 @@
 pub mod atomic_file;
+#[cfg(target_os = "macos")]
+pub mod clonefile_tree;
+pub mod copy_on_write_build_cache;
+#[cfg(target_os = "linux")]
+pub mod cp_reflink_tree;
 pub mod directory_repo_scanner;
 pub mod directory_scratch_space;
 pub mod durable_file;
@@ -13,4 +18,3 @@ pub mod mount_source;
 pub mod mount_table;
 #[cfg(any(target_os = "linux", test))]
 pub mod mountinfo_file;
-pub mod reflink_build_cache;

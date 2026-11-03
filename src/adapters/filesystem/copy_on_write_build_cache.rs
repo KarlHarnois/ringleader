@@ -1,26 +1,20 @@
 use std::fs;
 use std::iter::once;
 use std::path::Path;
-use std::process::Command;
 use std::time::SystemTime;
 
-use crate::adapters::BoundedCommand;
-use crate::adapters::child_process::bounded_command::Call;
-use crate::adapters::child_process::deadlines::CallKind;
+use crate::adapters::TreeCloner;
 use crate::application::ports::{BuildCache, BuildCacheError};
 
-pub struct ReflinkBuildCache {
-    bounded: BoundedCommand,
+pub struct CopyOnWriteBuildCache {
+    tree: TreeCloner,
 }
 
-impl ReflinkBuildCache {
-    const COPY_PROGRAM: &'static str = "cp";
-    const SUBCOMMAND: &'static str = "cp --reflink";
-    const CLONE_PRESERVING_BUILD_TIMES: [&'static str; 3] =
-        ["-R", "--reflink=always", "--preserve=mode,timestamps"];
-
-    pub fn new(bounded: BoundedCommand) -> Self {
-        Self { bounded }
+impl CopyOnWriteBuildCache {
+    pub fn new() -> Self {
+        Self {
+            tree: TreeCloner::new(),
+        }
     }
 
     fn modified(path: &Path) -> Option<SystemTime> {
@@ -35,23 +29,6 @@ impl ReflinkBuildCache {
             .max()
     }
 
-    fn clone_tree(&self, source: &Path, destination: &Path) -> Result<(), String> {
-        let mut command = Command::new(Self::COPY_PROGRAM);
-        command
-            .args(Self::CLONE_PRESERVING_BUILD_TIMES)
-            .arg(source)
-            .arg(destination);
-        let call = Call::new(Self::SUBCOMMAND, CallKind::BuildCacheCopy);
-        let output = self
-            .bounded
-            .run(command, &call)
-            .map_err(|error| error.to_string())?;
-        match output.succeeded() {
-            true => Ok(()),
-            false => Err(output.stderr_text().trim().to_string()),
-        }
-    }
-
     fn create_parent(destination: &Path) -> Result<(), String> {
         match destination.parent() {
             Some(parent) => fs::create_dir_all(parent).map_err(|error| error.to_string()),
@@ -60,7 +37,7 @@ impl ReflinkBuildCache {
     }
 }
 
-impl BuildCache for ReflinkBuildCache {
+impl BuildCache for CopyOnWriteBuildCache {
     fn last_built(&self, directory: &Path) -> Option<SystemTime> {
         let own = Self::modified(directory)?;
         Self::newest_child(directory)
@@ -76,7 +53,7 @@ impl BuildCache for ReflinkBuildCache {
             });
         }
         Self::create_parent(destination)
-            .and_then(|()| self.clone_tree(source, destination))
+            .and_then(|()| self.tree.clone_tree(source, destination))
             .map_err(|detail| BuildCacheError::Copy {
                 origin: source.to_path_buf(),
                 destination: destination.to_path_buf(),
@@ -92,7 +69,6 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::adapters::child_process::deadlines::Deadlines;
 
     struct CacheFixture {
         directory: tempfile::TempDir,
@@ -105,8 +81,8 @@ mod tests {
             }
         }
 
-        fn cache() -> ReflinkBuildCache {
-            ReflinkBuildCache::new(BoundedCommand::new(Deadlines::standard()))
+        fn cache() -> CopyOnWriteBuildCache {
+            CopyOnWriteBuildCache::new()
         }
 
         fn path(&self, relative: &str) -> PathBuf {
