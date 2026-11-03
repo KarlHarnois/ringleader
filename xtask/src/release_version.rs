@@ -3,31 +3,37 @@ use std::fmt;
 use crate::version_bump::VersionBump;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ReleaseTag {
+pub struct ReleaseVersion {
     major: u64,
     minor: u64,
     patch: u64,
 }
 
-impl ReleaseTag {
-    const PREFIX: &'static str = "v";
+impl ReleaseVersion {
+    const TAG_PREFIX: &'static str = "v";
 
-    pub fn parse(tag: &str) -> Result<Self, String> {
-        let invalid =
+    pub fn parse_tag(tag: &str) -> Result<Self, String> {
+        let malformed =
             || format!("Reading the release tag {tag:?} failed: expected v<major>.<minor>.<patch>");
-        let version = tag.strip_prefix(Self::PREFIX).ok_or_else(invalid)?;
+        let version = tag.strip_prefix(Self::TAG_PREFIX).ok_or_else(malformed)?;
+        Self::parse(version).map_err(|_| malformed())
+    }
+
+    pub fn parse(version: &str) -> Result<Self, String> {
+        let malformed =
+            || format!("Reading the version {version:?} failed: expected <major>.<minor>.<patch>");
         let numbers: Vec<u64> = version
             .split('.')
             .map(str::parse)
             .collect::<Result<_, _>>()
-            .map_err(|_| invalid())?;
+            .map_err(|_| malformed())?;
         match numbers[..] {
             [major, minor, patch] => Ok(Self {
                 major,
                 minor,
                 patch,
             }),
-            _ => Err(invalid()),
+            _ => Err(malformed()),
         }
     }
 
@@ -49,31 +55,28 @@ impl ReleaseTag {
             },
         }
     }
+
+    pub fn tag(&self) -> String {
+        format!("{}{self}", Self::TAG_PREFIX)
+    }
 }
 
-impl fmt::Display for ReleaseTag {
+impl fmt::Display for ReleaseVersion {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            formatter,
-            "{}{}.{}.{}",
-            Self::PREFIX,
-            self.major,
-            self.minor,
-            self.patch
-        )
+        write!(formatter, "{}.{}.{}", self.major, self.minor, self.patch)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::ReleaseTag;
+    use super::ReleaseVersion;
     use crate::version_bump::VersionBump;
 
     struct ReleaseFixture;
 
     impl ReleaseFixture {
         fn next(tag: &str, bump: VersionBump) -> String {
-            ReleaseTag::parse(tag).unwrap().bumped(bump).to_string()
+            ReleaseVersion::parse_tag(tag).unwrap().bumped(bump).tag()
         }
     }
 
@@ -94,16 +97,21 @@ mod tests {
 
     #[test]
     fn a_tag_without_the_prefix_is_refused() {
-        assert!(ReleaseTag::parse("0.1.0").is_err());
+        assert!(ReleaseVersion::parse_tag("0.1.0").is_err());
     }
 
     #[test]
     fn a_tag_without_three_numbers_is_refused() {
-        assert!(ReleaseTag::parse("v0.1").is_err());
+        assert!(ReleaseVersion::parse_tag("v0.1").is_err());
     }
 
     #[test]
     fn a_tag_with_a_suffix_is_refused() {
-        assert!(ReleaseTag::parse("v0.1.0-rc1").is_err());
+        assert!(ReleaseVersion::parse_tag("v0.1.0-rc1").is_err());
+    }
+
+    #[test]
+    fn a_version_prints_without_the_tag_prefix() {
+        assert_eq!(ReleaseVersion::parse("0.1.1").unwrap().to_string(), "0.1.1");
     }
 }

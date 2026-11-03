@@ -7,19 +7,24 @@ on:
     branches: [master]
 
 permissions:
-  contents: write
+  contents: read
   pull-requests: read
 
 env:
   CACHIX_CACHE: ringleader
+  RELEASE_SUBJECT_PREFIX: Release v
 
 defaults:
   run:
     shell: bash
 
 jobs:
-  tag:
-    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+  release:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      !(startsWith(github.event.workflow_run.head_commit.message, 'Release v') &&
+        github.event.workflow_run.head_commit.author.name == 'github-actions[bot]')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency:
@@ -33,15 +38,15 @@ jobs:
           persist-credentials: false
           ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
-      - name: Find the commit's tag, or the commits since the latest release
+      - name: Find the commits since the latest release
         id: since
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          existing=$(git tag --points-at "$COMMIT" --list 'v*' | head -n 1)
           latest=$(git tag --list 'v*' --sort=-v:refname | head -n 1)
-          if [ "$existing" = "$latest" ]; then
-            echo "tag=$existing" >> "$GITHUB_OUTPUT"
-          elif [ -n "$existing" ]; then
-            echo "$latest supersedes $existing"
+          master=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/master" --jq .object.sha)
+          if [ "$master" != "$COMMIT" ]; then
+            echo "master moved to $master, whose run releases $COMMIT"
           elif git merge-base --is-ancestor "$COMMIT" "$latest"; then
             echo "$latest already releases $COMMIT"
           else
@@ -66,26 +71,69 @@ jobs:
         with:
           name: ${{ env.CACHIX_CACHE }}
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-      - name: Tag the commit
+      - name: Commit and tag the release
         id: tag
         if: steps.since.outputs.latest != ''
         env:
-          GH_TOKEN: ${{ github.token }}
           LATEST: ${{ steps.since.outputs.latest }}
           LABELS: ${{ steps.labels.outputs.labels }}
         run: |
           read -ra labels <<< "$LABELS"
           tag=$(nix develop .#ci -c cargo xtask next-release "$LATEST" "${labels[@]}")
-          gh api --silent "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$tag" -f sha="$COMMIT"
+          nix develop .#ci -c cargo xtask set-version "${tag#v}"
+          changed=$(git status --porcelain --untracked-files=no | awk '{print $2}' | sort | tr '\n' ' ')
+          if [ "$changed" != "Cargo.lock Cargo.toml " ]; then
+            echo "::error::set-version changed $changed instead of Cargo.lock and Cargo.toml"
+            exit 1
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit --quiet -m "$RELEASE_SUBJECT_PREFIX${tag#v}" -- Cargo.toml Cargo.lock
+          git tag "$tag"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-      - name: Tell the tap about the tag
-        if: steps.tag.outputs.tag != '' || steps.since.outputs.tag != ''
+      - if: steps.tag.outputs.tag != ''
+        uses: webfactory/ssh-agent@e83874834305fe9a4a2997156cb26c5de65a8555 # v0.10.0
+        with:
+          ssh-private-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
+      - name: Push the release commit and its tag
+        if: steps.tag.outputs.tag != ''
         env:
-          GH_TOKEN: ${{ secrets.TAP_DISPATCH_TOKEN }}
-          TAG: ${{ steps.tag.outputs.tag || steps.since.outputs.tag }}
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
-          if [ -z "$GH_TOKEN" ]; then
-            echo "::warning::TAP_DISPATCH_TOKEN is not set, so the Homebrew tap does not hear about $TAG."
+          remote="git@github.com:$GITHUB_REPOSITORY.git"
+          if [ "$(git ls-remote "$remote" refs/heads/master | cut -f1)" != "$COMMIT" ]; then
+            echo "master moved past $COMMIT, whose run releases it"
             exit 0
           fi
-          gh api repos/KarlHarnois/homebrew-tap/dispatches -f event_type=ringleader-release -f "client_payload[tag]=$TAG"
+          git push --atomic "$remote" HEAD:refs/heads/master "refs/tags/$TAG"
+
+  announce:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      startsWith(github.event.workflow_run.head_commit.message, 'Release v') &&
+      github.event.workflow_run.head_commit.author.name == 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      COMMIT: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+      - name: Tell the tap about the release commit's tag
+        env:
+          GH_TOKEN: ${{ secrets.TAP_DISPATCH_TOKEN }}
+        run: |
+          tag=$(git tag --points-at "$COMMIT" --list 'v*' | head -n 1)
+          if [ -z "$tag" ]; then
+            echo "::error::the release commit $COMMIT carries no release tag"
+            exit 1
+          fi
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::TAP_DISPATCH_TOKEN is not set, so the Homebrew tap does not hear about $tag."
+            exit 0
+          fi
+          gh api repos/KarlHarnois/homebrew-tap/dispatches -f event_type=ringleader-release -f "client_payload[tag]=$tag"

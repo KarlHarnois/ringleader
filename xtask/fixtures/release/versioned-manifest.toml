@@ -1,0 +1,10 @@
+[package]
+name = "example-project"
+version = "0.1.1"
+edition = "2024"
+
+[workspace]
+members = ["helper"]
+
+[dependencies]
+helper = { version = "0.1.0", path = "helper" }
