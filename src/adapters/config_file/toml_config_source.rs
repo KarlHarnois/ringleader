@@ -70,7 +70,8 @@ scan_depth = 3
 # path = "~/projects/example-project"
 # base_branch = "main"
 # Gitignored build directories that a new worktree copies, as a copy-on-write
-# clone, from the repo's most recently built worktree. Needs btrfs or XFS.
+# clone, from the repo's most recently built worktree. Needs a filesystem
+# with copy-on-write clones, such as btrfs, XFS, or APFS.
 # build_cache_dirs = ["target"]
 
 # The first agent is the default for new sessions.
