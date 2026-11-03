@@ -23,7 +23,8 @@ jobs:
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push' &&
-      !startsWith(github.event.workflow_run.head_commit.message, 'Release v')
+      !(startsWith(github.event.workflow_run.head_commit.message, 'Release v') &&
+        github.event.workflow_run.head_commit.author.name == 'github-actions[bot]')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency:
@@ -110,7 +111,8 @@ jobs:
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push' &&
-      startsWith(github.event.workflow_run.head_commit.message, 'Release v')
+      startsWith(github.event.workflow_run.head_commit.message, 'Release v') &&
+      github.event.workflow_run.head_commit.author.name == 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
