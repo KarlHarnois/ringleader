@@ -231,10 +231,10 @@ mod tests {
             worktree.join("target")
         }
 
-        fn main_built_last() -> FakeBuildCache {
+        fn sibling_built_last() -> FakeBuildCache {
             FakeBuildCache::default()
-                .built_at(&Self::target_of(Path::new(ServiceFixture::REPO)), 200)
-                .built_at(&Self::target_of(Path::new(Self::SIBLING)), 100)
+                .built_at(&Self::target_of(Path::new(ServiceFixture::REPO)), 100)
+                .built_at(&Self::target_of(Path::new(Self::SIBLING)), 200)
         }
 
         fn with_local_tips(tips: &[(&str, &str)]) -> ServiceFixture {
@@ -310,14 +310,14 @@ mod tests {
 
     #[test]
     fn a_caching_repo_copies_the_most_recently_built_cache_into_the_new_worktree() {
-        let fixture = CreateFixture::with_built_siblings(CreateFixture::main_built_last());
+        let fixture = CreateFixture::with_built_siblings(CreateFixture::sibling_built_last());
 
         CreateFixture::create(&fixture, CreateFixture::caching_request()).unwrap();
 
         assert_eq!(
             fixture.build_cache().copies(),
             [(
-                CreateFixture::target_of(Path::new(ServiceFixture::REPO)),
+                CreateFixture::target_of(Path::new(CreateFixture::SIBLING)),
                 CreateFixture::target_of(&ServiceFixture::worktree_path("fix-auth")),
             )]
         );
@@ -325,7 +325,7 @@ mod tests {
 
     #[test]
     fn a_repo_without_build_cache_dirs_copies_nothing() {
-        let fixture = CreateFixture::with_built_siblings(CreateFixture::main_built_last());
+        let fixture = CreateFixture::with_built_siblings(CreateFixture::sibling_built_last());
 
         CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap();
 
@@ -344,7 +344,7 @@ mod tests {
     #[test]
     fn a_failed_cache_copy_still_creates_the_session_because_warming_is_side_work() {
         let fixture =
-            CreateFixture::with_built_siblings(CreateFixture::main_built_last().failing());
+            CreateFixture::with_built_siblings(CreateFixture::sibling_built_last().failing());
 
         let session = CreateFixture::create(&fixture, CreateFixture::caching_request()).unwrap();
 
