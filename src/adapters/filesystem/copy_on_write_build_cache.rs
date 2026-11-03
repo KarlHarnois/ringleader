@@ -18,6 +18,11 @@ impl CopyOnWriteBuildCache {
         }
     }
 
+    fn real_directory_modified(path: &Path) -> Option<SystemTime> {
+        let metadata = fs::symlink_metadata(path).ok()?;
+        metadata.is_dir().then(|| metadata.modified().ok())?
+    }
+
     fn modified(path: &Path) -> Option<SystemTime> {
         fs::symlink_metadata(path).ok()?.modified().ok()
     }
@@ -58,7 +63,7 @@ impl CopyOnWriteBuildCache {
 
 impl BuildCache for CopyOnWriteBuildCache {
     fn last_built(&self, directory: &Path) -> Option<SystemTime> {
-        let own = Self::modified(directory)?;
+        let own = Self::real_directory_modified(directory)?;
         Self::newest_child(directory)
             .into_iter()
             .chain(once(own))
@@ -194,5 +199,16 @@ mod tests {
             "{result:?}"
         );
         assert!(!destination.exists());
+    }
+
+    #[test]
+    fn a_symlinked_cache_was_never_built_so_no_platform_copies_through_the_link() {
+        let fixture = CacheFixture::new();
+        let shared = fixture.directory_built_at("shared-target", 100);
+        let link = fixture.path("worktree/target");
+        fs::create_dir_all(fixture.path("worktree")).unwrap();
+        std::os::unix::fs::symlink(&shared, &link).unwrap();
+
+        assert_eq!(CacheFixture::cache().last_built(&link), None);
     }
 }
