@@ -43,6 +43,7 @@ impl CpReflinkTree {
         let first = failures.next().unwrap_or_default().to_string();
         match failures.count() {
             0 => first,
+            1 => format!("{first}, and 1 more failure"),
             more => format!("{first}, and {more} more failures"),
         }
     }
@@ -97,5 +98,14 @@ mod tests {
 
         assert!(detail.starts_with("cp: "), "{detail}");
         assert!(detail.ends_with(", and 2 more failures"), "{detail}");
+    }
+
+    #[test]
+    fn a_failure_on_two_files_counts_the_second_in_the_singular() {
+        let fixture = TreeFixture::with_unreadable_outputs(&["first", "second"]);
+
+        let detail = fixture.clone_tree().unwrap_err();
+
+        assert!(detail.ends_with(", and 1 more failure"), "{detail}");
     }
 }
