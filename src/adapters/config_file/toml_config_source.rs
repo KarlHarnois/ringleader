@@ -63,12 +63,17 @@ bell_on_waiting = false
 scan_depth = 3
 
 # Optional. Repos found by scanning the launch directory need no entry here.
-# Use [[repos]] only to pin a custom name, a custom base_branch, or a repo
-# that should always appear in the picker. Explicit entries win on path collision.
+# Use [[repos]] only to pin a custom name, a custom base_branch, build_cache_dirs,
+# or a repo that should always appear in the picker. Explicit entries win on path
+# collision.
 # [[repos]]
 # name = "example-project"
 # path = "~/projects/example-project"
 # base_branch = "main"
+# Gitignored build directories that a new worktree copies, as a copy-on-write
+# clone, from the repo's most recently built worktree. Needs a filesystem
+# with copy-on-write clones, such as btrfs, XFS, or APFS.
+# build_cache_dirs = ["target"]
 
 # The first agent is the default for new sessions.
 [[agents]]
@@ -522,6 +527,23 @@ mod tests {
         assert_eq!(
             config.repos()[0].path(),
             Path::new("/home/example/projects/x")
+        );
+    }
+
+    #[test]
+    fn a_repo_build_cache_dir_reaches_the_repo() {
+        let fixture = SourceFixture::with_text(
+            "[[repos]]\nname = \"x\"\npath = \"/projects/x\"\nbuild_cache_dirs = [\"target\"]\n",
+        );
+
+        let config = fixture.source().load().unwrap();
+
+        let dirs = config.repos()[0].build_cache_dirs();
+        assert_eq!(
+            dirs.iter()
+                .map(|dir| dir.within(Path::new("/w")))
+                .collect::<Vec<_>>(),
+            [PathBuf::from("/w/target")]
         );
     }
 

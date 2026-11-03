@@ -112,11 +112,14 @@ struct RawRepo {
     name: Option<String>,
     path: PathBuf,
     base_branch: Option<String>,
+    #[serde(default)]
+    build_cache_dirs: Vec<String>,
 }
 
 impl RawRepo {
     fn into_draft(self, home: &HomeExpansion) -> RepoDraft {
-        let draft = RepoDraft::new(&home.path(&self.path));
+        let draft =
+            RepoDraft::new(&home.path(&self.path)).caching_builds_in(&self.build_cache_dirs);
         let draft = match &self.name {
             Some(name) => draft.named(name),
             None => draft,

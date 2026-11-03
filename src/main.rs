@@ -31,6 +31,7 @@ use adapters::claude::claude_usage_meter::ClaudeUsageMeter;
 use adapters::config_file::toml_config_source::TomlConfigSource;
 use adapters::config_file::toml_theme_source::TomlThemeSource;
 use adapters::direnv::direnv_directory_environment::DirenvDirectoryEnvironment;
+use adapters::filesystem::copy_on_write_build_cache::CopyOnWriteBuildCache;
 use adapters::filesystem::directory_repo_scanner::DirectoryRepoScanner;
 use adapters::filesystem::directory_scratch_space::DirectoryScratchSpace;
 use adapters::filesystem::file_lock::FileLock;
@@ -390,6 +391,7 @@ impl CompositionRoot {
             pull_requests,
             repo_pages,
             directory_environment,
+            Arc::new(CopyOnWriteBuildCache::new()),
         )
         .with_diff_workspace(Arc::new(GitWorkspace::new(
             self.programs.git(),
