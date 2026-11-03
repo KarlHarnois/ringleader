@@ -1,13 +1,14 @@
 use std::path::{Path, PathBuf};
 
 use super::repo_name::RepoName;
-use crate::domain::BaseBranch;
+use crate::domain::{BaseBranch, BuildCacheDir};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Repo {
     name: RepoName,
     path: PathBuf,
     base_branch: Option<BaseBranch>,
+    build_cache_dirs: Vec<BuildCacheDir>,
     explicit: bool,
 }
 
@@ -17,6 +18,7 @@ impl Repo {
             name,
             path: path.to_path_buf(),
             base_branch: None,
+            build_cache_dirs: Vec::new(),
             explicit: false,
         }
     }
@@ -26,7 +28,15 @@ impl Repo {
             name,
             path: path.to_path_buf(),
             base_branch,
+            build_cache_dirs: Vec::new(),
             explicit: true,
+        }
+    }
+
+    pub fn caching_builds_in(self, build_cache_dirs: Vec<BuildCacheDir>) -> Self {
+        Self {
+            build_cache_dirs,
+            ..self
         }
     }
 
@@ -40,6 +50,10 @@ impl Repo {
 
     pub fn base_branch(&self) -> Option<&BaseBranch> {
         self.base_branch.as_ref()
+    }
+
+    pub fn build_cache_dirs(&self) -> &[BuildCacheDir] {
+        &self.build_cache_dirs
     }
 
     pub fn is_explicit(&self) -> bool {

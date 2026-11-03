@@ -69,6 +69,9 @@ scan_depth = 3
 # name = "example-project"
 # path = "~/projects/example-project"
 # base_branch = "main"
+# Gitignored build directories that a new worktree copies, as a copy-on-write
+# clone, from the repo's most recently built worktree. Needs btrfs or XFS.
+# build_cache_dirs = ["target"]
 
 # The first agent is the default for new sessions.
 [[agents]]
@@ -522,6 +525,23 @@ mod tests {
         assert_eq!(
             config.repos()[0].path(),
             Path::new("/home/example/projects/x")
+        );
+    }
+
+    #[test]
+    fn a_repo_build_cache_dir_reaches_the_repo() {
+        let fixture = SourceFixture::with_text(
+            "[[repos]]\nname = \"x\"\npath = \"/projects/x\"\nbuild_cache_dirs = [\"target\"]\n",
+        );
+
+        let config = fixture.source().load().unwrap();
+
+        let dirs = config.repos()[0].build_cache_dirs();
+        assert_eq!(
+            dirs.iter()
+                .map(|dir| dir.within(Path::new("/w")))
+                .collect::<Vec<_>>(),
+            [PathBuf::from("/w/target")]
         );
     }
 

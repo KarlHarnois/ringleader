@@ -2,9 +2,9 @@ use std::path::{Path, PathBuf};
 
 use crate::application::ports::{AgentLaunch, SessionSpec, StartPoint};
 use crate::domain::{
-    Agent, AgentMode, BaseBranch, Checkout, Config, InvalidName, KeyBindings, NamingScheme,
-    Registration, Repo, Session, SessionMetadata, SessionName, SessionRepo, SessionSize,
-    SessionWorktree, TmuxAddress,
+    Agent, AgentMode, BaseBranch, BuildCacheDir, Checkout, Config, InvalidName, KeyBindings,
+    NamingScheme, Registration, Repo, Session, SessionMetadata, SessionName, SessionRepo,
+    SessionSize, SessionWorktree, TmuxAddress,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -144,6 +144,10 @@ impl CreationPlan {
         self.requested_base_branch
             .as_ref()
             .or_else(|| self.repo.base_branch())
+    }
+
+    pub fn build_cache_dirs(&self) -> &[BuildCacheDir] {
+        self.repo.build_cache_dirs()
     }
 
     pub fn requested_base_branch(&self) -> Option<&BaseBranch> {

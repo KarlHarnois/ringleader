@@ -36,6 +36,7 @@ use adapters::filesystem::directory_scratch_space::DirectoryScratchSpace;
 use adapters::filesystem::file_lock::FileLock;
 use adapters::filesystem::json_fold_store::JsonFoldStore;
 use adapters::filesystem::json_session_registry::JsonSessionRegistry;
+use adapters::filesystem::reflink_build_cache::ReflinkBuildCache;
 use adapters::gh::gh_program::GhProgram;
 use adapters::gh::gh_pull_requests::GhPullRequests;
 use adapters::gh::gh_repo_pages::GhRepoPages;
@@ -390,6 +391,7 @@ impl CompositionRoot {
             pull_requests,
             repo_pages,
             directory_environment,
+            Arc::new(ReflinkBuildCache::new(bounded)),
         )
         .with_diff_workspace(Arc::new(GitWorkspace::new(
             self.programs.git(),

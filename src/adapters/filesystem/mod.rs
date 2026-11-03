@@ -13,3 +13,4 @@ pub mod mount_source;
 pub mod mount_table;
 #[cfg(any(target_os = "linux", test))]
 pub mod mountinfo_file;
+pub mod reflink_build_cache;

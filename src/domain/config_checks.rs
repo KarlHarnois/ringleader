@@ -5,6 +5,7 @@ use super::agent::Agent;
 use super::config_draft::ConfigDraft;
 use super::hot_key::HotKey;
 use super::key_bindings::KeyBindings;
+use super::repo_draft::RepoDraft;
 use crate::domain::RepoName;
 
 pub struct ConfigChecks<'a> {
@@ -163,6 +164,7 @@ impl<'a> ConfigChecks<'a> {
         let mut seen: Vec<RepoName> = Vec::new();
         for repo in self.draft.repo_drafts() {
             self.check_absolute("repos.path", repo.path());
+            self.check_build_cache_dirs(repo);
             match repo.resolved_name() {
                 None => self.fail(format!(
                     "repos.name: `{}` is not a valid repo name",
@@ -173,6 +175,14 @@ impl<'a> ConfigChecks<'a> {
                 }
                 Some(name) => seen.push(name),
             }
+        }
+    }
+
+    fn check_build_cache_dirs(&mut self, repo: &RepoDraft) {
+        for text in repo.unusable_build_cache_dirs() {
+            self.fail(format!(
+                "repos.build_cache_dirs: `{text}` must be a relative path that stays inside the worktree"
+            ));
         }
     }
 
@@ -776,6 +786,17 @@ mod tests {
             .repo(RepoDraft::new(Path::new("/repos/two")).named("example-project"));
 
         ChecksFixture::fails_on(draft, "repos.name");
+    }
+
+    #[test]
+    fn a_build_cache_dir_outside_the_worktree_fails() {
+        let draft = ChecksFixture::draft().repo(
+            RepoDraft::new(Path::new("/repos/x"))
+                .named("x")
+                .caching_builds_in(&["../target".to_string()]),
+        );
+
+        ChecksFixture::fails_on(draft, "repos.build_cache_dirs");
     }
 
     #[test]

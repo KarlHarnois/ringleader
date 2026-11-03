@@ -1,4 +1,5 @@
 pub mod agent_launch;
+pub mod build_cache;
 pub mod clock;
 pub mod config_source;
 pub mod directory_environment;
@@ -23,6 +24,7 @@ pub mod web_browser;
 pub mod workspace;
 
 pub use agent_launch::AgentLaunch;
+pub use build_cache::{BuildCache, BuildCacheError};
 pub use clock::Clock;
 pub use config_source::{ConfigError, ConfigSource};
 pub use directory_environment::{DirectoryEnvironment, DirectoryEnvironmentError, Envrc};
