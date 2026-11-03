@@ -8,7 +8,7 @@
 
 ## Releases
 
-**A release is a release commit on `master` that carries a tag `v<version>`.** A release commit is a commit whose title is `Release v<version>`. The release workflow adds a release commit on top of each `master` commit that passes CI. The release commit sets the version in `Cargo.toml` and `Cargo.lock`. The workflow pushes the release commit and its tag with the `RELEASE_DEPLOY_KEY` deploy key. The `master` ruleset lets deploy keys bypass its rules. When CI passes on the release commit, the workflow tells the tap about the tag.
+**A release is a release commit on `master` that carries a tag `v<version>`.** A release commit is a commit by `github-actions[bot]` whose title is `Release v<version>`. The release workflow adds a release commit on top of each `master` commit that passes CI. The release commit sets the version in `Cargo.toml` and `Cargo.lock`. The workflow pushes the release commit and its tag with the `RELEASE_DEPLOY_KEY` deploy key. The `master` ruleset lets deploy keys bypass its rules. When CI passes on the release commit, the workflow tells the tap about the tag.
 
 - NEVER change the version in `Cargo.toml` or `Cargo.lock` by hand: only a release commit sets it.
 - A `nix build` has no `.git`, so it reports the version in `Cargo.toml` followed by `-g` and the short commit.
