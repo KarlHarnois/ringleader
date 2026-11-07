@@ -474,6 +474,7 @@ mod tests {
             RingleaderShim::new(
                 &self.directory.path().join("bin"),
                 Path::new("/builds/example/ringleader"),
+                &[],
             )
         }
 

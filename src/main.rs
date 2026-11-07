@@ -510,6 +510,7 @@ impl CompositionRoot {
             .with_shim(RingleaderShim::new(
                 &self.paths.shim_root(),
                 &self.executable,
+                &self.programs.assignments(),
             ))
             .with_config_path(config_path);
         LauncherCommand::new(self.launcher_prefix(), handoff)

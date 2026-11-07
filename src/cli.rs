@@ -29,6 +29,7 @@ use crate::domain::BuildVersion;
 #[derive(Debug, Parser)]
 #[command(
     name = "ringleader",
+    bin_name = "ringleader",
     version = BuildVersion::CURRENT.text(),
     about = "A tmux session manager for AI coding agents"
 )]
@@ -817,6 +818,17 @@ mod tests {
             let error = Cli::try_parse_from(arguments).unwrap_err();
             Cli::exit_code_for(&error)
         }
+    }
+
+    #[test]
+    fn the_usage_names_ringleader_whatever_file_the_build_runs_from() {
+        let error = Cli::try_parse_from([
+            "/nix/store/example-ringleader/bin/.ringleader-wrapped",
+            "nwe",
+        ])
+        .unwrap_err();
+
+        assert!(error.to_string().contains("Usage: ringleader"), "{error}");
     }
 
     #[test]
