@@ -47,6 +47,11 @@ impl RepoFinder {
         self.query_changed();
     }
 
+    pub fn begin_with_paste(&mut self, text: &str) -> Result<(), String> {
+        self.query = Self::empty_query();
+        self.paste(text)
+    }
+
     pub fn poll(&mut self) -> Option<Repo> {
         if self.scan.finish_if_done() {
             self.filter.load(self.scan.repos());

@@ -2681,11 +2681,10 @@ mod tests {
         let fixture = AppFixture::two_waiting_sessions();
         let mut app = AppFixture::started(&fixture, 100, 28);
         AppFixture::press(&mut app, 'n');
-        app.handle_event(&UiHarness::key(KeyCode::Tab));
 
-        app.handle_event(&Event::Paste("pasted\nname".to_string()));
+        app.handle_event(&Event::Paste("pasted-repo".to_string()));
 
-        assert!(AppFixture::screen(&app, 100, 28).contains("pasted name"));
+        assert!(AppFixture::screen(&app, 100, 28).contains("Find: pasted-repo"));
     }
 
     #[test]
