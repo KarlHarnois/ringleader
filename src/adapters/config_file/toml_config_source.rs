@@ -79,9 +79,13 @@ args = ["--name", "{name}"]
 env = ["ANTHROPIC_API_KEY"]
 # Agents start with a fixed baseline such as PATH and HOME. env copies more
 # variables from Ringleader's environment. set_env sets fixed values, for
-# example the config directory of a second Claude account. Values are used as
+# example the config directory of a second Claude account: add
+# CLAUDE_CONFIG_DIR = "~/.claude-work" to the set_env below. Values are used as
 # written: only a leading ~/ expands. Keep secrets in env.
-# set_env = { CLAUDE_CONFIG_DIR = "~/.claude-work" }
+# Keep CLAUDE_CODE_NATIVE_CURSOR. Without it, Claude hides its cursor at the
+# prompt when DISABLE_TELEMETRY is set, and Ringleader then cannot tell the
+# agent is ready, so startup_input and prompts never reach it.
+set_env = { CLAUDE_CODE_NATIVE_CURSOR = "1" }
 prompt_args = ["{prompt}"]
 # Added after args when a new session starts in plan mode. The new session
 # dialog opens in plan mode when the first agent has plan_args, and Alt-j
@@ -706,6 +710,19 @@ mod tests {
             .any(|line| line == r#"menu_keys = ["C-Space"]"#);
 
         assert!(written);
+    }
+
+    #[test]
+    fn the_first_run_template_keeps_the_claude_cursor_shown_so_input_can_reach_its_prompt() {
+        let fixture = SourceFixture::new();
+        fixture.source().write_first_run_template().unwrap();
+
+        let config = fixture.source().load().unwrap();
+
+        assert_eq!(
+            config.agent("claude").unwrap().env_assignments(),
+            [("CLAUDE_CODE_NATIVE_CURSOR".to_string(), "1".to_string())]
+        );
     }
 
     #[test]
