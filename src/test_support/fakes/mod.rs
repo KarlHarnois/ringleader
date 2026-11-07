@@ -1,4 +1,3 @@
-pub mod fake_build_cache;
 pub mod fake_clock;
 pub mod fake_config_source;
 pub mod fake_directory_environment;

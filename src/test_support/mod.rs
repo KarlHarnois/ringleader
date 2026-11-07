@@ -20,7 +20,6 @@ pub use cli_harness::{CapturedWriter, CliHarness};
 pub use deadline::Deadline;
 pub use direnv_test_home::DirenvTestHome;
 pub use executable_script::ExecutableScript;
-pub use fakes::fake_build_cache::FakeBuildCache;
 pub use fakes::fake_clock::FakeClock;
 pub use fakes::fake_config_source::FakeConfigSource;
 pub use fakes::fake_directory_environment::FakeDirectoryEnvironment;

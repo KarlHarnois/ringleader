@@ -2,10 +2,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use super::{
-    FakeBuildCache, FakeClock, FakeConfigSource, FakeDirectoryEnvironment, FakeHostProbe,
-    FakeMultiplexer, FakePullRequests, FakeRepoPages, FakeRepoScanner, FakeScratchSpace,
-    FakeSessionRegistry, FakeTerminalEmulator, FakeThemeSource, FakeUsageMeter, FakeWebBrowser,
-    FakeWorkspace,
+    FakeClock, FakeConfigSource, FakeDirectoryEnvironment, FakeHostProbe, FakeMultiplexer,
+    FakePullRequests, FakeRepoPages, FakeRepoScanner, FakeScratchSpace, FakeSessionRegistry,
+    FakeTerminalEmulator, FakeThemeSource, FakeUsageMeter, FakeWebBrowser, FakeWorkspace,
 };
 use crate::application::ports::{
     ConfigError, MergeOutcome, MultiplexerError, ScratchSpace, WorktreeEntry,
@@ -35,7 +34,6 @@ pub struct ServiceFixture {
     clock: Arc<FakeClock>,
     scratch_space: Arc<FakeScratchSpace>,
     directory_environment: Arc<FakeDirectoryEnvironment>,
-    build_cache: Arc<FakeBuildCache>,
     terminal_emulator: Arc<FakeTerminalEmulator>,
     web_browser: Arc<FakeWebBrowser>,
     usage_meter: Arc<FakeUsageMeter>,
@@ -80,7 +78,6 @@ impl ServiceFixture {
             clock: Arc::new(FakeClock::at(Self::NOW)),
             scratch_space: Arc::new(FakeScratchSpace::default()),
             directory_environment: Arc::new(FakeDirectoryEnvironment::default()),
-            build_cache: Arc::new(FakeBuildCache::default()),
             terminal_emulator: Arc::new(FakeTerminalEmulator::default()),
             web_browser: Arc::new(FakeWebBrowser::default()),
             usage_meter: Arc::new(FakeUsageMeter::new()),
@@ -180,13 +177,6 @@ impl ServiceFixture {
     pub fn with_directory_environment(self, environment: FakeDirectoryEnvironment) -> Self {
         Self {
             directory_environment: Arc::new(environment),
-            ..self
-        }
-    }
-
-    pub fn with_build_cache(self, build_cache: FakeBuildCache) -> Self {
-        Self {
-            build_cache: Arc::new(build_cache),
             ..self
         }
     }
@@ -309,10 +299,6 @@ impl ServiceFixture {
 
     pub fn directory_environment(&self) -> &FakeDirectoryEnvironment {
         &self.directory_environment
-    }
-
-    pub fn build_cache(&self) -> &FakeBuildCache {
-        &self.build_cache
     }
 
     pub fn terminal_emulator(&self) -> &FakeTerminalEmulator {
@@ -597,7 +583,6 @@ impl ServiceFixture {
                 self.pull_requests.clone(),
                 self.repo_pages.clone(),
                 self.directory_environment.clone(),
-                self.build_cache.clone(),
             )
             .with_diff_workspace(self.measuring_workspace()),
             TmuxPorts::new(self.multiplexer.clone()),

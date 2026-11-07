@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use super::build_cache_warmer::BuildCacheWarmer;
 use super::checkout_strategy::CheckoutStrategy;
 use super::creation_plan::CreationPlan;
 use super::start_point_resolver::StartPointResolver;
@@ -17,7 +16,6 @@ pub struct NewWorktreeStrategy {
     branches: BranchAvailability,
     workspace: Arc<dyn Workspace>,
     host: Arc<dyn HostProbe>,
-    build_cache: BuildCacheWarmer,
 }
 
 impl NewWorktreeStrategy {
@@ -26,7 +24,6 @@ impl NewWorktreeStrategy {
             branches: BranchAvailability::new(ports),
             workspace: ports.repos().workspace(),
             host: ports.repos().host(),
-            build_cache: BuildCacheWarmer::new(ports),
         }
     }
 
@@ -101,7 +98,6 @@ impl CheckoutStrategy for NewWorktreeStrategy {
             .refuse_taken(plan.repo_path(), &plan.branch())?;
         let start = self.resolve_start(plan, reconciliation)?;
         self.create_marked_worktree(plan, &start)?;
-        self.build_cache.warm(plan);
         Ok(plan.new_worktree_from(&start))
     }
 

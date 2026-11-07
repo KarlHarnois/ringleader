@@ -14,11 +14,10 @@ pub enum CallKind {
     UsageProbe,
     CurlQuery,
     SqliteQuery,
-    BuildCacheCopy,
 }
 
 impl CallKind {
-    pub const ALL: [CallKind; 13] = [
+    pub const ALL: [CallKind; 12] = [
         Self::TmuxQuery,
         Self::TmuxChange,
         Self::GitDiff,
@@ -31,7 +30,6 @@ impl CallKind {
         Self::UsageProbe,
         Self::CurlQuery,
         Self::SqliteQuery,
-        Self::BuildCacheCopy,
     ];
 
     fn index(self) -> usize {
@@ -59,7 +57,6 @@ impl Deadlines {
             .with(CallKind::UsageProbe, Duration::from_secs(30))
             .with(CallKind::CurlQuery, Duration::from_secs(15))
             .with(CallKind::SqliteQuery, Duration::from_secs(5))
-            .with(CallKind::BuildCacheCopy, Duration::from_secs(60))
     }
 
     pub fn diff_poll() -> Self {
