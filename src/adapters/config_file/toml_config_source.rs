@@ -79,9 +79,9 @@ args = ["--name", "{name}"]
 env = ["ANTHROPIC_API_KEY"]
 # Agents start with a fixed baseline such as PATH and HOME. env copies more
 # variables from Ringleader's environment. set_env sets fixed values, for
-# example the config directory of a second Claude account. Values are used as
+# example the config directory of a second Claude account: add
+# CLAUDE_CONFIG_DIR = "~/.claude-work" to the set_env below. Values are used as
 # written: only a leading ~/ expands. Keep secrets in env.
-# set_env = { CLAUDE_CONFIG_DIR = "~/.claude-work", CLAUDE_CODE_NATIVE_CURSOR = "1" }
 # Keep CLAUDE_CODE_NATIVE_CURSOR. Without it, Claude hides its cursor at the
 # prompt when DISABLE_TELEMETRY is set, and Ringleader then cannot tell the
 # agent is ready, so startup_input and prompts never reach it.
