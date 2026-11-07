@@ -25,16 +25,15 @@ impl SessionEnvrc {
         if envrc.is_denied() {
             return Self::denied(worktree);
         }
-        if self.main_checkout_vouches_for(main_checkout, &envrc) {
+        let main = self.environment.envrc(main_checkout);
+        if Self::main_checkout_vouches_for(main.as_ref(), &envrc) {
             return self.allow(worktree, main_checkout);
         }
-        Self::not_allowed(worktree, &envrc)
+        Self::not_allowed(worktree, Self::lasting_allow_command(main.as_ref(), &envrc))
     }
 
-    fn main_checkout_vouches_for(&self, main_checkout: &Path, envrc: &Envrc) -> bool {
-        self.environment
-            .envrc(main_checkout)
-            .is_some_and(|main| main.is_allowed() && envrc.has_contents_of(&main))
+    fn main_checkout_vouches_for(main: Option<&Envrc>, envrc: &Envrc) -> bool {
+        main.is_some_and(|main| main.is_allowed() && envrc.has_contents_of(main))
     }
 
     fn allow(&self, worktree: &Path, main_checkout: &Path) -> EnvrcChoice {
@@ -61,11 +60,16 @@ impl SessionEnvrc {
         EnvrcChoice::Skip
     }
 
-    fn not_allowed(worktree: &Path, envrc: &Envrc) -> EnvrcChoice {
+    fn lasting_allow_command<'a>(main: Option<&'a Envrc>, envrc: &'a Envrc) -> &'a str {
+        main.filter(|main| !main.is_denied() && envrc.has_contents_of(main))
+            .unwrap_or(envrc)
+            .allow_command()
+    }
+
+    fn not_allowed(worktree: &Path, allow_command: &str) -> EnvrcChoice {
         EnvrcChoice::Warn(format!(
-            "the .envrc of {} is not allowed, so the agent started without it, review the .envrc and run {}",
-            worktree.display(),
-            envrc.allow_command()
+            "the .envrc of {} is not allowed, so the agent started without it, review the .envrc and run {allow_command}",
+            worktree.display()
         ))
     }
 }
@@ -122,6 +126,10 @@ mod tests {
             let choice = SessionEnvrc::new(&fixture.ports())
                 .choose(&Self::worktree(), Self::main_checkout());
             (fixture, choice)
+        }
+
+        fn allow_command_of(directory: &Path) -> String {
+            format!("direnv allow {}", directory.display())
         }
 
         fn launch() -> AgentLaunch {
@@ -229,6 +237,56 @@ mod tests {
             format!(
                 "the .envrc of {worktree} is not allowed, so the agent started without it, review the .envrc and run direnv allow {worktree}"
             )
+        );
+    }
+
+    #[test]
+    fn the_warning_for_a_copy_of_the_main_checkout_envrc_allows_the_main_checkout() {
+        let environment = FakeDirectoryEnvironment::default()
+            .with_envrc(EnvrcFixture::main_checkout(), EnvrcFixture::FLAKE)
+            .with_envrc(&EnvrcFixture::worktree(), EnvrcFixture::FLAKE);
+
+        let (_, choice) = EnvrcFixture::choose(environment);
+
+        assert!(
+            choice
+                .warning()
+                .unwrap()
+                .ends_with(&EnvrcFixture::allow_command_of(
+                    EnvrcFixture::main_checkout()
+                ))
+        );
+    }
+
+    #[test]
+    fn the_warning_for_a_changed_envrc_allows_only_the_worktree() {
+        let environment = FakeDirectoryEnvironment::default()
+            .with_envrc(EnvrcFixture::main_checkout(), EnvrcFixture::FLAKE)
+            .with_envrc(&EnvrcFixture::worktree(), "use flake \n");
+
+        let (_, choice) = EnvrcFixture::choose(environment);
+
+        assert!(
+            choice
+                .warning()
+                .unwrap()
+                .ends_with(&EnvrcFixture::allow_command_of(&EnvrcFixture::worktree()))
+        );
+    }
+
+    #[test]
+    fn the_warning_never_suggests_allowing_a_denied_main_checkout_envrc() {
+        let environment = FakeDirectoryEnvironment::default()
+            .with_denied_envrc(EnvrcFixture::main_checkout(), EnvrcFixture::FLAKE)
+            .with_envrc(&EnvrcFixture::worktree(), EnvrcFixture::FLAKE);
+
+        let (_, choice) = EnvrcFixture::choose(environment);
+
+        assert!(
+            choice
+                .warning()
+                .unwrap()
+                .ends_with(&EnvrcFixture::allow_command_of(&EnvrcFixture::worktree()))
         );
     }
 

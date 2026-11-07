@@ -171,17 +171,15 @@ impl PreparedCheckout<'_> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
     use std::time::{Duration, Instant};
 
     use super::*;
     use crate::application::ports::{MultiplexerError, WorkspaceError, WorktreeEntry};
-    use crate::domain::{
-        Agent, AgentMode, AgentPane, BaseBranch, Branch, BuildCacheDir, Repo, RepoName,
-    };
+    use crate::domain::{Agent, AgentMode, AgentPane, BaseBranch, Branch, Repo, RepoName};
     use crate::test_support::{
-        FakeBuildCache, FakeDirectoryEnvironment, FakeHostProbe, FakeMultiplexer, FakeScratchSpace,
-        FakeWorkspace, ServiceFixture,
+        FakeDirectoryEnvironment, FakeHostProbe, FakeMultiplexer, FakeScratchSpace, FakeWorkspace,
+        ServiceFixture,
     };
 
     struct CreateFixture;
@@ -200,41 +198,6 @@ mod tests {
                 Path::new(ServiceFixture::REPO),
                 BaseBranch::new("develop"),
             )
-        }
-
-        const SIBLING: &'static str = "/data/ringleader/worktrees/example-project/older";
-
-        fn repo_caching_target() -> Repo {
-            Repo::explicit(
-                RepoName::parse("example-project").unwrap(),
-                Path::new(ServiceFixture::REPO),
-                None,
-            )
-            .caching_builds_in(vec![BuildCacheDir::parse("target").unwrap()])
-        }
-
-        fn caching_request() -> CreateRequest {
-            CreateRequest::new("fix-auth", Self::repo_caching_target())
-        }
-
-        fn with_built_siblings(build_cache: FakeBuildCache) -> ServiceFixture {
-            let repo = Path::new(ServiceFixture::REPO);
-            let workspace = FakeWorkspace::default()
-                .with_worktree(repo, WorktreeEntry::new(repo).on_branch("main").main())
-                .with_worktree(repo, WorktreeEntry::new(Path::new(Self::SIBLING)));
-            ServiceFixture::new()
-                .with_workspace(workspace)
-                .with_build_cache(build_cache)
-        }
-
-        fn target_of(worktree: &Path) -> PathBuf {
-            worktree.join("target")
-        }
-
-        fn sibling_built_last() -> FakeBuildCache {
-            FakeBuildCache::default()
-                .built_at(&Self::target_of(Path::new(ServiceFixture::REPO)), 100)
-                .built_at(&Self::target_of(Path::new(Self::SIBLING)), 200)
         }
 
         fn with_local_tips(tips: &[(&str, &str)]) -> ServiceFixture {
@@ -306,49 +269,6 @@ mod tests {
             assert!(fixture.workspace().state_changing_calls().is_empty());
             assert!(fixture.multiplexer().state_changing_calls().is_empty());
         }
-    }
-
-    #[test]
-    fn a_caching_repo_copies_the_most_recently_built_cache_into_the_new_worktree() {
-        let fixture = CreateFixture::with_built_siblings(CreateFixture::sibling_built_last());
-
-        CreateFixture::create(&fixture, CreateFixture::caching_request()).unwrap();
-
-        assert_eq!(
-            fixture.build_cache().copies(),
-            [(
-                CreateFixture::target_of(Path::new(CreateFixture::SIBLING)),
-                CreateFixture::target_of(&ServiceFixture::worktree_path("fix-auth")),
-            )]
-        );
-    }
-
-    #[test]
-    fn a_repo_without_build_cache_dirs_copies_nothing() {
-        let fixture = CreateFixture::with_built_siblings(CreateFixture::sibling_built_last());
-
-        CreateFixture::create(&fixture, CreateFixture::request("fix-auth")).unwrap();
-
-        assert!(fixture.build_cache().copies().is_empty());
-    }
-
-    #[test]
-    fn a_caching_repo_with_no_built_worktree_copies_nothing() {
-        let fixture = CreateFixture::with_built_siblings(FakeBuildCache::default());
-
-        CreateFixture::create(&fixture, CreateFixture::caching_request()).unwrap();
-
-        assert!(fixture.build_cache().copies().is_empty());
-    }
-
-    #[test]
-    fn a_failed_cache_copy_still_creates_the_session_because_warming_is_side_work() {
-        let fixture =
-            CreateFixture::with_built_siblings(CreateFixture::sibling_built_last().failing());
-
-        let session = CreateFixture::create(&fixture, CreateFixture::caching_request()).unwrap();
-
-        assert_eq!(fixture.registry().sessions(), vec![session]);
     }
 
     #[test]

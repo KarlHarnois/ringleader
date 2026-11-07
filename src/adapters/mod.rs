@@ -26,10 +26,6 @@ pub use child_process::kqueue_exit_watch::KqueueExitWatch as ExitWatch;
 #[cfg(target_os = "linux")]
 pub use child_process::pidfd_exit_watch::PidfdExitWatch as ExitWatch;
 #[cfg(target_os = "macos")]
-pub use filesystem::clonefile_tree::ClonefileTree as TreeCloner;
-#[cfg(target_os = "linux")]
-pub use filesystem::cp_reflink_tree::CpReflinkTree as TreeCloner;
-#[cfg(target_os = "macos")]
 pub use filesystem::getfsstat_mounts::GetfsstatMounts as HostMounts;
 #[cfg(target_os = "linux")]
 pub use filesystem::mountinfo_file::MountinfoFile as HostMounts;
