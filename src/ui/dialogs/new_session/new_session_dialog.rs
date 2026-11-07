@@ -692,12 +692,6 @@ mod tests {
             }
         }
 
-        fn search(dialog: &mut NewSessionDialog, service: &SessionService, query: &str) {
-            Self::press(dialog, service, KeyCode::Tab);
-            Self::press(dialog, service, KeyCode::Tab);
-            Self::type_text(dialog, service, query);
-        }
-
         fn submitted(step: DialogStep) -> CreateRequest {
             match Self::create_step(step) {
                 CreateStep::Stay(request) | CreateStep::Attach(request) => request,
@@ -736,12 +730,12 @@ mod tests {
     #[test]
     fn picking_through_the_search_changes_the_repo() {
         let (mut dialog, service) =
-            DialogFixture::opened_on_name(&DialogFixture::launched_in_repo());
-        DialogFixture::type_text(&mut dialog, &service, "fix-auth");
-        DialogFixture::search(&mut dialog, &service, "gate");
+            DialogFixture::opened_on_repo(&DialogFixture::launched_in_repo());
+        DialogFixture::type_text(&mut dialog, &service, "gate");
         DialogFixture::settle(&mut dialog, |text| text.contains("1/1 repos under ~"));
 
         DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
+        DialogFixture::type_text(&mut dialog, &service, "fix-auth");
         let shown = DialogFixture::text(&dialog);
         let step = DialogFixture::create(&mut dialog, &service);
 
@@ -799,8 +793,8 @@ mod tests {
     #[test]
     fn picking_a_repo_moves_on_to_the_name() {
         let (mut dialog, service) =
-            DialogFixture::opened_on_name(&DialogFixture::launched_in_repo());
-        DialogFixture::search(&mut dialog, &service, "gate");
+            DialogFixture::opened_on_repo(&DialogFixture::launched_in_repo());
+        DialogFixture::type_text(&mut dialog, &service, "gate");
         DialogFixture::settle(&mut dialog, |text| text.contains("1/1 repos under ~"));
 
         DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
@@ -812,8 +806,8 @@ mod tests {
     fn a_typed_repo_path_moves_on_to_the_name_once_checked() {
         let fixture = DialogFixture::launched_in_repo()
             .with_host(FakeHostProbe::default().with_directory(Path::new(DialogFixture::TYPED)));
-        let (mut dialog, service) = DialogFixture::opened_on_name(&fixture);
-        DialogFixture::search(&mut dialog, &service, DialogFixture::TYPED);
+        let (mut dialog, service) = DialogFixture::opened_on_repo(&fixture);
+        DialogFixture::type_text(&mut dialog, &service, DialogFixture::TYPED);
 
         DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
         DialogFixture::settle(&mut dialog, |text| {
@@ -827,8 +821,8 @@ mod tests {
     #[test]
     fn esc_in_the_search_closes_only_the_search() {
         let (mut dialog, service) =
-            DialogFixture::opened_on_name(&DialogFixture::launched_in_repo());
-        DialogFixture::search(&mut dialog, &service, "g");
+            DialogFixture::opened_on_repo(&DialogFixture::launched_in_repo());
+        DialogFixture::type_text(&mut dialog, &service, "g");
 
         let first = DialogFixture::press(&mut dialog, &service, KeyCode::Esc);
         let second = DialogFixture::press(&mut dialog, &service, KeyCode::Esc);
@@ -851,8 +845,8 @@ mod tests {
     #[test]
     fn a_pasted_search_with_an_inner_line_break_is_a_field_error() {
         let (mut dialog, service) =
-            DialogFixture::opened_on_name(&DialogFixture::launched_in_repo());
-        DialogFixture::search(&mut dialog, &service, "g");
+            DialogFixture::opened_on_repo(&DialogFixture::launched_in_repo());
+        DialogFixture::type_text(&mut dialog, &service, "g");
 
         dialog.paste(DialogFixture::TWO_LINE_PATH);
 
@@ -937,8 +931,8 @@ mod tests {
     #[test]
     fn alt_k_switches_the_agent_while_the_repo_search_is_open() {
         let (mut dialog, service) =
-            DialogFixture::opened_on_name(&DialogFixture::launched_with_two_agents());
-        DialogFixture::search(&mut dialog, &service, "gate");
+            DialogFixture::opened_on_repo(&DialogFixture::launched_with_two_agents());
+        DialogFixture::type_text(&mut dialog, &service, "gate");
 
         DialogFixture::cycle_agent(&mut dialog, &service);
 
@@ -1332,8 +1326,8 @@ mod tests {
     #[test]
     fn alt_l_switches_the_checkout_while_the_repo_search_is_open() {
         let (mut dialog, service) =
-            DialogFixture::opened_on_name(&DialogFixture::launched_among_gateways());
-        DialogFixture::search(&mut dialog, &service, "gate");
+            DialogFixture::opened_on_repo(&DialogFixture::launched_among_gateways());
+        DialogFixture::type_text(&mut dialog, &service, "gate");
 
         DialogFixture::toggle_checkout(&mut dialog, &service);
 
@@ -1385,8 +1379,8 @@ mod tests {
     #[test]
     fn alt_j_switches_the_mode_while_the_repo_search_is_open() {
         let (mut dialog, service) =
-            DialogFixture::opened_on_name(&DialogFixture::launched_among_gateways());
-        DialogFixture::search(&mut dialog, &service, "gate");
+            DialogFixture::opened_on_repo(&DialogFixture::launched_among_gateways());
+        DialogFixture::type_text(&mut dialog, &service, "gate");
 
         DialogFixture::toggle_mode(&mut dialog, &service);
 
@@ -1893,8 +1887,8 @@ mod tests {
     #[test]
     fn a_dialog_too_short_for_the_search_keeps_its_first_match_in_view() {
         let (mut dialog, service) =
-            DialogFixture::opened_on_name(&DialogFixture::launched_among_gateways());
-        DialogFixture::search(&mut dialog, &service, "gate");
+            DialogFixture::opened_on_repo(&DialogFixture::launched_among_gateways());
+        DialogFixture::type_text(&mut dialog, &service, "gate");
         DialogFixture::settle(&mut dialog, |text| text.contains("20/20 repos under ~"));
         let rows_without_the_name = 9;
 
@@ -2124,8 +2118,8 @@ mod tests {
     #[test]
     fn the_setting_keys_type_nothing_into_the_repo_search() {
         let (mut dialog, service) =
-            DialogFixture::opened_on_name(&DialogFixture::launched_with_two_agents());
-        DialogFixture::search(&mut dialog, &service, "gate");
+            DialogFixture::opened_on_repo(&DialogFixture::launched_with_two_agents());
+        DialogFixture::type_text(&mut dialog, &service, "gate");
 
         DialogFixture::change_every_setting(&mut dialog, &service);
 
@@ -2327,8 +2321,8 @@ mod tests {
     #[test]
     fn editing_the_repo_search_query_clears_the_error() {
         let (mut dialog, service) =
-            DialogFixture::opened_on_name(&DialogFixture::launched_in_repo());
-        DialogFixture::search(&mut dialog, &service, "g");
+            DialogFixture::opened_on_repo(&DialogFixture::launched_in_repo());
+        DialogFixture::type_text(&mut dialog, &service, "g");
         dialog.paste(DialogFixture::TWO_LINE_PATH);
         let refused = DialogFixture::row_above_the_hints(&dialog);
 
@@ -2390,8 +2384,8 @@ mod tests {
     #[test]
     fn ctrl_j_through_the_repo_list_leaves_the_error_on_screen() {
         let (mut dialog, service) =
-            DialogFixture::opened_on_name(&DialogFixture::launched_among_gateways());
-        DialogFixture::search(&mut dialog, &service, "gate");
+            DialogFixture::opened_on_repo(&DialogFixture::launched_among_gateways());
+        DialogFixture::type_text(&mut dialog, &service, "gate");
         DialogFixture::settle(&mut dialog, |text| text.contains("20/20 repos under ~"));
         dialog.paste(DialogFixture::TWO_LINE_PATH);
 
