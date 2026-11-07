@@ -1,12 +1,12 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NewSessionField {
-    Name,
     Repo,
+    Name,
     Prompt,
 }
 
 impl NewSessionField {
-    const ORDER: [NewSessionField; 3] = [Self::Name, Self::Repo, Self::Prompt];
+    const ORDER: [NewSessionField; 3] = [Self::Repo, Self::Name, Self::Prompt];
 
     pub fn next(self) -> Self {
         Self::ORDER[(self.position() + 1) % Self::ORDER.len()]
@@ -18,16 +18,16 @@ impl NewSessionField {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Name => "Name",
             Self::Repo => "Repo",
+            Self::Name => "Name",
             Self::Prompt => "Prompt",
         }
     }
 
     pub fn hints(self) -> &'static str {
         match self {
-            Self::Name => "Enter next field · Ctrl-S create · Esc cancel",
             Self::Repo => "Type to find a repo · Enter next field · Ctrl-S create · Esc cancel",
+            Self::Name => "Enter next field · Ctrl-S create · Esc cancel",
             Self::Prompt => "Enter create · Esc cancel",
         }
     }
@@ -46,11 +46,16 @@ mod tests {
 
     #[test]
     fn next_wraps_from_the_last_field_to_the_first() {
-        assert_eq!(NewSessionField::Prompt.next(), NewSessionField::Name);
+        assert_eq!(NewSessionField::Prompt.next(), NewSessionField::Repo);
     }
 
     #[test]
-    fn the_repo_is_followed_by_the_prompt() {
-        assert_eq!(NewSessionField::Repo.next(), NewSessionField::Prompt);
+    fn the_repo_is_followed_by_the_name() {
+        assert_eq!(NewSessionField::Repo.next(), NewSessionField::Name);
+    }
+
+    #[test]
+    fn the_name_is_followed_by_the_prompt() {
+        assert_eq!(NewSessionField::Name.next(), NewSessionField::Prompt);
     }
 }
