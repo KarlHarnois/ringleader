@@ -24,7 +24,7 @@ To run the darwin cross-check:
 
 1. Run `rustc --version`. The second word of its output is `<version>`.
 2. Read the locked nixpkgs revision from `flake.lock`. That revision is `<revision>`.
-3. Run this command inside the dev shell, with `<version>` and `<revision>` filled in. If `IN_NIX_SHELL` is not set, prefix the command with `direnv exec .`:
+3. Run this command as a dev shell tool under the `direnv exec .` rules in `AGENTS.md`, with `<version>` and `<revision>` filled in:
 
    ```sh
    nix shell --impure --expr '
