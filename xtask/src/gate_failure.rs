@@ -16,7 +16,7 @@ impl GateFailure {
     pub fn coverage_unavailable(status: ExitStatus) -> Self {
         Self {
             message: format!(
-                "`cargo llvm-cov clean` failed with {status}. Run the gate inside `nix develop`, \
+                "`cargo llvm-cov clean` failed with {status}. Run the gate inside the dev shell, \
                  which provides `cargo-llvm-cov`."
             ),
         }

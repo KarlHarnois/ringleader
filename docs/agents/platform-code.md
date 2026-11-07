@@ -22,12 +22,12 @@
 
 To run the darwin cross-check:
 
-1. Run `nix develop -c rustc --version`. The second word of its output is `<version>`.
+1. Run `rustc --version`. The second word of its output is `<version>`.
 2. Read the locked nixpkgs revision from `flake.lock`. That revision is `<revision>`.
 3. Run this command, with `<version>` and `<revision>` filled in:
 
    ```sh
-   nix develop -c nix shell --impure --expr '
+   nix shell --impure --expr '
      let
        nixpkgs = builtins.getFlake "github:NixOS/nixpkgs/<revision>";
        rustOverlay = builtins.getFlake "github:oxalica/rust-overlay";
@@ -42,7 +42,7 @@ To run the darwin cross-check:
      }' -c cargo clippy --all-targets --target aarch64-apple-darwin -- -D warnings
    ```
 
-   The outer `nix develop` supplies the C compiler that build scripts link with. Keep the toolchain's version equal to the dev shell's: clippy then reports the same lints for both targets.
+   The dev shell supplies the C compiler that build scripts link with. Keep the toolchain's version equal to the dev shell's: clippy then reports the same lints for both targets.
 
 4. The darwin cross-check passes when the command exits 0.
 
