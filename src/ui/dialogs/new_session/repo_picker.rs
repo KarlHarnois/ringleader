@@ -56,10 +56,11 @@ impl RepoPicker {
 
     pub fn paste(&mut self, text: &str) -> Result<(), String> {
         if self.searching {
-            self.finder.paste(text)
-        } else {
-            Ok(())
+            return self.finder.paste(text);
         }
+        self.finder.begin_with_paste(text)?;
+        self.searching = true;
+        Ok(())
     }
 
     pub fn lines(
@@ -261,6 +262,27 @@ mod tests {
         assert_eq!(step, PickerStep::Edited);
         assert!(PickerFixture::is_searching(&picker));
         assert!(PickerFixture::text(&picker).starts_with("Find: r█"));
+    }
+
+    #[test]
+    fn pasting_opens_the_search_with_that_text() {
+        let service = PickerFixture::fixture().service();
+        let mut picker = PickerFixture::opened(&service);
+
+        picker.paste("gateway").unwrap();
+
+        assert!(PickerFixture::text(&picker).starts_with("Find: gateway█"));
+    }
+
+    #[test]
+    fn a_refused_paste_leaves_the_search_closed() {
+        let service = PickerFixture::fixture().service();
+        let mut picker = PickerFixture::opened(&service);
+
+        let pasted = picker.paste("/work\n/other");
+
+        assert!(pasted.is_err());
+        assert!(!PickerFixture::is_searching(&picker));
     }
 
     #[test]

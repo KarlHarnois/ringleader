@@ -45,7 +45,7 @@ impl NewSessionDialog {
             mode: Self::starting_mode(&agents),
             agents,
             prompt: PromptField::default(),
-            focus: NewSessionField::Name,
+            focus: NewSessionField::Repo,
             checkout: Checkout::default(),
             error: None,
             creation: |request| {
@@ -203,6 +203,10 @@ impl NewSessionDialog {
     }
 
     fn request(&self) -> Result<CreateRequest, Refusal> {
+        let repo = self.repos.selected_repo().ok_or(Refusal::MissingField(
+            NewSessionField::Repo,
+            Self::REPO_MISSING,
+        ))?;
         let name = self.name.value().trim();
         if name.is_empty() {
             return Err(Refusal::MissingField(
@@ -210,10 +214,6 @@ impl NewSessionDialog {
                 Self::NAME_MISSING,
             ));
         }
-        let repo = self.repos.selected_repo().ok_or(Refusal::MissingField(
-            NewSessionField::Repo,
-            Self::REPO_MISSING,
-        ))?;
         let agent = self.agents.selected().map_err(Refusal::General)?;
         let request = CreateRequest::new(name, repo.clone())
             .with_agent(agent.name())
@@ -299,10 +299,16 @@ mod tests {
             )
         }
 
-        fn opened(fixture: &ServiceFixture) -> (NewSessionDialog, SessionService) {
+        fn opened_on_repo(fixture: &ServiceFixture) -> (NewSessionDialog, SessionService) {
             let service = fixture.service();
             let mut dialog = NewSessionDialog::open(&service, None);
             Self::settle(&mut dialog, |text| !text.contains("Finding the repo"));
+            (dialog, service)
+        }
+
+        fn opened_on_name(fixture: &ServiceFixture) -> (NewSessionDialog, SessionService) {
+            let (mut dialog, service) = Self::opened_on_repo(fixture);
+            Self::press(&mut dialog, &service, KeyCode::Tab);
             (dialog, service)
         }
 
@@ -322,21 +328,20 @@ mod tests {
         }
 
         fn focused_on_prompt(fixture: &ServiceFixture) -> (NewSessionDialog, SessionService) {
-            let (mut dialog, service) = Self::opened(fixture);
+            let (mut dialog, service) = Self::opened_on_name(fixture);
             Self::type_text(&mut dialog, &service, "fix-auth");
-            Self::press(&mut dialog, &service, KeyCode::Tab);
             Self::press(&mut dialog, &service, KeyCode::Tab);
             (dialog, service)
         }
 
         fn refused_for_a_missing_name() -> (NewSessionDialog, SessionService) {
-            let (mut dialog, service) = Self::opened(&Self::launched_in_repo());
+            let (mut dialog, service) = Self::opened_on_name(&Self::launched_in_repo());
             Self::create(&mut dialog, &service);
             (dialog, service)
         }
 
         fn named_without_a_repo() -> (NewSessionDialog, SessionService) {
-            let (mut dialog, service) = Self::opened(&ServiceFixture::new());
+            let (mut dialog, service) = Self::opened_on_name(&ServiceFixture::new());
             Self::type_text(&mut dialog, &service, "fix-auth");
             (dialog, service)
         }
@@ -357,7 +362,7 @@ mod tests {
                 .collect();
             let fixture =
                 Self::launched_in_repo().with_config(ServiceFixture::config().with_agents(agents));
-            Self::opened(&fixture)
+            Self::opened_on_name(&fixture)
         }
 
         fn launched_with_two_agents() -> ServiceFixture {
@@ -687,11 +692,6 @@ mod tests {
             }
         }
 
-        fn search(dialog: &mut NewSessionDialog, service: &SessionService, query: &str) {
-            Self::press(dialog, service, KeyCode::Tab);
-            Self::type_text(dialog, service, query);
-        }
-
         fn submitted(step: DialogStep) -> CreateRequest {
             match Self::create_step(step) {
                 CreateStep::Stay(request) | CreateStep::Attach(request) => request,
@@ -708,7 +708,7 @@ mod tests {
 
     #[test]
     fn the_repo_field_shows_the_repo_ringleader_started_in() {
-        let (dialog, _service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
+        let (dialog, _service) = DialogFixture::opened_on_name(&DialogFixture::launched_in_repo());
 
         assert!(DialogFixture::text(&dialog).contains("Repo      example-project\n"));
     }
@@ -719,21 +719,23 @@ mod tests {
             ServiceFixture::new().with_scanner(FakeRepoScanner::finding(Vec::new()).blocked());
         let service = fixture.service();
         let mut dialog = NewSessionDialog::open(&service, None);
+        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
 
         DialogFixture::type_text(&mut dialog, &service, "fix-auth");
 
-        assert!(DialogFixture::text(&dialog).starts_with("Name      fix-auth█"));
+        assert!(DialogFixture::text(&dialog).contains("Name      fix-auth█"));
         fixture.scanner().release();
     }
 
     #[test]
     fn picking_through_the_search_changes_the_repo() {
-        let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
-        DialogFixture::type_text(&mut dialog, &service, "fix-auth");
-        DialogFixture::search(&mut dialog, &service, "gate");
+        let (mut dialog, service) =
+            DialogFixture::opened_on_repo(&DialogFixture::launched_in_repo());
+        DialogFixture::type_text(&mut dialog, &service, "gate");
         DialogFixture::settle(&mut dialog, |text| text.contains("1/1 repos under ~"));
 
         DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
+        DialogFixture::type_text(&mut dialog, &service, "fix-auth");
         let shown = DialogFixture::text(&dialog);
         let step = DialogFixture::create(&mut dialog, &service);
 
@@ -746,15 +748,19 @@ mod tests {
 
     #[test]
     fn enter_walks_the_fields_then_creates_from_the_prompt() {
-        let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
-        DialogFixture::type_text(&mut dialog, &service, "fix-auth");
+        let (mut dialog, service) =
+            DialogFixture::opened_on_repo(&DialogFixture::launched_in_repo());
 
-        let walking = [KeyCode::Enter, KeyCode::Enter]
-            .map(|code| DialogFixture::press(&mut dialog, &service, code));
+        let past_the_repo = DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
+        DialogFixture::type_text(&mut dialog, &service, "fix-auth");
+        let past_the_name = DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
         DialogFixture::type_text(&mut dialog, &service, "fix the tests");
         let step = DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
 
-        assert_eq!(walking, [DialogStep::Stay, DialogStep::Stay]);
+        assert_eq!(
+            (past_the_repo, past_the_name),
+            (DialogStep::Stay, DialogStep::Stay)
+        );
         assert_eq!(
             DialogFixture::submitted(step),
             CreateRequest::new("fix-auth", ServiceFixture::repo())
@@ -766,7 +772,8 @@ mod tests {
 
     #[test]
     fn each_field_shows_its_own_hints() {
-        let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
+        let (mut dialog, service) =
+            DialogFixture::opened_on_repo(&DialogFixture::launched_in_repo());
         let mut hints = vec![DialogFixture::hints(&dialog)];
         for _ in 0..2 {
             DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
@@ -776,44 +783,46 @@ mod tests {
         assert_eq!(
             hints,
             [
-                DialogFixture::NAME_HINTS,
                 DialogFixture::REPO_HINTS,
+                DialogFixture::NAME_HINTS,
                 DialogFixture::PROMPT_HINTS,
             ]
         );
     }
 
     #[test]
-    fn picking_a_repo_moves_on_to_the_prompt() {
-        let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
-        DialogFixture::search(&mut dialog, &service, "gate");
+    fn picking_a_repo_moves_on_to_the_name() {
+        let (mut dialog, service) =
+            DialogFixture::opened_on_repo(&DialogFixture::launched_in_repo());
+        DialogFixture::type_text(&mut dialog, &service, "gate");
         DialogFixture::settle(&mut dialog, |text| text.contains("1/1 repos under ~"));
 
         DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
 
-        assert_eq!(DialogFixture::hints(&dialog), DialogFixture::PROMPT_HINTS);
+        assert_eq!(DialogFixture::hints(&dialog), DialogFixture::NAME_HINTS);
     }
 
     #[test]
-    fn a_typed_repo_path_moves_on_to_the_prompt_once_checked() {
+    fn a_typed_repo_path_moves_on_to_the_name_once_checked() {
         let fixture = DialogFixture::launched_in_repo()
             .with_host(FakeHostProbe::default().with_directory(Path::new(DialogFixture::TYPED)));
-        let (mut dialog, service) = DialogFixture::opened(&fixture);
-        DialogFixture::search(&mut dialog, &service, DialogFixture::TYPED);
+        let (mut dialog, service) = DialogFixture::opened_on_repo(&fixture);
+        DialogFixture::type_text(&mut dialog, &service, DialogFixture::TYPED);
 
         DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
         DialogFixture::settle(&mut dialog, |text| {
-            text.ends_with(DialogFixture::PROMPT_HINTS)
+            text.ends_with(DialogFixture::NAME_HINTS)
         });
 
         assert!(DialogFixture::text(&dialog).contains("Repo      tools\n"));
-        assert_eq!(DialogFixture::hints(&dialog), DialogFixture::PROMPT_HINTS);
+        assert_eq!(DialogFixture::hints(&dialog), DialogFixture::NAME_HINTS);
     }
 
     #[test]
     fn esc_in_the_search_closes_only_the_search() {
-        let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
-        DialogFixture::search(&mut dialog, &service, "g");
+        let (mut dialog, service) =
+            DialogFixture::opened_on_repo(&DialogFixture::launched_in_repo());
+        DialogFixture::type_text(&mut dialog, &service, "g");
 
         let first = DialogFixture::press(&mut dialog, &service, KeyCode::Esc);
         let second = DialogFixture::press(&mut dialog, &service, KeyCode::Esc);
@@ -823,8 +832,8 @@ mod tests {
 
     #[test]
     fn the_hints_follow_the_repo_field_and_its_search() {
-        let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
-        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
+        let (mut dialog, service) =
+            DialogFixture::opened_on_repo(&DialogFixture::launched_in_repo());
         let on_the_field = DialogFixture::text(&dialog);
 
         DialogFixture::type_text(&mut dialog, &service, "g");
@@ -835,8 +844,9 @@ mod tests {
 
     #[test]
     fn a_pasted_search_with_an_inner_line_break_is_a_field_error() {
-        let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
-        DialogFixture::search(&mut dialog, &service, "g");
+        let (mut dialog, service) =
+            DialogFixture::opened_on_repo(&DialogFixture::launched_in_repo());
+        DialogFixture::type_text(&mut dialog, &service, "g");
 
         dialog.paste(DialogFixture::TWO_LINE_PATH);
 
@@ -856,7 +866,7 @@ mod tests {
     #[test]
     fn alt_k_picks_the_next_agent() {
         let (mut dialog, service) =
-            DialogFixture::opened(&DialogFixture::launched_with_two_agents());
+            DialogFixture::opened_on_name(&DialogFixture::launched_with_two_agents());
         DialogFixture::type_text(&mut dialog, &service, "fix-auth");
 
         DialogFixture::cycle_agent(&mut dialog, &service);
@@ -868,7 +878,7 @@ mod tests {
     #[test]
     fn alt_k_past_the_last_agent_wraps_to_the_first() {
         let (mut dialog, service) =
-            DialogFixture::opened(&DialogFixture::launched_with_two_agents());
+            DialogFixture::opened_on_name(&DialogFixture::launched_with_two_agents());
         DialogFixture::type_text(&mut dialog, &service, "fix-auth");
 
         DialogFixture::cycle_agent(&mut dialog, &service);
@@ -881,7 +891,7 @@ mod tests {
     #[test]
     fn alt_k_shows_the_next_agent_in_the_settings_line() {
         let (mut dialog, service) =
-            DialogFixture::opened(&DialogFixture::launched_with_two_agents());
+            DialogFixture::opened_on_name(&DialogFixture::launched_with_two_agents());
 
         DialogFixture::cycle_agent(&mut dialog, &service);
 
@@ -894,13 +904,13 @@ mod tests {
     #[test]
     fn alt_k_keeps_the_dialog_open_on_the_focused_field_and_types_nothing() {
         let (mut dialog, service) =
-            DialogFixture::opened(&DialogFixture::launched_with_two_agents());
+            DialogFixture::opened_on_name(&DialogFixture::launched_with_two_agents());
         DialogFixture::type_text(&mut dialog, &service, "ship");
 
         let step = DialogFixture::cycle_agent(&mut dialog, &service);
 
         assert_eq!(step, DialogStep::Stay);
-        assert!(DialogFixture::text(&dialog).starts_with("Name      ship█\n"));
+        assert!(DialogFixture::text(&dialog).contains("Name      ship█\n"));
         assert_eq!(DialogFixture::hints(&dialog), NewSessionField::Name.hints());
     }
 
@@ -921,8 +931,8 @@ mod tests {
     #[test]
     fn alt_k_switches_the_agent_while_the_repo_search_is_open() {
         let (mut dialog, service) =
-            DialogFixture::opened(&DialogFixture::launched_with_two_agents());
-        DialogFixture::search(&mut dialog, &service, "gate");
+            DialogFixture::opened_on_repo(&DialogFixture::launched_with_two_agents());
+        DialogFixture::type_text(&mut dialog, &service, "gate");
 
         DialogFixture::cycle_agent(&mut dialog, &service);
 
@@ -935,7 +945,7 @@ mod tests {
     fn alt_k_with_no_agents_keeps_the_config_path_error() {
         let fixture = DialogFixture::launched_in_repo()
             .with_config(ServiceFixture::config().with_agents(Vec::new()));
-        let (mut dialog, service) = DialogFixture::opened(&fixture);
+        let (mut dialog, service) = DialogFixture::opened_on_name(&fixture);
 
         DialogFixture::cycle_agent(&mut dialog, &service);
 
@@ -948,7 +958,7 @@ mod tests {
     #[test]
     fn ctrl_s_creates_from_the_name_field_with_the_defaults() {
         let fixture = DialogFixture::launched_in_repo();
-        let (mut dialog, service) = DialogFixture::opened(&fixture);
+        let (mut dialog, service) = DialogFixture::opened_on_name(&fixture);
         DialogFixture::type_text(&mut dialog, &service, "fix-auth");
 
         let step = DialogFixture::create(&mut dialog, &service);
@@ -964,7 +974,8 @@ mod tests {
 
     #[test]
     fn a_create_without_a_prompt_attaches_so_the_prompt_can_be_typed_in_the_session() {
-        let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
+        let (mut dialog, service) =
+            DialogFixture::opened_on_name(&DialogFixture::launched_in_repo());
         DialogFixture::type_text(&mut dialog, &service, "fix-auth");
 
         let step = DialogFixture::create(&mut dialog, &service);
@@ -1020,18 +1031,19 @@ mod tests {
 
     #[test]
     fn control_w_deletes_the_last_word_of_the_name() {
-        let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
+        let (mut dialog, service) =
+            DialogFixture::opened_on_name(&DialogFixture::launched_in_repo());
         DialogFixture::type_text(&mut dialog, &service, "fix the auth");
 
         DialogFixture::control(&mut dialog, &service, 'w');
 
-        assert!(DialogFixture::text(&dialog).starts_with("Name      fix the █"));
+        assert!(DialogFixture::text(&dialog).contains("Name      fix the █"));
     }
 
     #[test]
     fn a_pasted_name_turns_line_breaks_into_spaces() {
         let fixture = DialogFixture::launched_in_repo();
-        let (mut dialog, service) = DialogFixture::opened(&fixture);
+        let (mut dialog, service) = DialogFixture::opened_on_name(&fixture);
 
         dialog.paste("fix\nauth");
         let step = DialogFixture::create(&mut dialog, &service);
@@ -1198,7 +1210,7 @@ mod tests {
         DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
         let step = DialogFixture::create(&mut dialog, &service);
 
-        assert_eq!(DialogFixture::hints(&dialog), DialogFixture::NAME_HINTS);
+        assert_eq!(DialogFixture::hints(&dialog), DialogFixture::REPO_HINTS);
         assert_eq!(DialogFixture::submitted(step).prompt(), "fix");
     }
 
@@ -1218,7 +1230,7 @@ mod tests {
 
     #[test]
     fn a_new_session_starts_in_plan_mode_when_the_agent_has_plan_args() {
-        let (dialog, _service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
+        let (dialog, _service) = DialogFixture::opened_on_name(&DialogFixture::launched_in_repo());
 
         assert!(
             DialogFixture::text(&dialog)
@@ -1228,7 +1240,8 @@ mod tests {
 
     #[test]
     fn alt_j_shows_build_mode() {
-        let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
+        let (mut dialog, service) =
+            DialogFixture::opened_on_name(&DialogFixture::launched_in_repo());
 
         DialogFixture::toggle_mode(&mut dialog, &service);
 
@@ -1240,7 +1253,8 @@ mod tests {
 
     #[test]
     fn shift_tab_still_toggles_the_mode() {
-        let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
+        let (mut dialog, service) =
+            DialogFixture::opened_on_name(&DialogFixture::launched_in_repo());
 
         DialogFixture::press(&mut dialog, &service, KeyCode::BackTab);
 
@@ -1249,7 +1263,8 @@ mod tests {
 
     #[test]
     fn a_second_alt_j_goes_back_to_plan_mode() {
-        let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
+        let (mut dialog, service) =
+            DialogFixture::opened_on_name(&DialogFixture::launched_in_repo());
 
         DialogFixture::toggle_mode(&mut dialog, &service);
         DialogFixture::toggle_mode(&mut dialog, &service);
@@ -1259,24 +1274,26 @@ mod tests {
 
     #[test]
     fn alt_j_keeps_the_focused_field() {
-        let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
+        let (mut dialog, service) =
+            DialogFixture::opened_on_name(&DialogFixture::launched_in_repo());
 
         DialogFixture::toggle_mode(&mut dialog, &service);
         DialogFixture::type_text(&mut dialog, &service, "fix-auth");
 
-        assert!(DialogFixture::text(&dialog).starts_with("Name      fix-auth"));
+        assert!(DialogFixture::text(&dialog).contains("Name      fix-auth"));
     }
 
     #[test]
     fn a_new_session_starts_in_a_new_worktree() {
-        let (dialog, _service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
+        let (dialog, _service) = DialogFixture::opened_on_name(&DialogFixture::launched_in_repo());
 
         assert!(DialogFixture::text(&dialog).contains("new worktree (Alt-l)"));
     }
 
     #[test]
     fn alt_l_switches_to_the_main_checkout() {
-        let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
+        let (mut dialog, service) =
+            DialogFixture::opened_on_name(&DialogFixture::launched_in_repo());
 
         DialogFixture::toggle_checkout(&mut dialog, &service);
 
@@ -1285,7 +1302,8 @@ mod tests {
 
     #[test]
     fn alt_l_twice_switches_back_to_a_new_worktree() {
-        let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
+        let (mut dialog, service) =
+            DialogFixture::opened_on_name(&DialogFixture::launched_in_repo());
 
         DialogFixture::toggle_checkout(&mut dialog, &service);
         DialogFixture::toggle_checkout(&mut dialog, &service);
@@ -1295,20 +1313,21 @@ mod tests {
 
     #[test]
     fn alt_l_keeps_the_focus_and_types_nothing() {
-        let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
+        let (mut dialog, service) =
+            DialogFixture::opened_on_name(&DialogFixture::launched_in_repo());
         DialogFixture::type_text(&mut dialog, &service, "fix");
 
         DialogFixture::toggle_checkout(&mut dialog, &service);
 
-        assert!(DialogFixture::text(&dialog).starts_with("Name      fix█\n"));
+        assert!(DialogFixture::text(&dialog).contains("Name      fix█\n"));
         assert_eq!(DialogFixture::hints(&dialog), NewSessionField::Name.hints());
     }
 
     #[test]
     fn alt_l_switches_the_checkout_while_the_repo_search_is_open() {
         let (mut dialog, service) =
-            DialogFixture::opened(&DialogFixture::launched_among_gateways());
-        DialogFixture::search(&mut dialog, &service, "gate");
+            DialogFixture::opened_on_repo(&DialogFixture::launched_among_gateways());
+        DialogFixture::type_text(&mut dialog, &service, "gate");
 
         DialogFixture::toggle_checkout(&mut dialog, &service);
 
@@ -1336,7 +1355,8 @@ mod tests {
 
     #[test]
     fn the_main_checkout_is_drawn_in_the_warning_color() {
-        let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
+        let (mut dialog, service) =
+            DialogFixture::opened_on_name(&DialogFixture::launched_in_repo());
 
         DialogFixture::toggle_checkout(&mut dialog, &service);
 
@@ -1344,22 +1364,23 @@ mod tests {
     }
 
     #[test]
-    fn tab_walks_only_name_repo_and_prompt() {
-        let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
+    fn tab_walks_only_repo_name_and_prompt() {
+        let (mut dialog, service) =
+            DialogFixture::opened_on_repo(&DialogFixture::launched_in_repo());
         DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
-        let on_the_repo = DialogFixture::hints(&dialog);
+        let on_the_name = DialogFixture::hints(&dialog);
 
         DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
 
-        assert_eq!(on_the_repo, NewSessionField::Repo.hints());
+        assert_eq!(on_the_name, NewSessionField::Name.hints());
         assert_eq!(DialogFixture::hints(&dialog), DialogFixture::PROMPT_HINTS);
     }
 
     #[test]
     fn alt_j_switches_the_mode_while_the_repo_search_is_open() {
         let (mut dialog, service) =
-            DialogFixture::opened(&DialogFixture::launched_among_gateways());
-        DialogFixture::search(&mut dialog, &service, "gate");
+            DialogFixture::opened_on_repo(&DialogFixture::launched_among_gateways());
+        DialogFixture::type_text(&mut dialog, &service, "gate");
 
         DialogFixture::toggle_mode(&mut dialog, &service);
 
@@ -1387,7 +1408,7 @@ mod tests {
         let agent = Agent::new("example-agent", "sh");
         let fixture = DialogFixture::launched_in_repo()
             .with_config(ServiceFixture::config().with_agents(vec![agent]));
-        let (mut dialog, service) = DialogFixture::opened(&fixture);
+        let (mut dialog, service) = DialogFixture::opened_on_name(&fixture);
 
         DialogFixture::toggle_mode(&mut dialog, &service);
 
@@ -1399,7 +1420,7 @@ mod tests {
         let agent = Agent::new("example-agent", "sh");
         let fixture = DialogFixture::launched_in_repo()
             .with_config(ServiceFixture::config().with_agents(vec![agent]));
-        let (dialog, _service) = DialogFixture::opened(&fixture);
+        let (dialog, _service) = DialogFixture::opened_on_name(&fixture);
 
         assert!(
             DialogFixture::text(&dialog)
@@ -1412,7 +1433,7 @@ mod tests {
         let agents = vec![ServiceFixture::agent(), Agent::new("example-agent", "sh")];
         let fixture = DialogFixture::launched_in_repo()
             .with_config(ServiceFixture::config().with_agents(agents));
-        let (mut dialog, service) = DialogFixture::opened(&fixture);
+        let (mut dialog, service) = DialogFixture::opened_on_name(&fixture);
 
         DialogFixture::cycle_agent(&mut dialog, &service);
 
@@ -1466,6 +1487,7 @@ mod tests {
         let focused = DialogFixture::shows_a_cursor(&dialog);
 
         DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
+        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
 
         assert!(focused);
         assert!(!DialogFixture::shows_a_cursor(&dialog));
@@ -1476,6 +1498,7 @@ mod tests {
         let service = DialogFixture::launched_in_repo().service();
         let mut dialog = NewSessionDialog::open(&service, None);
         let theme = DialogFixture::prompt_theme();
+        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
 
         DialogFixture::type_text(&mut dialog, &service, "fix-auth");
 
@@ -1617,6 +1640,7 @@ mod tests {
         }
         let focused = DialogFixture::underlined(&dialog);
 
+        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
         DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
 
         assert_eq!(focused, "tests");
@@ -1832,7 +1856,8 @@ mod tests {
 
     #[test]
     fn the_hints_keep_their_row_when_an_error_appears() {
-        let (mut dialog, _service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
+        let (mut dialog, _service) =
+            DialogFixture::opened_on_name(&DialogFixture::launched_in_repo());
         let rows_without_an_error = DialogFixture::text(&dialog).lines().count();
 
         dialog.fail(DialogFixture::CREATE_FAILURE.to_string());
@@ -1860,10 +1885,24 @@ mod tests {
     }
 
     #[test]
+    fn a_dialog_too_short_for_the_whole_search_keeps_its_first_match_in_view() {
+        let (mut dialog, service) =
+            DialogFixture::opened_on_repo(&DialogFixture::launched_among_gateways());
+        DialogFixture::type_text(&mut dialog, &service, "gate");
+        DialogFixture::settle(&mut dialog, |text| text.contains("20/20 repos under ~"));
+        let rows_without_the_name_and_the_query = 8;
+
+        dialog.fail(DialogFixture::worktree_error(1));
+
+        let shown = DialogFixture::text_at(&dialog, rows_without_the_name_and_the_query);
+        assert!(shown.contains("~/work/gateway-01\n─"), "{shown}");
+    }
+
+    #[test]
     fn a_dialog_too_short_for_the_search_keeps_its_first_match_in_view() {
         let (mut dialog, service) =
-            DialogFixture::opened(&DialogFixture::launched_among_gateways());
-        DialogFixture::search(&mut dialog, &service, "gate");
+            DialogFixture::opened_on_repo(&DialogFixture::launched_among_gateways());
+        DialogFixture::type_text(&mut dialog, &service, "gate");
         DialogFixture::settle(&mut dialog, |text| text.contains("20/20 repos under ~"));
         let rows_without_the_name = 9;
 
@@ -1899,7 +1938,7 @@ mod tests {
         assert_eq!(
             shown,
             format!(
-                "Name      fix-auth\nRepo      example-project\n{}\n{}\n{}\n{}\n{}",
+                "Repo      example-project\nName      fix-auth\n{}\n{}\n{}\n{}\n{}",
                 DialogFixture::rule(DialogFixture::PANEL_WIDTH),
                 DialogFixture::EMPTY_PROMPT_ROW,
                 DialogFixture::rule(DialogFixture::PANEL_WIDTH),
@@ -1916,11 +1955,11 @@ mod tests {
         dialog.paste(DialogFixture::SEVEN_LINES);
         DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
 
-        DialogFixture::search(&mut dialog, &service, "gate");
+        DialogFixture::type_text(&mut dialog, &service, "gate");
         DialogFixture::settle(&mut dialog, |text| text.contains("20/20 repos under ~"));
 
         let shown = DialogFixture::text(&dialog);
-        assert!(shown.contains("gateway-04\n\n─"));
+        assert!(shown.contains("gateway-04\nName      fix-auth\n\n─"));
         assert_eq!(DialogFixture::prompt_in(&shown), DialogFixture::SEVEN_LINES);
         assert!(shown.ends_with(DialogFixture::SEARCH_HINTS));
     }
@@ -1932,11 +1971,11 @@ mod tests {
         dialog.paste(DialogFixture::SEVEN_LINES);
         DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
 
-        DialogFixture::search(&mut dialog, &service, "gate");
+        DialogFixture::type_text(&mut dialog, &service, "gate");
         DialogFixture::settle(&mut dialog, |text| text.contains("20/20 repos under ~"));
 
         let shown = DialogFixture::text_at(&dialog, DialogFixture::COMPACT_HEIGHT);
-        assert!(shown.contains("gateway-01\n─"));
+        assert!(shown.contains("gateway-01\nName      fix-auth\n─"));
         assert_eq!(DialogFixture::prompt_in(&shown), "seven");
         assert!(shown.ends_with(DialogFixture::SEARCH_HINTS));
     }
@@ -1951,7 +1990,7 @@ mod tests {
         dialog.fail(error.clone());
 
         let shown = DialogFixture::text_at(&dialog, DialogFixture::COMPACT_HEIGHT);
-        assert!(shown.starts_with("Name      fix-auth\nRepo      example-project\n─"));
+        assert!(shown.starts_with("Repo      example-project\nName      fix-auth\n─"));
         assert_eq!(DialogFixture::prompt_in(&shown), "seven");
         assert!(shown.replace('\n', " ").contains(&error));
         assert!(shown.ends_with(DialogFixture::PROMPT_HINTS));
@@ -1978,12 +2017,12 @@ mod tests {
             DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
         dialog.paste(DialogFixture::SEVEN_LINES);
         let error = DialogFixture::worktree_error(3);
-        let rows_for_all_but_the_repo = 8;
+        let rows_for_all_but_the_name = 8;
 
         dialog.fail(error.clone());
 
-        let shown = DialogFixture::text_at(&dialog, rows_for_all_but_the_repo);
-        assert!(shown.starts_with("Name      fix-auth\n─"));
+        let shown = DialogFixture::text_at(&dialog, rows_for_all_but_the_name);
+        assert!(shown.starts_with("Repo      example-project\n─"));
         assert_eq!(DialogFixture::prompt_in(&shown), "seven");
         assert!(shown.replace('\n', " ").contains(&error));
         assert!(shown.ends_with(DialogFixture::PROMPT_HINTS));
@@ -2007,7 +2046,7 @@ mod tests {
     fn no_agents_shows_the_config_path_and_cannot_be_submitted() {
         let fixture = DialogFixture::launched_in_repo()
             .with_config(ServiceFixture::config().with_agents(Vec::new()));
-        let (mut dialog, service) = DialogFixture::opened(&fixture);
+        let (mut dialog, service) = DialogFixture::opened_on_name(&fixture);
         DialogFixture::type_text(&mut dialog, &service, "fix-auth");
 
         let step = DialogFixture::create(&mut dialog, &service);
@@ -2027,7 +2066,7 @@ mod tests {
         ];
         let fixture = DialogFixture::launched_in_repo()
             .with_config(ServiceFixture::config().with_agents(agents));
-        let (mut dialog, service) = DialogFixture::opened(&fixture);
+        let (mut dialog, service) = DialogFixture::opened_on_name(&fixture);
 
         DialogFixture::cycle_agent(&mut dialog, &service);
 
@@ -2050,10 +2089,10 @@ mod tests {
 
     #[test]
     fn the_prompt_rules_are_dim_until_the_prompt_has_focus() {
-        let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
+        let (mut dialog, service) =
+            DialogFixture::opened_on_name(&DialogFixture::launched_in_repo());
         let on_the_name = DialogFixture::rules_are_dim(&dialog);
 
-        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
         DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
 
         assert!(on_the_name);
@@ -2063,12 +2102,12 @@ mod tests {
     #[test]
     fn the_setting_keys_type_nothing_into_the_name() {
         let (mut dialog, service) =
-            DialogFixture::opened(&DialogFixture::launched_with_two_agents());
+            DialogFixture::opened_on_name(&DialogFixture::launched_with_two_agents());
         DialogFixture::type_text(&mut dialog, &service, "fix");
 
         DialogFixture::change_every_setting(&mut dialog, &service);
 
-        assert!(DialogFixture::text(&dialog).starts_with("Name      fix█\n"));
+        assert!(DialogFixture::text(&dialog).contains("Name      fix█\n"));
     }
 
     #[test]
@@ -2093,8 +2132,8 @@ mod tests {
     #[test]
     fn the_setting_keys_type_nothing_into_the_repo_search() {
         let (mut dialog, service) =
-            DialogFixture::opened(&DialogFixture::launched_with_two_agents());
-        DialogFixture::search(&mut dialog, &service, "gate");
+            DialogFixture::opened_on_repo(&DialogFixture::launched_with_two_agents());
+        DialogFixture::type_text(&mut dialog, &service, "gate");
 
         DialogFixture::change_every_setting(&mut dialog, &service);
 
@@ -2110,7 +2149,7 @@ mod tests {
         let agents = vec![ServiceFixture::agent(), Agent::new("example-agent", "sh")];
         let fixture = DialogFixture::launched_in_repo()
             .with_config(ServiceFixture::config().with_agents(agents));
-        let (mut dialog, service) = DialogFixture::opened(&fixture);
+        let (mut dialog, service) = DialogFixture::opened_on_name(&fixture);
 
         DialogFixture::cycle_agent(&mut dialog, &service);
 
@@ -2125,7 +2164,7 @@ mod tests {
         let agents = vec![ServiceFixture::agent(), Agent::new("example-agent", "sh")];
         let fixture = DialogFixture::launched_in_repo()
             .with_config(ServiceFixture::config().with_agents(agents));
-        let (mut dialog, service) = DialogFixture::opened(&fixture);
+        let (mut dialog, service) = DialogFixture::opened_on_name(&fixture);
 
         DialogFixture::cycle_agent(&mut dialog, &service);
 
@@ -2134,12 +2173,12 @@ mod tests {
 
     #[test]
     fn the_compact_tier_abbreviates_the_labels_and_wraps_the_settings() {
-        let (dialog, _service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
+        let (dialog, _service) = DialogFixture::opened_on_name(&DialogFixture::launched_in_repo());
 
         assert_eq!(
             DialogFixture::compact_text(&dialog),
             format!(
-                "N █\nR example-project\n{}\n{}\n{}\n  plan mode (Alt-j) · claude (Alt-k)\n  new worktree (Alt-l)\n{}",
+                "R example-project\nN █\n{}\n{}\n{}\n  plan mode (Alt-j) · claude (Alt-k)\n  new worktree (Alt-l)\n{}",
                 DialogFixture::rule(DialogFixture::COMPACT_PANEL_WIDTH),
                 DialogFixture::EMPTY_PROMPT_ROW,
                 DialogFixture::rule(DialogFixture::COMPACT_PANEL_WIDTH),
@@ -2150,7 +2189,8 @@ mod tests {
 
     #[test]
     fn the_hints_sit_on_the_last_row_with_the_error_right_above_them() {
-        let (mut dialog, _service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
+        let (mut dialog, _service) =
+            DialogFixture::opened_on_name(&DialogFixture::launched_in_repo());
 
         dialog.fail(DialogFixture::CREATE_FAILURE.to_string());
 
@@ -2165,7 +2205,7 @@ mod tests {
 
     #[test]
     fn a_row_above_the_hints_stays_free_for_an_error() {
-        let (dialog, _service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
+        let (dialog, _service) = DialogFixture::opened_on_name(&DialogFixture::launched_in_repo());
 
         let rows = DialogFixture::text(&dialog).lines().count();
         assert_eq!(rows, usize::from(DialogFixture::FULL_HEIGHT));
@@ -2188,8 +2228,8 @@ mod tests {
 
     #[test]
     fn a_missing_name_moves_the_focus_to_the_name() {
-        let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
-        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
+        let (mut dialog, service) =
+            DialogFixture::opened_on_name(&DialogFixture::launched_in_repo());
         DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
         DialogFixture::type_text(&mut dialog, &service, "fix");
 
@@ -2198,18 +2238,41 @@ mod tests {
 
         assert_eq!(step, DialogStep::Stay);
         assert_eq!(DialogFixture::hints(&dialog), DialogFixture::NAME_HINTS);
-        assert!(DialogFixture::text(&dialog).starts_with("Name      auth█\n"));
+        assert!(DialogFixture::text(&dialog).contains("Name      auth█\n"));
     }
 
     #[test]
     fn a_missing_repo_moves_the_focus_to_the_repo() {
         let (mut dialog, service) = DialogFixture::named_without_a_repo();
         DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
-        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
 
         DialogFixture::press(&mut dialog, &service, KeyCode::Enter);
 
         assert_eq!(DialogFixture::hints(&dialog), DialogFixture::REPO_HINTS);
+    }
+
+    #[test]
+    fn a_missing_repo_and_name_asks_for_the_repo_first() {
+        let (mut dialog, service) = DialogFixture::opened_on_name(&ServiceFixture::new());
+
+        DialogFixture::create(&mut dialog, &service);
+
+        assert!(DialogFixture::text(&dialog).contains(NewSessionDialog::REPO_MISSING));
+    }
+
+    #[test]
+    fn a_dialog_too_short_for_every_field_keeps_the_focused_name_in_view() {
+        let (mut dialog, service) =
+            DialogFixture::focused_on_prompt(&DialogFixture::launched_in_repo());
+        dialog.paste(DialogFixture::SEVEN_LINES);
+        dialog.fail(DialogFixture::worktree_error(3));
+        let rows_for_all_but_the_repo = 8;
+
+        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
+        DialogFixture::press(&mut dialog, &service, KeyCode::Tab);
+
+        let shown = DialogFixture::text_at(&dialog, rows_for_all_but_the_repo);
+        assert!(shown.starts_with("Name      fix-auth█\n─"));
     }
 
     #[test]
@@ -2228,7 +2291,7 @@ mod tests {
     #[test]
     fn a_failed_create_shows_its_error_in_the_dialog() {
         let fixture = DialogFixture::launched_in_repo();
-        let (mut dialog, _service) = DialogFixture::opened(&fixture);
+        let (mut dialog, _service) = DialogFixture::opened_on_name(&fixture);
 
         dialog.fail(DialogFixture::CREATE_FAILURE.to_string());
 
@@ -2271,8 +2334,9 @@ mod tests {
 
     #[test]
     fn editing_the_repo_search_query_clears_the_error() {
-        let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
-        DialogFixture::search(&mut dialog, &service, "g");
+        let (mut dialog, service) =
+            DialogFixture::opened_on_repo(&DialogFixture::launched_in_repo());
+        DialogFixture::type_text(&mut dialog, &service, "g");
         dialog.paste(DialogFixture::TWO_LINE_PATH);
         let refused = DialogFixture::row_above_the_hints(&dialog);
 
@@ -2284,7 +2348,8 @@ mod tests {
 
     #[test]
     fn typing_clears_an_error_reported_through_fail() {
-        let (mut dialog, service) = DialogFixture::opened(&DialogFixture::launched_in_repo());
+        let (mut dialog, service) =
+            DialogFixture::opened_on_name(&DialogFixture::launched_in_repo());
         dialog.fail(DialogFixture::CREATE_FAILURE.to_string());
         let failure = DialogFixture::row_above_the_hints(&dialog);
 
@@ -2333,8 +2398,8 @@ mod tests {
     #[test]
     fn ctrl_j_through_the_repo_list_leaves_the_error_on_screen() {
         let (mut dialog, service) =
-            DialogFixture::opened(&DialogFixture::launched_among_gateways());
-        DialogFixture::search(&mut dialog, &service, "gate");
+            DialogFixture::opened_on_repo(&DialogFixture::launched_among_gateways());
+        DialogFixture::type_text(&mut dialog, &service, "gate");
         DialogFixture::settle(&mut dialog, |text| text.contains("20/20 repos under ~"));
         dialog.paste(DialogFixture::TWO_LINE_PATH);
 

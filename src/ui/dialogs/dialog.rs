@@ -314,7 +314,7 @@ mod tests {
         assert_eq!(PlacementFixture::symbol(&terminal, 13, 3), " ");
         assert_eq!(PlacementFixture::symbol(&terminal, 14, 3), "N");
         assert_eq!(PlacementFixture::symbol(&terminal, 13, 4), " ");
-        assert_eq!(PlacementFixture::symbol(&terminal, 14, 4), "N");
+        assert_eq!(PlacementFixture::symbol(&terminal, 14, 4), "R");
     }
 
     #[test]
@@ -371,8 +371,8 @@ mod tests {
 
         assert_eq!(PlacementFixture::symbol(&terminal, 0, 0), "┌");
         assert_eq!(PlacementFixture::symbol(&terminal, 59, 11), "┘");
-        assert_eq!(PlacementFixture::symbol(&terminal, 2, 1), "N");
+        assert_eq!(PlacementFixture::symbol(&terminal, 2, 1), "R");
         assert_eq!(PlacementFixture::symbol(&terminal, 3, 1), " ");
-        assert_eq!(PlacementFixture::symbol(&terminal, 2, 2), "R");
+        assert_eq!(PlacementFixture::symbol(&terminal, 2, 2), "N");
     }
 }

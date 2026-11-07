@@ -45,7 +45,7 @@ impl<'a> NewSessionView<'a> {
             repos,
             agents,
             prompt,
-            focus: NewSessionField::Name,
+            focus: NewSessionField::Repo,
             checkout: Checkout::default(),
             mode: AgentMode::default(),
             error: None,
@@ -109,15 +109,15 @@ impl<'a> NewSessionView<'a> {
         labels: DialogLabels,
         theme: &Theme,
     ) -> Vec<Line<'static>> {
+        let repo_style = self.focus_style(NewSessionField::Repo, theme);
+        let repo_lines = self.repos.lines(field_width, repo_room, repo_style, theme);
         let cursor = self
             .is_focused(NewSessionField::Name)
             .then_some(Self::CURSOR);
         let name = TextFit::new(&self.name.visible(field_width, cursor)).padded(field_width);
         let name_line = Line::styled(name, theme.prompt());
-        let repo_style = self.focus_style(NewSessionField::Repo, theme);
-        let repo_lines = self.repos.lines(field_width, repo_room, repo_style, theme);
-        let mut lines = labels.labeled(NewSessionField::Name.label(), vec![name_line]);
-        lines.extend(labels.labeled(NewSessionField::Repo.label(), repo_lines));
+        let mut lines = labels.labeled(NewSessionField::Repo.label(), repo_lines);
+        lines.extend(labels.labeled(NewSessionField::Name.label(), vec![name_line]));
         lines
     }
 
@@ -129,8 +129,9 @@ impl<'a> NewSessionView<'a> {
 
     fn hidden_upper_rows(&self, upper_rows: usize, visible_rows: usize) -> usize {
         match self.focus {
-            NewSessionField::Repo => upper_rows.saturating_sub(visible_rows),
-            NewSessionField::Name | NewSessionField::Prompt => 0,
+            NewSessionField::Repo => upper_rows.saturating_sub(Self::NAME_ROWS + visible_rows),
+            NewSessionField::Name => upper_rows.saturating_sub(visible_rows),
+            NewSessionField::Prompt => 0,
         }
     }
 

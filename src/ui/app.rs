@@ -853,8 +853,8 @@ mod tests {
         fn request_prompted_create(app: &mut App, name: &str, prompt: &str) -> AppRequest {
             Self::press(app, 'n');
             Self::settle_dialog(app);
-            Self::type_text(app, name);
             app.handle_event(&UiHarness::key(KeyCode::Tab));
+            Self::type_text(app, name);
             app.handle_event(&UiHarness::key(KeyCode::Tab));
             Self::type_text(app, prompt);
             app.handle_event(&UiHarness::control('s'))
@@ -868,6 +868,7 @@ mod tests {
 
         fn submit_new_session(app: &mut App, name: &str) -> AppRequest {
             Self::settle_dialog(app);
+            app.handle_event(&UiHarness::key(KeyCode::Tab));
             Self::type_text(app, name);
             app.handle_event(&UiHarness::control('s'))
         }
@@ -2681,9 +2682,9 @@ mod tests {
         let mut app = AppFixture::started(&fixture, 100, 28);
         AppFixture::press(&mut app, 'n');
 
-        app.handle_event(&Event::Paste("pasted\nname".to_string()));
+        app.handle_event(&Event::Paste("pasted-repo".to_string()));
 
-        assert!(AppFixture::screen(&app, 100, 28).contains("pasted name"));
+        assert!(AppFixture::screen(&app, 100, 28).contains("Find: pasted-repo"));
     }
 
     #[test]
