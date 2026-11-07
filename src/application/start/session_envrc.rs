@@ -25,16 +25,15 @@ impl SessionEnvrc {
         if envrc.is_denied() {
             return Self::denied(worktree);
         }
-        if self.main_checkout_vouches_for(main_checkout, &envrc) {
+        let main = self.environment.envrc(main_checkout);
+        if Self::main_checkout_vouches_for(main.as_ref(), &envrc) {
             return self.allow(worktree, main_checkout);
         }
-        Self::not_allowed(worktree, &self.lasting_allow_command(main_checkout, &envrc))
+        Self::not_allowed(worktree, Self::lasting_allow_command(main.as_ref(), &envrc))
     }
 
-    fn main_checkout_vouches_for(&self, main_checkout: &Path, envrc: &Envrc) -> bool {
-        self.environment
-            .envrc(main_checkout)
-            .is_some_and(|main| main.is_allowed() && envrc.has_contents_of(&main))
+    fn main_checkout_vouches_for(main: Option<&Envrc>, envrc: &Envrc) -> bool {
+        main.is_some_and(|main| main.is_allowed() && envrc.has_contents_of(main))
     }
 
     fn allow(&self, worktree: &Path, main_checkout: &Path) -> EnvrcChoice {
@@ -61,14 +60,10 @@ impl SessionEnvrc {
         EnvrcChoice::Skip
     }
 
-    fn lasting_allow_command(&self, main_checkout: &Path, envrc: &Envrc) -> String {
-        self.environment
-            .envrc(main_checkout)
-            .filter(|main| !main.is_denied() && envrc.has_contents_of(main))
-            .map_or_else(
-                || envrc.allow_command().to_string(),
-                |main| main.allow_command().to_string(),
-            )
+    fn lasting_allow_command<'a>(main: Option<&'a Envrc>, envrc: &'a Envrc) -> &'a str {
+        main.filter(|main| !main.is_denied() && envrc.has_contents_of(main))
+            .unwrap_or(envrc)
+            .allow_command()
     }
 
     fn not_allowed(worktree: &Path, allow_command: &str) -> EnvrcChoice {
