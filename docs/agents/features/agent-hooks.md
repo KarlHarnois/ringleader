@@ -14,3 +14,5 @@
 | The pane is out of copy mode. | Copy mode would take the keys instead of the agent. |
 | The pane shows the cursor. | Claude hides the cursor in its trust and permission dialogs. |
 | The text before the cursor on its row is a bare prompt marker and a blank. That text holds no letters or digits. | An agent still starting has drawn no marker. An unsent draft puts its text before the cursor. |
+
+**Set `CLAUDE_CODE_NATIVE_CURSOR=1` in each Claude agent's `set_env`.** If `DISABLE_TELEMETRY` is set without that variable, Claude hides the cursor at its idle prompt. The agent then fails the check above.
