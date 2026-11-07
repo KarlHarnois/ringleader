@@ -129,7 +129,7 @@ mod tests {
         }
 
         fn allow_command_of(directory: &Path) -> String {
-            format!("run direnv allow {}", directory.display())
+            format!("direnv allow {}", directory.display())
         }
 
         fn launch() -> AgentLaunch {
