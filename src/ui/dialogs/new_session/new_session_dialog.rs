@@ -1885,6 +1885,20 @@ mod tests {
     }
 
     #[test]
+    fn a_dialog_too_short_for_the_whole_search_keeps_its_first_match_in_view() {
+        let (mut dialog, service) =
+            DialogFixture::opened_on_repo(&DialogFixture::launched_among_gateways());
+        DialogFixture::type_text(&mut dialog, &service, "gate");
+        DialogFixture::settle(&mut dialog, |text| text.contains("20/20 repos under ~"));
+        let rows_without_the_name_and_the_query = 8;
+
+        dialog.fail(DialogFixture::worktree_error(1));
+
+        let shown = DialogFixture::text_at(&dialog, rows_without_the_name_and_the_query);
+        assert!(shown.contains("~/work/gateway-01\n─"), "{shown}");
+    }
+
+    #[test]
     fn a_dialog_too_short_for_the_search_keeps_its_first_match_in_view() {
         let (mut dialog, service) =
             DialogFixture::opened_on_repo(&DialogFixture::launched_among_gateways());

@@ -129,8 +129,9 @@ impl<'a> NewSessionView<'a> {
 
     fn hidden_upper_rows(&self, upper_rows: usize, visible_rows: usize) -> usize {
         match self.focus {
+            NewSessionField::Repo => upper_rows.saturating_sub(Self::NAME_ROWS + visible_rows),
             NewSessionField::Name => upper_rows.saturating_sub(visible_rows),
-            NewSessionField::Repo | NewSessionField::Prompt => 0,
+            NewSessionField::Prompt => 0,
         }
     }
 
