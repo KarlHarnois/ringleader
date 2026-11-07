@@ -232,7 +232,7 @@ cargo test --bin ringleader <module::path>
 
 **If `IN_NIX_SHELL` is not set, prefix every command that runs a dev shell tool with `direnv exec .`.** If direnv is missing or refuses, stop and ask the project owner.
 
-**If a change edits `flake.nix` or `flake.lock`, use that prefix in every case:** the running shell keeps the old tools.
+**If `flake.nix` or `flake.lock` changed after the shell loaded, use that prefix in every case:** the running shell keeps the old tools.
 
 **NEVER prefix a command with `nix develop -c`.** Each prefixed command in a dirty worktree copies the tracked files into `/nix/store`.
 
