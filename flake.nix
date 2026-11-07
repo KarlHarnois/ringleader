@@ -171,6 +171,7 @@
           shellHook = ''
             if [[ -z ''${CI:-} ]]; then
               export CARGO_BUILD_JOBS=''${CARGO_BUILD_JOBS:-2}
+              export CARGO_INCREMENTAL=''${CARGO_INCREMENTAL:-0}
             fi
           '';
         };

@@ -171,12 +171,10 @@ Never add a comment to justify messy code or to stand in for a better name. Neve
 
 A hook is a user-configured action that runs when an event happens. The type that runs an agent's hooks is therefore `AgentHooks`, with `after_start` and `after_rename`, NEVER `AgentTyping`.
 
-### `nix develop`
+### Dev shell
 
-**Build, test, and run every tool inside `nix develop`.** The host `PATH` can carry other versions of `cargo`, `rustc`, and `tmux`.
+**Build, test, and run every tool inside the dev shell.** The host `PATH` can carry other versions of `cargo`, `rustc`, and `tmux`.
 
-- If `direnv allow` has run in this repository, `.envrc` loads the same dev shell through direnv.
-- Run the commands in this file as written. Their `nix develop -c` prefix makes them work without direnv.
 - Stage each new file by path with `git add` before any `nix` command: flake commands ignore files outside the git index.
 
 ### Ad-hoc tmux commands
@@ -184,7 +182,7 @@ A hook is a user-configured action that runs when an event happens. The type tha
 **An ad-hoc tmux command is a tmux command you run by hand, such as a binding experiment.** Run every ad-hoc tmux command on a throwaway server:
 
 1. If a manual run made `<tempdir>`, use that directory. Otherwise, make a directory with `mktemp -d` under `/tmp`. That directory is `<tempdir>`.
-2. Run each command as `env -u TMUX -u TMUX_PANE tmux -u -S <tempdir>/x.sock -f /dev/null ...`. Without that prefix, a tmux command reaches the project owner's tmux server: `nix develop` passes `$TMUX` through.
+2. Run each command as `env -u TMUX -u TMUX_PANE tmux -u -S <tempdir>/x.sock -f /dev/null ...`. Without that prefix, a tmux command reaches the project owner's tmux server: the dev shell passes `$TMUX` through.
 3. End with `kill-server` on `<tempdir>/x.sock`.
 
 - Keep the socket path under 100 bytes: tmux rejects a longer path with `File name too long`.
@@ -222,13 +220,21 @@ Create each fixture repo with `git init -b <branch>`. Never rely on `init.defaul
 **The working commands are the three commands below.** Run them while you work.
 
 ```sh
-nix develop -c cargo fmt --check
-nix develop -c cargo clippy --workspace --all-targets -- -D warnings
-nix develop -c cargo test --bin ringleader <module::path>
+cargo fmt --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --bin ringleader <module::path>
 ```
 
 - Use the narrowest `<module::path>` that covers the change.
-- If the change is in `xtask`, run `nix develop -c cargo test -p xtask` instead.
+- If the change is in `xtask`, run `cargo test -p xtask` instead.
+
+**If `IN_NIX_SHELL` is set, run every command as written.**
+
+**If `IN_NIX_SHELL` is not set, prefix every command that runs a dev shell tool with `direnv exec .`.** If direnv is missing or refuses, stop and ask the project owner.
+
+**If `flake.nix` or `flake.lock` changed after the shell loaded, use that prefix in every case:** the running shell keeps the old tools.
+
+**NEVER prefix a command with `nix develop -c`.** Each prefixed command in a dirty worktree copies the tracked files into `/nix/store`.
 
 **NEVER run these commands locally:** each compiles the whole suite or rebuilds everything on all cores, and CI runs them.
 
