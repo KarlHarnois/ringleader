@@ -43,7 +43,7 @@ Sessions run on Ringleader's own tmux server. The server ignores your tmux confi
 ```
 ringleader
 ringleader list [--json]
-ringleader new --name <n> --repo <r> [--agent <a>] [--base-branch <b> | --main-checkout] [--plan] [--prompt <text>]
+ringleader new --name <n> --repo <r> [--agent <a>] [--base-branch <b> | --main-checkout] [--plan] [--prompt <text>] [--attach]
 ringleader delete <name>... [--force] [--forget]
 ringleader attach <name>
 ringleader send <name> <prompt>
@@ -57,6 +57,8 @@ ringleader doctor [--json]
 ```
 
 Every command accepts `--config <path>` and `--log-level <level>`.
+
+`new --attach` opens the TUI attached to the new session, so Ctrl-Q and the Ctrl-Space menu return you to the TUI.
 
 ## Exit codes
 

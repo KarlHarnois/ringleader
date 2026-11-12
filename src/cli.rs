@@ -24,7 +24,7 @@ use session_commands::SessionCommands;
 
 use crate::application::ports::{Lock, LockError};
 use crate::application::{CorruptRegistry, SessionService};
-use crate::domain::BuildVersion;
+use crate::domain::{BuildVersion, SessionName};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -133,6 +133,8 @@ struct NewArgs {
     plan: bool,
     #[arg(long)]
     prompt: Option<String>,
+    #[arg(long)]
+    attach: bool,
 }
 
 #[derive(Debug, Args)]
@@ -348,6 +350,33 @@ impl Cli {
         }
         let result = self.dispatch(service, session);
         lock.release();
+        self.finish_command(result, service, session)
+    }
+
+    pub fn session_to_attach(&self, exit: CliExit) -> Option<SessionName> {
+        let args = self.new_args_to_attach()?;
+        if exit != CliExit::Code(0) {
+            return None;
+        }
+        SessionName::new(&args.name).ok()
+    }
+
+    fn new_args_to_attach(&self) -> Option<&NewArgs> {
+        match &self.command {
+            Some(CliCommand::New(args)) if args.attach => Some(args),
+            _ => None,
+        }
+    }
+
+    fn finish_command(
+        &self,
+        result: Result<u8, CommandStop>,
+        service: &SessionService,
+        session: &mut CliSession,
+    ) -> CliExit {
+        if self.new_args_to_attach().is_some() {
+            return session.finish(result);
+        }
         session.wait_for_startup_input(service);
         let exit = session.finish(result);
         self.purge_retired_scratch(service, session);
@@ -457,6 +486,15 @@ mod tests {
         CapturedWriter, CliHarness, Deadline, FakeLock, FakeMultiplexer, FakeScratchSpace, Gate,
         ServiceFixture,
     };
+
+    struct AttachFixture;
+
+    impl AttachFixture {
+        fn parse(arguments: &[&str]) -> Cli {
+            Cli::try_parse_from(std::iter::once("ringleader").chain(arguments.iter().copied()))
+                .unwrap()
+        }
+    }
 
     struct LockFlowFixture;
 
@@ -668,6 +706,58 @@ mod tests {
 
         assert_eq!(exit, CliExit::Code(0));
         assert!(!harness.stderr().contains("waiting for the agent"));
+    }
+
+    #[test]
+    fn new_with_attach_leaves_the_startup_input_to_the_tui_it_hands_over_to() {
+        let fixture = ServiceFixture::new()
+            .with_config(ServiceFixture::config_with_input())
+            .with_multiplexer(FakeMultiplexer::new().blocking_typing());
+        let typing = fixture.shared_multiplexer();
+        let harness = CliHarness::new(fixture);
+        let handle = thread::spawn(move || {
+            harness.run(&[
+                "new",
+                "--name",
+                "Fix Auth",
+                "--repo",
+                "example-project",
+                "--attach",
+            ])
+        });
+
+        let finished = Deadline::after(Duration::from_secs(2)).wait_until(|| handle.is_finished());
+        typing.release_typing();
+        let exit = handle.join().unwrap();
+
+        assert!(finished);
+        assert_eq!(exit, CliExit::Code(0));
+    }
+
+    #[test]
+    fn new_with_attach_names_the_created_session_to_attach() {
+        let cli = AttachFixture::parse(&["new", "--name", "Fix Auth", "--repo", "x", "--attach"]);
+
+        let name = cli.session_to_attach(CliExit::Code(0));
+
+        assert_eq!(
+            name.map(|name| name.to_string()),
+            Some("fix-auth".to_string())
+        );
+    }
+
+    #[test]
+    fn a_failed_new_with_attach_names_no_session_to_attach() {
+        let cli = AttachFixture::parse(&["new", "--name", "fix-auth", "--repo", "x", "--attach"]);
+
+        assert_eq!(cli.session_to_attach(CliExit::Code(CliExit::FAILURE)), None);
+    }
+
+    #[test]
+    fn new_without_attach_names_no_session_to_attach() {
+        let cli = AttachFixture::parse(&["new", "--name", "fix-auth", "--repo", "x"]);
+
+        assert_eq!(cli.session_to_attach(CliExit::Code(0)), None);
     }
 
     #[test]

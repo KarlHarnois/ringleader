@@ -190,7 +190,20 @@ impl CompositionRoot {
         Self::warn_of_mutating_template_problem(cli, &config_source, session);
         let loaded = Self::load(&config_source);
         let mut service = self.service(config_source, loaded);
-        Self::exit_with(cli.execute(&mut service, session, lock))
+        let exit = cli.execute(&mut service, session, lock);
+        match cli.session_to_attach(exit) {
+            Some(name) => self.attach_in_tui(service, name.to_string()),
+            None => Self::exit_with(exit),
+        }
+    }
+
+    fn attach_in_tui(&self, service: SessionService, name: String) -> ExitCode {
+        let state_directory = self.paths.state_directory();
+        let ran = self
+            .started_app_with(service, &state_directory, Vec::new())
+            .and_then(|app| Self::run_app(app, Some(name)))
+            .map(|(app, signals)| Self::wait_for_startup_input(app, signals));
+        ran.err().unwrap_or(ExitCode::SUCCESS)
     }
 
     fn warn_of_mutating_template_problem(
@@ -257,7 +270,7 @@ impl CompositionRoot {
         self.handoff().delete_stale();
         Self::truncate_log(&log);
         self.started_app(cli, state_directory, log.err())
-            .and_then(Self::run_app)
+            .and_then(|app| Self::run_app(app, None))
             .map(|(app, signals)| Self::wait_for_startup_input(app, signals))
     }
 
@@ -280,27 +293,40 @@ impl CompositionRoot {
             .error()
             .map(|error| format!("config error, running read-only: {error}"))
             .or(template_warning);
+        let process_warnings = [log_problem, startup_message]
+            .into_iter()
+            .flatten()
+            .collect();
+        let service = self.service(config_source, loaded);
+        self.started_app_with(service, state_directory, process_warnings)
+    }
+
+    fn started_app_with(
+        &self,
+        service: SessionService,
+        state_directory: &Path,
+        process_warnings: Vec<String>,
+    ) -> Result<App, ExitCode> {
         let mut app = App::new(
-            self.service(config_source, loaded),
+            service,
             Box::new(FileLock::new(&state_directory.join("lock"))),
             Box::new(io::stdout()),
             Box::new(JsonFoldStore::new(&state_directory.join("folds.json"))),
             Instant::now(),
         )
         .with_color_mode(self.color_mode());
-        let process_warnings = [log_problem, startup_message]
-            .into_iter()
-            .flatten()
-            .collect();
         app.start_up(process_warnings)
             .map(|()| app)
             .map_err(|error| Self::refuse(&error))
     }
 
-    fn run_app(mut app: App) -> Result<(App, SignalHookInterrupts), ExitCode> {
+    fn run_app(
+        mut app: App,
+        opening_session: Option<String>,
+    ) -> Result<(App, SignalHookInterrupts), ExitCode> {
         let signals =
             SignalHookInterrupts::register().map_err(|error| Self::fail(&error.to_string()))?;
-        Self::run_event_loop(&mut app, signals.clone())
+        Self::run_event_loop(&mut app, signals.clone(), opening_session)
             .map(|()| (app, signals))
             .map_err(|error| Self::fail(&error.to_string()))
     }
@@ -310,11 +336,17 @@ impl CompositionRoot {
         session.wait_for_startup_input(&app.into_service());
     }
 
-    fn run_event_loop(app: &mut App, signals: SignalHookInterrupts) -> io::Result<()> {
+    fn run_event_loop(
+        app: &mut App,
+        signals: SignalHookInterrupts,
+        opening_session: Option<String>,
+    ) -> io::Result<()> {
         let screen = TerminalGuard::enter(Box::new(CrosstermScreenMode))?;
         screen.state().install_panic_hook();
         Self::cleared_terminal().and_then(|terminal| {
-            EventLoop::new(terminal, CrosstermInput, Box::new(signals), screen.state()).run(app)
+            EventLoop::new(terminal, CrosstermInput, Box::new(signals), screen.state())
+                .with_opening_session(opening_session)
+                .run(app)
         })
     }
 
