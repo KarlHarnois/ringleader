@@ -198,11 +198,14 @@ impl CompositionRoot {
     }
 
     fn attach_in_tui(&self, service: SessionService, name: String) -> ExitCode {
-        let state_directory = self.paths.state_directory();
-        let _reported_tui_failure = self
-            .started_app_with(service, &state_directory, Vec::new())
-            .and_then(|app| Self::run_app(app, Some(name)))
-            .map(|(app, signals)| Self::wait_for_startup_input(app, signals));
+        let mut app = self.new_app(service, &self.paths.state_directory());
+        let signals = SignalHookInterrupts::register()
+            .unwrap_or_else(|_| SignalHookInterrupts::unregistered());
+        let _reported_tui_failure = Self::start_up(&mut app, Vec::new()).and_then(|()| {
+            Self::run_event_loop(&mut app, signals.clone(), Some(name))
+                .map_err(|error| Self::fail(&error.to_string()))
+        });
+        Self::wait_for_startup_input(app, signals);
         ExitCode::SUCCESS
     }
 
@@ -307,16 +310,23 @@ impl CompositionRoot {
         state_directory: &Path,
         process_warnings: Vec<String>,
     ) -> Result<App, ExitCode> {
-        let mut app = App::new(
+        let mut app = self.new_app(service, state_directory);
+        Self::start_up(&mut app, process_warnings).map(|()| app)
+    }
+
+    fn new_app(&self, service: SessionService, state_directory: &Path) -> App {
+        App::new(
             service,
             Box::new(FileLock::new(&state_directory.join("lock"))),
             Box::new(io::stdout()),
             Box::new(JsonFoldStore::new(&state_directory.join("folds.json"))),
             Instant::now(),
         )
-        .with_color_mode(self.color_mode());
+        .with_color_mode(self.color_mode())
+    }
+
+    fn start_up(app: &mut App, process_warnings: Vec<String>) -> Result<(), ExitCode> {
         app.start_up(process_warnings)
-            .map(|()| app)
             .map_err(|error| Self::refuse(&error))
     }
 
