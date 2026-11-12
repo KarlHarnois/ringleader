@@ -31,6 +31,7 @@ pub struct EventLoop<B: Backend, I: InputSource> {
     signals: Box<dyn Interrupts>,
     screen: Arc<TerminalState>,
     shells: Box<dyn ShellRunner>,
+    opening_session: Option<String>,
 }
 
 impl<B, I> EventLoop<B, I>
@@ -54,6 +55,14 @@ where
             signals,
             screen,
             shells: Box::new(ChildShell),
+            opening_session: None,
+        }
+    }
+
+    pub fn with_opening_session(self, opening_session: Option<String>) -> Self {
+        Self {
+            opening_session,
+            ..self
         }
     }
 
@@ -73,7 +82,14 @@ where
         app.resize(size.width, size.height);
         app.observe();
         app.refresh_usage();
-        Ok(())
+        self.attach_opening_session(app)
+    }
+
+    fn attach_opening_session(&mut self, app: &mut App) -> io::Result<()> {
+        match self.opening_session.take() {
+            Some(name) => self.attach(app, &name),
+            None => Ok(()),
+        }
     }
 
     fn serve(&mut self, app: &mut App) -> io::Result<()> {
@@ -402,6 +418,26 @@ mod tests {
         assert_eq!(harness.screen_switches(), ["enter", "leave", "enter"]);
         assert_eq!(event_loop.backend().clears(), 1);
         assert_eq!(fixture.multiplexer().attached().len(), 1);
+    }
+
+    #[test]
+    fn an_opening_session_is_attached_before_the_first_key() {
+        let session = ServiceFixture::session("fix-auth");
+        let fixture = ServiceFixture::new()
+            .with_sessions(std::slice::from_ref(&session))
+            .with_multiplexer(FakeMultiplexer::new().with_live(ServiceFixture::waiting(&session)));
+        let harness = UiHarness::new();
+        let mut app = UiHarness::app(&fixture);
+        let mut event_loop = harness
+            .event_loop(ScriptedInput::events(vec![UiHarness::character('q')]))
+            .with_opening_session(Some("fix-auth".to_string()));
+
+        event_loop.run(&mut app).unwrap();
+
+        assert_eq!(
+            fixture.multiplexer().attached(),
+            [AttachTarget::Agent("ringleader-fix-auth".to_string())]
+        );
     }
 
     #[test]
