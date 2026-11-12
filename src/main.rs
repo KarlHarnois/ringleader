@@ -199,6 +199,7 @@ impl CompositionRoot {
 
     fn attach_in_tui(&self, service: SessionService, name: String) -> ExitCode {
         let mut app = self.new_app(service, &self.paths.state_directory());
+        app.start_scratch_purge();
         let signals = SignalHookInterrupts::register()
             .unwrap_or_else(|_| SignalHookInterrupts::unregistered());
         let _reported_tui_failure = Self::start_up(&mut app, Vec::new()).and_then(|()| {

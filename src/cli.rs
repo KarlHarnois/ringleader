@@ -350,10 +350,7 @@ impl Cli {
         }
         let result = self.dispatch(service, session);
         lock.release();
-        self.wait_for_startup_input_unless_attaching(service, session);
-        let exit = session.finish(result);
-        self.purge_retired_scratch(service, session);
-        exit
+        self.finish_command(result, service, session)
     }
 
     pub fn session_to_attach(&self, exit: CliExit) -> Option<SessionName> {
@@ -371,14 +368,19 @@ impl Cli {
         }
     }
 
-    fn wait_for_startup_input_unless_attaching(
+    fn finish_command(
         &self,
+        result: Result<u8, CommandStop>,
         service: &SessionService,
         session: &mut CliSession,
-    ) {
-        if self.new_args_to_attach().is_none() {
-            session.wait_for_startup_input(service);
+    ) -> CliExit {
+        if self.new_args_to_attach().is_some() {
+            return session.finish(result);
         }
+        session.wait_for_startup_input(service);
+        let exit = session.finish(result);
+        self.purge_retired_scratch(service, session);
+        exit
     }
 
     fn purge_retired_scratch(&self, service: &SessionService, session: &CliSession) {

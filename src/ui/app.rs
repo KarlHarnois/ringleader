@@ -152,6 +152,10 @@ impl App {
         self.home.awaits_results()
     }
 
+    pub fn start_scratch_purge(&mut self) {
+        self.scratch_purge.start(&self.service);
+    }
+
     pub fn into_service(self) -> SessionService {
         self.service
     }
@@ -2742,6 +2746,21 @@ mod tests {
 
         let delete = app.handle_event(&UiHarness::key(KeyCode::Enter));
         AppFixture::perform(&mut app, delete);
+
+        let purged = Deadline::for_background_work().wait_until(|| {
+            app.poll(Instant::now());
+            fixture.scratch_space().purged().len() == 1
+        });
+        assert!(purged);
+    }
+
+    #[test]
+    fn a_started_scratch_purge_removes_the_retired_scratch_directories() {
+        let fixture =
+            ServiceFixture::new().with_scratch_space(FakeScratchSpace::holding_one_retired());
+        let mut app = AppFixture::started(&fixture, 100, 28);
+
+        app.start_scratch_purge();
 
         let purged = Deadline::for_background_work().wait_until(|| {
             app.poll(Instant::now());
