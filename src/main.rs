@@ -199,11 +199,11 @@ impl CompositionRoot {
 
     fn attach_in_tui(&self, service: SessionService, name: String) -> ExitCode {
         let state_directory = self.paths.state_directory();
-        let ran = self
+        let _reported_tui_failure = self
             .started_app_with(service, &state_directory, Vec::new())
             .and_then(|app| Self::run_app(app, Some(name)))
             .map(|(app, signals)| Self::wait_for_startup_input(app, signals));
-        ran.err().unwrap_or(ExitCode::SUCCESS)
+        ExitCode::SUCCESS
     }
 
     fn warn_of_mutating_template_problem(

@@ -53,6 +53,7 @@ impl<'a> SessionCommands<'a> {
     }
 
     pub fn create(&mut self, args: &NewArgs) -> Result<u8, CommandStop> {
+        self.refuse_attach_from_own_pane(args)?;
         self.service.observe_and_record()?;
         let repo = RepoArgument::new(&args.repo).resolve(self.service, self.session)?;
         let request = Self::create_request(args, repo);
@@ -67,6 +68,16 @@ impl<'a> SessionCommands<'a> {
         ));
         self.note_if_present(outcome.warning());
         Ok(0)
+    }
+
+    fn refuse_attach_from_own_pane(&self, args: &NewArgs) -> Result<(), ServiceError> {
+        if !args.attach {
+            return Ok(());
+        }
+        match self.service.refuse_own_pane() {
+            Err(error @ ServiceError::Conflict(_)) => Err(error),
+            _ => Ok(()),
+        }
     }
 
     fn create_request(args: &NewArgs, repo: Repo) -> CreateRequest {
@@ -1324,6 +1335,36 @@ mod tests {
             harness.fixture().multiplexer().recorded_return_request(),
             None
         );
+    }
+
+    #[test]
+    fn new_with_attach_from_a_pane_of_the_own_server_exits_three_before_creating() {
+        let harness = CliHarness::new(
+            ServiceFixture::new().with_multiplexer(FakeMultiplexer::new().called_from_own_pane()),
+        );
+
+        let exit = harness.run(&[
+            "new",
+            "--name",
+            "fix-auth",
+            "--repo",
+            "example-project",
+            "--attach",
+        ]);
+
+        assert_eq!(exit, CliExit::Code(3));
+        assert!(!harness.stdout().contains("created"));
+    }
+
+    #[test]
+    fn new_without_attach_from_a_pane_of_the_own_server_creates_the_session() {
+        let harness = CliHarness::new(
+            ServiceFixture::new().with_multiplexer(FakeMultiplexer::new().called_from_own_pane()),
+        );
+
+        let exit = harness.run(&["new", "--name", "fix-auth", "--repo", "example-project"]);
+
+        assert_eq!(exit, CliExit::Code(0));
     }
 
     #[test]
