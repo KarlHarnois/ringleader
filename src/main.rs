@@ -200,13 +200,17 @@ impl CompositionRoot {
     fn attach_in_tui(&self, service: SessionService, name: String) -> ExitCode {
         let mut app = self.new_app(service, &self.paths.state_directory());
         app.start_scratch_purge();
-        let signals = SignalHookInterrupts::register()
-            .unwrap_or_else(|_| SignalHookInterrupts::unregistered());
-        let _reported_tui_failure = Self::start_up(&mut app, Vec::new()).and_then(|()| {
-            Self::run_event_loop(&mut app, signals.clone(), Some(name))
-                .map_err(|error| Self::fail(&error.to_string()))
-        });
-        Self::wait_for_startup_input(app, signals);
+        let signals = Self::start_up(&mut app, Vec::new())
+            .and_then(|()| Self::tui_signals())
+            .and_then(|signals| {
+                Self::run_event_loop(&mut app, signals.clone(), Some(name))
+                    .map(|()| signals)
+                    .map_err(|error| Self::fail(&error.to_string()))
+            });
+        Self::wait_for_startup_input(
+            app,
+            signals.unwrap_or_else(|_| SignalHookInterrupts::unregistered()),
+        );
         ExitCode::SUCCESS
     }
 
@@ -335,11 +339,14 @@ impl CompositionRoot {
         mut app: App,
         opening_session: Option<String>,
     ) -> Result<(App, SignalHookInterrupts), ExitCode> {
-        let signals =
-            SignalHookInterrupts::register().map_err(|error| Self::fail(&error.to_string()))?;
+        let signals = Self::tui_signals()?;
         Self::run_event_loop(&mut app, signals.clone(), opening_session)
             .map(|()| (app, signals))
             .map_err(|error| Self::fail(&error.to_string()))
+    }
+
+    fn tui_signals() -> Result<SignalHookInterrupts, ExitCode> {
+        SignalHookInterrupts::register().map_err(|error| Self::fail(&error.to_string()))
     }
 
     fn wait_for_startup_input(app: App, signals: SignalHookInterrupts) {
