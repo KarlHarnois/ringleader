@@ -71,13 +71,10 @@ impl<'a> SessionCommands<'a> {
     }
 
     fn refuse_attach_from_own_pane(&self, args: &NewArgs) -> Result<(), ServiceError> {
-        if !args.attach {
-            return Ok(());
+        if args.attach {
+            self.service.own_pane_warning()?;
         }
-        match self.service.refuse_own_pane() {
-            Err(error @ ServiceError::Conflict(_)) => Err(error),
-            _ => Ok(()),
-        }
+        Ok(())
     }
 
     fn create_request(args: &NewArgs, repo: Repo) -> CreateRequest {

@@ -200,8 +200,12 @@ impl SessionService {
             .unwrap_or_else(|| self.config().key_bindings().clone())
     }
 
-    pub fn refuse_own_pane(&self) -> Result<(), ServiceError> {
-        self.access.refuse_own_pane()
+    pub fn own_pane_warning(&self) -> Result<Option<String>, ServiceError> {
+        match self.access.refuse_own_pane() {
+            Ok(()) => Ok(None),
+            Err(error @ ServiceError::Conflict(_)) => Err(error),
+            Err(error) => Ok(Some(error.to_string())),
+        }
     }
 
     pub fn reload(&mut self) -> Result<(), ServiceError> {
@@ -900,9 +904,16 @@ mod tests {
         let fixture =
             ServiceFixture::new().with_multiplexer(FakeMultiplexer::new().called_from_own_pane());
 
-        let error = fixture.service().refuse_own_pane().unwrap_err();
+        let error = fixture.service().own_pane_warning().unwrap_err();
 
         assert!(matches!(error, ServiceError::Conflict(_)));
+    }
+
+    #[test]
+    fn a_caller_outside_the_own_server_gets_no_own_pane_warning() {
+        let fixture = ServiceFixture::new();
+
+        assert_eq!(fixture.service().own_pane_warning().unwrap(), None);
     }
 
     #[test]

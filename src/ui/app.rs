@@ -73,7 +73,7 @@ impl App {
     pub fn start_up(&mut self, process_warnings: Vec<String>) -> Result<(), ServiceError> {
         self.load_theme();
         let socket_recovery = self.service.restore_server_socket();
-        let pane_warning = self.own_pane_warning()?;
+        let pane_warning = self.service.own_pane_warning()?;
         let state_warnings = self.under_write_lock(Self::recover_state)??;
         let warnings: Vec<String> = process_warnings
             .into_iter()
@@ -452,14 +452,6 @@ impl App {
         match self.dialogs.fail(error.to_string()) {
             Ok(()) => self.status.show(None),
             Err(error) => self.status.error(error),
-        }
-    }
-
-    fn own_pane_warning(&self) -> Result<Option<String>, ServiceError> {
-        match self.service.refuse_own_pane() {
-            Ok(()) => Ok(None),
-            Err(error @ ServiceError::Conflict(_)) => Err(error),
-            Err(error) => Ok(Some(error.to_string())),
         }
     }
 
