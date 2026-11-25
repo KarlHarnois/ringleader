@@ -68,7 +68,6 @@ impl ProcessInfo {
         shown.join(", ")
     }
 
-    #[cfg(test)]
     pub fn command(&self) -> &str {
         &self.command
     }

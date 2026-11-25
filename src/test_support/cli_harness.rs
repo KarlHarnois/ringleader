@@ -67,9 +67,15 @@ impl CliHarness {
     }
 
     pub fn run(&self, arguments: &[&str]) -> CliExit {
-        let cli =
+        let Ok(cli) =
             Cli::try_parse_from(std::iter::once("ringleader").chain(arguments.iter().copied()))
-                .expect("the arguments parse");
+        else {
+            return CliExit::Code(CliExit::FAILURE);
+        };
+        let cli = match cli.accept_if_valid() {
+            Ok(cli) => cli,
+            Err(exit) => return exit,
+        };
         let mut session = self.session(cli.output_mode());
         if let Err(exit) = cli.read_prompt(&mut session) {
             return exit;

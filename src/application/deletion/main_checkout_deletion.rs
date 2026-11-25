@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use super::delete_impact::{DeleteConfirmation, DeleteImpact};
+use super::delete_confirmation::DeleteConfirmation;
+use super::delete_impact::DeleteImpact;
 use super::delete_outcome::DeleteOutcome;
 use crate::application::ServiceError;
 use crate::application::ServicePorts;

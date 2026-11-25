@@ -44,7 +44,7 @@ Sessions run on Ringleader's own tmux server. The server ignores your tmux confi
 ringleader
 ringleader list [--json]
 ringleader new --name <n> --repo <r> [--agent <a>] [--base-branch <b> | --main-checkout] [--plan] [--prompt <text> | --prompt-file <path|->] [--lock-timeout <seconds>] [--json]
-ringleader delete <name>... [--force] [--forget] [--lock-timeout <seconds>]
+ringleader delete <name>... [--force | --if-impact <json>] [--forget] [--lock-timeout <seconds>] [--json]
 ringleader attach <name>
 ringleader send <name> (<prompt> | --prompt-file <path|->) [--json]
 ringleader rename <old> <new> [--lock-timeout <seconds>] [--json]

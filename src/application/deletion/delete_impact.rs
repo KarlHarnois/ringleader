@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 
-use crate::application::ServiceError;
 use crate::application::ports::{DirtyState, ProcessInfo, UnmergedCommits};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -40,8 +39,41 @@ impl DeleteImpact {
         Self { working, ..self }
     }
 
+    pub fn seen(
+        dirty_files: u64,
+        nested_repos: Vec<PathBuf>,
+        unmerged_commits: u64,
+        processes: Vec<ProcessInfo>,
+        working: bool,
+    ) -> Self {
+        Self {
+            dirty_files,
+            nested_repos,
+            unmerged_commits,
+            processes,
+            working,
+            scope: DeleteScope::Worktree,
+        }
+    }
+
+    pub fn dirty_files(&self) -> u64 {
+        self.dirty_files
+    }
+
+    pub fn unmerged_commits(&self) -> u64 {
+        self.unmerged_commits
+    }
+
+    pub fn nested_repos(&self) -> &[PathBuf] {
+        &self.nested_repos
+    }
+
     pub fn processes(&self) -> &[ProcessInfo] {
         &self.processes
+    }
+
+    pub fn working(&self) -> bool {
+        self.working
     }
 
     pub fn needs_confirmation(&self) -> bool {
@@ -88,7 +120,7 @@ impl DeleteImpact {
         self.scope.kept()
     }
 
-    fn accepts(&self, current: &DeleteImpact) -> bool {
+    pub(crate) fn accepts(&self, current: &DeleteImpact) -> bool {
         let working_confirmed = self.working || !current.working;
         working_confirmed
             && self.covers_count(self.dirty_files, current.dirty_files)
@@ -133,56 +165,6 @@ impl DeleteScope {
                 Some("the main checkout and its branch stay, delete ends only the session")
             }
         }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DeleteConfirmation {
-    seen: Option<DeleteImpact>,
-    forget: bool,
-}
-
-impl DeleteConfirmation {
-    pub fn confirmed(seen: DeleteImpact) -> Self {
-        Self {
-            seen: Some(seen),
-            forget: false,
-        }
-    }
-
-    pub fn force() -> Self {
-        Self {
-            seen: None,
-            forget: false,
-        }
-    }
-
-    pub fn forgetting(self) -> Self {
-        Self {
-            forget: true,
-            ..self
-        }
-    }
-
-    pub fn forgets(&self) -> bool {
-        self.forget
-    }
-
-    pub fn covers_working(&self) -> bool {
-        self.seen.as_ref().is_none_or(|seen| seen.working)
-    }
-
-    pub fn check(&self, current: &DeleteImpact) -> Result<(), ServiceError> {
-        let Some(seen) = &self.seen else {
-            return Ok(());
-        };
-        if seen.accepts(current) {
-            return Ok(());
-        }
-        Err(ServiceError::GuardsChanged {
-            message: format!("delete would lose work: {}", current.warnings().join("; ")),
-            impact: Box::new(current.clone()),
-        })
     }
 }
 

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use super::create_reply::CreateReply;
-use super::delete_report::DeleteReport;
+use super::delete_reply::DeleteReply;
 use super::list_report::ListReport;
 use super::rename_reply::RenameReply;
 use super::repo_argument::RepoArgument;
@@ -14,8 +14,7 @@ use super::{
     StopArgs,
 };
 use crate::application::{
-    CreateRequest, DeleteConfirmation, DeleteImpact, DeleteOutcome, HandOff, ServiceError,
-    SessionService,
+    CreateRequest, DeleteConfirmation, DeleteImpact, HandOff, ServiceError, SessionService,
 };
 use crate::domain::{AgentMode, BaseBranch, Checkout, Repo, RepoGroup};
 
@@ -103,42 +102,21 @@ impl<'a> SessionCommands<'a> {
         let report = self
             .service
             .delete_sessions(&confirmations, || session.is_signaled());
-        for (name, outcome) in report.outcomes() {
-            self.report_delete(name, outcome);
-        }
-        Ok(Self::failure_code(report.failures()))
-    }
-
-    fn report_delete(&mut self, name: &str, outcome: Result<&DeleteOutcome, &ServiceError>) {
-        let report = DeleteReport::new(name);
-        match outcome {
-            Ok(outcome) => self.report_deleted(&report, outcome),
-            Err(ServiceError::GuardsChanged { impact, .. }) => self.report_refusal(&report, impact),
-            Err(error) => self.report_failure(name, error),
-        }
+        let exit = Self::failure_code(report.failures());
+        let reply = DeleteReply::new(report);
+        self.session.output().reply(&reply)?;
+        Ok(exit)
     }
 
     fn delete_confirmation(args: &DeleteArgs) -> DeleteConfirmation {
-        let confirmation = match args.force {
-            true => DeleteConfirmation::force(),
-            false => DeleteConfirmation::confirmed(DeleteImpact::default()),
+        let confirmation = match &args.if_impact {
+            Some(impact) => DeleteConfirmation::confirmed(impact.clone()),
+            None if args.force => DeleteConfirmation::force(),
+            None => DeleteConfirmation::confirmed(DeleteImpact::default()),
         };
         match args.forget {
             true => confirmation.forgetting(),
             false => confirmation,
-        }
-    }
-
-    fn report_deleted(&mut self, report: &DeleteReport, outcome: &DeleteOutcome) {
-        for warning in report.warnings(outcome) {
-            self.session.output().note(&warning);
-        }
-        self.session.output().line(&report.success(outcome));
-    }
-
-    fn report_refusal(&mut self, report: &DeleteReport, impact: &DeleteImpact) {
-        for line in report.refusal(impact) {
-            self.session.output().note(&line);
         }
     }
 
@@ -256,12 +234,6 @@ impl<'a> SessionCommands<'a> {
         let reply = RestartReply::new(report);
         self.session.output().reply(&reply)?;
         Ok(exit)
-    }
-
-    fn report_failure(&mut self, name: &str, error: &ServiceError) {
-        let kind = error.failure_kind();
-        let message = format!("{name}: {error}");
-        self.session.output().print_failure(kind, &message);
     }
 
     fn failure_code<'e>(mut failures: impl Iterator<Item = (&'e str, &'e ServiceError)>) -> u8 {
@@ -1772,6 +1744,30 @@ mod tests {
             let exit = harness.run(&["restart", "alpha", "bravo", "--json"]);
             (harness, exit)
         }
+
+        fn with_dirty(files: u64) -> ServiceFixture {
+            let session = CommandFixture::session();
+            CommandFixture::live().with_workspace(
+                ServiceFixture::workspace_for(&[&session]).with_dirty(
+                    session.worktree_path(),
+                    DirtyState::present(files, Vec::new()),
+                ),
+            )
+        }
+
+        fn refused_impact(harness: &CliHarness) -> String {
+            let json = Self::envelope(harness);
+            json["result"]["results"][0]["error"]["impact"].to_string()
+        }
+
+        fn stop_repo_with_a_working_session() -> (CliHarness, CliExit) {
+            let session = CommandFixture::session();
+            let harness = CliHarness::new(CommandFixture::live().with_multiplexer(
+                FakeMultiplexer::new().with_live(ServiceFixture::working(&session)),
+            ));
+            let exit = harness.run(&["stop", "--repo", "example-project", "--json"]);
+            (harness, exit)
+        }
     }
 
     #[test]
@@ -1905,21 +1901,163 @@ mod tests {
     }
 
     #[test]
-    fn stop_repo_json_lists_a_skipped_session() {
-        let session = CommandFixture::session();
-        let harness =
-            CliHarness::new(CommandFixture::live().with_multiplexer(
-                FakeMultiplexer::new().with_live(ServiceFixture::working(&session)),
-            ));
-
-        let exit = harness.run(&["stop", "--repo", "example-project", "--json"]);
+    fn stop_repo_json_names_the_skipped_session() {
+        let (harness, _) = ChangeJsonFixture::stop_repo_with_a_working_session();
 
         let json = ChangeJsonFixture::envelope(&harness);
         let skipped = json["result"]["skipped"].as_array().unwrap();
         assert_eq!(skipped[0]["name"], "fix-auth");
+    }
+
+    #[test]
+    fn stop_repo_json_gives_the_skip_reason() {
+        let (harness, _) = ChangeJsonFixture::stop_repo_with_a_working_session();
+
+        let json = ChangeJsonFixture::envelope(&harness);
+        let skipped = json["result"]["skipped"].as_array().unwrap();
         assert_eq!(skipped[0]["reason"], "working");
+    }
+
+    #[test]
+    fn stop_repo_json_reports_no_stopped_result() {
+        let (harness, _) = ChangeJsonFixture::stop_repo_with_a_working_session();
+
+        let json = ChangeJsonFixture::envelope(&harness);
         assert_eq!(json["result"]["results"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn stop_repo_json_prints_no_standard_error() {
+        let (harness, _) = ChangeJsonFixture::stop_repo_with_a_working_session();
+
+        assert_eq!(harness.stderr(), "");
+    }
+
+    #[test]
+    fn stop_repo_json_exits_zero() {
+        let (_, exit) = ChangeJsonFixture::stop_repo_with_a_working_session();
+
+        assert_eq!(exit, CliExit::Code(0));
+    }
+
+    #[test]
+    fn delete_json_matches_the_pinned_envelope() {
+        let harness = CliHarness::new(CommandFixture::live());
+
+        let exit = harness.run(&["delete", "fix-auth", "--json"]);
+
+        assert_eq!(
+            harness.stdout(),
+            ChangeJsonFixture::pinned(include_str!("../../tests/fixtures/contract/delete.json"))
+        );
         assert_eq!(harness.stderr(), "");
         assert_eq!(exit, CliExit::Code(0));
+    }
+
+    #[test]
+    fn delete_json_reports_a_refusal_of_a_dirty_worktree() {
+        let harness = CliHarness::new(ChangeJsonFixture::with_dirty(2));
+
+        let exit = harness.run(&["delete", "fix-auth", "--json"]);
+
+        assert_eq!(
+            harness.stdout(),
+            ChangeJsonFixture::pinned(include_str!(
+                "../../tests/fixtures/contract/delete-refused.json"
+            ))
+        );
+        assert_eq!(harness.stderr(), "");
+        assert_eq!(exit, CliExit::Code(3));
+    }
+
+    #[test]
+    fn a_refused_json_delete_keeps_the_session() {
+        let harness = CliHarness::new(ChangeJsonFixture::with_dirty(2));
+
+        harness.run(&["delete", "fix-auth", "--json"]);
+
+        assert_eq!(harness.fixture().registry().sessions().len(), 1);
+    }
+
+    #[test]
+    fn delete_json_with_the_seen_impact_of_a_refusal_deletes_the_session() {
+        let refusal = CliHarness::new(ChangeJsonFixture::with_dirty(2));
+        refusal.run(&["delete", "fix-auth", "--json"]);
+        let seen = ChangeJsonFixture::refused_impact(&refusal);
+        let harness = CliHarness::new(ChangeJsonFixture::with_dirty(2));
+
+        let exit = harness.run(&["delete", "fix-auth", "--json", "--if-impact", &seen]);
+
+        let json = ChangeJsonFixture::envelope(&harness);
+        assert_eq!(json["result"]["results"][0]["result"], "deleted");
+        assert!(harness.fixture().registry().sessions().is_empty());
+        assert_eq!(exit, CliExit::Code(0));
+    }
+
+    #[test]
+    fn delete_json_with_a_seen_impact_that_the_worktree_outgrew_prints_the_measured_impact() {
+        let seen = r#"{"dirty_files":1,"unmerged_commits":0,"nested_repos":[],"processes":[],"working":false}"#;
+        let harness = CliHarness::new(ChangeJsonFixture::with_dirty(2));
+
+        let exit = harness.run(&["delete", "fix-auth", "--json", "--if-impact", seen]);
+
+        assert_eq!(
+            harness.stdout(),
+            ChangeJsonFixture::pinned(include_str!(
+                "../../tests/fixtures/contract/delete-refused.json"
+            ))
+        );
+        assert_eq!(harness.fixture().registry().sessions().len(), 1);
+        assert_eq!(exit, CliExit::Code(3));
+    }
+
+    #[test]
+    fn delete_forget_json_reports_no_worktree_warning() {
+        let harness = CliHarness::new(CommandFixture::live());
+
+        harness.run(&["delete", "fix-auth", "--forget", "--json"]);
+
+        let json = ChangeJsonFixture::envelope(&harness);
+        let warnings = json["result"]["results"][0]["impact"]["warnings"]
+            .as_array()
+            .unwrap();
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn delete_json_reports_one_result_for_each_name() {
+        let harness = CliHarness::new(CommandFixture::stopped(
+            &["alpha", "bravo"],
+            &["alpha", "bravo"],
+        ));
+
+        let exit = harness.run(&["delete", "alpha", "bravo", "--json"]);
+
+        let json = ChangeJsonFixture::envelope(&harness);
+        let results = json["result"]["results"].as_array().unwrap();
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0]["name"], "alpha");
+        assert_eq!(results[1]["name"], "bravo");
+        assert_eq!(exit, CliExit::Code(0));
+    }
+
+    #[test]
+    fn delete_with_several_names_and_a_seen_impact_fails_before_the_write_lock() {
+        let harness = CliHarness::new(ServiceFixture::new());
+
+        let exit = harness.run(&["delete", "alpha", "bravo", "--if-impact", "{}"]);
+
+        assert_eq!(exit, CliExit::Code(CliExit::FAILURE));
+        assert!(harness.lock_acquisitions().is_empty());
+    }
+
+    #[test]
+    fn delete_with_an_unparsable_seen_impact_fails_before_the_write_lock() {
+        let harness = CliHarness::new(ServiceFixture::new());
+
+        let exit = harness.run(&["delete", "alpha", "--if-impact", "not json"]);
+
+        assert_eq!(exit, CliExit::Code(CliExit::FAILURE));
+        assert!(harness.lock_acquisitions().is_empty());
     }
 }
