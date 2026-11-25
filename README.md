@@ -43,13 +43,13 @@ Sessions run on Ringleader's own tmux server. The server ignores your tmux confi
 ```
 ringleader
 ringleader list [--json]
-ringleader new --name <n> --repo <r> [--agent <a>] [--base-branch <b> | --main-checkout] [--plan] [--prompt <text> | --prompt-file <path|->] [--lock-timeout <seconds>]
+ringleader new --name <n> --repo <r> [--agent <a>] [--base-branch <b> | --main-checkout] [--plan] [--prompt <text> | --prompt-file <path|->] [--lock-timeout <seconds>] [--json]
 ringleader delete <name>... [--force] [--forget] [--lock-timeout <seconds>]
 ringleader attach <name>
-ringleader send <name> (<prompt> | --prompt-file <path|->)
-ringleader rename <old> <new> [--lock-timeout <seconds>]
-ringleader restart (<name>... | --all) [--lock-timeout <seconds>]
-ringleader stop (<name>... | --repo <r>) [--lock-timeout <seconds>]
+ringleader send <name> (<prompt> | --prompt-file <path|->) [--json]
+ringleader rename <old> <new> [--lock-timeout <seconds>] [--json]
+ringleader restart (<name>... | --all) [--lock-timeout <seconds>] [--json]
+ringleader stop (<name>... | --repo <r>) [--lock-timeout <seconds>] [--json]
 ringleader repo add <path> [--name <n>] [--base-branch <b>] [--lock-timeout <seconds>]
 ringleader repo remove <name> [--lock-timeout <seconds>]
 ringleader repo list [--json]
@@ -79,7 +79,7 @@ Conflicts with existing state include these:
 - a held lock
 - a `send` to a stopped session, or to an agent away from its prompt
 
-Under `--json`, a failure prints an envelope whose `error.code` is one of these:
+Under `--json`, the envelope holds a top-level `error` only when the whole command fails. Its `error.code` is one of these:
 
 | Code | Exit code |
 |---|---|
@@ -91,6 +91,8 @@ Under `--json`, a failure prints an envelope whose `error.code` is one of these:
 | `timed-out` | 1 |
 | `lock-held` | 3 |
 | `failed` | 1 |
+
+A batch command that fails for one name exits with that name's code and holds an `error` element for that name in `result.results`.
 
 ## Skills
 

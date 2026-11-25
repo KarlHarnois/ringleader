@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use super::Reply;
+use super::{Remark, Reply};
 use crate::application::RepoDiscovery;
 use crate::domain::Repo;
 
@@ -37,8 +37,12 @@ impl Reply for RepoListReport {
         self.discovery.repos().iter().map(Self::line).collect()
     }
 
-    fn notices(&self) -> Vec<String> {
-        self.discovery.notices()
+    fn remarks(&self) -> Vec<Remark> {
+        self.discovery
+            .notices()
+            .into_iter()
+            .map(Remark::Problem)
+            .collect()
     }
 
     fn result(&self) -> impl Serialize {

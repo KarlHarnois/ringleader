@@ -4,16 +4,21 @@ mod cli_exit;
 mod cli_input;
 mod cli_output;
 mod cli_session;
+mod create_reply;
 mod delete_report;
 mod entry_points;
 mod envelope;
 mod list_report;
 mod prompt_argument;
+mod rename_reply;
 mod reply;
 mod repo_argument;
 mod repo_commands;
 mod repo_list_report;
+mod restart_reply;
+mod send_reply;
 mod session_commands;
+mod stop_reply;
 mod version_reply;
 
 use std::ffi::OsString;
@@ -33,7 +38,7 @@ use cli_session::CommandStop;
 pub use entry_points::EntryPoints;
 pub use envelope::EnvelopeError;
 use prompt_argument::PromptArgument;
-pub use reply::Reply;
+pub use reply::{Remark, Reply};
 use repo_commands::RepoCommands;
 use session_commands::SessionCommands;
 pub use version_reply::VersionReply;
@@ -89,7 +94,7 @@ enum CliCommand {
         #[command(subcommand)]
         action: RepoAction,
     },
-    #[command(about = "List the configured agents")]
+    #[command(about = "Manage the configured agents")]
     Agent {
         #[command(subcommand)]
         action: AgentAction,
@@ -193,6 +198,8 @@ struct NewArgs {
     prompt_file: Option<String>,
     #[command(flatten)]
     lock: LockArgs,
+    #[command(flatten)]
+    json: JsonArgs,
 }
 
 #[derive(Debug, Args)]
@@ -231,6 +238,8 @@ struct SendArgs {
     prompt: Option<String>,
     #[arg(long, value_name = "PATH|-")]
     prompt_file: Option<String>,
+    #[command(flatten)]
+    json: JsonArgs,
 }
 
 #[derive(Debug, Args)]
@@ -246,6 +255,8 @@ struct RestartArgs {
     all: bool,
     #[command(flatten)]
     lock: LockArgs,
+    #[command(flatten)]
+    json: JsonArgs,
 }
 
 #[derive(Debug, Args)]
@@ -261,6 +272,8 @@ struct StopArgs {
     repo: Option<String>,
     #[command(flatten)]
     lock: LockArgs,
+    #[command(flatten)]
+    json: JsonArgs,
 }
 
 #[derive(Debug, Args)]
@@ -269,6 +282,8 @@ struct RenameArgs {
     new: String,
     #[command(flatten)]
     lock: LockArgs,
+    #[command(flatten)]
+    json: JsonArgs,
 }
 
 impl Cli {
@@ -397,6 +412,11 @@ impl Cli {
             | Some(CliCommand::Agent {
                 action: AgentAction::List(args),
             }) => Some(args),
+            Some(CliCommand::New(args)) => Some(&args.json),
+            Some(CliCommand::Send(args)) => Some(&args.json),
+            Some(CliCommand::Rename(args)) => Some(&args.json),
+            Some(CliCommand::Restart(args)) => Some(&args.json),
+            Some(CliCommand::Stop(args)) => Some(&args.json),
             _ => None,
         }
     }
@@ -932,6 +952,18 @@ mod tests {
     }
 
     #[test]
+    fn a_change_command_json_reports_a_held_lock_in_the_envelope() {
+        let harness = CliHarness::new(ServiceFixture::new()).with_lock(FakeLock::held_elsewhere());
+
+        let exit = harness.run(&["rename", "a", "b", "--json", "--lock-timeout", "0"]);
+
+        let json: serde_json::Value = serde_json::from_str(harness.stdout().trim()).unwrap();
+        assert_eq!(json["error"]["code"], "lock-held");
+        assert_eq!(harness.stderr(), "");
+        assert_eq!(exit.code(), CliExit::CONFLICT);
+    }
+
+    #[test]
     fn a_signal_ends_a_bounded_wait_for_the_lock() {
         let harness = CliHarness::new(ServiceFixture::new()).with_lock(FakeLock::held_elsewhere());
         harness.signals().raise(SIGINT);
@@ -1195,6 +1227,14 @@ mod tests {
     #[test]
     fn a_missing_argument_exits_one() {
         assert_eq!(ParseFixture::exit_code(&["ringleader", "delete"]), 1);
+    }
+
+    #[test]
+    fn delete_does_not_parse_the_json_flag() {
+        assert_eq!(
+            ParseFixture::exit_code(&["ringleader", "delete", "a", "--json"]),
+            1
+        );
     }
 
     #[test]
