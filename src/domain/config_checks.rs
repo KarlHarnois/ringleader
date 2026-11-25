@@ -160,24 +160,25 @@ impl<'a> ConfigChecks<'a> {
     }
 
     fn check_repos(&mut self) {
-        let mut names = EntryNames::of("repos.name", "repos");
+        let mut names = EntryNames::of("repos");
         for repo in self.draft.repo_drafts() {
             self.check_absolute("repos.path", repo.path());
-            match repo.resolved_name() {
-                None => self.fail(format!(
+            let Some(name) = repo.resolved_name() else {
+                self.fail(format!(
                     "repos.name: `{}` is not a valid repo name",
                     repo.shown_name()
-                )),
-                Some(name) => match names.repetition_failure(name.as_str()) {
-                    Some(failure) => self.fail(failure),
-                    None => names.record(name.as_str()),
-                },
+                ));
+                continue;
+            };
+            if let Some(failure) = names.repetition_failure(name.as_str()) {
+                self.fail(failure);
             }
+            names.record(name.as_str());
         }
     }
 
     fn check_agents(&mut self) {
-        let mut names = EntryNames::of("agents.name", "agents");
+        let mut names = EntryNames::of("agents");
         for agent in self.draft.agents_value() {
             if let Some(failure) = names.repetition_failure(agent.name()) {
                 self.fail(failure);
@@ -194,7 +195,7 @@ impl<'a> ConfigChecks<'a> {
     }
 
     fn check_remote_hosts(&mut self) {
-        let mut names = EntryNames::of("hosts.name", "hosts");
+        let mut names = EntryNames::of("hosts");
         for entry in self.draft.remote_hosts_value() {
             if let Some(reason) = entry.name_refusal() {
                 self.fail(format!("hosts.name: `{}` {reason}", entry.name()));
@@ -290,15 +291,13 @@ impl<'a> ConfigChecks<'a> {
 }
 
 struct EntryNames {
-    setting: &'static str,
     table: &'static str,
     seen: Vec<String>,
 }
 
 impl EntryNames {
-    fn of(setting: &'static str, table: &'static str) -> Self {
+    fn of(table: &'static str) -> Self {
         Self {
-            setting,
             table,
             seen: Vec::new(),
         }
@@ -306,10 +305,8 @@ impl EntryNames {
 
     fn repetition_failure(&self, name: &str) -> Option<String> {
         self.seen.iter().any(|seen| seen == name).then(|| {
-            format!(
-                "{}: `{name}` names two [[{}]] entries",
-                self.setting, self.table
-            )
+            let table = self.table;
+            format!("{table}.name: `{name}` names two [[{table}]] entries")
         })
     }
 
