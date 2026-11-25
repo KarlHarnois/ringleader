@@ -43,15 +43,15 @@ Sessions run on Ringleader's own tmux server. The server ignores your tmux confi
 ```
 ringleader
 ringleader list [--json]
-ringleader new --name <n> --repo <r> [--agent <a>] [--base-branch <b> | --main-checkout] [--plan] [--prompt <text> | --prompt-file <path|->]
-ringleader delete <name>... [--force] [--forget]
+ringleader new --name <n> --repo <r> [--agent <a>] [--base-branch <b> | --main-checkout] [--plan] [--prompt <text> | --prompt-file <path|->] [--lock-timeout <seconds>]
+ringleader delete <name>... [--force] [--forget] [--lock-timeout <seconds>]
 ringleader attach <name>
 ringleader send <name> (<prompt> | --prompt-file <path|->)
-ringleader rename <old> <new>
-ringleader restart (<name>... | --all)
-ringleader stop (<name>... | --repo <r>)
-ringleader repo add <path> [--name <n>] [--base-branch <b>]
-ringleader repo remove <name>
+ringleader rename <old> <new> [--lock-timeout <seconds>]
+ringleader restart (<name>... | --all) [--lock-timeout <seconds>]
+ringleader stop (<name>... | --repo <r>) [--lock-timeout <seconds>]
+ringleader repo add <path> [--name <n>] [--base-branch <b>] [--lock-timeout <seconds>]
+ringleader repo remove <name> [--lock-timeout <seconds>]
 ringleader repo list
 ringleader doctor [--json]
 ringleader version [--json]

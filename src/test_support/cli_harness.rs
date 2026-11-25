@@ -6,6 +6,7 @@ use clap::Parser;
 
 use super::{FakeCliInput, FakeInterrupts, FakeLock, FakePromptFiles, ServiceFixture};
 use crate::application::ServiceError;
+use crate::application::ports::lock::LockPatience;
 use crate::cli::{Cli, CliExit, CliInput, CliOutput, CliSession, OutputMode};
 
 pub struct CliHarness {
@@ -51,6 +52,10 @@ impl CliHarness {
 
     pub fn lock_acquisitions(&self) -> Vec<&'static str> {
         self.lock.borrow().acquisitions().to_vec()
+    }
+
+    pub fn lock_patiences(&self) -> Vec<LockPatience> {
+        self.lock.borrow().patiences()
     }
 
     pub fn with_stdout(self, stdout: CapturedWriter) -> Self {

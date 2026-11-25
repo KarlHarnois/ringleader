@@ -16,6 +16,7 @@ mod version_reply;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand};
 use serde::Serialize;
@@ -34,6 +35,7 @@ use session_commands::SessionCommands;
 pub use version_reply::VersionReply;
 
 use crate::application::diagnostics::doctor_report::DoctorReport;
+use crate::application::ports::lock::LockPatience;
 use crate::application::ports::{Lock, LockError};
 use crate::application::{CorruptRegistry, FailureKind, SessionService};
 use crate::domain::BuildVersion;
@@ -109,9 +111,15 @@ enum RepoAction {
     #[command(about = "Pin a repo as a [[repos]] entry")]
     Add(RepoAddArgs),
     #[command(about = "Remove a [[repos]] entry")]
-    Remove(NameArgs),
+    Remove(RepoRemoveArgs),
     #[command(about = "List the repos the picker shows")]
     List,
+}
+
+#[derive(Debug, Args)]
+struct LockArgs {
+    #[arg(long, value_name = "SECONDS")]
+    lock_timeout: Option<u64>,
 }
 
 #[derive(Debug, Args)]
@@ -121,6 +129,15 @@ struct RepoAddArgs {
     name: Option<String>,
     #[arg(long)]
     base_branch: Option<String>,
+    #[command(flatten)]
+    lock: LockArgs,
+}
+
+#[derive(Debug, Args)]
+struct RepoRemoveArgs {
+    name: String,
+    #[command(flatten)]
+    lock: LockArgs,
 }
 
 #[derive(Debug, Args)]
@@ -159,6 +176,8 @@ struct NewArgs {
     prompt: Option<String>,
     #[arg(long, value_name = "PATH|-")]
     prompt_file: Option<String>,
+    #[command(flatten)]
+    lock: LockArgs,
 }
 
 #[derive(Debug, Args)]
@@ -169,6 +188,8 @@ struct DeleteArgs {
     force: bool,
     #[arg(long)]
     forget: bool,
+    #[command(flatten)]
+    lock: LockArgs,
 }
 
 #[derive(Debug, Args)]
@@ -198,25 +219,41 @@ struct SendArgs {
 }
 
 #[derive(Debug, Args)]
-#[group(required = true, multiple = false)]
+#[command(group(
+    clap::ArgGroup::new("restart_target")
+        .required(true)
+        .multiple(false)
+        .args(["names", "all"])
+))]
 struct RestartArgs {
     names: Vec<String>,
     #[arg(long)]
     all: bool,
+    #[command(flatten)]
+    lock: LockArgs,
 }
 
 #[derive(Debug, Args)]
-#[group(required = true, multiple = false)]
+#[command(group(
+    clap::ArgGroup::new("stop_target")
+        .required(true)
+        .multiple(false)
+        .args(["names", "repo"])
+))]
 struct StopArgs {
     names: Vec<String>,
     #[arg(long)]
     repo: Option<String>,
+    #[command(flatten)]
+    lock: LockArgs,
 }
 
 #[derive(Debug, Args)]
 struct RenameArgs {
     old: String,
     new: String,
+    #[command(flatten)]
+    lock: LockArgs,
 }
 
 impl Cli {
@@ -336,20 +373,33 @@ impl Cli {
         }
     }
 
-    pub fn is_mutating(&self) -> bool {
-        matches!(
-            self.command,
+    fn lock_args(&self) -> Option<&LockArgs> {
+        match &self.command {
             Some(
-                CliCommand::New(_)
-                    | CliCommand::Delete(_)
-                    | CliCommand::Rename(_)
-                    | CliCommand::Restart(_)
-                    | CliCommand::Stop(_)
-                    | CliCommand::Repo {
-                        action: RepoAction::Add(_) | RepoAction::Remove(_)
-                    }
-            )
-        )
+                CliCommand::New(NewArgs { lock, .. })
+                | CliCommand::Delete(DeleteArgs { lock, .. })
+                | CliCommand::Rename(RenameArgs { lock, .. })
+                | CliCommand::Restart(RestartArgs { lock, .. })
+                | CliCommand::Stop(StopArgs { lock, .. })
+                | CliCommand::Repo {
+                    action:
+                        RepoAction::Add(RepoAddArgs { lock, .. })
+                        | RepoAction::Remove(RepoRemoveArgs { lock, .. }),
+                },
+            ) => Some(lock),
+            _ => None,
+        }
+    }
+
+    pub fn is_mutating(&self) -> bool {
+        self.lock_args().is_some()
+    }
+
+    fn lock_patience(&self) -> LockPatience {
+        match self.lock_args().and_then(|args| args.lock_timeout) {
+            Some(seconds) => LockPatience::of(Duration::from_secs(seconds)),
+            None => LockPatience::DEFAULT,
+        }
     }
 
     pub fn read_prompt(&self, session: &mut CliSession) -> Result<(), CliExit> {
@@ -392,16 +442,23 @@ impl Cli {
         if !self.is_mutating() {
             return Ok(());
         }
+        let patience = self.lock_patience();
         let taken = match lock.try_acquire() {
-            Err(LockError::Held { .. }) => Self::wait_for_lock(lock, session),
+            Err(LockError::Held { .. }) if patience.allows_a_wait() => {
+                Self::wait_for_lock(lock, patience, session)
+            }
             attempt => attempt,
         };
         taken.map_err(|error| Self::lock_failure(&error, session))
     }
 
-    fn wait_for_lock(lock: &mut dyn Lock, session: &mut CliSession) -> Result<(), LockError> {
+    fn wait_for_lock(
+        lock: &mut dyn Lock,
+        patience: LockPatience,
+        session: &mut CliSession,
+    ) -> Result<(), LockError> {
         session.output().note(Self::LOCK_WAIT_NOTE);
-        lock.acquire(&|| session.is_signaled())
+        lock.acquire(patience, &|| session.is_signaled())
     }
 
     fn lock_failure(error: &LockError, session: &mut CliSession) -> CliExit {
@@ -552,6 +609,7 @@ mod tests {
 
     impl LockFlowFixture {
         const TYPING_DELAY: Duration = Duration::from_millis(200);
+        const LONG_HOLD: Duration = Duration::from_secs(5);
 
         fn release_typing_later(multiplexer: &Arc<FakeMultiplexer>) {
             let delayed = Arc::clone(multiplexer);
@@ -722,6 +780,173 @@ mod tests {
         harness.run(&["delete", "fix-auth"]);
 
         assert_eq!(harness.lock_acquisitions(), ["try"]);
+    }
+
+    #[test]
+    fn a_free_lock_ignores_the_bound() {
+        let harness = CliHarness::new(ServiceFixture::new());
+
+        let exit = harness.run(&[
+            "new",
+            "--name",
+            "Fix Auth",
+            "--repo",
+            "example-project",
+            "--lock-timeout",
+            "5",
+        ]);
+
+        assert_eq!(exit, CliExit::Code(0));
+        assert_eq!(harness.lock_acquisitions(), ["try"]);
+        assert!(harness.lock_patiences().is_empty());
+        assert!(!harness.stderr().contains("waiting for another Ringleader"));
+    }
+
+    #[test]
+    fn a_lock_held_past_the_bound_exits_three_and_names_the_lock() {
+        let harness = CliHarness::new(ServiceFixture::new()).with_lock(FakeLock::held_elsewhere());
+
+        let exit = harness.run(&["delete", "fix-auth", "--lock-timeout", "10"]);
+
+        assert_eq!(exit.code(), CliExit::CONFLICT);
+        assert!(
+            harness
+                .stderr()
+                .contains("another Ringleader holds /state/ringleader/lock")
+        );
+        assert_eq!(
+            harness.lock_patiences(),
+            [LockPatience::of(Duration::from_secs(10))]
+        );
+    }
+
+    #[test]
+    fn a_bound_above_the_hold_lets_the_command_run() {
+        let harness = CliHarness::new(ServiceFixture::new())
+            .with_lock(FakeLock::held_for(LockFlowFixture::LONG_HOLD));
+
+        let exit = harness.run(&[
+            "new",
+            "--name",
+            "Fix Auth",
+            "--repo",
+            "example-project",
+            "--lock-timeout",
+            "10",
+        ]);
+
+        assert_eq!(exit, CliExit::Code(0));
+    }
+
+    #[test]
+    fn a_bound_below_the_hold_exits_three() {
+        let harness = CliHarness::new(ServiceFixture::new())
+            .with_lock(FakeLock::held_for(LockFlowFixture::LONG_HOLD));
+
+        let exit = harness.run(&["delete", "fix-auth", "--lock-timeout", "3"]);
+
+        assert_eq!(exit.code(), CliExit::CONFLICT);
+    }
+
+    #[test]
+    fn a_lock_released_within_the_bound_lets_the_command_run() {
+        let harness =
+            CliHarness::new(ServiceFixture::new()).with_lock(FakeLock::held_until_waited());
+
+        let exit = harness.run(&[
+            "new",
+            "--name",
+            "Fix Auth",
+            "--repo",
+            "example-project",
+            "--lock-timeout",
+            "10",
+        ]);
+
+        assert_eq!(exit, CliExit::Code(0));
+        assert_eq!(harness.lock_acquisitions(), ["try", "wait"]);
+        assert_eq!(
+            harness.lock_patiences(),
+            [LockPatience::of(Duration::from_secs(10))]
+        );
+        assert!(
+            harness
+                .stderr()
+                .contains("waiting for another Ringleader to finish a change")
+        );
+    }
+
+    #[test]
+    fn a_zero_bound_fails_at_once_without_a_wait_note() {
+        let harness = CliHarness::new(ServiceFixture::new()).with_lock(FakeLock::held_elsewhere());
+
+        let exit = harness.run(&["delete", "fix-auth", "--lock-timeout", "0"]);
+
+        assert_eq!(exit.code(), CliExit::CONFLICT);
+        assert_eq!(harness.lock_acquisitions(), ["try"]);
+        assert!(harness.lock_patiences().is_empty());
+        assert!(!harness.stderr().contains("waiting for another Ringleader"));
+        assert!(
+            harness
+                .stderr()
+                .contains("another Ringleader holds /state/ringleader/lock")
+        );
+    }
+
+    #[test]
+    fn a_signal_ends_a_bounded_wait_for_the_lock() {
+        let harness = CliHarness::new(ServiceFixture::new()).with_lock(FakeLock::held_elsewhere());
+        harness.signals().raise(SIGINT);
+
+        let exit = harness.run(&["delete", "fix-auth", "--lock-timeout", "10"]);
+
+        assert!(matches!(exit, CliExit::Interrupted { signal: SIGINT, .. }));
+    }
+
+    #[test]
+    fn a_command_without_the_write_lock_refuses_the_lock_timeout_flag() {
+        assert_eq!(
+            ParseFixture::exit_code(&["ringleader", "list", "--lock-timeout", "5"]),
+            1
+        );
+    }
+
+    #[test]
+    fn a_negative_lock_timeout_exits_one() {
+        assert_eq!(
+            ParseFixture::exit_code(&["ringleader", "delete", "a", "--lock-timeout", "-1"]),
+            1
+        );
+    }
+
+    #[test]
+    fn a_non_numeric_lock_timeout_exits_one() {
+        assert_eq!(
+            ParseFixture::exit_code(&["ringleader", "delete", "a", "--lock-timeout", "soon"]),
+            1
+        );
+    }
+
+    #[test]
+    fn every_changing_command_parses_the_lock_timeout_flag() {
+        let cases = [
+            &["new", "--name", "x", "--repo", "r"][..],
+            &["delete", "x"][..],
+            &["rename", "a", "b"][..],
+            &["restart", "--all"][..],
+            &["restart", "x"][..],
+            &["stop", "x"][..],
+            &["stop", "--repo", "r"][..],
+            &["repo", "add", "/tmp/repo"][..],
+            &["repo", "remove", "x"][..],
+        ];
+        for arguments in cases {
+            let mut words = vec!["ringleader"];
+            words.extend_from_slice(arguments);
+            words.extend(["--lock-timeout", "5"]);
+            Cli::try_parse_from(words.iter().copied())
+                .unwrap_or_else(|error| panic!("{arguments:?}: {error}"));
+        }
     }
 
     #[test]
