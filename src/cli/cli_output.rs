@@ -2,7 +2,7 @@ use std::io::{self, Write};
 
 use super::EnvelopeError;
 use super::envelope::Envelope;
-use super::reply::Reply;
+use super::reply::{Remark, Reply};
 use crate::application::FailureKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,8 +40,8 @@ impl CliOutput {
                 for line in reply.lines() {
                     self.line(&line);
                 }
-                for notice in reply.notices() {
-                    self.error(&notice);
+                for remark in reply.remarks() {
+                    self.print_remark(&remark);
                 }
                 Ok(())
             }
@@ -50,6 +50,13 @@ impl CliOutput {
                 self.line(&text);
                 Ok(())
             }
+        }
+    }
+
+    fn print_remark(&mut self, remark: &Remark) {
+        match remark {
+            Remark::Note(text) => self.note(text),
+            Remark::Problem(text) => self.error(text),
         }
     }
 

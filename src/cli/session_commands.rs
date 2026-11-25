@@ -1,16 +1,21 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use super::create_reply::CreateReply;
 use super::delete_report::DeleteReport;
 use super::list_report::ListReport;
+use super::rename_reply::RenameReply;
 use super::repo_argument::RepoArgument;
+use super::restart_reply::RestartReply;
+use super::send_reply::SendReply;
+use super::stop_reply::StopReply;
 use super::{
     CliExit, CliSession, CommandStop, DeleteArgs, NewArgs, RenameArgs, RestartArgs, SendArgs,
     StopArgs,
 };
 use crate::application::{
-    CreateRequest, DeleteConfirmation, DeleteImpact, DeleteOutcome, HandOff, RestartReport,
-    ServiceError, SessionService, StartOutcome, StopReport,
+    CreateRequest, DeleteConfirmation, DeleteImpact, DeleteOutcome, HandOff, ServiceError,
+    SessionService,
 };
 use crate::domain::{AgentMode, BaseBranch, Checkout, Repo, RepoGroup};
 
@@ -20,8 +25,6 @@ pub struct SessionCommands<'a> {
 }
 
 impl<'a> SessionCommands<'a> {
-    const NOTHING_TO_RESTART: &'static str = "no exited or stopped session to restart";
-    const NOTHING_TO_STOP: &'static str = "no waiting or exited session to stop";
     const UNKNOWN_REPO: &'static str = "<repo>";
 
     pub fn new(service: &'a mut SessionService, session: &'a mut CliSession) -> Self {
@@ -52,14 +55,8 @@ impl<'a> SessionCommands<'a> {
         let request = Self::create_request(args, repo, self.session.prompt());
         self.session.stop_if_signaled()?;
         let outcome = self.service.create_session(&request)?;
-        let created = outcome.session();
-        self.session.output().line(&format!(
-            "created {} in {} on branch {}",
-            created.name(),
-            created.worktree_path().display(),
-            created.branch()
-        ));
-        self.note_if_present(outcome.warning());
+        let reply = CreateReply::new(outcome);
+        self.session.output().reply(&reply)?;
         Ok(0)
     }
 
@@ -184,9 +181,8 @@ impl<'a> SessionCommands<'a> {
     pub fn send(&mut self, args: &SendArgs) -> Result<u8, CommandStop> {
         self.service
             .send_prompt(&args.name, self.session.prompt())?;
-        self.session
-            .output()
-            .line(&format!("sent the prompt to {}", args.name));
+        let reply = SendReply::new(&args.name);
+        self.session.output().reply(&reply)?;
         Ok(0)
     }
 
@@ -194,9 +190,8 @@ impl<'a> SessionCommands<'a> {
         self.service.observe_and_record()?;
         self.session.stop_if_signaled()?;
         let renamed = self.service.rename_session(&args.old, &args.new)?;
-        self.session
-            .output()
-            .line(&format!("renamed {} to {}", args.old, renamed.name()));
+        let reply = RenameReply::new(&args.old, renamed);
+        self.session.output().reply(&reply)?;
         Ok(0)
     }
 
@@ -214,8 +209,10 @@ impl<'a> SessionCommands<'a> {
         let report = self
             .service
             .restart_sessions(names, || session.is_signaled());
-        self.report_restarts(&report);
-        Ok(Self::failure_code(report.failures()))
+        let exit = Self::failure_code(report.failures());
+        let reply = RestartReply::new(report);
+        self.session.output().reply(&reply)?;
+        Ok(exit)
     }
 
     pub fn stop_named_or_repo(&mut self, args: &StopArgs) -> Result<u8, CommandStop> {
@@ -230,8 +227,10 @@ impl<'a> SessionCommands<'a> {
         self.session.stop_if_signaled()?;
         let session = &*self.session;
         let report = self.service.stop_sessions(names, || session.is_signaled());
-        self.report_stopped(report.outcomes());
-        Ok(Self::failure_code(report.failures()))
+        let exit = Self::failure_code(report.failures());
+        let reply = StopReply::of_names(report);
+        self.session.output().reply(&reply)?;
+        Ok(exit)
     }
 
     pub fn stop_repo(&mut self, repo: &str) -> Result<u8, CommandStop> {
@@ -242,32 +241,10 @@ impl<'a> SessionCommands<'a> {
         let report = self
             .service
             .stop_repo(&RepoGroup::of_repo(&repo), || session.is_signaled())?;
-        self.report_stops(&report);
-        Ok(Self::failure_code(report.failures()))
-    }
-
-    fn report_stops(&mut self, report: &StopReport) {
-        for (name, skip) in report.skips() {
-            self.session
-                .output()
-                .note(&format!("skipped {name}, {}", skip.label()));
-        }
-        if report.outcomes().next().is_none() {
-            self.session.output().note(Self::NOTHING_TO_STOP);
-        }
-        self.report_stopped(report.outcomes());
-    }
-
-    fn report_stopped<'r>(
-        &mut self,
-        outcomes: impl Iterator<Item = (&'r str, Result<&'r (), &'r ServiceError>)>,
-    ) {
-        for (name, stop) in outcomes {
-            match stop {
-                Ok(()) => self.session.output().line(&format!("stopped {name}")),
-                Err(error) => self.report_failure(name, error),
-            }
-        }
+        let exit = Self::failure_code(report.failures());
+        let reply = StopReply::of_repo(report);
+        self.session.output().reply(&reply)?;
+        Ok(exit)
     }
 
     pub fn restart_all(&mut self) -> Result<u8, CommandStop> {
@@ -275,44 +252,22 @@ impl<'a> SessionCommands<'a> {
         self.session.stop_if_signaled()?;
         let session = &*self.session;
         let report = self.service.restart_all(|| session.is_signaled())?;
-        self.report_restarts(&report);
-        Ok(Self::failure_code(report.failures()))
-    }
-
-    fn report_restarts(&mut self, report: &RestartReport) {
-        if report.is_empty() {
-            self.session.output().note(Self::NOTHING_TO_RESTART);
-        }
-        for (name, restart) in report.outcomes() {
-            match restart {
-                Ok(outcome) => self.report_restart(name, outcome),
-                Err(error) => self.report_failure(name, error),
-            }
-        }
-    }
-
-    fn report_restart(&mut self, name: &str, outcome: &StartOutcome) {
-        self.note_if_present(outcome.recovery());
-        self.note_if_present(outcome.warning());
-        self.session.output().line(&format!("restarted {name}"));
+        let exit = Self::failure_code(report.failures());
+        let reply = RestartReply::new(report);
+        self.session.output().reply(&reply)?;
+        Ok(exit)
     }
 
     fn report_failure(&mut self, name: &str, error: &ServiceError) {
-        self.session
-            .output()
-            .print_failure(error.failure_kind(), &format!("{name}: {error}"));
+        let kind = error.failure_kind();
+        let message = format!("{name}: {error}");
+        self.session.output().print_failure(kind, &message);
     }
 
     fn failure_code<'e>(mut failures: impl Iterator<Item = (&'e str, &'e ServiceError)>) -> u8 {
         failures
             .next()
             .map_or(0, |(_, error)| CliExit::exit_code(error.failure_kind()))
-    }
-
-    fn note_if_present(&mut self, note: Option<&str>) {
-        if let Some(note) = note {
-            self.session.output().note(note);
-        }
     }
 }
 
@@ -1773,5 +1728,198 @@ mod tests {
             ),
             "{events:?}"
         );
+    }
+
+    struct ChangeJsonFixture;
+
+    impl ChangeJsonFixture {
+        fn envelope(harness: &CliHarness) -> serde_json::Value {
+            serde_json::from_str(&harness.stdout()).unwrap()
+        }
+
+        fn pinned(text: &'static str) -> String {
+            text.replace("<build>", BuildVersion::CURRENT.text())
+        }
+
+        fn exited(names: &[&str]) -> ServiceFixture {
+            let sessions: Vec<Session> = names
+                .iter()
+                .map(|name| ServiceFixture::session(name))
+                .collect();
+            let present: Vec<&Session> = sessions.iter().collect();
+            let multiplexer = present
+                .iter()
+                .fold(FakeMultiplexer::new(), |multiplexer, session| {
+                    multiplexer.with_live(ServiceFixture::exited(session))
+                });
+            ServiceFixture::new()
+                .with_sessions(&sessions)
+                .with_workspace(ServiceFixture::workspace_for(&present))
+                .with_host(ServiceFixture::host_for(&present))
+                .with_multiplexer(multiplexer)
+        }
+
+        fn run_stop_with_a_missing_name() -> (CliHarness, CliExit) {
+            let harness = CliHarness::new(CommandFixture::live());
+            let exit = harness.run(&["stop", "fix-auth", "missing", "--json"]);
+            (harness, exit)
+        }
+
+        fn run_restart_with_a_warning() -> (CliHarness, CliExit) {
+            let fixture = Self::exited(&["alpha", "bravo"])
+                .with_directory_environment(ServiceFixture::not_allowed_envrc("alpha"));
+            let harness = CliHarness::new(fixture);
+            let exit = harness.run(&["restart", "alpha", "bravo", "--json"]);
+            (harness, exit)
+        }
+    }
+
+    #[test]
+    fn new_json_matches_the_pinned_envelope() {
+        let harness = CliHarness::new(ServiceFixture::new());
+
+        let exit = harness.run(&[
+            "new",
+            "--name",
+            "fix-auth",
+            "--repo",
+            "example-project",
+            "--json",
+        ]);
+
+        assert_eq!(
+            harness.stdout(),
+            ChangeJsonFixture::pinned(include_str!("../../tests/fixtures/contract/new.json"))
+        );
+        assert_eq!(harness.stderr(), "");
+        assert_eq!(exit, CliExit::Code(0));
+    }
+
+    #[test]
+    fn send_json_matches_the_pinned_envelope() {
+        let harness = CliHarness::new(CommandFixture::live());
+
+        let exit = harness.run(&["send", "fix-auth", "review the diff", "--json"]);
+
+        assert_eq!(
+            harness.stdout(),
+            ChangeJsonFixture::pinned(include_str!("../../tests/fixtures/contract/send.json"))
+        );
+        assert_eq!(harness.stderr(), "");
+        assert_eq!(exit, CliExit::Code(0));
+    }
+
+    #[test]
+    fn rename_json_matches_the_pinned_envelope() {
+        let harness = CliHarness::new(CommandFixture::live());
+
+        let exit = harness.run(&["rename", "fix-auth", "fix-login", "--json"]);
+
+        assert_eq!(
+            harness.stdout(),
+            ChangeJsonFixture::pinned(include_str!("../../tests/fixtures/contract/rename.json"))
+        );
+        assert_eq!(harness.stderr(), "");
+        assert_eq!(exit, CliExit::Code(0));
+    }
+
+    #[test]
+    fn stop_json_matches_the_pinned_envelope() {
+        let harness = CliHarness::new(CommandFixture::live());
+
+        let exit = harness.run(&["stop", "fix-auth", "--json"]);
+
+        assert_eq!(
+            harness.stdout(),
+            ChangeJsonFixture::pinned(include_str!("../../tests/fixtures/contract/stop.json"))
+        );
+        assert_eq!(harness.stderr(), "");
+        assert_eq!(exit, CliExit::Code(0));
+    }
+
+    #[test]
+    fn restart_json_matches_the_pinned_envelope() {
+        let harness = CliHarness::new(ChangeJsonFixture::exited(&["fix-auth"]));
+
+        let exit = harness.run(&["restart", "fix-auth", "--json"]);
+
+        assert_eq!(
+            harness.stdout(),
+            ChangeJsonFixture::pinned(include_str!("../../tests/fixtures/contract/restart.json"))
+        );
+        assert_eq!(harness.stderr(), "");
+        assert_eq!(exit, CliExit::Code(0));
+    }
+
+    #[test]
+    fn stop_json_reports_a_stopped_name_and_a_failed_name() {
+        let (harness, _) = ChangeJsonFixture::run_stop_with_a_missing_name();
+
+        let json = ChangeJsonFixture::envelope(&harness);
+        let results = json["result"]["results"].as_array().unwrap();
+        assert_eq!(results[0]["name"], "fix-auth");
+        assert_eq!(results[0]["result"], "stopped");
+        assert_eq!(results[1]["name"], "missing");
+        assert_eq!(results[1]["error"]["code"], "not-found");
+        assert!(results[1]["result"].is_null());
+    }
+
+    #[test]
+    fn stop_json_exits_with_the_first_failure() {
+        let (_, exit) = ChangeJsonFixture::run_stop_with_a_missing_name();
+
+        assert_eq!(exit, CliExit::Code(CliExit::NOT_FOUND));
+    }
+
+    #[test]
+    fn stop_json_prints_no_standard_error() {
+        let (harness, _) = ChangeJsonFixture::run_stop_with_a_missing_name();
+
+        assert_eq!(harness.stderr(), "");
+    }
+
+    #[test]
+    fn restart_json_keeps_a_warning_in_the_result() {
+        let (harness, _) = ChangeJsonFixture::run_restart_with_a_warning();
+
+        let json = ChangeJsonFixture::envelope(&harness);
+        let results = json["result"]["results"].as_array().unwrap();
+        assert_eq!(results[0]["name"], "alpha");
+        assert!(results[0]["warning"].is_string());
+        assert_eq!(results[1]["name"], "bravo");
+        assert!(results[1]["warning"].is_null());
+    }
+
+    #[test]
+    fn restart_json_exits_zero() {
+        let (_, exit) = ChangeJsonFixture::run_restart_with_a_warning();
+
+        assert_eq!(exit, CliExit::Code(0));
+    }
+
+    #[test]
+    fn restart_json_prints_no_standard_error() {
+        let (harness, _) = ChangeJsonFixture::run_restart_with_a_warning();
+
+        assert_eq!(harness.stderr(), "");
+    }
+
+    #[test]
+    fn stop_repo_json_lists_a_skipped_session() {
+        let session = CommandFixture::session();
+        let harness =
+            CliHarness::new(CommandFixture::live().with_multiplexer(
+                FakeMultiplexer::new().with_live(ServiceFixture::working(&session)),
+            ));
+
+        let exit = harness.run(&["stop", "--repo", "example-project", "--json"]);
+
+        let json = ChangeJsonFixture::envelope(&harness);
+        let skipped = json["result"]["skipped"].as_array().unwrap();
+        assert_eq!(skipped[0]["name"], "fix-auth");
+        assert_eq!(skipped[0]["reason"], "working");
+        assert_eq!(json["result"]["results"].as_array().unwrap().len(), 0);
+        assert_eq!(harness.stderr(), "");
+        assert_eq!(exit, CliExit::Code(0));
     }
 }
