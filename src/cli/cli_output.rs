@@ -1,29 +1,52 @@
 use std::io::{self, Write};
 
+use super::envelope::Envelope;
+use super::reply::Reply;
 use super::{CliExit, EnvelopeError};
+use crate::application::FailureKind;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutputMode {
+    Text,
+    Json,
+}
 
 pub struct CliOutput {
     stdout: Box<dyn Write>,
     stderr: Box<dyn Write>,
     stdout_closed: bool,
+    mode: OutputMode,
 }
 
 impl CliOutput {
     pub(super) const PROGRAM: &'static str = "ringleader";
 
-    pub fn new(stdout: Box<dyn Write>, stderr: Box<dyn Write>) -> Self {
+    pub fn new(stdout: Box<dyn Write>, stderr: Box<dyn Write>, mode: OutputMode) -> Self {
         Self {
             stdout,
             stderr,
             stdout_closed: false,
+            mode,
         }
     }
 
-    pub fn standard() -> Self {
-        Self::new(Box::new(io::stdout()), Box::new(io::stderr()))
+    pub fn standard(mode: OutputMode) -> Self {
+        Self::new(Box::new(io::stdout()), Box::new(io::stderr()), mode)
     }
 
-    pub fn envelope(&mut self, text: Result<String, EnvelopeError>) -> CliExit {
+    pub fn reply(&mut self, reply: &impl Reply) -> CliExit {
+        match self.mode {
+            OutputMode::Text => {
+                for line in reply.lines() {
+                    self.line(&line);
+                }
+                CliExit::Code(0)
+            }
+            OutputMode::Json => self.envelope(Envelope::of(&reply.result()).text()),
+        }
+    }
+
+    fn envelope(&mut self, text: Result<String, EnvelopeError>) -> CliExit {
         match text {
             Ok(text) => {
                 self.line(&text);
@@ -33,6 +56,23 @@ impl CliOutput {
                 self.error(&error.to_string());
                 CliExit::Code(CliExit::FAILURE)
             }
+        }
+    }
+
+    pub fn print_failure(&mut self, kind: FailureKind, message: &str) {
+        match self.mode {
+            OutputMode::Text => self.error(message),
+            OutputMode::Json => match Envelope::error(kind, message).text() {
+                Ok(text) => self.line(&text),
+                Err(error) => self.error(&error.to_string()),
+            },
+        }
+    }
+
+    pub fn print_interrupted_failure(&mut self, message: &str) {
+        match self.mode {
+            OutputMode::Text => self.error(message),
+            OutputMode::Json => {}
         }
     }
 
@@ -63,28 +103,18 @@ impl CliOutput {
 
 #[cfg(test)]
 mod tests {
-    use serde::Serialize;
-
     use super::*;
-    use crate::cli::envelope::Envelope;
-    use crate::test_support::CapturedWriter;
-
-    struct Unserializable;
-
-    impl Serialize for Unserializable {
-        fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: serde::Serializer,
-        {
-            Err(serde::ser::Error::custom("not serializable"))
-        }
-    }
+    use crate::test_support::{CapturedWriter, UnserializableValue};
 
     #[test]
     fn an_envelope_that_renders_writes_the_line_and_exits_zero() {
         let stdout = CapturedWriter::default();
         let stderr = CapturedWriter::default();
-        let mut output = CliOutput::new(Box::new(stdout.clone()), Box::new(stderr.clone()));
+        let mut output = CliOutput::new(
+            Box::new(stdout.clone()),
+            Box::new(stderr.clone()),
+            OutputMode::Text,
+        );
 
         let exit = output.envelope(Ok("line".to_string()));
 
@@ -97,8 +127,12 @@ mod tests {
     fn an_envelope_that_fails_writes_the_message_and_exits_one() {
         let stdout = CapturedWriter::default();
         let stderr = CapturedWriter::default();
-        let mut output = CliOutput::new(Box::new(stdout.clone()), Box::new(stderr.clone()));
-        let error = Envelope::of(&Unserializable).text().unwrap_err();
+        let mut output = CliOutput::new(
+            Box::new(stdout.clone()),
+            Box::new(stderr.clone()),
+            OutputMode::Text,
+        );
+        let error = Envelope::of(&UnserializableValue).text().unwrap_err();
 
         let exit = output.envelope(Err(error));
 
@@ -113,7 +147,11 @@ mod tests {
     #[test]
     fn a_broken_pipe_stops_further_lines_without_panicking() {
         let stderr = CapturedWriter::default();
-        let mut output = CliOutput::new(Box::new(CapturedWriter::broken_pipe()), Box::new(stderr));
+        let mut output = CliOutput::new(
+            Box::new(CapturedWriter::broken_pipe()),
+            Box::new(stderr),
+            OutputMode::Text,
+        );
 
         output.line("first");
         output.line("second");
@@ -127,6 +165,7 @@ mod tests {
         let mut output = CliOutput::new(
             Box::new(CapturedWriter::default()),
             Box::new(stderr.clone()),
+            OutputMode::Text,
         );
 
         output.error("no session named x");

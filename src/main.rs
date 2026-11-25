@@ -65,7 +65,7 @@ use application::{
     AgentPorts, DesktopPorts, DiagnosticPaths, LoadedConfig, RepoPorts, ServiceContext,
     ServiceError, ServicePorts, SessionService, StatePorts, TmuxPorts,
 };
-use cli::{Cli, CliExit, CliInput, CliOutput, CliSession, EntryPoints, EnvelopeError};
+use cli::{Cli, CliExit, CliInput, CliOutput, CliSession, EntryPoints, OutputMode, VersionReply};
 use ui::theme::ColorMode;
 use ui::{
     App, CrosstermInput, CrosstermScreenMode, EventLoop, FinderPopupError, MenuPopupError,
@@ -157,7 +157,7 @@ impl CompositionRoot {
     ) -> Result<ExitCode, ExitCode> {
         self.handoff().delete_stale();
         let mut session = CliSession::new(
-            CliOutput::standard(),
+            CliOutput::standard(cli.output_mode()),
             CliInput::standard(),
             Box::new(FilesystemPromptFiles),
             Box::new(Self::cli_signals(cli)),
@@ -314,7 +314,7 @@ impl CompositionRoot {
 
     fn wait_for_startup_input(app: App, signals: SignalHookInterrupts) {
         let mut session = CliSession::new(
-            CliOutput::standard(),
+            CliOutput::standard(OutputMode::Text),
             CliInput::standard(),
             Box::new(FilesystemPromptFiles),
             Box::new(signals),
@@ -588,7 +588,7 @@ impl CompositionRoot {
 
     fn refuse(error: &ServiceError) -> ExitCode {
         let _ = writeln!(io::stderr(), "ringleader: {error}");
-        ExitCode::from(CliExit::error_code(error))
+        ExitCode::from(CliExit::exit_code(error.failure_kind()))
     }
 
     fn fail(message: &str) -> ExitCode {
@@ -602,9 +602,9 @@ impl EntryPoints for CompositionRoot {
         self.exec_agent(handoff)
     }
 
-    fn print_version(&self, line: Result<String, EnvelopeError>) -> ExitCode {
-        let mut output = CliOutput::standard();
-        ExitCode::from(output.envelope(line).code())
+    fn print_version(&self, reply: &VersionReply, mode: OutputMode) -> ExitCode {
+        let mut output = CliOutput::standard(mode);
+        ExitCode::from(output.reply(reply).code())
     }
 
     fn socket_problem(&self) -> Option<String> {

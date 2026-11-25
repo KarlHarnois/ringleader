@@ -7,30 +7,35 @@ mod entry_points;
 mod envelope;
 mod list_report;
 mod prompt_argument;
+mod reply;
 mod repo_argument;
 mod repo_commands;
 mod session_commands;
+mod version_reply;
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand};
+use serde::Serialize;
 
 pub use cli_exit::CliExit;
 pub use cli_input::CliInput;
-pub use cli_output::CliOutput;
+pub use cli_output::{CliOutput, OutputMode};
 pub use cli_session::CliSession;
 use cli_session::CommandStop;
 pub use entry_points::EntryPoints;
-use envelope::Envelope;
 pub use envelope::EnvelopeError;
 use prompt_argument::PromptArgument;
+pub use reply::Reply;
 use repo_commands::RepoCommands;
 use session_commands::SessionCommands;
+pub use version_reply::VersionReply;
 
+use crate::application::diagnostics::doctor_report::DoctorReport;
 use crate::application::ports::{Lock, LockError};
-use crate::application::{CorruptRegistry, SessionService};
+use crate::application::{CorruptRegistry, FailureKind, SessionService};
 use crate::domain::BuildVersion;
 
 #[derive(Debug, Parser)]
@@ -126,8 +131,15 @@ struct JsonArgs {
 
 type ListArgs = JsonArgs;
 
-#[derive(serde::Serialize)]
-struct VersionResult {}
+impl Reply for DoctorReport {
+    fn lines(&self) -> Vec<String> {
+        DoctorReport::lines(self)
+    }
+
+    fn result(&self) -> impl Serialize {
+        DoctorReport::findings(self)
+    }
+}
 
 #[derive(Debug, Args)]
 struct NewArgs {
@@ -243,8 +255,8 @@ impl Cli {
         if let Some(handoff) = self.exec_agent_handoff() {
             return entry_points.launch_agent(handoff);
         }
-        if let Some(args) = self.version_args() {
-            return entry_points.print_version(Self::version_line(args));
+        if self.version_args().is_some() {
+            return entry_points.print_version(&Self::version_reply(), self.output_mode());
         }
         if let Some(problem) = entry_points.socket_problem()
             && !self.is_doctor()
@@ -285,15 +297,12 @@ impl Cli {
         }
     }
 
-    fn version_line(args: &JsonArgs) -> Result<String, EnvelopeError> {
-        match args.json {
-            true => Envelope::of(&VersionResult {}).text(),
-            false => Ok(format!(
-                "{} {}",
-                CliOutput::PROGRAM,
-                BuildVersion::CURRENT.text()
-            )),
-        }
+    fn version_reply() -> VersionReply {
+        VersionReply::new(format!(
+            "{} {}",
+            CliOutput::PROGRAM,
+            BuildVersion::CURRENT.text()
+        ))
     }
 
     fn finder_client(&self) -> Option<&str> {
@@ -316,6 +325,15 @@ impl Cli {
 
     fn is_doctor(&self) -> bool {
         matches!(self.command, Some(CliCommand::Doctor(_)))
+    }
+
+    pub fn output_mode(&self) -> OutputMode {
+        match &self.command {
+            Some(CliCommand::List(args)) if args.json => OutputMode::Json,
+            Some(CliCommand::Doctor(args)) if args.json => OutputMode::Json,
+            Some(CliCommand::Version(args)) if args.json => OutputMode::Json,
+            _ => OutputMode::Text,
+        }
     }
 
     pub fn is_mutating(&self) -> bool {
@@ -344,8 +362,10 @@ impl Cli {
                 Ok(())
             }
             Err(error) => {
-                session.output().error(&error.to_string());
-                Err(CliExit::Code(CliExit::FAILURE))
+                session
+                    .output()
+                    .print_failure(FailureKind::Failed, &error.to_string());
+                Err(CliExit::Code(CliExit::exit_code(FailureKind::Failed)))
             }
         }
     }
@@ -388,8 +408,9 @@ impl Cli {
         if let Err(stop) = session.stop_if_signaled() {
             return session.finish(Err(stop));
         }
-        session.output().error(&error.to_string());
-        CliExit::Code(CliExit::lock_error_code(error))
+        let kind = error.failure_kind();
+        session.output().print_failure(kind, &error.to_string());
+        CliExit::Code(CliExit::exit_code(kind))
     }
 
     pub fn execute(
@@ -398,12 +419,14 @@ impl Cli {
         session: &mut CliSession,
         lock: &mut dyn Lock,
     ) -> CliExit {
-        if let Some(CliCommand::Doctor(args)) = &self.command {
-            return CliExit::Code(Self::doctor(service, session, args));
+        if let Some(CliCommand::Doctor(_)) = &self.command {
+            return CliExit::Code(Self::doctor(service, session));
         }
         if let Some(error) = service.read_only_reason() {
-            session.output().error(&error.to_string());
-            return CliExit::Code(CliExit::FAILURE);
+            session
+                .output()
+                .print_failure(FailureKind::Failed, &error.to_string());
+            return CliExit::Code(CliExit::exit_code(FailureKind::Failed));
         }
         Self::restore_server_socket(service, session);
         let recovery = if self.is_mutating() {
@@ -415,8 +438,9 @@ impl Cli {
             Ok(Some(warning)) => session.output().error(&warning),
             Ok(None) => {}
             Err(error) => {
-                session.output().error(&error.to_string());
-                return CliExit::Code(CliExit::FAILURE);
+                let kind = error.failure_kind();
+                session.output().print_failure(kind, &error.to_string());
+                return CliExit::Code(CliExit::exit_code(kind));
             }
         }
         let result = self.dispatch(service, session);
@@ -443,25 +467,11 @@ impl Cli {
         }
     }
 
-    fn doctor(service: &SessionService, session: &mut CliSession, args: &JsonArgs) -> u8 {
+    fn doctor(service: &SessionService, session: &mut CliSession) -> u8 {
         let report = service.doctor();
-        if args.json {
-            let code = session
-                .output()
-                .envelope(Envelope::of(&report.findings()).text())
-                .code();
-            if code != 0 {
-                return code;
-            }
-        } else {
-            Self::print_lines(report.lines(), session);
-        }
-        u8::from(report.has_problems())
-    }
-
-    fn print_lines(lines: impl IntoIterator<Item = String>, session: &mut CliSession) {
-        for line in lines {
-            session.output().line(&line);
+        match session.output().reply(&report) {
+            CliExit::Code(0) => u8::from(report.has_problems()),
+            exit => exit.code(),
         }
     }
 
@@ -485,7 +495,7 @@ impl Cli {
     ) -> Result<u8, CommandStop> {
         let mut commands = SessionCommands::new(service, session);
         match command {
-            CliCommand::List(args) => commands.list(args),
+            CliCommand::List(_) => commands.list(),
             CliCommand::New(args) => commands.create(args),
             CliCommand::Delete(args) => commands.delete(args),
             CliCommand::Attach(args) => commands.attach(&args.name),
@@ -609,11 +619,16 @@ mod tests {
             self.record(format!("launch_agent {}", handoff.display()))
         }
 
-        fn print_version(&self, line: Result<String, EnvelopeError>) -> ExitCode {
-            match line {
-                Ok(line) => self.record(format!("print_version {line}")),
-                Err(error) => self.record(format!("print_version error {error}")),
-            }
+        fn print_version(&self, reply: &VersionReply, mode: OutputMode) -> ExitCode {
+            let stdout = CapturedWriter::default();
+            let stderr = CapturedWriter::default();
+            let mut output = CliOutput::new(Box::new(stdout.clone()), Box::new(stderr), mode);
+            let exit = output.reply(reply);
+            self.record(format!(
+                "print_version {} {}",
+                exit.code(),
+                stdout.text().trim_end()
+            ))
         }
 
         fn socket_problem(&self) -> Option<String> {
@@ -1088,7 +1103,7 @@ mod tests {
         assert_eq!(
             entry_points.entered(),
             [format!(
-                "print_version ringleader {}",
+                "print_version 0 ringleader {}",
                 BuildVersion::CURRENT.text()
             )]
         );
@@ -1101,7 +1116,7 @@ mod tests {
         entry_points.enter(&["version"]);
 
         let recorded = entry_points.entered().pop().unwrap();
-        let line = recorded.strip_prefix("print_version ").unwrap();
+        let line = recorded.strip_prefix("print_version 0 ").unwrap();
         let flag = Cli::try_parse_from(["ringleader", "--version"]).unwrap_err();
         assert_eq!(flag.to_string().trim_end(), line);
     }
@@ -1116,7 +1131,7 @@ mod tests {
             .replace("<build>", BuildVersion::CURRENT.text());
         assert_eq!(
             entry_points.entered(),
-            [format!("print_version {}", expected.trim_end())]
+            [format!("print_version 0 {}", expected.trim_end())]
         );
     }
 
@@ -1191,7 +1206,7 @@ mod tests {
         .into_iter()
         .map(str::to_string)
         .chain([format!(
-            "print_version ringleader {}",
+            "print_version 0 ringleader {}",
             BuildVersion::CURRENT.text()
         )])
         .collect::<Vec<_>>();

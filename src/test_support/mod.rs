@@ -14,6 +14,7 @@ pub mod recording_programs;
 pub mod service_fixture;
 pub mod tmux_test_server;
 pub mod ui_harness;
+pub mod unserializable_value;
 
 pub use call_hooks::CallHooks;
 pub use cli_harness::{CapturedWriter, CliHarness};
@@ -51,3 +52,4 @@ pub use recording_programs::RecordingPrograms;
 pub use service_fixture::ServiceFixture;
 pub use tmux_test_server::TmuxTestServer;
 pub use ui_harness::{FixtureBackend, RecordingShells, ScriptedInput, UiHarness};
+pub use unserializable_value::UnserializableValue;

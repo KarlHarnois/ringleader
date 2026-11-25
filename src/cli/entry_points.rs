@@ -1,11 +1,11 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use crate::cli::{Cli, EnvelopeError};
+use crate::cli::{Cli, OutputMode, VersionReply};
 
 pub trait EntryPoints {
     fn launch_agent(&self, handoff: &Path) -> ExitCode;
-    fn print_version(&self, line: Result<String, EnvelopeError>) -> ExitCode;
+    fn print_version(&self, reply: &VersionReply, mode: OutputMode) -> ExitCode;
     fn socket_problem(&self) -> Option<String>;
     fn refuse_to_start(&self, problem: &str) -> ExitCode;
     fn find_session(&self, cli: &Cli, client: &str) -> ExitCode;

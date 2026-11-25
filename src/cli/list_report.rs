@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use serde::Serialize;
 
+use super::Reply;
 use crate::domain::{DiffStat, SessionSummary};
 
 pub struct ListReport<'a> {
@@ -14,16 +15,6 @@ impl<'a> ListReport<'a> {
 
     pub fn new(rows: &'a [SessionSummary], diffs: &'a HashMap<String, DiffStat>) -> Self {
         Self { rows, diffs }
-    }
-
-    pub fn lines(&self) -> Vec<String> {
-        self.rows.iter().map(|row| self.line(row)).collect()
-    }
-
-    pub fn result(&self) -> impl Serialize + '_ {
-        ListResult {
-            sessions: self.rows.iter().map(|row| self.entry(row)).collect(),
-        }
     }
 
     fn line(&self, row: &SessionSummary) -> String {
@@ -63,6 +54,18 @@ impl<'a> ListReport<'a> {
     fn diff(&self, row: &SessionSummary) -> Option<DiffStat> {
         row.session()?;
         self.diffs.get(row.name()).copied()
+    }
+}
+
+impl Reply for ListReport<'_> {
+    fn lines(&self) -> Vec<String> {
+        self.rows.iter().map(|row| self.line(row)).collect()
+    }
+
+    fn result(&self) -> impl Serialize {
+        ListResult {
+            sessions: self.rows.iter().map(|row| self.entry(row)).collect(),
+        }
     }
 }
 
