@@ -1232,8 +1232,8 @@ mod tests {
     #[test]
     fn returning_from_an_attach_fits_the_agent_again_because_the_client_resized_it() {
         let fixture = AppFixture::two_waiting_sessions();
-        let start = Instant::now();
         let mut app = AppFixture::started(&fixture, 100, 28);
+        let start = Instant::now();
         let fits_before = AppFixture::fits(&fixture).len();
 
         app.attach("dark-mode");

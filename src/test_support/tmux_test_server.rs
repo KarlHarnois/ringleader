@@ -43,7 +43,7 @@ impl TmuxTestServer {
     const SETTLE_LIMIT: Duration = Duration::from_secs(2);
     const POLL_INTERVAL: Duration = Duration::from_millis(20);
     const OUTER_SESSION: &'static str = "outer";
-    const WINDOW_SIZES_FILE: &'static str = "window-sizes";
+    const WINDOW_RESIZES_FILE: &'static str = "window-resizes";
 
     pub fn new() -> Self {
         Self::with_config(&Self::default_config())
@@ -336,21 +336,36 @@ impl TmuxTestServer {
         self.text(&args);
     }
 
-    pub fn record_window_sizes(&self) {
-        let sizes = self.directory().join(Self::WINDOW_SIZES_FILE);
-        let record = format!(
-            "run-shell \"echo #{{window_width}}x#{{window_height}} >> {}\"",
-            sizes.display()
-        );
+    pub fn record_window_resizes(&self) {
+        let resizes = self.directory().join(Self::WINDOW_RESIZES_FILE);
+        let record = format!("run-shell \"echo resize >> {}\"", resizes.display());
         self.text(&["set-hook", "-g", "window-resized", &record]);
     }
 
-    pub fn recorded_window_sizes(&self) -> Vec<String> {
-        std::fs::read_to_string(self.directory().join(Self::WINDOW_SIZES_FILE))
+    pub fn window_resize_count(&self) -> usize {
+        std::fs::read_to_string(self.directory().join(Self::WINDOW_RESIZES_FILE))
             .unwrap_or_default()
             .lines()
-            .map(str::to_string)
-            .collect()
+            .count()
+    }
+
+    pub fn window_size(&self, target: &str) -> String {
+        self.text(&[
+            "display-message",
+            "-p",
+            "-t",
+            target,
+            "#{window_width}x#{window_height}",
+        ])
+    }
+
+    pub fn window_state(&self, target: &str) -> (usize, String) {
+        (self.window_resize_count(), self.window_size(target))
+    }
+
+    pub fn wait_for_window(&self, target: &str, resizes: usize, size: &str) -> (usize, String) {
+        self.wait_for(|| self.window_state(target) == (resizes, size.to_string()));
+        self.window_state(target)
     }
 
     pub fn wait_for(&self, condition: impl Fn() -> bool) -> bool {
