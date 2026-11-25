@@ -1,9 +1,11 @@
 mod cli_exit;
+mod cli_input;
 mod cli_output;
 mod cli_session;
 mod delete_report;
 mod entry_points;
 mod list_report;
+mod prompt_argument;
 mod repo_argument;
 mod repo_commands;
 mod session_commands;
@@ -15,10 +17,12 @@ use std::process::ExitCode;
 use clap::{Args, Parser, Subcommand};
 
 pub use cli_exit::CliExit;
+pub use cli_input::CliInput;
 pub use cli_output::CliOutput;
 pub use cli_session::CliSession;
 use cli_session::CommandStop;
 pub use entry_points::EntryPoints;
+use prompt_argument::PromptArgument;
 use repo_commands::RepoCommands;
 use session_commands::SessionCommands;
 
@@ -131,8 +135,10 @@ struct NewArgs {
     main_checkout: bool,
     #[arg(long)]
     plan: bool,
-    #[arg(long)]
+    #[arg(long, conflicts_with = "prompt_file")]
     prompt: Option<String>,
+    #[arg(long, value_name = "PATH|-")]
+    prompt_file: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -157,10 +163,18 @@ struct NamesArgs {
 }
 
 #[derive(Debug, Args)]
+#[command(group(
+    clap::ArgGroup::new("prompt_source")
+        .required(true)
+        .multiple(false)
+        .args(["prompt", "prompt_file"])
+))]
 struct SendArgs {
     name: String,
     #[arg(allow_hyphen_values = true)]
-    prompt: String,
+    prompt: Option<String>,
+    #[arg(long, value_name = "PATH|-")]
+    prompt_file: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -289,6 +303,36 @@ impl Cli {
                     }
             )
         )
+    }
+
+    pub fn read_prompt(&self, session: &mut CliSession) -> Result<(), CliExit> {
+        let Some(argument) = self.prompt_argument() else {
+            return Ok(());
+        };
+        match session.resolve_prompt(&argument) {
+            Ok(prompt) => {
+                session.store_prompt(prompt);
+                Ok(())
+            }
+            Err(error) => {
+                session.output().error(&error.to_string());
+                Err(CliExit::Code(CliExit::FAILURE))
+            }
+        }
+    }
+
+    fn prompt_argument(&self) -> Option<PromptArgument<'_>> {
+        match &self.command {
+            Some(CliCommand::New(args)) => Some(PromptArgument::new(
+                args.prompt.as_deref(),
+                args.prompt_file.as_deref(),
+            )),
+            Some(CliCommand::Send(args)) => Some(PromptArgument::new(
+                args.prompt.as_deref(),
+                args.prompt_file.as_deref(),
+            )),
+            _ => None,
+        }
     }
 
     pub fn take_write_lock(
@@ -865,6 +909,48 @@ mod tests {
     #[test]
     fn stop_without_a_name_or_a_repo_exits_one() {
         assert_eq!(ParseFixture::exit_code(&["ringleader", "stop"]), 1);
+    }
+
+    #[test]
+    fn new_with_a_prompt_and_a_prompt_file_exits_one() {
+        assert_eq!(
+            ParseFixture::exit_code(&[
+                "ringleader",
+                "new",
+                "--name",
+                "fix-auth",
+                "--repo",
+                "example-project",
+                "--prompt",
+                "go",
+                "--prompt-file",
+                "prompt.txt",
+            ]),
+            1
+        );
+    }
+
+    #[test]
+    fn send_with_a_prompt_and_a_prompt_file_exits_one() {
+        assert_eq!(
+            ParseFixture::exit_code(&[
+                "ringleader",
+                "send",
+                "fix-auth",
+                "go",
+                "--prompt-file",
+                "prompt.txt",
+            ]),
+            1
+        );
+    }
+
+    #[test]
+    fn send_without_a_prompt_or_a_prompt_file_exits_one() {
+        assert_eq!(
+            ParseFixture::exit_code(&["ringleader", "send", "fix-auth"]),
+            1
+        );
     }
 
     #[test]

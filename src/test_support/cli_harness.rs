@@ -4,13 +4,15 @@ use std::sync::{Arc, Mutex};
 
 use clap::Parser;
 
-use super::{FakeInterrupts, FakeLock, ServiceFixture};
-use crate::cli::{Cli, CliExit, CliOutput, CliSession};
+use super::{FakeCliInput, FakeInterrupts, FakeLock, FakePromptFiles, ServiceFixture};
+use crate::cli::{Cli, CliExit, CliInput, CliOutput, CliSession};
 
 pub struct CliHarness {
     fixture: ServiceFixture,
     stdout: CapturedWriter,
     stderr: CapturedWriter,
+    input: FakeCliInput,
+    prompt_files: FakePromptFiles,
     signals: FakeInterrupts,
     lock: RefCell<FakeLock>,
 }
@@ -21,8 +23,21 @@ impl CliHarness {
             fixture,
             stdout: CapturedWriter::default(),
             stderr: CapturedWriter::default(),
+            input: FakeCliInput::default(),
+            prompt_files: FakePromptFiles::default(),
             signals: FakeInterrupts::default(),
             lock: RefCell::new(FakeLock::free()),
+        }
+    }
+
+    pub fn with_input(self, input: FakeCliInput) -> Self {
+        Self { input, ..self }
+    }
+
+    pub fn with_prompt_files(self, prompt_files: FakePromptFiles) -> Self {
+        Self {
+            prompt_files,
+            ..self
         }
     }
 
@@ -50,7 +65,15 @@ impl CliHarness {
             Cli::try_parse_from(std::iter::once("ringleader").chain(arguments.iter().copied()))
                 .expect("the arguments parse");
         let output = CliOutput::new(Box::new(self.stdout.clone()), Box::new(self.stderr.clone()));
-        let mut session = CliSession::new(output, Box::new(self.signals.clone()));
+        let mut session = CliSession::new(
+            output,
+            CliInput::new(Box::new(self.input.clone())),
+            Box::new(self.prompt_files.clone()),
+            Box::new(self.signals.clone()),
+        );
+        if let Err(exit) = cli.read_prompt(&mut session) {
+            return exit;
+        }
         if let Err(exit) = cli.take_write_lock(&mut *self.lock.borrow_mut(), &mut session) {
             return exit;
         }

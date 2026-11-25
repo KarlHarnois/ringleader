@@ -3,6 +3,7 @@ pub mod directory_repo_scanner;
 pub mod directory_scratch_space;
 pub mod durable_file;
 pub mod file_lock;
+pub mod filesystem_prompt_files;
 pub mod fnv_hash;
 #[cfg(target_os = "macos")]
 pub mod getfsstat_mounts;
