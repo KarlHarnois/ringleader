@@ -7,7 +7,7 @@ use crate::application::ports::{PromptFileError, PromptFiles};
 pub struct FilesystemPromptFiles;
 
 impl PromptFiles for FilesystemPromptFiles {
-    fn text(&self, path: &Path) -> Result<String, PromptFileError> {
+    fn read_text(&self, path: &Path) -> Result<String, PromptFileError> {
         match fs::read(path) {
             Ok(bytes) => String::from_utf8(bytes).map_err(|_| PromptFileError::NotText),
             Err(error) if error.kind() == io::ErrorKind::NotFound => Err(PromptFileError::Missing),
@@ -55,7 +55,7 @@ mod tests {
         );
 
         assert_eq!(
-            fixture.files().text(&path),
+            fixture.files().read_text(&path),
             Ok("fix the login\n\nand the quotes \"x\"".to_string())
         );
     }
@@ -65,7 +65,7 @@ mod tests {
         let fixture = PromptFilesFixture::new();
 
         assert_eq!(
-            fixture.files().text(&fixture.path("absent.txt")),
+            fixture.files().read_text(&fixture.path("absent.txt")),
             Err(PromptFileError::Missing)
         );
     }
@@ -77,7 +77,7 @@ mod tests {
         fs::create_dir(&path).unwrap();
 
         assert_eq!(
-            fixture.files().text(&path),
+            fixture.files().read_text(&path),
             Err(PromptFileError::Unreadable)
         );
     }
@@ -87,6 +87,9 @@ mod tests {
         let fixture = PromptFilesFixture::new();
         let path = fixture.writing("prompt.bin", &[0xff, 0xfe, 0x00]);
 
-        assert_eq!(fixture.files().text(&path), Err(PromptFileError::NotText));
+        assert_eq!(
+            fixture.files().read_text(&path),
+            Err(PromptFileError::NotText)
+        );
     }
 }

@@ -3,12 +3,14 @@ use std::io;
 use std::path::Path;
 
 use super::CliInput;
+use super::prompt_text::PromptText;
 use crate::application::ports::{PromptFileError, PromptFiles};
-use crate::domain::Prompt;
 
-pub struct PromptArgument<'a> {
-    text: Option<&'a str>,
-    file: Option<&'a str>,
+pub enum PromptArgument<'a> {
+    Text(&'a str),
+    File(&'a Path),
+    StandardInput,
+    Absent,
 }
 
 impl<'a> PromptArgument<'a> {
@@ -17,48 +19,47 @@ impl<'a> PromptArgument<'a> {
     const PREFIX: &'static str = "--prompt-file";
 
     pub fn new(text: Option<&'a str>, file: Option<&'a str>) -> Self {
-        Self { text, file }
+        match (text, file) {
+            (Some(text), _) => Self::Text(text),
+            (None, Some(Self::STANDARD_INPUT_FLAG)) => Self::StandardInput,
+            (None, Some(path)) => Self::File(Path::new(path)),
+            (None, None) => Self::Absent,
+        }
     }
 
-    pub fn resolve(
+    pub fn read(
         &self,
         files: &dyn PromptFiles,
         input: &mut CliInput,
-    ) -> Result<String, PromptArgumentError> {
-        match (self.text, self.file) {
-            (Some(text), _) => Ok(text.to_string()),
-            (None, Some(Self::STANDARD_INPUT_FLAG)) => {
-                let text = input.read_text().map_err(Self::input_error)?;
-                Self::require_prompt(text, Self::STANDARD_INPUT)
+    ) -> Result<Option<PromptText>, PromptArgumentError> {
+        match self {
+            Self::Text(text) => Ok(Some(PromptText::new((*text).to_string()))),
+            Self::File(path) => {
+                Self::require_prompt(Self::read_file(files, path)?, &path.to_string_lossy())
+                    .map(Some)
             }
-            (None, Some(path)) => {
-                let text = files
-                    .text(Path::new(path))
-                    .map_err(|error| Self::file_error(path, error))?;
-                Self::require_prompt(text, path)
+            Self::StandardInput => {
+                Self::require_prompt(Self::read_standard_input(input)?, Self::STANDARD_INPUT)
+                    .map(Some)
             }
-            (None, None) => Ok(String::new()),
+            Self::Absent => Ok(None),
         }
     }
 
-    fn require_prompt(text: String, source: &str) -> Result<String, PromptArgumentError> {
-        if Prompt::of(&text).is_blank() {
-            return Err(PromptArgumentError::NoPrompt {
-                source: source.to_string(),
-            });
-        }
-        Ok(Self::without_trailing_line_ends(&text).to_string())
+    fn read_file(files: &dyn PromptFiles, path: &Path) -> Result<String, PromptArgumentError> {
+        files
+            .read_text(path)
+            .map_err(|error| Self::file_error(path, error))
     }
 
-    fn without_trailing_line_ends(text: &str) -> &str {
-        let mut end = text.len();
-        while let Some(without_newline) = text[..end].strip_suffix('\n') {
-            end = without_newline.len();
-            if let Some(without_carriage_return) = text[..end].strip_suffix('\r') {
-                end = without_carriage_return.len();
-            }
-        }
-        &text[..end]
+    fn read_standard_input(input: &mut CliInput) -> Result<String, PromptArgumentError> {
+        input.read_text().map_err(Self::input_error)
+    }
+
+    fn require_prompt(text: String, source: &str) -> Result<PromptText, PromptArgumentError> {
+        PromptText::parse(text).ok_or_else(|| PromptArgumentError::NoPrompt {
+            source: source.to_string(),
+        })
     }
 
     fn input_error(error: io::Error) -> PromptArgumentError {
@@ -70,8 +71,8 @@ impl<'a> PromptArgument<'a> {
         }
     }
 
-    fn file_error(path: &str, error: PromptFileError) -> PromptArgumentError {
-        let source = path.to_string();
+    fn file_error(path: &Path, error: PromptFileError) -> PromptArgumentError {
+        let source = path.to_string_lossy().into_owned();
         match error {
             PromptFileError::Missing => PromptArgumentError::Missing { source },
             PromptFileError::Unreadable => PromptArgumentError::Unreadable { source },

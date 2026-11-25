@@ -1,4 +1,5 @@
 use super::prompt_argument::{PromptArgument, PromptArgumentError};
+use super::prompt_text::PromptText;
 use super::{CliExit, CliInput, CliOutput, EnvelopeError};
 use crate::application::ports::{Interrupts, PromptFiles};
 use crate::application::{FailureKind, Pending, ServiceError, SessionService};
@@ -7,7 +8,6 @@ pub struct CliSession {
     output: CliOutput,
     input: CliInput,
     prompt_files: Box<dyn PromptFiles>,
-    prompt: Option<String>,
     signals: Box<dyn Interrupts>,
 }
 
@@ -24,7 +24,6 @@ impl CliSession {
             output,
             input,
             prompt_files,
-            prompt: None,
             signals,
         }
     }
@@ -33,19 +32,11 @@ impl CliSession {
         &mut self.output
     }
 
-    pub fn resolve_prompt(
+    pub fn read_prompt(
         &mut self,
         argument: &PromptArgument,
-    ) -> Result<String, PromptArgumentError> {
-        argument.resolve(self.prompt_files.as_ref(), &mut self.input)
-    }
-
-    pub fn store_prompt(&mut self, prompt: String) {
-        self.prompt = Some(prompt);
-    }
-
-    pub fn prompt(&self) -> &str {
-        self.prompt.as_deref().unwrap_or_default()
+    ) -> Result<Option<PromptText>, PromptArgumentError> {
+        argument.read(self.prompt_files.as_ref(), &mut self.input)
     }
 
     pub fn stop_if_signaled(&self) -> Result<(), CommandStop> {

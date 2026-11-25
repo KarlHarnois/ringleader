@@ -67,7 +67,7 @@ use application::{
 };
 use cli::{
     Cli, CliExit, CliInput, CliOutput, CliSession, EntryPoints, EnvelopeError, OutputMode,
-    VersionReply,
+    PromptText, VersionReply,
 };
 use ui::theme::ColorMode;
 use ui::{
@@ -167,11 +167,15 @@ impl CompositionRoot {
         );
         Self::report_log_problem(log, &mut session);
         let mut lock = FileLock::new(&state_directory.join("lock"));
-        cli.read_prompt(&mut session)
-            .and_then(|()| cli.take_write_lock(&mut lock, &mut session))
+        let prompt = cli
+            .read_prompt(&mut session)
+            .and_then(|prompt| {
+                cli.take_write_lock(&mut lock, &mut session)
+                    .map(|()| prompt)
+            })
             .map_err(Self::exit_with)?;
         Self::truncate_log_of_mutating(cli, log);
-        Ok(self.execute_cli(cli, &mut session, &mut lock))
+        Ok(self.execute_cli(cli, &mut session, &mut lock, prompt))
     }
 
     fn cli_signals(cli: &Cli) -> SignalHookInterrupts {
@@ -195,12 +199,18 @@ impl CompositionRoot {
         }
     }
 
-    fn execute_cli(&self, cli: &Cli, session: &mut CliSession, lock: &mut FileLock) -> ExitCode {
+    fn execute_cli(
+        &self,
+        cli: &Cli,
+        session: &mut CliSession,
+        lock: &mut FileLock,
+        prompt: Option<PromptText>,
+    ) -> ExitCode {
         let config_source = self.config_source(cli);
         Self::warn_of_mutating_template_problem(cli, &config_source, session);
         let loaded = Self::load(&config_source);
         let mut service = self.service(config_source, loaded);
-        Self::exit_with(cli.execute(&mut service, session, lock))
+        Self::exit_with(cli.execute(&mut service, session, lock, prompt))
     }
 
     fn warn_of_mutating_template_problem(

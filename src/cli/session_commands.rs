@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use super::create_reply::CreateReply;
 use super::delete_reply::DeleteReply;
 use super::list_report::ListReport;
+use super::prompt_text::PromptText;
 use super::rename_reply::RenameReply;
 use super::repo_argument::RepoArgument;
 use super::restart_reply::RestartReply;
@@ -48,10 +49,14 @@ impl<'a> SessionCommands<'a> {
         Ok(0)
     }
 
-    pub fn create(&mut self, args: &NewArgs) -> Result<u8, CommandStop> {
+    pub fn create(
+        &mut self,
+        args: &NewArgs,
+        prompt: Option<PromptText>,
+    ) -> Result<u8, CommandStop> {
         self.service.observe_and_record()?;
         let repo = RepoArgument::new(&args.repo).resolve(self.service, self.session)?;
-        let request = Self::create_request(args, repo, self.session.prompt());
+        let request = Self::create_request(args, repo, prompt);
         self.session.stop_if_signaled()?;
         let outcome = self.service.create_session(&request)?;
         let reply = CreateReply::new(outcome);
@@ -59,11 +64,13 @@ impl<'a> SessionCommands<'a> {
         Ok(0)
     }
 
-    fn create_request(args: &NewArgs, repo: Repo, prompt: &str) -> CreateRequest {
+    fn create_request(args: &NewArgs, repo: Repo, prompt: Option<PromptText>) -> CreateRequest {
         let mut request = CreateRequest::new(&args.name, repo)
             .with_checkout(Self::checkout(args))
-            .with_mode(Self::mode(args))
-            .with_prompt(prompt);
+            .with_mode(Self::mode(args));
+        if let Some(prompt) = prompt {
+            request = request.with_prompt(prompt.text());
+        }
         if let Some(agent) = &args.agent {
             request = request.with_agent(agent);
         }
@@ -156,9 +163,9 @@ impl<'a> SessionCommands<'a> {
             .flatten()
     }
 
-    pub fn send(&mut self, args: &SendArgs) -> Result<u8, CommandStop> {
-        self.service
-            .send_prompt(&args.name, self.session.prompt())?;
+    pub fn send(&mut self, args: &SendArgs, prompt: Option<PromptText>) -> Result<u8, CommandStop> {
+        let text = prompt.as_ref().map(PromptText::text).unwrap_or_default();
+        self.service.send_prompt(&args.name, text)?;
         let reply = SendReply::new(&args.name);
         self.session.output().reply(&reply)?;
         Ok(0)
@@ -1593,14 +1600,25 @@ mod tests {
     }
 
     #[test]
-    fn a_prompt_file_keeps_leading_spaces_and_drops_only_its_trailing_line_end() {
+    fn a_prompt_file_keeps_its_leading_spaces() {
         let harness = PromptFixture::live_with_prompt_files(
-            FakePromptFiles::default().holding(PromptFixture::PATH, "  fix the login\n"),
+            FakePromptFiles::default().holding(PromptFixture::PATH, "  fix the login"),
         );
 
         harness.run(&["send", "fix-auth", "--prompt-file", PromptFixture::PATH]);
 
         assert_eq!(PromptFixture::submitted(&harness), ["  fix the login"]);
+    }
+
+    #[test]
+    fn a_prompt_file_drops_its_trailing_line_end() {
+        let harness = PromptFixture::live_with_prompt_files(
+            FakePromptFiles::default().holding(PromptFixture::PATH, "fix the login\n"),
+        );
+
+        harness.run(&["send", "fix-auth", "--prompt-file", PromptFixture::PATH]);
+
+        assert_eq!(PromptFixture::submitted(&harness), ["fix the login"]);
     }
 
     #[test]
