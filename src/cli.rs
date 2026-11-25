@@ -477,7 +477,10 @@ impl Cli {
         lock: &mut dyn Lock,
     ) -> CliExit {
         if let Some(CliCommand::Doctor(_)) = &self.command {
-            return CliExit::Code(Self::doctor(service, session));
+            return match Self::doctor(service, session) {
+                Ok(code) => CliExit::Code(code),
+                Err(stop) => session.finish(Err(stop)),
+            };
         }
         if let Some(error) = service.read_only_reason() {
             session
@@ -524,12 +527,10 @@ impl Cli {
         }
     }
 
-    fn doctor(service: &SessionService, session: &mut CliSession) -> u8 {
+    fn doctor(service: &SessionService, session: &mut CliSession) -> Result<u8, CommandStop> {
         let report = service.doctor();
-        match session.output().reply(&report) {
-            CliExit::Code(0) => u8::from(report.has_problems()),
-            exit => exit.code(),
-        }
+        session.output().reply(&report)?;
+        Ok(u8::from(report.has_problems()))
     }
 
     fn dispatch(
@@ -681,12 +682,8 @@ mod tests {
             let stdout = CapturedWriter::default();
             let stderr = CapturedWriter::default();
             let mut output = CliOutput::new(Box::new(stdout.clone()), Box::new(stderr), mode);
-            let exit = output.reply(reply);
-            self.record(format!(
-                "print_version {} {}",
-                exit.code(),
-                stdout.text().trim_end()
-            ))
+            let code = output.reply(reply).map_or(CliExit::FAILURE, |()| 0);
+            self.record(format!("print_version {code} {}", stdout.text().trim_end()))
         }
 
         fn socket_problem(&self) -> Option<String> {
@@ -1386,6 +1383,17 @@ mod tests {
             .replace("<build>", BuildVersion::CURRENT.text());
         assert_eq!(harness.stdout(), expected);
         assert_eq!(exit, CliExit::Code(0));
+    }
+
+    #[test]
+    fn a_doctor_that_succeeds_despite_a_signal_exits_with_its_own_code() {
+        let harness = CliHarness::new(DoctorJsonFixture::healthy());
+        harness.signals().raise(SIGINT);
+
+        let exit = harness.run(&["doctor"]);
+
+        assert_eq!(exit, CliExit::Code(0));
+        assert!(!harness.stderr().contains("interrupted"));
     }
 
     #[test]

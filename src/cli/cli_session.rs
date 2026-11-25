@@ -1,7 +1,7 @@
 use super::prompt_argument::{PromptArgument, PromptArgumentError};
-use super::{CliExit, CliInput, CliOutput};
+use super::{CliExit, CliInput, CliOutput, EnvelopeError};
 use crate::application::ports::{Interrupts, PromptFiles};
-use crate::application::{Pending, ServiceError, SessionService};
+use crate::application::{FailureKind, Pending, ServiceError, SessionService};
 
 pub struct CliSession {
     output: CliOutput,
@@ -57,7 +57,7 @@ impl CliSession {
 
     pub fn wait<T: Send + 'static>(&self, pending: &Pending<T>) -> Result<T, CommandStop> {
         match pending.wait_unless(|| self.is_signaled()) {
-            Some(result) => result.map_err(CommandStop::Failed),
+            Some(result) => result.map_err(CommandStop::from),
             None => Err(CommandStop::Interrupted(
                 self.signals.raised().unwrap_or_default(),
             )),
@@ -76,12 +76,12 @@ impl CliSession {
     pub fn finish(&mut self, result: Result<u8, CommandStop>) -> CliExit {
         let code = match result {
             Ok(code) => code,
-            Err(CommandStop::Failed(error)) => {
-                let kind = error.failure_kind();
+            Err(CommandStop::Failed(failure)) => {
+                let kind = failure.kind();
                 if self.is_signaled() {
-                    self.output.print_interrupted_failure(&error.to_string());
+                    self.output.print_interrupted_failure(failure.message());
                 } else {
-                    self.output.print_failure(kind, &error.to_string());
+                    self.output.print_failure(kind, failure.message());
                 }
                 CliExit::exit_code(kind)
             }
@@ -104,7 +104,7 @@ impl CliSession {
 
     #[cfg(test)]
     pub fn finish_failure(&mut self, error: ServiceError) -> CliExit {
-        self.finish(Err(CommandStop::Failed(error)))
+        self.finish(Err(error.into()))
     }
 
     pub fn is_signaled(&self) -> bool {
@@ -113,12 +113,90 @@ impl CliSession {
 }
 
 pub enum CommandStop {
-    Failed(ServiceError),
+    Failed(CommandFailure),
     Interrupted(i32),
+}
+
+pub struct CommandFailure {
+    kind: FailureKind,
+    message: String,
+}
+
+impl CommandFailure {
+    fn kind(&self) -> FailureKind {
+        self.kind
+    }
+
+    fn message(&self) -> &str {
+        &self.message
+    }
+}
+
+impl From<ServiceError> for CommandFailure {
+    fn from(error: ServiceError) -> Self {
+        Self {
+            kind: error.failure_kind(),
+            message: error.to_string(),
+        }
+    }
+}
+
+impl From<EnvelopeError> for CommandFailure {
+    fn from(error: EnvelopeError) -> Self {
+        Self {
+            kind: error.failure_kind(),
+            message: error.to_string(),
+        }
+    }
 }
 
 impl From<ServiceError> for CommandStop {
     fn from(error: ServiceError) -> Self {
-        CommandStop::Failed(error)
+        CommandStop::Failed(error.into())
+    }
+}
+
+impl From<EnvelopeError> for CommandStop {
+    fn from(error: EnvelopeError) -> Self {
+        CommandStop::Failed(error.into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cli::OutputMode;
+    use crate::cli::envelope::Envelope;
+    use crate::test_support::{
+        CapturedWriter, FakeCliInput, FakeInterrupts, FakePromptFiles, UnserializableValue,
+    };
+
+    #[test]
+    fn finishing_with_an_envelope_error_prints_the_failed_envelope_and_exits_one() {
+        let stdout = CapturedWriter::default();
+        let stderr = CapturedWriter::default();
+        let output = CliOutput::new(
+            Box::new(stdout.clone()),
+            Box::new(stderr.clone()),
+            OutputMode::Json,
+        );
+        let mut session = CliSession::new(
+            output,
+            CliInput::new(Box::new(FakeCliInput::default())),
+            Box::new(FakePromptFiles::default()),
+            Box::new(FakeInterrupts::default()),
+        );
+        let error = Envelope::of(&UnserializableValue).text().unwrap_err();
+
+        let exit = session.finish(Err(CommandStop::from(error)));
+
+        let json: serde_json::Value = serde_json::from_str(stdout.text().trim()).unwrap();
+        assert_eq!(json["error"]["code"], "failed");
+        assert_eq!(
+            json["error"]["message"],
+            "cannot serialize the JSON envelope"
+        );
+        assert_eq!(stderr.text(), "");
+        assert_eq!(exit, CliExit::Code(CliExit::FAILURE));
     }
 }

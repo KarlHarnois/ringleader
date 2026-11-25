@@ -1,8 +1,8 @@
 use std::io::{self, Write};
 
+use super::EnvelopeError;
 use super::envelope::Envelope;
 use super::reply::Reply;
-use super::{CliExit, EnvelopeError};
 use crate::application::FailureKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,27 +34,18 @@ impl CliOutput {
         Self::new(Box::new(io::stdout()), Box::new(io::stderr()), mode)
     }
 
-    pub fn reply(&mut self, reply: &impl Reply) -> CliExit {
+    pub fn reply(&mut self, reply: &impl Reply) -> Result<(), EnvelopeError> {
         match self.mode {
             OutputMode::Text => {
                 for line in reply.lines() {
                     self.line(&line);
                 }
-                CliExit::Code(0)
+                Ok(())
             }
-            OutputMode::Json => self.envelope(Envelope::of(&reply.result()).text()),
-        }
-    }
-
-    fn envelope(&mut self, text: Result<String, EnvelopeError>) -> CliExit {
-        match text {
-            Ok(text) => {
+            OutputMode::Json => {
+                let text = Envelope::of(&reply.result()).text()?;
                 self.line(&text);
-                CliExit::Code(0)
-            }
-            Err(error) => {
-                self.error(&error.to_string());
-                CliExit::Code(CliExit::FAILURE)
+                Ok(())
             }
         }
     }
@@ -103,73 +94,123 @@ impl CliOutput {
 
 #[cfg(test)]
 mod tests {
+    use serde::Serialize;
+
     use super::*;
     use crate::test_support::{CapturedWriter, UnserializableValue};
 
-    #[test]
-    fn an_envelope_that_renders_writes_the_line_and_exits_zero() {
-        let stdout = CapturedWriter::default();
-        let stderr = CapturedWriter::default();
-        let mut output = CliOutput::new(
-            Box::new(stdout.clone()),
-            Box::new(stderr.clone()),
-            OutputMode::Text,
-        );
+    struct OutputFixture {
+        output: CliOutput,
+        stdout: CapturedWriter,
+        stderr: CapturedWriter,
+    }
 
-        let exit = output.envelope(Ok("line".to_string()));
+    impl OutputFixture {
+        fn of(mode: OutputMode) -> Self {
+            Self::with_stdout(mode, CapturedWriter::default())
+        }
 
-        assert_eq!(exit, CliExit::Code(0));
-        assert_eq!(stdout.text(), "line\n");
-        assert_eq!(stderr.text(), "");
+        fn with_broken_stdout() -> Self {
+            Self::with_stdout(OutputMode::Text, CapturedWriter::broken_pipe())
+        }
+
+        fn with_stdout(mode: OutputMode, stdout: CapturedWriter) -> Self {
+            let stderr = CapturedWriter::default();
+            let output = CliOutput::new(Box::new(stdout.clone()), Box::new(stderr.clone()), mode);
+            Self {
+                output,
+                stdout,
+                stderr,
+            }
+        }
+
+        fn stdout_text(&self) -> String {
+            self.stdout.text()
+        }
+
+        fn stderr_text(&self) -> String {
+            self.stderr.text()
+        }
+    }
+
+    struct LinesReply;
+
+    #[derive(Serialize)]
+    struct LinesResult {
+        value: &'static str,
+    }
+
+    impl Reply for LinesReply {
+        fn lines(&self) -> Vec<String> {
+            vec!["first".to_string(), "second".to_string()]
+        }
+
+        fn result(&self) -> impl Serialize {
+            LinesResult { value: "ok" }
+        }
+    }
+
+    struct UnserializableReply;
+
+    impl Reply for UnserializableReply {
+        fn lines(&self) -> Vec<String> {
+            Vec::new()
+        }
+
+        fn result(&self) -> impl Serialize {
+            UnserializableValue
+        }
     }
 
     #[test]
-    fn an_envelope_that_fails_writes_the_message_and_exits_one() {
-        let stdout = CapturedWriter::default();
-        let stderr = CapturedWriter::default();
-        let mut output = CliOutput::new(
-            Box::new(stdout.clone()),
-            Box::new(stderr.clone()),
-            OutputMode::Text,
-        );
-        let error = Envelope::of(&UnserializableValue).text().unwrap_err();
+    fn a_text_reply_prints_each_line_on_standard_output() {
+        let mut fixture = OutputFixture::of(OutputMode::Text);
 
-        let exit = output.envelope(Err(error));
+        fixture.output.reply(&LinesReply).unwrap();
 
-        assert_eq!(exit, CliExit::Code(CliExit::FAILURE));
-        assert_eq!(stdout.text(), "");
-        assert_eq!(
-            stderr.text(),
-            "ringleader: cannot serialize the JSON envelope\n"
-        );
+        assert_eq!(fixture.stdout_text(), "first\nsecond\n");
+        assert_eq!(fixture.stderr_text(), "");
+    }
+
+    #[test]
+    fn a_json_reply_prints_one_line_on_standard_output() {
+        let mut fixture = OutputFixture::of(OutputMode::Json);
+
+        fixture.output.reply(&LinesReply).unwrap();
+
+        let json: serde_json::Value = serde_json::from_str(fixture.stdout_text().trim()).unwrap();
+        assert_eq!(json["result"]["value"], "ok");
+        assert_eq!(fixture.stdout_text().lines().count(), 1);
+        assert_eq!(fixture.stderr_text(), "");
+    }
+
+    #[test]
+    fn a_json_reply_that_cannot_be_serialized_prints_nothing_and_returns_the_error() {
+        let mut fixture = OutputFixture::of(OutputMode::Json);
+
+        let error = fixture.output.reply(&UnserializableReply).unwrap_err();
+
+        assert_eq!(error.to_string(), "cannot serialize the JSON envelope");
+        assert_eq!(fixture.stdout_text(), "");
+        assert_eq!(fixture.stderr_text(), "");
     }
 
     #[test]
     fn a_broken_pipe_stops_further_lines_without_panicking() {
-        let stderr = CapturedWriter::default();
-        let mut output = CliOutput::new(
-            Box::new(CapturedWriter::broken_pipe()),
-            Box::new(stderr),
-            OutputMode::Text,
-        );
+        let mut fixture = OutputFixture::with_broken_stdout();
 
-        output.line("first");
-        output.line("second");
+        fixture.output.line("first");
+        fixture.output.line("second");
 
-        assert!(output.is_closed());
+        assert!(fixture.output.is_closed());
     }
 
     #[test]
     fn errors_carry_the_program_name() {
-        let stderr = CapturedWriter::default();
-        let mut output = CliOutput::new(
-            Box::new(CapturedWriter::default()),
-            Box::new(stderr.clone()),
-            OutputMode::Text,
-        );
+        let mut fixture = OutputFixture::of(OutputMode::Text);
 
-        output.error("no session named x");
+        fixture.output.error("no session named x");
 
-        assert_eq!(stderr.text(), "ringleader: no session named x\n");
+        assert_eq!(fixture.stderr_text(), "ringleader: no session named x\n");
     }
 }
