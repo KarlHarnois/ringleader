@@ -602,6 +602,11 @@ impl EntryPoints for CompositionRoot {
         self.exec_agent(handoff)
     }
 
+    fn print_version(&self, line: &str) -> ExitCode {
+        CliOutput::standard().line(line);
+        ExitCode::SUCCESS
+    }
+
     fn socket_problem(&self) -> Option<String> {
         self.diagnostics().socket_problem()
     }

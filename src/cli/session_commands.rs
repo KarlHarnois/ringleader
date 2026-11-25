@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use super::delete_report::DeleteReport;
+use super::envelope::Envelope;
 use super::list_report::ListReport;
 use super::repo_argument::RepoArgument;
 use super::{
@@ -43,7 +44,9 @@ impl<'a> SessionCommands<'a> {
             .collect();
         let report = ListReport::new(&rows, &diffs);
         if args.json {
-            self.session.output().line(&report.json());
+            self.session
+                .output()
+                .line(&Envelope::of(&report.result()).text());
         } else {
             for line in report.lines() {
                 self.session.output().line(&line);
@@ -332,7 +335,7 @@ mod tests {
         ReturnRequest,
     };
     use crate::cli::CliExit;
-    use crate::domain::{Repo, RepoName, Session};
+    use crate::domain::{BuildVersion, Repo, RepoName, Session};
     use crate::test_support::{
         CapturedWriter, CliHarness, FakeCliInput, FakeLock, FakeMultiplexer, FakePromptFiles,
         FakeRepoScanner, FakeScratchSpace, FakeSessionRegistry, ServiceFixture,
@@ -573,24 +576,42 @@ mod tests {
         assert!(harness.stdout().starts_with("waiting   fix-auth"));
     }
 
+    struct ListJsonFixture;
+
+    impl ListJsonFixture {
+        fn two_sessions() -> ServiceFixture {
+            let stranger = ServiceFixture::session("mystery");
+            CommandFixture::live().with_multiplexer(
+                FakeMultiplexer::new()
+                    .with_live(ServiceFixture::waiting(&CommandFixture::session()))
+                    .with_live(ServiceFixture::waiting(&stranger).without_metadata()),
+            )
+        }
+    }
+
     #[test]
     fn list_json_uses_stable_state_strings_and_a_null_diff_for_unmanaged_rows() {
-        let stranger = ServiceFixture::session("mystery");
-        let fixture = CommandFixture::live();
-        let fixture = fixture.with_multiplexer(
-            FakeMultiplexer::new()
-                .with_live(ServiceFixture::waiting(&CommandFixture::session()))
-                .with_live(ServiceFixture::waiting(&stranger).without_metadata()),
-        );
-        let harness = CliHarness::new(fixture);
+        let harness = CliHarness::new(ListJsonFixture::two_sessions());
 
         harness.run(&["list", "--json"]);
 
-        let rows: serde_json::Value = serde_json::from_str(&harness.stdout()).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&harness.stdout()).unwrap();
+        let rows = json["result"]["sessions"].as_array().unwrap();
         assert_eq!(rows[0]["state"], "waiting");
         assert_eq!(rows[0]["diff"]["files"], 0);
         assert_eq!(rows[1]["state"], "unmanaged");
         assert!(rows[1]["diff"].is_null());
+    }
+
+    #[test]
+    fn list_json_matches_the_pinned_envelope() {
+        let harness = CliHarness::new(ListJsonFixture::two_sessions());
+
+        harness.run(&["list", "--json"]);
+
+        let expected = include_str!("../../tests/fixtures/contract/list.json")
+            .replace("<build>", BuildVersion::CURRENT.text());
+        assert_eq!(harness.stdout(), expected);
     }
 
     #[test]

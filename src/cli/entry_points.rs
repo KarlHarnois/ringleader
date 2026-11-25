@@ -5,6 +5,7 @@ use crate::cli::Cli;
 
 pub trait EntryPoints {
     fn launch_agent(&self, handoff: &Path) -> ExitCode;
+    fn print_version(&self, line: &str) -> ExitCode;
     fn socket_problem(&self) -> Option<String>;
     fn refuse_to_start(&self, problem: &str) -> ExitCode;
     fn find_session(&self, cli: &Cli, client: &str) -> ExitCode;
