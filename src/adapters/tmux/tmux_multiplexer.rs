@@ -508,10 +508,6 @@ mod tests {
             fixture
         }
 
-        fn window_size(&self, target: &str) -> String {
-            self.server.window_size(target)
-        }
-
         fn worktree(&self, name: &str) -> PathBuf {
             let worktree = self.server.directory().join("worktrees").join(name);
             fs::create_dir_all(&worktree).unwrap();
@@ -1431,14 +1427,9 @@ mod tests {
             )
             .unwrap();
 
-        let (resizes, size) = fixture
+        fixture
             .server
-            .wait_for_window("=ringleader-dark-mode:", 3, "90x30");
-        assert_eq!(
-            (resizes, size.as_str()),
-            (3, "90x30"),
-            "count {resizes}, live size {size}"
-        );
+            .require_window_at("=ringleader-dark-mode:", 3, "90x30");
     }
 
     #[test]
@@ -1525,7 +1516,7 @@ mod tests {
             .fit_agent_window("ringleader-fix-auth", SessionSize::new(60, 20))
             .unwrap();
 
-        assert_eq!(fixture.window_size("=ringleader-fix-auth:"), "60x20");
+        assert_eq!(fixture.server.window_size("=ringleader-fix-auth:"), "60x20");
     }
 
     #[test]
@@ -1544,7 +1535,7 @@ mod tests {
             .fit_agent_window("ringleader-fix-auth", SessionSize::new(60, 20))
             .unwrap();
 
-        assert_eq!(fixture.window_size("=ringleader-fix-auth:"), "90x30");
+        assert_eq!(fixture.server.window_size("=ringleader-fix-auth:"), "90x30");
     }
 
     #[test]
