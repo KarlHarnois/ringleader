@@ -5,7 +5,8 @@ use std::sync::{Arc, Mutex};
 use clap::Parser;
 
 use super::{FakeCliInput, FakeInterrupts, FakeLock, FakePromptFiles, ServiceFixture};
-use crate::cli::{Cli, CliExit, CliInput, CliOutput, CliSession};
+use crate::application::ServiceError;
+use crate::cli::{Cli, CliExit, CliInput, CliOutput, CliSession, OutputMode};
 
 pub struct CliHarness {
     fixture: ServiceFixture,
@@ -64,13 +65,7 @@ impl CliHarness {
         let cli =
             Cli::try_parse_from(std::iter::once("ringleader").chain(arguments.iter().copied()))
                 .expect("the arguments parse");
-        let output = CliOutput::new(Box::new(self.stdout.clone()), Box::new(self.stderr.clone()));
-        let mut session = CliSession::new(
-            output,
-            CliInput::new(Box::new(self.input.clone())),
-            Box::new(self.prompt_files.clone()),
-            Box::new(self.signals.clone()),
-        );
+        let mut session = self.session(cli.output_mode());
         if let Err(exit) = cli.read_prompt(&mut session) {
             return exit;
         }
@@ -81,6 +76,28 @@ impl CliHarness {
             &mut self.fixture.unloaded_service(),
             &mut session,
             &mut *self.lock.borrow_mut(),
+        )
+    }
+
+    pub fn finish_failure(&self, arguments: &[&str], error: ServiceError) -> CliExit {
+        let cli =
+            Cli::try_parse_from(std::iter::once("ringleader").chain(arguments.iter().copied()))
+                .expect("the arguments parse");
+        let mut session = self.session(cli.output_mode());
+        session.finish_failure(error)
+    }
+
+    fn session(&self, mode: OutputMode) -> CliSession {
+        let output = CliOutput::new(
+            Box::new(self.stdout.clone()),
+            Box::new(self.stderr.clone()),
+            mode,
+        );
+        CliSession::new(
+            output,
+            CliInput::new(Box::new(self.input.clone())),
+            Box::new(self.prompt_files.clone()),
+            Box::new(self.signals.clone()),
         )
     }
 

@@ -5,6 +5,7 @@ use super::ports::{
     TerminalEmulatorError, WebBrowserError, WorkspaceError,
 };
 use crate::application::DeleteImpact;
+use crate::application::FailureKind;
 use crate::domain::InvalidName;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,6 +36,18 @@ pub enum ServiceError {
 }
 
 impl ServiceError {
+    pub fn failure_kind(&self) -> FailureKind {
+        match self {
+            ServiceError::Invalid(_) => FailureKind::Invalid,
+            ServiceError::NotFound(_) => FailureKind::NotFound,
+            ServiceError::Conflict(_) => FailureKind::Conflict,
+            ServiceError::Unmeasurable(_) => FailureKind::Unmeasurable,
+            ServiceError::GuardsChanged { .. } => FailureKind::WouldLoseWork,
+            ServiceError::TimedOut { .. } => FailureKind::TimedOut,
+            ServiceError::Failed(_) => FailureKind::Failed,
+        }
+    }
+
     pub fn is_timeout_of(&self, expected: Tool) -> bool {
         matches!(self, ServiceError::TimedOut { tool, .. } if *tool == expected)
     }
@@ -149,7 +162,48 @@ impl From<InvalidName> for ServiceError {
 
 #[cfg(test)]
 mod tests {
-    use super::{ServiceError, Tool};
+    use super::{FailureKind, ServiceError, Tool};
+
+    #[test]
+    fn each_service_error_names_its_failure_kind() {
+        let cases = [
+            (
+                ServiceError::Invalid("bad".to_string()),
+                FailureKind::Invalid,
+            ),
+            (
+                ServiceError::NotFound("bad".to_string()),
+                FailureKind::NotFound,
+            ),
+            (
+                ServiceError::Conflict("bad".to_string()),
+                FailureKind::Conflict,
+            ),
+            (
+                ServiceError::Unmeasurable("bad".to_string()),
+                FailureKind::Unmeasurable,
+            ),
+            (
+                ServiceError::GuardsChanged {
+                    message: "bad".to_string(),
+                    impact: Box::default(),
+                },
+                FailureKind::WouldLoseWork,
+            ),
+            (
+                ServiceError::TimedOut {
+                    tool: Tool::Git,
+                    message: "bad".to_string(),
+                },
+                FailureKind::TimedOut,
+            ),
+            (ServiceError::Failed("bad".to_string()), FailureKind::Failed),
+        ];
+
+        for (error, kind) in cases {
+            assert_eq!(error.failure_kind(), kind);
+        }
+    }
 
     #[test]
     fn adding_context_keeps_the_kind_and_appends_the_context() {

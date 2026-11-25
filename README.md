@@ -78,6 +78,19 @@ Conflicts with existing state include these:
 - a held lock
 - a `send` to a stopped session, or to an agent away from its prompt
 
+Under `--json`, a failure prints an envelope whose `error.code` is one of these:
+
+| Code | Exit code |
+|---|---|
+| `invalid` | 1 |
+| `not-found` | 2 |
+| `conflict` | 3 |
+| `unmeasurable` | 3 |
+| `would-lose-work` | 3 |
+| `timed-out` | 1 |
+| `lock-held` | 3 |
+| `failed` | 1 |
+
 ## Skills
 
 Unless an agent's config turns them off, each Claude Code and opencode session gets these skills:

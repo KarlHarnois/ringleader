@@ -77,8 +77,13 @@ impl CliSession {
         let code = match result {
             Ok(code) => code,
             Err(CommandStop::Failed(error)) => {
-                self.output.error(&error.to_string());
-                CliExit::error_code(&error)
+                let kind = error.failure_kind();
+                if self.is_signaled() {
+                    self.output.print_interrupted_failure(&error.to_string());
+                } else {
+                    self.output.print_failure(kind, &error.to_string());
+                }
+                CliExit::exit_code(kind)
             }
             Err(CommandStop::Interrupted(signal)) => {
                 return CliExit::Interrupted {
@@ -95,6 +100,11 @@ impl CliSession {
             }
             None => CliExit::Code(code),
         }
+    }
+
+    #[cfg(test)]
+    pub fn finish_failure(&mut self, error: ServiceError) -> CliExit {
+        self.finish(Err(CommandStop::Failed(error)))
     }
 
     pub fn is_signaled(&self) -> bool {

@@ -113,6 +113,7 @@ Never put a secret into a handoff prompt: the prompt lands in the agent's transc
 | 3 | A conflict with existing state | Follow the rule below this table. |
 | Any other code | The command did not finish | Report the exit code and stderr, and stop. |
 
+- Under `--json`, a failure prints the envelope on standard output. Read `error.code` and `error.message` there instead of stderr. A note can still print on standard error.
 - On exit code 1, read stderr. If stderr says the agent has no `plan_args`, rerun the command once without `--plan`. Then tell the user the session started in build mode. Otherwise, report stderr and stop.
 - On exit code 3, read stderr. If stderr says the name already exists as a session, branch, or worktree, rerun the command once with another name. Otherwise, report stderr and stop. Stderr names the conflict, such as a held lock, a stopped session, or an agent away from its prompt.
 - If a rerun fails too, report its stderr and stop.

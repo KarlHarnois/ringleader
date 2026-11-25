@@ -31,7 +31,7 @@ impl DoctorReport {
             .collect()
     }
 
-    pub fn findings(&self) -> impl Serialize + '_ {
+    pub fn findings(&self) -> impl Serialize {
         DoctorFindings {
             findings: self.lines.clone(),
         }

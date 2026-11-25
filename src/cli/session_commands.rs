@@ -2,12 +2,11 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use super::delete_report::DeleteReport;
-use super::envelope::Envelope;
 use super::list_report::ListReport;
 use super::repo_argument::RepoArgument;
 use super::{
-    CliExit, CliSession, CommandStop, DeleteArgs, ListArgs, NewArgs, RenameArgs, RestartArgs,
-    SendArgs, StopArgs,
+    CliExit, CliSession, CommandStop, DeleteArgs, NewArgs, RenameArgs, RestartArgs, SendArgs,
+    StopArgs,
 };
 use crate::application::{
     CreateRequest, DeleteConfirmation, DeleteImpact, DeleteOutcome, HandOff, RestartReport,
@@ -29,7 +28,7 @@ impl<'a> SessionCommands<'a> {
         Self { service, session }
     }
 
-    pub fn list(&mut self, args: &ListArgs) -> Result<u8, CommandStop> {
+    pub fn list(&mut self) -> Result<u8, CommandStop> {
         let rows = self.service.observe()?;
         let names: Vec<String> = rows
             .iter()
@@ -43,17 +42,7 @@ impl<'a> SessionCommands<'a> {
             .filter_map(|(name, diff)| Some((name, diff.ok()?)))
             .collect();
         let report = ListReport::new(&rows, &diffs);
-        if args.json {
-            return Ok(self
-                .session
-                .output()
-                .envelope(Envelope::of(&report.result()).text())
-                .code());
-        }
-        for line in report.lines() {
-            self.session.output().line(&line);
-        }
-        Ok(0)
+        Ok(self.session.output().reply(&report).code())
     }
 
     pub fn create(&mut self, args: &NewArgs) -> Result<u8, CommandStop> {
@@ -308,13 +297,15 @@ impl<'a> SessionCommands<'a> {
     }
 
     fn report_failure(&mut self, name: &str, error: &ServiceError) {
-        self.session.output().error(&format!("{name}: {error}"));
+        self.session
+            .output()
+            .print_failure(error.failure_kind(), &format!("{name}: {error}"));
     }
 
     fn failure_code<'e>(mut failures: impl Iterator<Item = (&'e str, &'e ServiceError)>) -> u8 {
         failures
             .next()
-            .map_or(0, |(_, error)| CliExit::error_code(error))
+            .map_or(0, |(_, error)| CliExit::exit_code(error.failure_kind()))
     }
 
     fn note_if_present(&mut self, note: Option<&str>) {
@@ -331,6 +322,7 @@ mod tests {
 
     use signal_hook::consts::{SIGHUP, SIGINT};
 
+    use crate::application::ServiceError;
     use crate::application::ports::{
         AttachTarget, ConfigError, DirtyState, MultiplexerError, PromptFileError, RegistryError,
         ReturnRequest,
@@ -613,6 +605,78 @@ mod tests {
         let expected = include_str!("../../tests/fixtures/contract/list.json")
             .replace("<build>", BuildVersion::CURRENT.text());
         assert_eq!(harness.stdout(), expected);
+    }
+
+    #[test]
+    fn list_json_failure_prints_the_pinned_envelope() {
+        let harness = CliHarness::new(ServiceFixture::new());
+
+        let exit = harness.finish_failure(
+            &["list", "--json"],
+            ServiceError::Failed("example failure".to_string()),
+        );
+
+        let expected = include_str!("../../tests/fixtures/contract/failure.json")
+            .replace("<build>", BuildVersion::CURRENT.text());
+        assert_eq!(harness.stdout(), expected);
+        assert_eq!(harness.stderr(), "");
+        assert_eq!(exit, CliExit::Code(CliExit::FAILURE));
+    }
+
+    #[test]
+    fn list_failure_without_json_prints_the_unchanged_text() {
+        let harness = CliHarness::new(ServiceFixture::new());
+
+        let exit = harness.finish_failure(
+            &["list"],
+            ServiceError::Failed("example failure".to_string()),
+        );
+
+        assert_eq!(harness.stdout(), "");
+        assert_eq!(harness.stderr(), "ringleader: example failure\n");
+        assert_eq!(exit, CliExit::Code(CliExit::FAILURE));
+    }
+
+    #[test]
+    fn list_json_before_the_command_fails_prints_the_failure_envelope() {
+        let harness = CliHarness::new(
+            CommandFixture::live().with_broken_config(CommandFixture::broken_config()),
+        );
+
+        let exit = harness.run(&["list", "--json"]);
+
+        let json: serde_json::Value = serde_json::from_str(harness.stdout().trim()).unwrap();
+        assert_eq!(json["error"]["code"], "failed");
+        assert_eq!(harness.stderr(), "");
+        assert_eq!(exit, CliExit::Code(CliExit::FAILURE));
+    }
+
+    #[test]
+    fn a_text_failure_with_a_signal_prints_the_error_line() {
+        let harness = CliHarness::new(ServiceFixture::new());
+        harness.signals().raise(SIGINT);
+
+        let exit = harness.finish_failure(
+            &["list"],
+            ServiceError::Failed("example failure".to_string()),
+        );
+
+        assert!(harness.stderr().contains("ringleader: example failure"));
+        assert!(matches!(exit, CliExit::Interrupted { signal: SIGINT, .. }));
+    }
+
+    #[test]
+    fn a_json_failure_with_a_signal_prints_no_envelope() {
+        let harness = CliHarness::new(ServiceFixture::new());
+        harness.signals().raise(SIGINT);
+
+        let exit = harness.finish_failure(
+            &["list", "--json"],
+            ServiceError::Failed("example failure".to_string()),
+        );
+
+        assert_eq!(harness.stdout(), "");
+        assert!(matches!(exit, CliExit::Interrupted { signal: SIGINT, .. }));
     }
 
     #[test]
