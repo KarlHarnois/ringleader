@@ -1,21 +1,51 @@
-use super::{CliExit, CliOutput};
-use crate::application::ports::Interrupts;
+use super::prompt_argument::{PromptArgument, PromptArgumentError};
+use super::{CliExit, CliInput, CliOutput};
+use crate::application::ports::{Interrupts, PromptFiles};
 use crate::application::{Pending, ServiceError, SessionService};
 
 pub struct CliSession {
     output: CliOutput,
+    input: CliInput,
+    prompt_files: Box<dyn PromptFiles>,
+    prompt: Option<String>,
     signals: Box<dyn Interrupts>,
 }
 
 impl CliSession {
     const SIGNAL_EXIT_BASE: u8 = 128;
 
-    pub fn new(output: CliOutput, signals: Box<dyn Interrupts>) -> Self {
-        Self { output, signals }
+    pub fn new(
+        output: CliOutput,
+        input: CliInput,
+        prompt_files: Box<dyn PromptFiles>,
+        signals: Box<dyn Interrupts>,
+    ) -> Self {
+        Self {
+            output,
+            input,
+            prompt_files,
+            prompt: None,
+            signals,
+        }
     }
 
     pub fn output(&mut self) -> &mut CliOutput {
         &mut self.output
+    }
+
+    pub fn resolve_prompt(
+        &mut self,
+        argument: &PromptArgument,
+    ) -> Result<String, PromptArgumentError> {
+        argument.resolve(self.prompt_files.as_ref(), &mut self.input)
+    }
+
+    pub fn store_prompt(&mut self, prompt: String) {
+        self.prompt = Some(prompt);
+    }
+
+    pub fn prompt(&self) -> &str {
+        self.prompt.as_deref().unwrap_or_default()
     }
 
     pub fn stop_if_signaled(&self) -> Result<(), CommandStop> {

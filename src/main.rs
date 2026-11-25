@@ -34,6 +34,7 @@ use adapters::direnv::direnv_directory_environment::DirenvDirectoryEnvironment;
 use adapters::filesystem::directory_repo_scanner::DirectoryRepoScanner;
 use adapters::filesystem::directory_scratch_space::DirectoryScratchSpace;
 use adapters::filesystem::file_lock::FileLock;
+use adapters::filesystem::filesystem_prompt_files::FilesystemPromptFiles;
 use adapters::filesystem::json_fold_store::JsonFoldStore;
 use adapters::filesystem::json_session_registry::JsonSessionRegistry;
 use adapters::gh::gh_program::GhProgram;
@@ -64,7 +65,7 @@ use application::{
     AgentPorts, DesktopPorts, DiagnosticPaths, LoadedConfig, RepoPorts, ServiceContext,
     ServiceError, ServicePorts, SessionService, StatePorts, TmuxPorts,
 };
-use cli::{Cli, CliExit, CliOutput, CliSession, EntryPoints};
+use cli::{Cli, CliExit, CliInput, CliOutput, CliSession, EntryPoints};
 use ui::theme::ColorMode;
 use ui::{
     App, CrosstermInput, CrosstermScreenMode, EventLoop, FinderPopupError, MenuPopupError,
@@ -155,10 +156,16 @@ impl CompositionRoot {
         log: &OpenedLog,
     ) -> Result<ExitCode, ExitCode> {
         self.handoff().delete_stale();
-        let mut session = CliSession::new(CliOutput::standard(), Box::new(Self::cli_signals(cli)));
+        let mut session = CliSession::new(
+            CliOutput::standard(),
+            CliInput::standard(),
+            Box::new(FilesystemPromptFiles),
+            Box::new(Self::cli_signals(cli)),
+        );
         Self::report_log_problem(log, &mut session);
         let mut lock = FileLock::new(&state_directory.join("lock"));
-        cli.take_write_lock(&mut lock, &mut session)
+        cli.read_prompt(&mut session)
+            .and_then(|()| cli.take_write_lock(&mut lock, &mut session))
             .map_err(Self::exit_with)?;
         Self::truncate_log_of_mutating(cli, log);
         Ok(self.execute_cli(cli, &mut session, &mut lock))
@@ -306,7 +313,12 @@ impl CompositionRoot {
     }
 
     fn wait_for_startup_input(app: App, signals: SignalHookInterrupts) {
-        let mut session = CliSession::new(CliOutput::standard(), Box::new(signals));
+        let mut session = CliSession::new(
+            CliOutput::standard(),
+            CliInput::standard(),
+            Box::new(FilesystemPromptFiles),
+            Box::new(signals),
+        );
         session.wait_for_startup_input(&app.into_service());
     }
 

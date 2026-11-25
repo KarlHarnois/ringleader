@@ -1,3 +1,4 @@
+pub mod fake_cli_input;
 pub mod fake_clock;
 pub mod fake_config_source;
 pub mod fake_directory_environment;
@@ -6,6 +7,7 @@ pub mod fake_host_probe;
 pub mod fake_interrupts;
 pub mod fake_lock;
 pub mod fake_multiplexer;
+pub mod fake_prompt_files;
 pub mod fake_pull_requests;
 pub mod fake_repo_pages;
 pub mod fake_repo_scanner;

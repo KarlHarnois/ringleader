@@ -55,7 +55,7 @@ impl<'a> SessionCommands<'a> {
     pub fn create(&mut self, args: &NewArgs) -> Result<u8, CommandStop> {
         self.service.observe_and_record()?;
         let repo = RepoArgument::new(&args.repo).resolve(self.service, self.session)?;
-        let request = Self::create_request(args, repo);
+        let request = Self::create_request(args, repo, self.session.prompt());
         self.session.stop_if_signaled()?;
         let outcome = self.service.create_session(&request)?;
         let created = outcome.session();
@@ -69,11 +69,11 @@ impl<'a> SessionCommands<'a> {
         Ok(0)
     }
 
-    fn create_request(args: &NewArgs, repo: Repo) -> CreateRequest {
+    fn create_request(args: &NewArgs, repo: Repo, prompt: &str) -> CreateRequest {
         let mut request = CreateRequest::new(&args.name, repo)
             .with_checkout(Self::checkout(args))
             .with_mode(Self::mode(args))
-            .with_prompt(args.prompt.as_deref().unwrap_or(""));
+            .with_prompt(prompt);
         if let Some(agent) = &args.agent {
             request = request.with_agent(agent);
         }
@@ -188,7 +188,8 @@ impl<'a> SessionCommands<'a> {
     }
 
     pub fn send(&mut self, args: &SendArgs) -> Result<u8, CommandStop> {
-        self.service.send_prompt(&args.name, &args.prompt)?;
+        self.service
+            .send_prompt(&args.name, self.session.prompt())?;
         self.session
             .output()
             .line(&format!("sent the prompt to {}", args.name));
@@ -322,17 +323,19 @@ impl<'a> SessionCommands<'a> {
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};
+    use std::sync::{Arc, Mutex};
 
     use signal_hook::consts::{SIGHUP, SIGINT};
 
     use crate::application::ports::{
-        AttachTarget, ConfigError, DirtyState, MultiplexerError, RegistryError, ReturnRequest,
+        AttachTarget, ConfigError, DirtyState, MultiplexerError, PromptFileError, RegistryError,
+        ReturnRequest,
     };
     use crate::cli::CliExit;
     use crate::domain::{Repo, RepoName, Session};
     use crate::test_support::{
-        CapturedWriter, CliHarness, FakeMultiplexer, FakeRepoScanner, FakeScratchSpace,
-        FakeSessionRegistry, ServiceFixture,
+        CapturedWriter, CliHarness, FakeCliInput, FakeLock, FakeMultiplexer, FakePromptFiles,
+        FakeRepoScanner, FakeScratchSpace, FakeSessionRegistry, ServiceFixture,
     };
 
     struct CommandFixture;
@@ -413,6 +416,44 @@ mod tests {
                 path: PathBuf::from(ServiceFixture::REPO),
                 detail: "expected `=`".to_string(),
             }
+        }
+    }
+
+    struct PromptFixture;
+
+    impl PromptFixture {
+        const PATH: &'static str = "/prompts/task.txt";
+
+        fn large() -> String {
+            let mut prompt = "fix the \"login\" \\ backslash\n".repeat(4_000);
+            prompt.push_str("done");
+            prompt
+        }
+
+        fn live_with_prompt_files(prompt_files: FakePromptFiles) -> CliHarness {
+            CliHarness::new(CommandFixture::live()).with_prompt_files(prompt_files)
+        }
+
+        fn live_with_standard_input(text: &str) -> CliHarness {
+            CliHarness::new(CommandFixture::live()).with_input(FakeCliInput::holding(text))
+        }
+
+        fn created_prompt(harness: &CliHarness) -> String {
+            harness
+                .fixture()
+                .multiplexer()
+                .launches()
+                .pop()
+                .unwrap()
+                .argv()[1]
+                .clone()
+        }
+
+        fn submitted(harness: &CliHarness) -> Vec<String> {
+            harness
+                .fixture()
+                .multiplexer()
+                .submitted_when_ready("ringleader-fix-auth")
         }
     }
 
@@ -1341,6 +1382,309 @@ mod tests {
             harness
                 .stderr()
                 .contains("run Ringleader from another terminal")
+        );
+    }
+
+    #[test]
+    fn new_reads_a_large_prompt_unchanged_from_standard_input() {
+        let prompt = PromptFixture::large();
+        let harness =
+            CliHarness::new(ServiceFixture::new()).with_input(FakeCliInput::holding(&prompt));
+
+        let exit = harness.run(&[
+            "new",
+            "--name",
+            "fix-auth",
+            "--repo",
+            "example-project",
+            "--prompt-file",
+            "-",
+        ]);
+
+        assert_eq!(exit, CliExit::Code(0));
+        assert_eq!(PromptFixture::created_prompt(&harness), prompt);
+    }
+
+    #[test]
+    fn new_reads_a_large_prompt_unchanged_from_a_file() {
+        let prompt = PromptFixture::large();
+        let harness = CliHarness::new(ServiceFixture::new())
+            .with_prompt_files(FakePromptFiles::default().holding(PromptFixture::PATH, &prompt));
+
+        let exit = harness.run(&[
+            "new",
+            "--name",
+            "fix-auth",
+            "--repo",
+            "example-project",
+            "--prompt-file",
+            PromptFixture::PATH,
+        ]);
+
+        assert_eq!(exit, CliExit::Code(0));
+        assert_eq!(PromptFixture::created_prompt(&harness), prompt);
+    }
+
+    #[test]
+    fn send_reads_a_large_prompt_unchanged_from_standard_input() {
+        let prompt = PromptFixture::large();
+        let harness = PromptFixture::live_with_standard_input(&prompt);
+
+        let exit = harness.run(&["send", "fix-auth", "--prompt-file", "-"]);
+
+        assert_eq!(exit, CliExit::Code(0));
+        assert_eq!(PromptFixture::submitted(&harness), vec![prompt]);
+    }
+
+    #[test]
+    fn send_reads_a_large_prompt_unchanged_from_a_file() {
+        let prompt = PromptFixture::large();
+        let harness = PromptFixture::live_with_prompt_files(
+            FakePromptFiles::default().holding(PromptFixture::PATH, &prompt),
+        );
+
+        let exit = harness.run(&["send", "fix-auth", "--prompt-file", PromptFixture::PATH]);
+
+        assert_eq!(exit, CliExit::Code(0));
+        assert_eq!(PromptFixture::submitted(&harness), vec![prompt]);
+    }
+
+    #[test]
+    fn a_prompt_file_drops_its_trailing_line_ends() {
+        let harness = PromptFixture::live_with_prompt_files(
+            FakePromptFiles::default().holding(PromptFixture::PATH, "fix the login\n\n"),
+        );
+
+        harness.run(&["send", "fix-auth", "--prompt-file", PromptFixture::PATH]);
+
+        assert_eq!(PromptFixture::submitted(&harness), ["fix the login"]);
+    }
+
+    #[test]
+    fn a_prompt_file_that_holds_no_text_exits_one_and_names_the_flag() {
+        let harness = PromptFixture::live_with_prompt_files(
+            FakePromptFiles::default().holding(PromptFixture::PATH, ""),
+        );
+
+        let exit = harness.run(&["send", "fix-auth", "--prompt-file", PromptFixture::PATH]);
+
+        assert_eq!(exit, CliExit::Code(CliExit::FAILURE));
+        assert!(harness.stderr().contains(&format!(
+            "--prompt-file: {} holds no prompt",
+            PromptFixture::PATH
+        )));
+    }
+
+    #[test]
+    fn a_standard_input_that_holds_no_text_exits_one_and_names_the_flag() {
+        let harness = PromptFixture::live_with_standard_input("");
+
+        let exit = harness.run(&["send", "fix-auth", "--prompt-file", "-"]);
+
+        assert_eq!(exit, CliExit::Code(CliExit::FAILURE));
+        assert!(
+            harness
+                .stderr()
+                .contains("--prompt-file: standard input holds no prompt")
+        );
+    }
+
+    #[test]
+    fn a_prompt_file_of_only_line_ends_holds_no_prompt() {
+        let harness = PromptFixture::live_with_prompt_files(
+            FakePromptFiles::default().holding(PromptFixture::PATH, "\n\r\n\n"),
+        );
+
+        let exit = harness.run(&["send", "fix-auth", "--prompt-file", PromptFixture::PATH]);
+
+        assert_eq!(exit, CliExit::Code(CliExit::FAILURE));
+        assert!(harness.stderr().contains(&format!(
+            "--prompt-file: {} holds no prompt",
+            PromptFixture::PATH
+        )));
+    }
+
+    #[test]
+    fn a_standard_input_of_only_line_ends_holds_no_prompt() {
+        let harness = PromptFixture::live_with_standard_input("\n\r\n\n");
+
+        let exit = harness.run(&["send", "fix-auth", "--prompt-file", "-"]);
+
+        assert_eq!(exit, CliExit::Code(CliExit::FAILURE));
+        assert!(
+            harness
+                .stderr()
+                .contains("--prompt-file: standard input holds no prompt")
+        );
+    }
+
+    #[test]
+    fn new_refuses_a_prompt_file_of_only_spaces() {
+        let harness = CliHarness::new(ServiceFixture::new())
+            .with_prompt_files(FakePromptFiles::default().holding(PromptFixture::PATH, "  \n"));
+
+        let exit = harness.run(&[
+            "new",
+            "--name",
+            "fix-auth",
+            "--repo",
+            "example-project",
+            "--prompt-file",
+            PromptFixture::PATH,
+        ]);
+
+        assert_eq!(exit, CliExit::Code(CliExit::FAILURE));
+        assert!(harness.stderr().contains(&format!(
+            "--prompt-file: {} holds no prompt",
+            PromptFixture::PATH
+        )));
+    }
+
+    #[test]
+    fn send_refuses_a_prompt_file_of_only_spaces() {
+        let harness = PromptFixture::live_with_prompt_files(
+            FakePromptFiles::default().holding(PromptFixture::PATH, "  \n"),
+        );
+
+        let exit = harness.run(&["send", "fix-auth", "--prompt-file", PromptFixture::PATH]);
+
+        assert_eq!(exit, CliExit::Code(CliExit::FAILURE));
+        assert!(harness.stderr().contains(&format!(
+            "--prompt-file: {} holds no prompt",
+            PromptFixture::PATH
+        )));
+    }
+
+    #[test]
+    fn new_refuses_a_standard_input_of_only_a_tab() {
+        let harness =
+            CliHarness::new(ServiceFixture::new()).with_input(FakeCliInput::holding("\t\n"));
+
+        let exit = harness.run(&[
+            "new",
+            "--name",
+            "fix-auth",
+            "--repo",
+            "example-project",
+            "--prompt-file",
+            "-",
+        ]);
+
+        assert_eq!(exit, CliExit::Code(CliExit::FAILURE));
+        assert!(
+            harness
+                .stderr()
+                .contains("--prompt-file: standard input holds no prompt")
+        );
+    }
+
+    #[test]
+    fn a_prompt_file_keeps_leading_spaces_and_drops_only_its_trailing_line_end() {
+        let harness = PromptFixture::live_with_prompt_files(
+            FakePromptFiles::default().holding(PromptFixture::PATH, "  fix the login\n"),
+        );
+
+        harness.run(&["send", "fix-auth", "--prompt-file", PromptFixture::PATH]);
+
+        assert_eq!(PromptFixture::submitted(&harness), ["  fix the login"]);
+    }
+
+    #[test]
+    fn a_prompt_file_path_with_no_file_exits_one_and_names_the_path() {
+        let harness = PromptFixture::live_with_prompt_files(FakePromptFiles::default());
+
+        let exit = harness.run(&["send", "fix-auth", "--prompt-file", PromptFixture::PATH]);
+
+        assert_eq!(exit, CliExit::Code(CliExit::FAILURE));
+        assert!(harness.stderr().contains(&format!(
+            "--prompt-file: no file at {}",
+            PromptFixture::PATH
+        )));
+    }
+
+    #[test]
+    fn a_prompt_file_that_cannot_be_read_exits_one_and_names_the_path() {
+        let harness = PromptFixture::live_with_prompt_files(
+            FakePromptFiles::default().failing(PromptFixture::PATH, PromptFileError::Unreadable),
+        );
+
+        let exit = harness.run(&["send", "fix-auth", "--prompt-file", PromptFixture::PATH]);
+
+        assert_eq!(exit, CliExit::Code(CliExit::FAILURE));
+        assert!(harness.stderr().contains(&format!(
+            "--prompt-file: cannot read {}",
+            PromptFixture::PATH
+        )));
+    }
+
+    #[test]
+    fn a_prompt_file_that_is_not_text_exits_one_and_names_the_path() {
+        let harness = PromptFixture::live_with_prompt_files(
+            FakePromptFiles::default().failing(PromptFixture::PATH, PromptFileError::NotText),
+        );
+
+        let exit = harness.run(&["send", "fix-auth", "--prompt-file", PromptFixture::PATH]);
+
+        assert_eq!(exit, CliExit::Code(CliExit::FAILURE));
+        assert!(harness.stderr().contains(&format!(
+            "--prompt-file: {} is not UTF-8 text",
+            PromptFixture::PATH
+        )));
+    }
+
+    #[test]
+    fn new_with_a_missing_prompt_file_fails_before_the_write_lock() {
+        let harness = CliHarness::new(ServiceFixture::new());
+
+        let exit = harness.run(&[
+            "new",
+            "--name",
+            "fix-auth",
+            "--repo",
+            "example-project",
+            "--prompt-file",
+            PromptFixture::PATH,
+        ]);
+
+        assert_eq!(exit, CliExit::Code(CliExit::FAILURE));
+        assert!(harness.stderr().contains(&format!(
+            "--prompt-file: no file at {}",
+            PromptFixture::PATH
+        )));
+        assert!(harness.lock_acquisitions().is_empty());
+    }
+
+    #[test]
+    fn new_reads_standard_input_to_its_end_before_the_write_lock() {
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let input = FakeCliInput::holding("fix the login").recording(Arc::clone(&log));
+        let lock = FakeLock::free().recording(Arc::clone(&log));
+        let harness = CliHarness::new(ServiceFixture::new())
+            .with_input(input)
+            .with_lock(lock);
+
+        let exit = harness.run(&[
+            "new",
+            "--name",
+            "fix-auth",
+            "--repo",
+            "example-project",
+            "--prompt-file",
+            "-",
+        ]);
+
+        assert_eq!(exit, CliExit::Code(0));
+        let events = log.lock().unwrap();
+        let position = |event: &str| events.iter().position(|item| item == event);
+        assert!(
+            matches!(
+                (
+                    position(FakeCliInput::READ_TO_END),
+                    position("acquire try")
+                ),
+                (Some(read), Some(acquire)) if read < acquire
+            ),
+            "{events:?}"
         );
     }
 }
