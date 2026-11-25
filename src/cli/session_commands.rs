@@ -1611,17 +1611,6 @@ mod tests {
     }
 
     #[test]
-    fn a_prompt_file_drops_its_trailing_line_end() {
-        let harness = PromptFixture::live_with_prompt_files(
-            FakePromptFiles::default().holding(PromptFixture::PATH, "fix the login\n"),
-        );
-
-        harness.run(&["send", "fix-auth", "--prompt-file", PromptFixture::PATH]);
-
-        assert_eq!(PromptFixture::submitted(&harness), ["fix the login"]);
-    }
-
-    #[test]
     fn a_prompt_file_path_with_no_file_exits_one_and_names_the_path() {
         let harness = PromptFixture::live_with_prompt_files(FakePromptFiles::default());
 

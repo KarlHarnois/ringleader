@@ -48,9 +48,10 @@ use session_commands::SessionCommands;
 pub use version_reply::VersionReply;
 
 use crate::application::diagnostics::doctor_report::DoctorReport;
-use crate::application::ports::lock::LockPatience;
-use crate::application::ports::{Lock, LockError};
-use crate::application::{CorruptRegistry, DeleteImpact, FailureKind, SessionService};
+use crate::application::ports::{Lock, LockError, LockPatience};
+use crate::application::{
+    CorruptRegistry, DeleteImpact, FailureKind, ServiceError, SessionService,
+};
 use crate::domain::BuildVersion;
 
 #[derive(Debug, Parser)]
@@ -320,15 +321,15 @@ impl Cli {
     }
 
     fn accepting_valid_cli(self) -> Result<Self, ExitCode> {
-        self.accept_if_valid()
+        let mut output = CliOutput::standard(self.output_mode());
+        self.accept_if_valid(&mut output)
             .map_err(|exit| ExitCode::from(exit.code()))
     }
 
-    pub(crate) fn accept_if_valid(self) -> Result<Self, CliExit> {
+    pub(crate) fn accept_if_valid(self, output: &mut CliOutput) -> Result<Self, CliExit> {
         let Some(message) = self.several_impact_names() else {
             return Ok(self);
         };
-        let mut output = CliOutput::standard(self.output_mode());
         output.print_failure(FailureKind::Invalid, &message);
         Err(CliExit::Code(CliExit::exit_code(FailureKind::Invalid)))
     }
@@ -538,7 +539,7 @@ impl Cli {
             }
             attempt => attempt,
         };
-        taken.map_err(|error| Self::lock_failure(&error, session))
+        taken.map_err(|error| Self::lock_failure(error, session))
     }
 
     fn wait_for_lock(
@@ -550,10 +551,11 @@ impl Cli {
         lock.acquire(patience, &|| session.is_signaled())
     }
 
-    fn lock_failure(error: &LockError, session: &mut CliSession) -> CliExit {
+    fn lock_failure(error: LockError, session: &mut CliSession) -> CliExit {
         if let Err(stop) = session.stop_if_signaled() {
             return session.finish(Err(stop));
         }
+        let error = ServiceError::from(error);
         let kind = error.failure_kind();
         session.output().print_failure(kind, &error.to_string());
         CliExit::Code(CliExit::exit_code(kind))
@@ -1288,6 +1290,16 @@ mod tests {
             ParseFixture::exit_code(&["ringleader", "delete", "a", "--force", "--if-impact", "{}"]),
             1
         );
+    }
+
+    #[test]
+    fn delete_refuses_a_seen_impact_with_several_names() {
+        let harness = CliHarness::new(ServiceFixture::new());
+
+        let exit = harness.run(&["delete", "a", "b", "--if-impact", "{}"]);
+
+        assert_eq!(exit.code(), CliExit::FAILURE);
+        assert!(harness.stderr().contains(Cli::SEVERAL_IMPACT_NAMES));
     }
 
     #[test]

@@ -23,6 +23,8 @@ pub enum ServiceError {
     #[error("{0}")]
     Conflict(String),
     #[error("{0}")]
+    LockHeld(String),
+    #[error("{0}")]
     Unmeasurable(String),
     #[error("{message}")]
     GuardsChanged {
@@ -41,6 +43,7 @@ impl ServiceError {
             ServiceError::Invalid(_) => FailureKind::Invalid,
             ServiceError::NotFound(_) => FailureKind::NotFound,
             ServiceError::Conflict(_) => FailureKind::Conflict,
+            ServiceError::LockHeld(_) => FailureKind::LockHeld,
             ServiceError::Unmeasurable(_) => FailureKind::Unmeasurable,
             ServiceError::GuardsChanged { .. } => FailureKind::WouldLoseWork,
             ServiceError::TimedOut { .. } => FailureKind::TimedOut,
@@ -55,7 +58,9 @@ impl ServiceError {
     pub fn is_refusal(&self) -> bool {
         matches!(
             self,
-            ServiceError::Conflict(_) | ServiceError::GuardsChanged { .. }
+            ServiceError::Conflict(_)
+                | ServiceError::LockHeld(_)
+                | ServiceError::GuardsChanged { .. }
         )
     }
 
@@ -66,6 +71,7 @@ impl ServiceError {
             ServiceError::Invalid(_) => ServiceError::Invalid(message),
             ServiceError::NotFound(_) => ServiceError::NotFound(message),
             ServiceError::Conflict(_) => ServiceError::Conflict(message),
+            ServiceError::LockHeld(_) => ServiceError::LockHeld(message),
             ServiceError::Unmeasurable(_) => ServiceError::Unmeasurable(message),
             ServiceError::GuardsChanged { impact, .. } => {
                 ServiceError::GuardsChanged { message, impact }
@@ -112,7 +118,7 @@ impl From<LockError> for ServiceError {
     fn from(error: LockError) -> Self {
         let message = error.to_string();
         match error {
-            LockError::Held { .. } => ServiceError::Conflict(message),
+            LockError::Held { .. } => ServiceError::LockHeld(message),
             LockError::Io { .. } => ServiceError::Failed(message),
         }
     }
@@ -162,7 +168,9 @@ impl From<InvalidName> for ServiceError {
 
 #[cfg(test)]
 mod tests {
-    use super::{FailureKind, ServiceError, Tool};
+    use std::path::PathBuf;
+
+    use super::{FailureKind, LockError, ServiceError, Tool};
 
     #[test]
     fn each_service_error_names_its_failure_kind() {
@@ -178,6 +186,10 @@ mod tests {
             (
                 ServiceError::Conflict("bad".to_string()),
                 FailureKind::Conflict,
+            ),
+            (
+                ServiceError::LockHeld("bad".to_string()),
+                FailureKind::LockHeld,
             ),
             (
                 ServiceError::Unmeasurable("bad".to_string()),
@@ -211,6 +223,7 @@ mod tests {
             ServiceError::Invalid("bad".to_string()),
             ServiceError::NotFound("bad".to_string()),
             ServiceError::Conflict("bad".to_string()),
+            ServiceError::LockHeld("bad".to_string()),
             ServiceError::Unmeasurable("bad".to_string()),
             ServiceError::Failed("bad".to_string()),
             ServiceError::TimedOut {
@@ -224,6 +237,28 @@ mod tests {
             assert_eq!(std::mem::discriminant(&extended), kind);
             assert_eq!(extended.to_string(), "bad; while renaming");
         }
+    }
+
+    #[test]
+    fn a_held_lock_becomes_a_lock_held_failure() {
+        let error = ServiceError::from(LockError::Held {
+            path: PathBuf::from("/state/ringleader/lock"),
+        });
+
+        assert_eq!(error.failure_kind(), FailureKind::LockHeld);
+    }
+
+    #[test]
+    fn adding_context_keeps_a_guards_changed_impact() {
+        let error = ServiceError::GuardsChanged {
+            message: "bad".to_string(),
+            impact: Box::default(),
+        };
+
+        let extended = error.adding_context("while renaming");
+
+        assert!(matches!(extended, ServiceError::GuardsChanged { .. }));
+        assert_eq!(extended.to_string(), "bad; while renaming");
     }
 
     #[test]

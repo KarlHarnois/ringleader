@@ -3,8 +3,6 @@ use std::time::Duration;
 
 use thiserror::Error;
 
-use crate::application::FailureKind;
-
 pub trait Lock {
     fn try_acquire(&mut self) -> Result<(), LockError>;
     fn acquire(&mut self, patience: LockPatience, stop: &dyn Fn() -> bool)
@@ -43,15 +41,6 @@ pub enum LockError {
     Io { path: PathBuf, detail: String },
 }
 
-impl LockError {
-    pub fn failure_kind(&self) -> FailureKind {
-        match self {
-            LockError::Held { .. } => FailureKind::LockHeld,
-            LockError::Io { .. } => FailureKind::Failed,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -65,28 +54,5 @@ mod tests {
     fn the_default_patience_allows_a_wait_for_sixty_seconds() {
         assert_eq!(LockPatience::DEFAULT.limit(), Duration::from_secs(60));
         assert!(LockPatience::DEFAULT.allows_a_wait());
-    }
-
-    #[test]
-    fn each_lock_error_names_its_failure_kind() {
-        let cases = [
-            (
-                LockError::Held {
-                    path: PathBuf::from("/state/ringleader/lock"),
-                },
-                FailureKind::LockHeld,
-            ),
-            (
-                LockError::Io {
-                    path: PathBuf::from("/state/ringleader/lock"),
-                    detail: "permission denied".to_string(),
-                },
-                FailureKind::Failed,
-            ),
-        ];
-
-        for (error, kind) in cases {
-            assert_eq!(error.failure_kind(), kind);
-        }
     }
 }

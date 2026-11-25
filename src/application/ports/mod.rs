@@ -32,7 +32,7 @@ pub use fold_store::{FoldStore, FoldStoreError};
 pub use head::Head;
 pub use host_probe::{DirectoryAccess, HostProbe, HostProbeError, ProcessInfo};
 pub use interrupts::Interrupts;
-pub use lock::{Lock, LockError};
+pub use lock::{Lock, LockError, LockPatience};
 pub use merge_outcome::MergeOutcome;
 pub use multiplexer::{
     AttachTarget, ClientView, Multiplexer, MultiplexerError, ReturnRequest, ServerConfig,

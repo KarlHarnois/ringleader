@@ -39,23 +39,6 @@ impl DeleteImpact {
         Self { working, ..self }
     }
 
-    pub fn seen(
-        dirty_files: u64,
-        nested_repos: Vec<PathBuf>,
-        unmerged_commits: u64,
-        processes: Vec<ProcessInfo>,
-        working: bool,
-    ) -> Self {
-        Self {
-            dirty_files,
-            nested_repos,
-            unmerged_commits,
-            processes,
-            working,
-            scope: DeleteScope::Worktree,
-        }
-    }
-
     pub fn dirty_files(&self) -> u64 {
         self.dirty_files
     }
@@ -178,7 +161,7 @@ mod tests {
         fn measured(dirty_files: u64, unmerged_commits: u64) -> DeleteImpact {
             DeleteImpact::measured(
                 &DirtyState::present(dirty_files, Vec::new()),
-                &UnmergedCommits::new(unmerged_commits, None, None),
+                &UnmergedCommits::counting(unmerged_commits),
                 Vec::new(),
             )
         }

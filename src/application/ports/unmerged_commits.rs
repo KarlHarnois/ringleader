@@ -16,6 +16,10 @@ impl UnmergedCommits {
         }
     }
 
+    pub fn counting(count: u64) -> Self {
+        Self::new(count, None, None)
+    }
+
     pub fn count(&self) -> u64 {
         self.count
     }

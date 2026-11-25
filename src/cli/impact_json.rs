@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::application::DeleteImpact;
-use crate::application::ports::ProcessInfo;
+use crate::application::ports::{DirtyState, ProcessInfo, UnmergedCommits};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ImpactJson {
@@ -47,13 +47,12 @@ impl ImpactJson {
             working,
             warnings: _,
         } = serde_json::from_str(text).map_err(ImpactJsonError)?;
-        Ok(DeleteImpact::seen(
-            dirty_files,
-            nested_repos,
-            unmerged_commits,
-            Self::into_processes(processes),
-            working,
-        ))
+        let dirty = DirtyState::present(dirty_files, nested_repos);
+        let commits = UnmergedCommits::counting(unmerged_commits);
+        Ok(
+            DeleteImpact::measured(&dirty, &commits, Self::into_processes(processes))
+                .while_working(working),
+        )
     }
 
     fn into_processes(processes: Vec<ProcessJson>) -> Vec<ProcessInfo> {
