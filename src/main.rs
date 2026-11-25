@@ -65,7 +65,7 @@ use application::{
     AgentPorts, DesktopPorts, DiagnosticPaths, LoadedConfig, RepoPorts, ServiceContext,
     ServiceError, ServicePorts, SessionService, StatePorts, TmuxPorts,
 };
-use cli::{Cli, CliExit, CliInput, CliOutput, CliSession, EntryPoints};
+use cli::{Cli, CliExit, CliInput, CliOutput, CliSession, EntryPoints, EnvelopeError};
 use ui::theme::ColorMode;
 use ui::{
     App, CrosstermInput, CrosstermScreenMode, EventLoop, FinderPopupError, MenuPopupError,
@@ -602,9 +602,9 @@ impl EntryPoints for CompositionRoot {
         self.exec_agent(handoff)
     }
 
-    fn print_version(&self, line: &str) -> ExitCode {
-        CliOutput::standard().line(line);
-        ExitCode::SUCCESS
+    fn print_version(&self, line: Result<String, EnvelopeError>) -> ExitCode {
+        let mut output = CliOutput::standard();
+        ExitCode::from(output.envelope(line).code())
     }
 
     fn socket_problem(&self) -> Option<String> {

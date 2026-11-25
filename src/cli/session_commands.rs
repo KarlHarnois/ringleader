@@ -44,13 +44,14 @@ impl<'a> SessionCommands<'a> {
             .collect();
         let report = ListReport::new(&rows, &diffs);
         if args.json {
-            self.session
+            return Ok(self
+                .session
                 .output()
-                .line(&Envelope::of(&report.result()).text());
-        } else {
-            for line in report.lines() {
-                self.session.output().line(&line);
-            }
+                .envelope(Envelope::of(&report.result()).text())
+                .code());
+        }
+        for line in report.lines() {
+            self.session.output().line(&line);
         }
         Ok(0)
     }

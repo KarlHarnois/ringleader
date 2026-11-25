@@ -20,7 +20,7 @@ impl<'a> ListReport<'a> {
         self.rows.iter().map(|row| self.line(row)).collect()
     }
 
-    pub fn result(&self) -> ListResult {
+    pub fn result(&self) -> impl Serialize + '_ {
         ListResult {
             sessions: self.rows.iter().map(|row| self.entry(row)).collect(),
         }
@@ -50,13 +50,13 @@ impl<'a> ListReport<'a> {
     fn entry(&self, row: &SessionSummary) -> ListEntry {
         let metadata = row.metadata();
         ListEntry {
+            agent: metadata.map(|metadata| metadata.agent().to_string()),
+            branch: metadata.map(|metadata| metadata.branch().to_string()),
+            diff: self.diff(row).map(DiffEntry::from_stat),
             name: row.name().to_string(),
             repo: metadata.map(|metadata| metadata.repo_name().to_string()),
-            branch: metadata.map(|metadata| metadata.branch().to_string()),
-            worktree: metadata.map(|metadata| metadata.worktree_path().display().to_string()),
-            agent: metadata.map(|metadata| metadata.agent().to_string()),
             state: row.state().label(),
-            diff: self.diff(row).map(DiffEntry::from_stat),
+            worktree: metadata.map(|metadata| metadata.worktree_path().display().to_string()),
         }
     }
 
@@ -67,35 +67,35 @@ impl<'a> ListReport<'a> {
 }
 
 #[derive(Serialize)]
-pub struct ListResult {
+struct ListResult {
     sessions: Vec<ListEntry>,
 }
 
 #[derive(Serialize)]
 struct ListEntry {
+    agent: Option<String>,
+    branch: Option<String>,
+    diff: Option<DiffEntry>,
     name: String,
     repo: Option<String>,
-    branch: Option<String>,
-    worktree: Option<String>,
-    agent: Option<String>,
     state: &'static str,
-    diff: Option<DiffEntry>,
+    worktree: Option<String>,
 }
 
 #[derive(Serialize)]
 struct DiffEntry {
+    deletions: u64,
     files: u64,
     insertions: u64,
-    deletions: u64,
     untracked: u64,
 }
 
 impl DiffEntry {
     fn from_stat(diff: DiffStat) -> Self {
         Self {
+            deletions: diff.deletions(),
             files: diff.files(),
             insertions: diff.insertions(),
-            deletions: diff.deletions(),
             untracked: diff.untracked(),
         }
     }
