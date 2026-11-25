@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use super::repo_list_report::RepoListReport;
 use super::{CliSession, CommandStop, RepoAddArgs};
 use crate::application::{AddRepoRequest, RepoAddition, ServiceError, SessionService};
 use crate::domain::BaseBranch;
@@ -70,21 +71,9 @@ impl<'a> RepoCommands<'a> {
 
     pub fn list(&mut self) -> Result<u8, CommandStop> {
         let discovery = self.session.wait(&self.service.discover_repos())?;
-        for repo in discovery.repos() {
-            let marker = if repo.is_explicit() {
-                "  [[repos]]"
-            } else {
-                ""
-            };
-            self.session.output().line(&format!(
-                "{:<24} {}{marker}",
-                repo.name(),
-                repo.path().display()
-            ));
-        }
-        for notice in discovery.notices() {
-            self.session.output().error(&notice);
-        }
+        self.session
+            .output()
+            .reply(&RepoListReport::new(discovery))?;
         Ok(0)
     }
 }
@@ -94,7 +83,7 @@ mod tests {
     use std::path::Path;
 
     use crate::cli::CliExit;
-    use crate::domain::{Repo, RepoName};
+    use crate::domain::{BaseBranch, BuildVersion, Repo, RepoName};
     use crate::test_support::{CliHarness, FakeRepoScanner, FakeWorkspace, ServiceFixture};
 
     struct RepoFixture;
@@ -120,6 +109,57 @@ mod tests {
         fn explicit(name: &str, path: &str) -> Repo {
             Repo::explicit(RepoName::parse(name).unwrap(), Path::new(path), None)
         }
+
+        fn based_on(name: &str, path: &str, base_branch: &str) -> Repo {
+            Repo::explicit(
+                RepoName::parse(name).unwrap(),
+                Path::new(path),
+                BaseBranch::new(base_branch),
+            )
+        }
+    }
+
+    struct RepoListJsonFixture;
+
+    impl RepoListJsonFixture {
+        fn configured_and_scanned_with_a_notice() -> ServiceFixture {
+            let config = ServiceFixture::config().with_repos(vec![RepoFixture::based_on(
+                "pinned",
+                "/opt/pinned",
+                "develop",
+            )]);
+            ServiceFixture::new()
+                .with_config(config)
+                .with_scanner(FakeRepoScanner::finding(vec![ServiceFixture::repo()]).cut_short())
+        }
+
+        fn without_repos() -> ServiceFixture {
+            ServiceFixture::new().with_scanner(FakeRepoScanner::finding(vec![]))
+        }
+    }
+
+    #[test]
+    fn repo_list_json_matches_the_pinned_envelope() {
+        let harness = CliHarness::new(RepoListJsonFixture::configured_and_scanned_with_a_notice());
+
+        let exit = harness.run(&["repo", "list", "--json"]);
+
+        let expected = include_str!("../../tests/fixtures/contract/repo-list.json")
+            .replace("<build>", BuildVersion::CURRENT.text());
+        assert_eq!(harness.stdout(), expected);
+        assert_eq!(harness.stderr(), "");
+        assert_eq!(exit, CliExit::Code(0));
+    }
+
+    #[test]
+    fn repo_list_json_without_repos_prints_an_empty_result() {
+        let harness = CliHarness::new(RepoListJsonFixture::without_repos());
+
+        harness.run(&["repo", "list", "--json"]);
+
+        let json: serde_json::Value = serde_json::from_str(harness.stdout().trim()).unwrap();
+        assert!(json["result"]["repos"].as_array().unwrap().is_empty());
+        assert!(json["result"]["notices"].as_array().unwrap().is_empty());
     }
 
     #[test]

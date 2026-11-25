@@ -1,0 +1,1 @@
+{"schema_version":1,"build_version":"<build>","result":{"repos":[{"name":"example-project","path":"/repos/example-project","source":"scan","base_branch":null},{"name":"pinned","path":"/opt/pinned","source":"config","base_branch":"develop"}],"notices":["the scan of /repos/example-project was cut short"]}}

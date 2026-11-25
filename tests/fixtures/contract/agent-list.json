@@ -1,0 +1,1 @@
+{"schema_version":1,"build_version":"<build>","result":{"agents":[{"name":"claude","command":"claude","plan":true},{"name":"other","command":"other-agent","plan":false}]}}

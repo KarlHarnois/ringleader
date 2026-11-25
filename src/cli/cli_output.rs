@@ -40,6 +40,9 @@ impl CliOutput {
                 for line in reply.lines() {
                     self.line(&line);
                 }
+                for notice in reply.notices() {
+                    self.error(&notice);
+                }
                 Ok(())
             }
             OutputMode::Json => {
