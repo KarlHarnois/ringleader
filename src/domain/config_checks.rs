@@ -5,7 +5,6 @@ use super::agent::Agent;
 use super::config_draft::ConfigDraft;
 use super::hot_key::HotKey;
 use super::key_bindings::KeyBindings;
-use crate::domain::RepoName;
 
 pub struct ConfigChecks<'a> {
     draft: &'a ConfigDraft,
@@ -41,6 +40,7 @@ impl<'a> ConfigChecks<'a> {
         self.check_scan_depth();
         self.check_repos();
         self.check_agents();
+        self.check_remote_hosts();
         self.failures
     }
 
@@ -160,7 +160,7 @@ impl<'a> ConfigChecks<'a> {
     }
 
     fn check_repos(&mut self) {
-        let mut seen: Vec<RepoName> = Vec::new();
+        let mut names = EntryNames::of("repos.name", "repos");
         for repo in self.draft.repo_drafts() {
             self.check_absolute("repos.path", repo.path());
             match repo.resolved_name() {
@@ -168,24 +168,21 @@ impl<'a> ConfigChecks<'a> {
                     "repos.name: `{}` is not a valid repo name",
                     repo.shown_name()
                 )),
-                Some(name) if seen.contains(&name) => {
-                    self.fail(format!("repos.name: `{name}` names two [[repos]] entries"))
-                }
-                Some(name) => seen.push(name),
+                Some(name) => match names.repetition_failure(name.as_str()) {
+                    Some(failure) => self.fail(failure),
+                    None => names.record(name.as_str()),
+                },
             }
         }
     }
 
     fn check_agents(&mut self) {
-        let mut seen: Vec<&str> = Vec::new();
+        let mut names = EntryNames::of("agents.name", "agents");
         for agent in self.draft.agents_value() {
-            if seen.contains(&agent.name()) {
-                self.fail(format!(
-                    "agents.name: `{}` names two [[agents]] entries",
-                    agent.name()
-                ));
+            if let Some(failure) = names.repetition_failure(agent.name()) {
+                self.fail(failure);
             }
-            seen.push(agent.name());
+            names.record(agent.name());
             self.check_command(agent);
             for name in agent.env_names() {
                 self.check_env_name(agent, name);
@@ -193,6 +190,19 @@ impl<'a> ConfigChecks<'a> {
             for (name, value) in agent.env_assignments() {
                 self.check_env_assignment(agent, name, value);
             }
+        }
+    }
+
+    fn check_remote_hosts(&mut self) {
+        let mut names = EntryNames::of("hosts.name", "hosts");
+        for entry in self.draft.remote_hosts_value() {
+            if let Some(reason) = entry.name_refusal() {
+                self.fail(format!("hosts.name: `{}` {reason}", entry.name()));
+            }
+            if let Some(failure) = names.repetition_failure(entry.name()) {
+                self.fail(failure);
+            }
+            names.record(entry.name());
         }
     }
 
@@ -279,12 +289,42 @@ impl<'a> ConfigChecks<'a> {
     }
 }
 
+struct EntryNames {
+    setting: &'static str,
+    table: &'static str,
+    seen: Vec<String>,
+}
+
+impl EntryNames {
+    fn of(setting: &'static str, table: &'static str) -> Self {
+        Self {
+            setting,
+            table,
+            seen: Vec::new(),
+        }
+    }
+
+    fn repetition_failure(&self, name: &str) -> Option<String> {
+        self.seen.iter().any(|seen| seen == name).then(|| {
+            format!(
+                "{}: `{name}` names two [[{}]] entries",
+                self.setting, self.table
+            )
+        })
+    }
+
+    fn record(&mut self, name: &str) {
+        self.seen.push(name.to_string());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
     use super::*;
     use crate::domain::Config;
+    use crate::domain::RemoteHostEntry;
     use crate::domain::repo_draft::RepoDraft;
 
     struct ChecksFixture;
@@ -317,6 +357,10 @@ mod tests {
         fn example_agent_setting(name: &str, value: &str) -> Agent {
             Agent::new("example-agent", "example-agent")
                 .with_env_assignments(&[(name.to_string(), value.to_string())])
+        }
+
+        fn host(name: &str) -> ConfigDraft {
+            Self::draft().remote_host(RemoteHostEntry::new(name))
         }
     }
 
@@ -785,6 +829,82 @@ mod tests {
             .agent(Agent::new("claude", "claude"));
 
         ChecksFixture::fails_on(draft, "agents.name");
+    }
+
+    #[test]
+    fn two_host_entries_with_one_name_fail() {
+        let draft = ChecksFixture::draft()
+            .remote_host(RemoteHostEntry::new("example-host"))
+            .remote_host(RemoteHostEntry::new("example-host"));
+
+        assert_eq!(
+            ChecksFixture::failures(&draft),
+            ["hosts.name: `example-host` names two [[hosts]] entries"]
+        );
+    }
+
+    #[test]
+    fn an_empty_host_name_fails() {
+        assert_eq!(
+            ChecksFixture::failures(&ChecksFixture::host("")),
+            ["hosts.name: `` is empty"]
+        );
+    }
+
+    #[test]
+    fn a_host_name_holding_whitespace_fails() {
+        assert_eq!(
+            ChecksFixture::failures(&ChecksFixture::host("two words")),
+            ["hosts.name: `two words` holds whitespace"]
+        );
+    }
+
+    #[test]
+    fn a_host_name_starting_with_a_dash_fails() {
+        assert_eq!(
+            ChecksFixture::failures(&ChecksFixture::host("-oProxyCommand")),
+            ["hosts.name: `-oProxyCommand` starts with -"]
+        );
+    }
+
+    #[test]
+    fn host_refusals_are_reported_in_config_order() {
+        let draft = ChecksFixture::draft()
+            .remote_host(RemoteHostEntry::new("-first"))
+            .remote_host(RemoteHostEntry::new("-second"));
+
+        assert_eq!(
+            ChecksFixture::failures(&draft),
+            [
+                "hosts.name: `-first` starts with -",
+                "hosts.name: `-second` starts with -"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_refused_and_repeated_host_name_reports_both_failures() {
+        let draft = ChecksFixture::draft()
+            .remote_host(RemoteHostEntry::new("two words"))
+            .remote_host(RemoteHostEntry::new("two words"));
+
+        assert_eq!(
+            ChecksFixture::failures(&draft),
+            [
+                "hosts.name: `two words` holds whitespace",
+                "hosts.name: `two words` holds whitespace",
+                "hosts.name: `two words` names two [[hosts]] entries"
+            ]
+        );
+    }
+
+    #[test]
+    fn two_good_host_entries_pass() {
+        let draft = ChecksFixture::draft()
+            .remote_host(RemoteHostEntry::new("first-host"))
+            .remote_host(RemoteHostEntry::new("second-host"));
+
+        assert!(ChecksFixture::failures(&draft).is_empty());
     }
 
     #[test]

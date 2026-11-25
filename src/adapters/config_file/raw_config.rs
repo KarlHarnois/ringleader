@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 use super::parse_failure::ParseFailure;
-use crate::domain::{Agent, ConfigDraft, RepoDraft};
+use crate::domain::{Agent, ConfigDraft, RemoteHostEntry, RepoDraft};
 
 #[derive(Deserialize, Default)]
 #[serde(default)]
@@ -26,6 +26,7 @@ pub struct RawConfig {
     scan_depth: Option<i64>,
     repos: Vec<RawRepo>,
     agents: Vec<RawAgent>,
+    hosts: Vec<RawHost>,
 }
 
 impl RawConfig {
@@ -47,6 +48,9 @@ impl RawConfig {
         for repo in self.repos {
             draft = draft.repo(repo.into_draft(home));
         }
+        let draft = self.hosts.into_iter().fold(draft, |draft, host| {
+            draft.remote_host(RemoteHostEntry::new(&host.name))
+        });
         self.agents
             .into_iter()
             .fold(draft, |draft, agent| draft.agent(agent.into_agent(home)))
@@ -105,6 +109,12 @@ impl RawConfig {
         }
         draft
     }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawHost {
+    name: String,
 }
 
 #[derive(Deserialize)]
@@ -215,5 +225,34 @@ impl<'a> HomeExpansion<'a> {
             (Some(home), Some(rest)) => home.join(rest).to_string_lossy().into_owned(),
             _ => command.to_string(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct RawConfigFixture;
+
+    impl RawConfigFixture {
+        fn parse_error(text: &str) -> String {
+            RawConfig::parse(text).err().expect("a parse failure")
+        }
+    }
+
+    #[test]
+    fn a_host_entry_with_an_address_key_fails_to_parse() {
+        let error = RawConfigFixture::parse_error(
+            "[[hosts]]\nname = \"example-host\"\naddress = \"192.0.2.10\"\n",
+        );
+
+        assert!(error.contains("address"), "{error}");
+    }
+
+    #[test]
+    fn a_host_entry_without_a_name_fails_to_parse() {
+        let error = RawConfigFixture::parse_error("[[hosts]]\n");
+
+        assert!(error.contains("name"), "{error}");
     }
 }

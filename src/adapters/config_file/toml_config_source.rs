@@ -496,6 +496,42 @@ mod tests {
     }
 
     #[test]
+    fn a_config_with_host_entries_still_loads() {
+        let fixture = SourceFixture::with_text(
+            "[[hosts]]\nname = \"first-host\"\n[[hosts]]\nname = \"second-host\"\n",
+        );
+
+        assert!(fixture.source().load().is_ok());
+    }
+
+    #[test]
+    fn a_repeated_host_name_fails_a_load() {
+        let fixture = SourceFixture::with_text(concat!(
+            "[[hosts]]\nname = \"example-host\"\n",
+            "[[hosts]]\nname = \"example-host\"\n",
+        ));
+
+        let Err(ConfigError::Invalid { failures, .. }) = fixture.source().load() else {
+            panic!("a repeated host name should fail a load");
+        };
+        assert_eq!(
+            failures,
+            ["hosts.name: `example-host` names two [[hosts]] entries"]
+        );
+    }
+
+    #[test]
+    fn a_host_entry_with_an_unknown_key_is_a_parse_error_naming_it() {
+        let fixture = SourceFixture::with_text(
+            "[[hosts]]\nname = \"example-host\"\naddress = \"192.0.2.10\"\n",
+        );
+
+        let error = fixture.source().load().unwrap_err();
+
+        assert!(error.to_string().contains("address"));
+    }
+
+    #[test]
     fn unparsable_text_is_a_parse_error() {
         let fixture = SourceFixture::with_text("branch_prefix = ");
 
