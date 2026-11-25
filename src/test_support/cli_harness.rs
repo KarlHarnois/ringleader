@@ -6,7 +6,7 @@ use clap::Parser;
 
 use super::{FakeCliInput, FakeInterrupts, FakeLock, FakePromptFiles, ServiceFixture};
 use crate::application::ServiceError;
-use crate::application::ports::lock::LockPatience;
+use crate::application::ports::LockPatience;
 use crate::cli::{Cli, CliExit, CliInput, CliOutput, CliSession, OutputMode};
 
 pub struct CliHarness {
@@ -72,7 +72,8 @@ impl CliHarness {
         else {
             return CliExit::Code(CliExit::FAILURE);
         };
-        let cli = match cli.accept_if_valid() {
+        let mut output = self.output(cli.output_mode());
+        let cli = match cli.accept_if_valid(&mut output) {
             Ok(cli) => cli,
             Err(exit) => return exit,
         };
@@ -100,12 +101,16 @@ impl CliHarness {
         session.finish_failure(error)
     }
 
-    fn session(&self, mode: OutputMode) -> CliSession {
-        let output = CliOutput::new(
+    fn output(&self, mode: OutputMode) -> CliOutput {
+        CliOutput::new(
             Box::new(self.stdout.clone()),
             Box::new(self.stderr.clone()),
             mode,
-        );
+        )
+    }
+
+    fn session(&self, mode: OutputMode) -> CliSession {
+        let output = self.output(mode);
         CliSession::new(
             output,
             CliInput::new(Box::new(self.input.clone())),

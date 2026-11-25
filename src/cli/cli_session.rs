@@ -123,33 +123,21 @@ impl CommandFailure {
     }
 }
 
-impl From<ServiceError> for CommandFailure {
-    fn from(error: ServiceError) -> Self {
-        Self {
-            kind: error.failure_kind(),
-            message: error.to_string(),
-        }
-    }
-}
-
-impl From<EnvelopeError> for CommandFailure {
-    fn from(error: EnvelopeError) -> Self {
-        Self {
-            kind: error.failure_kind(),
-            message: error.to_string(),
-        }
-    }
-}
-
 impl From<ServiceError> for CommandStop {
     fn from(error: ServiceError) -> Self {
-        CommandStop::Failed(error.into())
+        CommandStop::Failed(CommandFailure {
+            kind: error.failure_kind(),
+            message: error.to_string(),
+        })
     }
 }
 
 impl From<EnvelopeError> for CommandStop {
     fn from(error: EnvelopeError) -> Self {
-        CommandStop::Failed(error.into())
+        CommandStop::Failed(CommandFailure {
+            kind: error.failure_kind(),
+            message: error.to_string(),
+        })
     }
 }
 

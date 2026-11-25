@@ -3,8 +3,7 @@ use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::application::ports::lock::LockPatience;
-use crate::application::ports::{Lock, LockError};
+use crate::application::ports::{Lock, LockError, LockPatience};
 
 pub struct FileLock {
     path: PathBuf,
@@ -237,7 +236,7 @@ mod tests {
     }
 
     #[test]
-    fn a_limit_beyond_the_instant_range_still_stops_when_asked() {
+    fn a_patience_beyond_the_instant_range_still_stops_when_asked() {
         let fixture = LockFixture::new();
         let _holder = fixture.held();
         let asked = Cell::new(0);

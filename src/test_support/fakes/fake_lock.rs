@@ -2,8 +2,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
-use crate::application::ports::lock::LockPatience;
-use crate::application::ports::{Lock, LockError};
+use crate::application::ports::{Lock, LockError, LockPatience};
 
 #[derive(Clone)]
 pub struct FakeLock {

@@ -10,8 +10,7 @@ use super::blocking_operation::{BlockingOperation, DeleteStep, OperationOutcome}
 use super::dialogs::{Dialog, DialogOpening, DialogSlot, DialogStep};
 use super::theme::{ColorMode, Theme};
 use super::theme_slot::ThemeSlot;
-use crate::application::ports::lock::LockPatience;
-use crate::application::ports::{FoldStore, Lock, LockError};
+use crate::application::ports::{FoldStore, Lock, LockError, LockPatience};
 use crate::application::{
     CorruptRegistry, EphemeralShell, HandOff, ServiceError, SessionService, ShellOutcome,
 };
@@ -3632,7 +3631,7 @@ mod tests {
 
         let refusal = app.start_up(Vec::new()).unwrap_err();
 
-        assert!(matches!(refusal, ServiceError::Conflict(_)));
+        assert!(matches!(refusal, ServiceError::LockHeld(_)));
         assert!(!fixture.registry().was_moved_aside());
     }
 
