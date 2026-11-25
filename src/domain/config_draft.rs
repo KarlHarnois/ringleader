@@ -8,6 +8,7 @@ use super::config_checks::ConfigChecks;
 use super::hot_key::HotKey;
 use super::key_bindings::KeyBindings;
 use super::naming_scheme::NamingScheme;
+use super::remote_host_entry::RemoteHostEntry;
 use super::repo_draft::RepoDraft;
 use crate::domain::Repo;
 
@@ -30,6 +31,7 @@ pub struct ConfigDraft {
     scan_depth: i64,
     repos: Vec<RepoDraft>,
     agents: Vec<Agent>,
+    remote_hosts: Vec<RemoteHostEntry>,
 }
 
 impl ConfigDraft {
@@ -52,6 +54,7 @@ impl ConfigDraft {
             scan_depth: 3,
             repos: Vec::new(),
             agents: Vec::new(),
+            remote_hosts: Vec::new(),
         }
     }
 
@@ -164,6 +167,11 @@ impl ConfigDraft {
 
     pub fn agent(mut self, agent: Agent) -> Self {
         self.agents.push(agent);
+        self
+    }
+
+    pub fn remote_host(mut self, entry: RemoteHostEntry) -> Self {
+        self.remote_hosts.push(entry);
         self
     }
 
@@ -288,6 +296,10 @@ impl ConfigDraft {
 
     pub(super) fn agents_value(&self) -> &[Agent] {
         &self.agents
+    }
+
+    pub(super) fn remote_hosts_value(&self) -> &[RemoteHostEntry] {
+        &self.remote_hosts
     }
 
     fn written_or_default(&self, written: Option<&[String]>, defaults: &[&str]) -> Vec<String> {
