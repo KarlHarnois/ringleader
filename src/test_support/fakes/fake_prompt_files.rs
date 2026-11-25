@@ -28,7 +28,7 @@ impl FakePromptFiles {
 }
 
 impl PromptFiles for FakePromptFiles {
-    fn text(&self, path: &Path) -> Result<String, PromptFileError> {
+    fn read_text(&self, path: &Path) -> Result<String, PromptFileError> {
         self.entries
             .lock()
             .unwrap()

@@ -12,6 +12,7 @@ mod failed_entry;
 mod impact_json;
 mod list_report;
 mod prompt_argument;
+mod prompt_text;
 mod rename_reply;
 mod reply;
 mod repo_argument;
@@ -40,6 +41,7 @@ use cli_session::CommandStop;
 pub use entry_points::EntryPoints;
 pub use envelope::EnvelopeError;
 use prompt_argument::PromptArgument;
+pub use prompt_text::PromptText;
 pub use reply::{Remark, Reply};
 use repo_commands::RepoCommands;
 use session_commands::SessionCommands;
@@ -485,15 +487,12 @@ impl Cli {
         }
     }
 
-    pub fn read_prompt(&self, session: &mut CliSession) -> Result<(), CliExit> {
+    pub fn read_prompt(&self, session: &mut CliSession) -> Result<Option<PromptText>, CliExit> {
         let Some(argument) = self.prompt_argument() else {
-            return Ok(());
+            return Ok(None);
         };
-        match session.resolve_prompt(&argument) {
-            Ok(prompt) => {
-                session.store_prompt(prompt);
-                Ok(())
-            }
+        match session.read_prompt(&argument) {
+            Ok(prompt) => Ok(prompt),
             Err(error) => {
                 session
                     .output()
@@ -565,6 +564,7 @@ impl Cli {
         service: &mut SessionService,
         session: &mut CliSession,
         lock: &mut dyn Lock,
+        prompt: Option<PromptText>,
     ) -> CliExit {
         if let Some(CliCommand::Doctor(_)) = &self.command {
             return match Self::doctor(service, session) {
@@ -593,7 +593,7 @@ impl Cli {
                 return CliExit::Code(CliExit::exit_code(kind));
             }
         }
-        let result = self.dispatch(service, session);
+        let result = self.dispatch(service, session, prompt);
         lock.release();
         session.wait_for_startup_input(service);
         let exit = session.finish(result);
@@ -627,12 +627,15 @@ impl Cli {
         &self,
         service: &mut SessionService,
         session: &mut CliSession,
+        prompt: Option<PromptText>,
     ) -> Result<u8, CommandStop> {
         match &self.command {
             Some(CliCommand::Repo { action }) => Self::dispatch_repo(action, service, session),
             Some(CliCommand::Agent { action }) => Self::dispatch_agent(action, service, session),
-            Some(CliCommand::Send(args)) => SessionCommands::new(service, session).send(args),
-            Some(command) => Self::dispatch_session(command, service, session),
+            Some(CliCommand::Send(args)) => {
+                SessionCommands::new(service, session).send(args, prompt)
+            }
+            Some(command) => Self::dispatch_session(command, service, session, prompt),
             None => Ok(0),
         }
     }
@@ -641,11 +644,12 @@ impl Cli {
         command: &CliCommand,
         service: &mut SessionService,
         session: &mut CliSession,
+        prompt: Option<PromptText>,
     ) -> Result<u8, CommandStop> {
         let mut commands = SessionCommands::new(service, session);
         match command {
             CliCommand::List(_) => commands.list(),
-            CliCommand::New(args) => commands.create(args),
+            CliCommand::New(args) => commands.create(args, prompt),
             CliCommand::Delete(args) => commands.delete(args),
             CliCommand::Attach(args) => commands.attach(&args.name),
             CliCommand::Rename(args) => commands.rename(args),

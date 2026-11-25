@@ -1,7 +1,7 @@
 use std::path::Path;
 
 pub trait PromptFiles {
-    fn text(&self, path: &Path) -> Result<String, PromptFileError>;
+    fn read_text(&self, path: &Path) -> Result<String, PromptFileError>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

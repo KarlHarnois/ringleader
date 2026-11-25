@@ -77,9 +77,10 @@ impl CliHarness {
             Err(exit) => return exit,
         };
         let mut session = self.session(cli.output_mode());
-        if let Err(exit) = cli.read_prompt(&mut session) {
-            return exit;
-        }
+        let prompt = match cli.read_prompt(&mut session) {
+            Ok(prompt) => prompt,
+            Err(exit) => return exit,
+        };
         if let Err(exit) = cli.take_write_lock(&mut *self.lock.borrow_mut(), &mut session) {
             return exit;
         }
@@ -87,6 +88,7 @@ impl CliHarness {
             &mut self.fixture.unloaded_service(),
             &mut session,
             &mut *self.lock.borrow_mut(),
+            prompt,
         )
     }
 
