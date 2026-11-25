@@ -10,6 +10,7 @@ use super::blocking_operation::{BlockingOperation, DeleteStep, OperationOutcome}
 use super::dialogs::{Dialog, DialogOpening, DialogSlot, DialogStep};
 use super::theme::{ColorMode, Theme};
 use super::theme_slot::ThemeSlot;
+use crate::application::ports::lock::LockPatience;
 use crate::application::ports::{FoldStore, Lock, LockError};
 use crate::application::{
     CorruptRegistry, EphemeralShell, HandOff, ServiceError, SessionService, ShellOutcome,
@@ -498,7 +499,8 @@ impl App {
     }
 
     fn under_write_lock<T>(&mut self, work: impl FnOnce(&mut Self) -> T) -> Result<T, LockError> {
-        self.write_lock.acquire(&Self::never_interrupted)?;
+        self.write_lock
+            .acquire(LockPatience::DEFAULT, &Self::never_interrupted)?;
         let done = work(self);
         self.write_lock.release();
         Ok(done)

@@ -1,31 +1,24 @@
 use std::fs::{File, OpenOptions, TryLockError};
 use std::path::{Path, PathBuf};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use crate::application::ports::lock::LockPatience;
 use crate::application::ports::{Lock, LockError};
 
 pub struct FileLock {
     path: PathBuf,
-    retries: u32,
     held: Option<File>,
 }
 
 impl FileLock {
-    const RETRIES: u32 = 600;
     const RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
     pub fn new(path: &Path) -> Self {
         Self {
             path: path.to_path_buf(),
-            retries: Self::RETRIES,
             held: None,
         }
-    }
-
-    #[cfg(test)]
-    pub fn with_retries(self, retries: u32) -> Self {
-        Self { retries, ..self }
     }
 
     fn open(&self) -> Result<File, LockError> {
@@ -60,14 +53,20 @@ impl Lock for FileLock {
         }
     }
 
-    fn acquire(&mut self, stop: &dyn Fn() -> bool) -> Result<(), LockError> {
-        for _ in 0..self.retries {
+    fn acquire(
+        &mut self,
+        patience: LockPatience,
+        stop: &dyn Fn() -> bool,
+    ) -> Result<(), LockError> {
+        let start = Instant::now();
+        loop {
             match self.try_acquire() {
-                Err(LockError::Held { .. }) if !stop() => thread::sleep(Self::RETRY_INTERVAL),
+                Err(LockError::Held { .. }) if start.elapsed() < patience.limit() && !stop() => {
+                    thread::sleep(Self::RETRY_INTERVAL)
+                }
                 attempt => return attempt,
             }
         }
-        self.try_acquire()
     }
 
     fn release(&mut self) {
@@ -89,9 +88,10 @@ mod tests {
 
     impl LockFixture {
         const FORKED_CHILD_EXEC_LIMIT: Duration = Duration::from_secs(1);
-        const FEW_RETRIES: u32 = 3;
-        const ENOUGH_RETRIES_TO_OUTLAST_THE_HOLD: u32 = 20;
+        const SHORT_PATIENCE: Duration = Duration::from_millis(300);
+        const LONG_PATIENCE: Duration = Duration::from_secs(2);
         const HOLD: Duration = Duration::from_millis(150);
+        const ASKS_BEFORE_STOPPING: usize = 3;
 
         fn new() -> Self {
             Self {
@@ -104,11 +104,15 @@ mod tests {
         }
 
         fn lock(&self) -> FileLock {
-            FileLock::new(&self.path()).with_retries(Self::FEW_RETRIES)
+            FileLock::new(&self.path())
         }
 
-        fn patient_lock(&self) -> FileLock {
-            FileLock::new(&self.path()).with_retries(Self::ENOUGH_RETRIES_TO_OUTLAST_THE_HOLD)
+        fn short_patience() -> LockPatience {
+            LockPatience::of(Self::SHORT_PATIENCE)
+        }
+
+        fn long_patience() -> LockPatience {
+            LockPatience::of(Self::LONG_PATIENCE)
         }
 
         fn held(&self) -> FileLock {
@@ -178,18 +182,22 @@ mod tests {
         let fixture = LockFixture::new();
         let release = LockFixture::release_later(fixture.held());
 
-        let acquired = fixture.patient_lock().acquire(&LockFixture::never);
+        let acquired = fixture
+            .lock()
+            .acquire(LockFixture::long_patience(), &LockFixture::never);
 
         release.join().unwrap();
         assert_eq!(acquired, Ok(()));
     }
 
     #[test]
-    fn acquire_gives_up_once_its_retries_run_out() {
+    fn acquire_gives_up_once_its_patience_runs_out() {
         let fixture = LockFixture::new();
         let _holder = fixture.held();
 
-        let acquired = fixture.lock().acquire(&LockFixture::never);
+        let acquired = fixture
+            .lock()
+            .acquire(LockFixture::short_patience(), &LockFixture::never);
 
         assert_eq!(
             acquired,
@@ -205,7 +213,7 @@ mod tests {
         let _holder = fixture.held();
         let asked = Cell::new(0);
 
-        let acquired = fixture.lock().acquire(&|| {
+        let acquired = fixture.lock().acquire(LockFixture::short_patience(), &|| {
             asked.set(asked.get() + 1);
             true
         });
@@ -220,12 +228,30 @@ mod tests {
         let _holder = fixture.held();
         let asked = Cell::new(0);
 
-        let _ = fixture.lock().acquire(&|| {
+        let _ = fixture.lock().acquire(LockFixture::long_patience(), &|| {
             asked.set(asked.get() + 1);
-            false
+            asked.get() == LockFixture::ASKS_BEFORE_STOPPING
         });
 
-        assert_eq!(asked.get(), LockFixture::FEW_RETRIES);
+        assert_eq!(asked.get(), LockFixture::ASKS_BEFORE_STOPPING);
+    }
+
+    #[test]
+    fn a_limit_beyond_the_instant_range_still_stops_when_asked() {
+        let fixture = LockFixture::new();
+        let _holder = fixture.held();
+        let asked = Cell::new(0);
+
+        let acquired =
+            fixture
+                .lock()
+                .acquire(LockPatience::of(Duration::from_secs(u64::MAX)), &|| {
+                    asked.set(asked.get() + 1);
+                    true
+                });
+
+        assert!(matches!(acquired, Err(LockError::Held { .. })));
+        assert_eq!(asked.get(), 1);
     }
 
     #[test]

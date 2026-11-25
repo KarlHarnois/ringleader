@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
 
+use crate::application::ports::lock::LockPatience;
 use crate::application::ports::{Lock, LockError};
 
 #[derive(Clone)]
@@ -14,6 +16,7 @@ struct LockState {
     elsewhere: OtherHolder,
     held: bool,
     acquisitions: Vec<&'static str>,
+    patiences: Vec<LockPatience>,
 }
 
 #[derive(Default, Clone, Copy, PartialEq, Eq)]
@@ -21,13 +24,14 @@ enum OtherHolder {
     #[default]
     None,
     Holding,
-    ReleasingWithinPatience,
+    ReleasingAfter(Duration),
 }
 
 impl FakeLock {
     const PATH: &'static str = "/state/ringleader/lock";
     const TRY: &'static str = "try";
     const WAIT: &'static str = "wait";
+    const HELD_UNTIL_WAITED: Duration = Duration::from_secs(1);
 
     pub fn free() -> Self {
         Self::with_other_holder(OtherHolder::None)
@@ -37,8 +41,12 @@ impl FakeLock {
         Self::with_other_holder(OtherHolder::Holding)
     }
 
+    pub fn held_for(hold: Duration) -> Self {
+        Self::with_other_holder(OtherHolder::ReleasingAfter(hold))
+    }
+
     pub fn held_until_waited() -> Self {
-        Self::with_other_holder(OtherHolder::ReleasingWithinPatience)
+        Self::held_for(Self::HELD_UNTIL_WAITED)
     }
 
     fn with_other_holder(elsewhere: OtherHolder) -> Self {
@@ -66,6 +74,10 @@ impl FakeLock {
         self.state().acquisitions.clone()
     }
 
+    pub fn patiences(&self) -> Vec<LockPatience> {
+        self.state().patiences.clone()
+    }
+
     fn take(&self, kind: &'static str) -> Result<(), LockError> {
         let mut state = self.state();
         state.acquisitions.push(kind);
@@ -80,9 +92,11 @@ impl FakeLock {
         Ok(())
     }
 
-    fn outwait_a_releasing_holder(&self) {
+    fn release_holder_within(&self, patience: LockPatience) {
         let mut state = self.state();
-        if state.elsewhere == OtherHolder::ReleasingWithinPatience {
+        if let OtherHolder::ReleasingAfter(hold) = state.elsewhere
+            && hold <= patience.limit()
+        {
             state.elsewhere = OtherHolder::None;
         }
     }
@@ -103,9 +117,14 @@ impl Lock for FakeLock {
         self.take(Self::TRY)
     }
 
-    fn acquire(&mut self, stop: &dyn Fn() -> bool) -> Result<(), LockError> {
+    fn acquire(
+        &mut self,
+        patience: LockPatience,
+        stop: &dyn Fn() -> bool,
+    ) -> Result<(), LockError> {
+        self.state().patiences.push(patience);
         if !stop() {
-            self.outwait_a_releasing_holder();
+            self.release_holder_within(patience);
         }
         self.take(Self::WAIT)
     }
