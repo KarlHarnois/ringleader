@@ -144,8 +144,7 @@ mod tests {
 
     impl FitFixture {
         const WINDOW: &str = "=alpha:";
-        const CLIENT_WIDTH: &str = "90";
-        const CLIENT_HEIGHT: &str = "30";
+        const CLIENT_SIZE: &str = "90x30";
         const SENTINEL_SIZE: &str = "70x20";
 
         fn narrowed() -> Self {
@@ -157,7 +156,7 @@ mod tests {
         }
 
         fn join_client(&self) -> ControlClient {
-            self.join_client_of_size(&format!("{}x{}", Self::CLIENT_WIDTH, Self::CLIENT_HEIGHT))
+            self.join_client_of_size(Self::CLIENT_SIZE)
         }
 
         fn join_client_of_size(&self, size: &str) -> ControlClient {
@@ -169,17 +168,11 @@ mod tests {
         }
 
         fn window_size(&self) -> String {
-            self.server.text(&[
-                "display-message",
-                "-p",
-                "-t",
-                Self::WINDOW,
-                "#{window_width}x#{window_height}",
-            ])
+            self.server.window_size(Self::WINDOW)
         }
 
-        fn sizes_recorded_through_a_sentinel(&self) -> Vec<String> {
-            let (width, height) = Self::SENTINEL_SIZE.split_once('x').unwrap();
+        fn resize_to(&self, size: &str) {
+            let (width, height) = size.split_once('x').unwrap();
             self.server.text(&[
                 "resize-window",
                 "-t",
@@ -189,22 +182,7 @@ mod tests {
                 "-y",
                 height,
             ]);
-            self.server.wait_for(|| {
-                self.server
-                    .recorded_window_sizes()
-                    .contains(&Self::SENTINEL_SIZE.to_string())
-            });
-            self.server.recorded_window_sizes()
-        }
-
-        fn shows_a_second_resize_at_the_client_size(&self) -> bool {
-            let shorter = format!("{}x29", Self::CLIENT_WIDTH);
-            let client = format!("{}x{}", Self::CLIENT_WIDTH, Self::CLIENT_HEIGHT);
-            self.server.wait_for(|| {
-                self.server
-                    .recorded_window_sizes()
-                    .ends_with(&[shorter.clone(), client.clone()])
-            })
+            self.server.wait_for(|| self.window_size() == size);
         }
     }
 
@@ -214,11 +192,19 @@ mod tests {
         let tmux = fixture.server.command();
         let fit = ClientSizeFit::before_a_client_arrives(&tmux, FitFixture::WINDOW);
         let _client = fixture.join_client();
-        fixture.server.record_window_sizes();
+        fixture.server.record_window_resizes();
 
         fit.fit_once_a_client_joins();
 
-        assert!(fixture.shows_a_second_resize_at_the_client_size());
+        let (resizes, size) =
+            fixture
+                .server
+                .wait_for_window(FitFixture::WINDOW, 2, FitFixture::CLIENT_SIZE);
+        assert_eq!(
+            (resizes, size.as_str()),
+            (2, FitFixture::CLIENT_SIZE),
+            "count {resizes}, live size {size}"
+        );
     }
 
     #[test]
@@ -228,13 +214,18 @@ mod tests {
         let tmux = fixture.server.command();
         let fit = ClientSizeFit::before_a_client_arrives(&tmux, FitFixture::WINDOW);
         let _client = fixture.join_client();
-        fixture.server.record_window_sizes();
+        fixture.server.record_window_resizes();
 
         fit.fit_once_a_client_joins();
 
+        let (resizes, size) =
+            fixture
+                .server
+                .wait_for_window(FitFixture::WINDOW, 2, FitFixture::CLIENT_SIZE);
         assert_eq!(
-            fixture.sizes_recorded_through_a_sentinel(),
-            ["90x29", "90x30", FitFixture::SENTINEL_SIZE]
+            (resizes, size.as_str()),
+            (2, FitFixture::CLIENT_SIZE),
+            "count {resizes}, live size {size}"
         );
     }
 
@@ -256,13 +247,20 @@ mod tests {
         let _client = fixture.join_client();
         let tmux = fixture.server.command();
         let fit = ClientSizeFit::before_a_client_arrives(&tmux, FitFixture::WINDOW);
-        fixture.server.record_window_sizes();
+        fixture.server.record_window_resizes();
 
         fit.fit_if_resized();
 
+        fixture.resize_to(FitFixture::SENTINEL_SIZE);
+        fixture
+            .server
+            .wait_for(|| fixture.server.window_resize_count() >= 1);
+        let resizes = fixture.server.window_resize_count();
         assert_eq!(
-            fixture.sizes_recorded_through_a_sentinel(),
-            [FitFixture::SENTINEL_SIZE]
+            resizes,
+            1,
+            "count {resizes}, live size {}",
+            fixture.window_size()
         );
     }
 }

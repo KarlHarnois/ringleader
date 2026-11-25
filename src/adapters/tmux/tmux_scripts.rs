@@ -319,3 +319,50 @@ impl TmuxScripts {
         words.iter().map(OsString::from).collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::OsString;
+
+    use super::TmuxScripts;
+    use crate::domain::SessionSize;
+
+    #[test]
+    fn a_redraw_nudges_one_row() {
+        let [nudge, _] = TmuxScripts::redraw_at("=alpha:", SessionSize::new(90, 30));
+
+        assert_eq!(
+            nudge.argv(),
+            ["resize-window", "-U", "-t", "=alpha:", "1"]
+                .map(OsString::from)
+                .to_vec()
+        );
+    }
+
+    #[test]
+    fn a_redraw_resizes_to_the_client_size() {
+        let [_, resize] = TmuxScripts::redraw_at("=alpha:", SessionSize::new(90, 30));
+
+        assert_eq!(
+            resize.argv(),
+            [
+                "resize-window",
+                "-t",
+                "=alpha:",
+                "-x",
+                "90",
+                "-y",
+                "30",
+                ";",
+                "set-option",
+                "-w",
+                "-u",
+                "-t",
+                "=alpha:",
+                "window-size",
+            ]
+            .map(OsString::from)
+            .to_vec()
+        );
+    }
+}

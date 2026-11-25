@@ -509,13 +509,7 @@ mod tests {
         }
 
         fn window_size(&self, target: &str) -> String {
-            self.server.text(&[
-                "display-message",
-                "-p",
-                "-t",
-                target,
-                "#{window_width}x#{window_height}",
-            ])
+            self.server.window_size(target)
         }
 
         fn worktree(&self, name: &str) -> PathBuf {
@@ -1428,7 +1422,7 @@ mod tests {
         multiplexer
             .fit_agent_window("ringleader-dark-mode", SessionSize::new(46, 22))
             .unwrap();
-        fixture.server.record_window_sizes();
+        fixture.server.record_window_resizes();
 
         multiplexer
             .switch_client(
@@ -1437,13 +1431,14 @@ mod tests {
             )
             .unwrap();
 
-        let resized_twice = ["90x29".to_string(), "90x30".to_string()];
-        assert!(fixture.server.wait_for(|| {
-            fixture
-                .server
-                .recorded_window_sizes()
-                .ends_with(&resized_twice)
-        }));
+        let (resizes, size) = fixture
+            .server
+            .wait_for_window("=ringleader-dark-mode:", 3, "90x30");
+        assert_eq!(
+            (resizes, size.as_str()),
+            (3, "90x30"),
+            "count {resizes}, live size {size}"
+        );
     }
 
     #[test]
