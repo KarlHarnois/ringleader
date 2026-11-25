@@ -24,6 +24,7 @@ pub use cli_session::CliSession;
 use cli_session::CommandStop;
 pub use entry_points::EntryPoints;
 use envelope::Envelope;
+pub use envelope::EnvelopeError;
 use prompt_argument::PromptArgument;
 use repo_commands::RepoCommands;
 use session_commands::SessionCommands;
@@ -34,7 +35,7 @@ use crate::domain::BuildVersion;
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "ringleader",
+    name = CliOutput::PROGRAM,
     version = BuildVersion::CURRENT.text(),
     about = "A tmux session manager for AI coding agents"
 )]
@@ -124,6 +125,9 @@ struct JsonArgs {
 }
 
 type ListArgs = JsonArgs;
+
+#[derive(serde::Serialize)]
+struct VersionResult {}
 
 #[derive(Debug, Args)]
 struct NewArgs {
@@ -240,7 +244,7 @@ impl Cli {
             return entry_points.launch_agent(handoff);
         }
         if let Some(args) = self.version_args() {
-            return entry_points.print_version(&Self::version_line(args));
+            return entry_points.print_version(Self::version_line(args));
         }
         if let Some(problem) = entry_points.socket_problem()
             && !self.is_doctor()
@@ -281,10 +285,14 @@ impl Cli {
         }
     }
 
-    fn version_line(args: &JsonArgs) -> String {
+    fn version_line(args: &JsonArgs) -> Result<String, EnvelopeError> {
         match args.json {
-            true => Envelope::of(&serde_json::json!({})).text(),
-            false => format!("ringleader {}", BuildVersion::CURRENT.text()),
+            true => Envelope::of(&VersionResult {}).text(),
+            false => Ok(format!(
+                "{} {}",
+                CliOutput::PROGRAM,
+                BuildVersion::CURRENT.text()
+            )),
         }
     }
 
@@ -438,9 +446,13 @@ impl Cli {
     fn doctor(service: &SessionService, session: &mut CliSession, args: &JsonArgs) -> u8 {
         let report = service.doctor();
         if args.json {
-            session
+            let code = session
                 .output()
-                .line(&Envelope::of(&report.findings()).text());
+                .envelope(Envelope::of(&report.findings()).text())
+                .code();
+            if code != 0 {
+                return code;
+            }
         } else {
             Self::print_lines(report.lines(), session);
         }
@@ -597,8 +609,11 @@ mod tests {
             self.record(format!("launch_agent {}", handoff.display()))
         }
 
-        fn print_version(&self, line: &str) -> ExitCode {
-            self.record(format!("print_version {line}"))
+        fn print_version(&self, line: Result<String, EnvelopeError>) -> ExitCode {
+            match line {
+                Ok(line) => self.record(format!("print_version {line}")),
+                Err(error) => self.record(format!("print_version error {error}")),
+            }
         }
 
         fn socket_problem(&self) -> Option<String> {
@@ -1081,10 +1096,13 @@ mod tests {
 
     #[test]
     fn the_version_command_prints_the_line_that_the_version_flag_prints() {
+        let entry_points = RecordingEntryPoints::default();
+
+        entry_points.enter(&["version"]);
+
+        let recorded = entry_points.entered().pop().unwrap();
+        let line = recorded.strip_prefix("print_version ").unwrap();
         let flag = Cli::try_parse_from(["ringleader", "--version"]).unwrap_err();
-
-        let line = Cli::version_line(&JsonArgs { json: false });
-
         assert_eq!(flag.to_string().trim_end(), line);
     }
 
@@ -1136,9 +1154,17 @@ mod tests {
 
         let exit = harness.run(&["doctor", "--json"]);
 
+        assert_eq!(exit, CliExit::Code(1));
+    }
+
+    #[test]
+    fn doctor_json_reports_a_problem_finding() {
+        let harness = CliHarness::new(DoctorJsonFixture::with_a_problem());
+
+        harness.run(&["doctor", "--json"]);
+
         let json: serde_json::Value = serde_json::from_str(harness.stdout().trim()).unwrap();
         let findings = json["result"]["findings"].as_array().unwrap();
-        assert_eq!(exit, CliExit::Code(1));
         assert!(
             findings
                 .iter()
@@ -1147,23 +1173,29 @@ mod tests {
     }
 
     #[test]
-    fn a_socket_problem_refuses_every_entry_but_doctor() {
+    fn a_socket_problem_refuses_every_entry_but_doctor_and_version() {
         let entry_points = RecordingEntryPoints::with_socket_problem();
 
         entry_points.enter(&[]);
         entry_points.enter(&["__find-session", "--client", "client-1234"]);
         entry_points.enter(&["__session-menu", "--client", "client-1234"]);
         entry_points.enter(&["doctor"]);
+        entry_points.enter(&["version"]);
 
-        assert_eq!(
-            entry_points.entered(),
-            [
-                "refuse_to_start the socket is gone",
-                "refuse_to_start the socket is gone",
-                "refuse_to_start the socket is gone",
-                "run_command"
-            ]
-        );
+        let expected = [
+            "refuse_to_start the socket is gone",
+            "refuse_to_start the socket is gone",
+            "refuse_to_start the socket is gone",
+            "run_command",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .chain([format!(
+            "print_version ringleader {}",
+            BuildVersion::CURRENT.text()
+        )])
+        .collect::<Vec<_>>();
+        assert_eq!(entry_points.entered(), expected);
     }
 
     #[test]

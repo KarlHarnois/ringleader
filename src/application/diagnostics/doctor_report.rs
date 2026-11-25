@@ -31,26 +31,26 @@ impl DoctorReport {
             .collect()
     }
 
-    pub fn findings(&self) -> DoctorFindings {
+    pub fn findings(&self) -> impl Serialize + '_ {
         DoctorFindings {
             findings: self.lines.clone(),
         }
     }
 
     fn push(&mut self, severity: Severity, message: String) {
-        self.lines.push(DoctorLine { severity, message });
+        self.lines.push(DoctorLine { message, severity });
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct DoctorFindings {
+#[derive(Serialize)]
+struct DoctorFindings {
     findings: Vec<DoctorLine>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 struct DoctorLine {
-    severity: Severity,
     message: String,
+    severity: Severity,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
