@@ -54,6 +54,7 @@ ringleader repo add <path> [--name <n>] [--base-branch <b>]
 ringleader repo remove <name>
 ringleader repo list
 ringleader doctor [--json]
+ringleader version [--json]
 ```
 
 Every command accepts `--config <path>` and `--log-level <level>`.

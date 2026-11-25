@@ -18,7 +18,7 @@ description: Hand a task to a new Ringleader session, send a prompt to another s
 **Run these steps before any action that needs the current session's agent, repo, or name.**
 
 1. Run `git rev-parse --show-toplevel`. Its output is the current worktree, with symlinks resolved.
-2. Run `ringleader list --json`. The current session is the entry whose `worktree`, passed through `realpath`, equals the current worktree. Compare the resolved paths, since a `worktree` value can still contain a symlink.
+2. Run `ringleader list --json`. The current session is the entry in `result.sessions` whose `worktree`, passed through `realpath`, equals the current worktree. Compare the resolved paths, since a `worktree` value can still contain a symlink.
 3. Run `git worktree list --porcelain`. The path after the first `worktree` is the main checkout.
 
 If no entry matches, this agent runs outside Ringleader. Ask the user which agent and repo to use, and wait for the answer.
@@ -40,7 +40,7 @@ If no entry matches, this agent runs outside Ringleader. Ask the user which agen
 - If the user asks to build on an existing branch, pass `--base-branch <branch>`. Otherwise, never pass it.
 - To build on the current work, the branch is the current session's `branch`.
 
-1. Pick the name: two to four lowercase words that summarize the task, joined by hyphens, such as `fix-login-timeout`. The name is also the new branch. If `ringleader list --json` already shows the name, pick another.
+1. Pick the name: two to four lowercase words that summarize the task, joined by hyphens, such as `fix-login-timeout`. The name is also the new branch. If the `result.sessions` of `ringleader list --json` already shows the name, pick another.
 2. Pick the mode:
    - If the user asks to implement, fix, or change something concrete, leave out `--plan`.
    - Otherwise, pass `--plan`. Plan mode covers these requests:
@@ -77,7 +77,7 @@ Never put a secret into a handoff prompt: the prompt lands in the agent's transc
 
 ## Send a prompt to an existing session
 
-1. Find the target in `ringleader list --json`. If its `state` is neither `working` nor `waiting`, tell the user and stop.
+1. Find the target in the `result.sessions` of `ringleader list --json`. If its `state` is neither `working` nor `waiting`, tell the user and stop.
 2. If the target is the current session, stop: a prompt sent there types into this agent's own prompt box.
 3. Write the handoff prompt, per Write a handoff prompt.
 4. Run this command. If the shell tool takes a timeout, give the command at least 90 seconds. The command waits for the target's agent to reach its prompt.
@@ -93,7 +93,7 @@ Never put a secret into a handoff prompt: the prompt lands in the agent's transc
 
 | Action | Command | Rule |
 | --- | --- | --- |
-| List | `ringleader list --json` | Report each session's `name`, `state`, and `branch`. |
+| List | `ringleader list --json` | Report each entry of `result.sessions` with its `name`, `state`, and `branch`. |
 | Rename | `ringleader rename <old> <new>` | Run only when the user asks. |
 | Restart | `ringleader restart <name>...` | Run only when the user asks. |
 | Stop | `ringleader stop <name>...` | Run only when the user asks. `ringleader restart <name>` resumes a stopped session. |

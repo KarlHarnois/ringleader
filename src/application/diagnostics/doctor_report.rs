@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DoctorReport {
     lines: Vec<DoctorLine>,
 }
@@ -31,13 +31,20 @@ impl DoctorReport {
             .collect()
     }
 
-    pub fn json(&self) -> String {
-        serde_json::to_string_pretty(&self.lines).unwrap_or_default()
+    pub fn findings(&self) -> DoctorFindings {
+        DoctorFindings {
+            findings: self.lines.clone(),
+        }
     }
 
     fn push(&mut self, severity: Severity, message: String) {
         self.lines.push(DoctorLine { severity, message });
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DoctorFindings {
+    findings: Vec<DoctorLine>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

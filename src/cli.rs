@@ -4,6 +4,7 @@ mod cli_output;
 mod cli_session;
 mod delete_report;
 mod entry_points;
+mod envelope;
 mod list_report;
 mod prompt_argument;
 mod repo_argument;
@@ -22,6 +23,7 @@ pub use cli_output::CliOutput;
 pub use cli_session::CliSession;
 use cli_session::CommandStop;
 pub use entry_points::EntryPoints;
+use envelope::Envelope;
 use prompt_argument::PromptArgument;
 use repo_commands::RepoCommands;
 use session_commands::SessionCommands;
@@ -77,6 +79,8 @@ enum CliCommand {
     },
     #[command(about = "Check tmux, git, the config, and every session")]
     Doctor(JsonArgs),
+    #[command(about = "Print the version")]
+    Version(JsonArgs),
     #[command(name = "__exec-agent", hide = true)]
     ExecAgent {
         #[arg(long, value_name = "PATH")]
@@ -235,6 +239,9 @@ impl Cli {
         if let Some(handoff) = self.exec_agent_handoff() {
             return entry_points.launch_agent(handoff);
         }
+        if let Some(args) = self.version_args() {
+            return entry_points.print_version(&Self::version_line(args));
+        }
         if let Some(problem) = entry_points.socket_problem()
             && !self.is_doctor()
         {
@@ -264,6 +271,20 @@ impl Cli {
         match &self.command {
             Some(CliCommand::ExecAgent { handoff }) => Some(handoff),
             _ => None,
+        }
+    }
+
+    fn version_args(&self) -> Option<&JsonArgs> {
+        match &self.command {
+            Some(CliCommand::Version(args)) => Some(args),
+            _ => None,
+        }
+    }
+
+    fn version_line(args: &JsonArgs) -> String {
+        match args.json {
+            true => Envelope::of(&serde_json::json!({})).text(),
+            false => format!("ringleader {}", BuildVersion::CURRENT.text()),
         }
     }
 
@@ -417,7 +438,9 @@ impl Cli {
     fn doctor(service: &SessionService, session: &mut CliSession, args: &JsonArgs) -> u8 {
         let report = service.doctor();
         if args.json {
-            session.output().line(&report.json());
+            session
+                .output()
+                .line(&Envelope::of(&report.findings()).text());
         } else {
             Self::print_lines(report.lines(), session);
         }
@@ -460,6 +483,7 @@ impl Cli {
             CliCommand::Repo { .. }
             | CliCommand::Send(_)
             | CliCommand::Doctor(_)
+            | CliCommand::Version(_)
             | CliCommand::ExecAgent { .. }
             | CliCommand::FindSession { .. }
             | CliCommand::SessionMenu { .. } => Ok(0),
@@ -571,6 +595,10 @@ mod tests {
     impl EntryPoints for RecordingEntryPoints {
         fn launch_agent(&self, handoff: &Path) -> ExitCode {
             self.record(format!("launch_agent {}", handoff.display()))
+        }
+
+        fn print_version(&self, line: &str) -> ExitCode {
+            self.record(format!("print_version {line}"))
         }
 
         fn socket_problem(&self) -> Option<String> {
@@ -1034,6 +1062,88 @@ mod tests {
         entry_points.enter(&["__exec-agent", "--handoff", "/run/h.json"]);
 
         assert_eq!(entry_points.entered(), ["launch_agent /run/h.json"]);
+    }
+
+    #[test]
+    fn the_version_command_enters_before_the_socket_check() {
+        let entry_points = RecordingEntryPoints::with_socket_problem();
+
+        entry_points.enter(&["version"]);
+
+        assert_eq!(
+            entry_points.entered(),
+            [format!(
+                "print_version ringleader {}",
+                BuildVersion::CURRENT.text()
+            )]
+        );
+    }
+
+    #[test]
+    fn the_version_command_prints_the_line_that_the_version_flag_prints() {
+        let flag = Cli::try_parse_from(["ringleader", "--version"]).unwrap_err();
+
+        let line = Cli::version_line(&JsonArgs { json: false });
+
+        assert_eq!(flag.to_string().trim_end(), line);
+    }
+
+    #[test]
+    fn version_json_prints_the_pinned_envelope() {
+        let entry_points = RecordingEntryPoints::default();
+
+        entry_points.enter(&["version", "--json"]);
+
+        let expected = include_str!("../tests/fixtures/contract/version.json")
+            .replace("<build>", BuildVersion::CURRENT.text());
+        assert_eq!(
+            entry_points.entered(),
+            [format!("print_version {}", expected.trim_end())]
+        );
+    }
+
+    struct DoctorJsonFixture;
+
+    impl DoctorJsonFixture {
+        fn healthy() -> ServiceFixture {
+            let session = ServiceFixture::session("fix-auth");
+            ServiceFixture::new()
+                .with_sessions(std::slice::from_ref(&session))
+                .with_workspace(ServiceFixture::workspace_for(&[&session]))
+                .with_host(ServiceFixture::host_for(&[&session]))
+        }
+
+        fn with_a_problem() -> ServiceFixture {
+            ServiceFixture::new().with_config(ServiceFixture::config().with_agents(vec![]))
+        }
+    }
+
+    #[test]
+    fn doctor_json_matches_the_pinned_envelope() {
+        let harness = CliHarness::new(DoctorJsonFixture::healthy());
+
+        let exit = harness.run(&["doctor", "--json"]);
+
+        let expected = include_str!("../tests/fixtures/contract/doctor.json")
+            .replace("<build>", BuildVersion::CURRENT.text());
+        assert_eq!(harness.stdout(), expected);
+        assert_eq!(exit, CliExit::Code(0));
+    }
+
+    #[test]
+    fn doctor_json_exits_one_for_a_problem() {
+        let harness = CliHarness::new(DoctorJsonFixture::with_a_problem());
+
+        let exit = harness.run(&["doctor", "--json"]);
+
+        let json: serde_json::Value = serde_json::from_str(harness.stdout().trim()).unwrap();
+        let findings = json["result"]["findings"].as_array().unwrap();
+        assert_eq!(exit, CliExit::Code(1));
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding["severity"] == "problem")
+        );
     }
 
     #[test]

@@ -20,9 +20,10 @@ impl<'a> ListReport<'a> {
         self.rows.iter().map(|row| self.line(row)).collect()
     }
 
-    pub fn json(&self) -> String {
-        let entries: Vec<ListEntry> = self.rows.iter().map(|row| self.entry(row)).collect();
-        serde_json::to_string_pretty(&entries).unwrap_or_default()
+    pub fn result(&self) -> ListResult {
+        ListResult {
+            sessions: self.rows.iter().map(|row| self.entry(row)).collect(),
+        }
     }
 
     fn line(&self, row: &SessionSummary) -> String {
@@ -63,6 +64,11 @@ impl<'a> ListReport<'a> {
         row.session()?;
         self.diffs.get(row.name()).copied()
     }
+}
+
+#[derive(Serialize)]
+pub struct ListResult {
+    sessions: Vec<ListEntry>,
 }
 
 #[derive(Serialize)]
