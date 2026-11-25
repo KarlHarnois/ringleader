@@ -50,6 +50,7 @@ pub use repo_draft::RepoDraft;
 pub use repos::repo::{Repo, RepoScope};
 pub use repos::repo_group::RepoGroup;
 pub use repos::repo_name::RepoName;
+pub use sessions::prompt::Prompt;
 pub use sessions::session::{Registration, Session, TmuxAddress};
 pub use sessions::session_classifier::SessionClassifier;
 pub use sessions::session_metadata::{SessionMetadata, SessionRepo, SessionWorktree};

@@ -1,3 +1,4 @@
+pub mod prompt;
 pub mod session;
 pub mod session_classifier;
 pub mod session_metadata;

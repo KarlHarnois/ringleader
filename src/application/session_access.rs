@@ -9,7 +9,7 @@ use super::ports::{
 use super::reconciliation::ManagedRow;
 use super::service_error::ServiceError;
 use super::service_ports::ServicePorts;
-use crate::domain::{PullRequest, RepoGroup, Session, SessionState, SessionSummary};
+use crate::domain::{Prompt, PullRequest, RepoGroup, Session, SessionState, SessionSummary};
 
 pub struct SessionAccess {
     multiplexer: Arc<dyn Multiplexer>,
@@ -217,7 +217,7 @@ impl SessionAccess {
     }
 
     fn refuse_blank(prompt: &str) -> Result<(), ServiceError> {
-        if prompt.trim().is_empty() {
+        if Prompt::of(prompt).is_blank() {
             return Err(ServiceError::Invalid(
                 "the prompt is empty, pass the text the agent should read".to_string(),
             ));

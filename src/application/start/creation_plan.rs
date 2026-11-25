@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use crate::application::ports::{AgentLaunch, SessionSpec, StartPoint};
 use crate::domain::{
-    Agent, AgentMode, BaseBranch, Checkout, Config, InvalidName, KeyBindings, NamingScheme,
+    Agent, AgentMode, BaseBranch, Checkout, Config, InvalidName, KeyBindings, NamingScheme, Prompt,
     Registration, Repo, Session, SessionMetadata, SessionName, SessionRepo, SessionSize,
     SessionWorktree, TmuxAddress,
 };
@@ -54,7 +54,7 @@ impl CreateRequest {
     }
 
     pub fn with_prompt(self, prompt: &str) -> Self {
-        let is_blank = prompt.trim().is_empty();
+        let is_blank = Prompt::of(prompt).is_blank();
         Self {
             prompt: if is_blank { "" } else { prompt }.to_string(),
             ..self
