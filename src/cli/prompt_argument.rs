@@ -4,6 +4,7 @@ use std::path::Path;
 
 use super::CliInput;
 use crate::application::ports::{PromptFileError, PromptFiles};
+use crate::domain::Prompt;
 
 pub struct PromptArgument<'a> {
     text: Option<&'a str>,
@@ -41,7 +42,7 @@ impl<'a> PromptArgument<'a> {
     }
 
     fn require_prompt(text: String, source: &str) -> Result<String, PromptArgumentError> {
-        if text.trim().is_empty() {
+        if Prompt::of(&text).is_blank() {
             return Err(PromptArgumentError::NoPrompt {
                 source: source.to_string(),
             });
