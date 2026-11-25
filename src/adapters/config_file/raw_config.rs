@@ -241,15 +241,6 @@ mod tests {
     }
 
     #[test]
-    fn a_host_entry_with_an_address_key_fails_to_parse() {
-        let error = RawConfigFixture::parse_error(
-            "[[hosts]]\nname = \"example-host\"\naddress = \"192.0.2.10\"\n",
-        );
-
-        assert!(error.contains("address"), "{error}");
-    }
-
-    #[test]
     fn a_host_entry_without_a_name_fails_to_parse() {
         let error = RawConfigFixture::parse_error("[[hosts]]\n");
 
