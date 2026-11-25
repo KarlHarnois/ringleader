@@ -53,6 +53,12 @@ enum Outcome<'a, T> {
 #[error("cannot serialize the JSON envelope")]
 pub struct EnvelopeError(#[source] serde_json::Error);
 
+impl EnvelopeError {
+    pub fn failure_kind(&self) -> FailureKind {
+        FailureKind::Failed
+    }
+}
+
 #[derive(Serialize)]
 struct Body<'a, T: Serialize> {
     schema_version: u32,

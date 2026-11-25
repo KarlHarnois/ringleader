@@ -65,7 +65,10 @@ use application::{
     AgentPorts, DesktopPorts, DiagnosticPaths, LoadedConfig, RepoPorts, ServiceContext,
     ServiceError, ServicePorts, SessionService, StatePorts, TmuxPorts,
 };
-use cli::{Cli, CliExit, CliInput, CliOutput, CliSession, EntryPoints, OutputMode, VersionReply};
+use cli::{
+    Cli, CliExit, CliInput, CliOutput, CliSession, EntryPoints, EnvelopeError, OutputMode,
+    VersionReply,
+};
 use ui::theme::ColorMode;
 use ui::{
     App, CrosstermInput, CrosstermScreenMode, EventLoop, FinderPopupError, MenuPopupError,
@@ -595,6 +598,12 @@ impl CompositionRoot {
         let _ = writeln!(io::stderr(), "ringleader: {message}");
         ExitCode::from(CliExit::FAILURE)
     }
+
+    fn print_version_failure(output: &mut CliOutput, error: EnvelopeError) -> ExitCode {
+        let kind = error.failure_kind();
+        output.print_failure(kind, &error.to_string());
+        ExitCode::from(CliExit::exit_code(kind))
+    }
 }
 
 impl EntryPoints for CompositionRoot {
@@ -604,7 +613,10 @@ impl EntryPoints for CompositionRoot {
 
     fn print_version(&self, reply: &VersionReply, mode: OutputMode) -> ExitCode {
         let mut output = CliOutput::standard(mode);
-        ExitCode::from(output.reply(reply).code())
+        output.reply(reply).map_or_else(
+            |error| Self::print_version_failure(&mut output, error),
+            |()| ExitCode::SUCCESS,
+        )
     }
 
     fn socket_problem(&self) -> Option<String> {

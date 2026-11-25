@@ -42,7 +42,8 @@ impl<'a> SessionCommands<'a> {
             .filter_map(|(name, diff)| Some((name, diff.ok()?)))
             .collect();
         let report = ListReport::new(&rows, &diffs);
-        Ok(self.session.output().reply(&report).code())
+        self.session.output().reply(&report)?;
+        Ok(0)
     }
 
     pub fn create(&mut self, args: &NewArgs) -> Result<u8, CommandStop> {
