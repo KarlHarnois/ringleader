@@ -44,6 +44,7 @@ impl TmuxTestServer {
     const POLL_INTERVAL: Duration = Duration::from_millis(20);
     const OUTER_SESSION: &'static str = "outer";
     const WINDOW_RESIZES_FILE: &'static str = "window-resizes";
+    const WINDOW_ID_FORMAT: &'static str = "#{window_id}";
 
     pub fn new() -> Self {
         Self::with_config(&Self::default_config())
@@ -336,16 +337,37 @@ impl TmuxTestServer {
         self.text(&args);
     }
 
+    pub fn add_detached_window(&self, session: &str, name: &str) -> String {
+        let mut args = vec![
+            "new-window",
+            "-d",
+            "-t",
+            session,
+            "-n",
+            name,
+            "-P",
+            "-F",
+            Self::WINDOW_ID_FORMAT,
+        ];
+        args.extend(Self::STAND_IN);
+        self.text(&args)
+    }
+
     pub fn record_window_resizes(&self) {
         let resizes = self.directory().join(Self::WINDOW_RESIZES_FILE);
-        let record = format!("run-shell \"echo resize >> {}\"", resizes.display());
+        let record = format!(
+            "run-shell \"echo {} >> {}\"",
+            Self::WINDOW_ID_FORMAT,
+            resizes.display()
+        );
         self.text(&["set-hook", "-g", "window-resized", &record]);
     }
 
-    pub fn window_resize_count(&self) -> usize {
-        std::fs::read_to_string(self.directory().join(Self::WINDOW_RESIZES_FILE))
-            .unwrap_or_default()
+    pub fn window_resize_count(&self, target: &str) -> usize {
+        let window = self.window_id(target);
+        self.resize_records()
             .lines()
+            .filter(|record| *record == window)
             .count()
     }
 
@@ -359,13 +381,33 @@ impl TmuxTestServer {
         ])
     }
 
-    pub fn window_state(&self, target: &str) -> (usize, String) {
-        (self.window_resize_count(), self.window_size(target))
+    fn window_id(&self, target: &str) -> String {
+        self.text(&[
+            "display-message",
+            "-p",
+            "-t",
+            target,
+            Self::WINDOW_ID_FORMAT,
+        ])
     }
 
-    pub fn wait_for_window(&self, target: &str, resizes: usize, size: &str) -> (usize, String) {
-        self.wait_for(|| self.window_state(target) == (resizes, size.to_string()));
-        self.window_state(target)
+    fn resize_records(&self) -> String {
+        std::fs::read_to_string(self.directory().join(Self::WINDOW_RESIZES_FILE))
+            .unwrap_or_default()
+    }
+
+    fn window_state(&self, target: &str) -> (usize, String) {
+        (self.window_resize_count(target), self.window_size(target))
+    }
+
+    pub fn require_window_at(&self, target: &str, resizes: usize, size: &str) {
+        let settled = self.wait_for(|| self.window_state(target) == (resizes, size.to_string()));
+        assert!(settled, "{}", self.window_mismatch(target));
+    }
+
+    fn window_mismatch(&self, target: &str) -> String {
+        let (count, live_size) = self.window_state(target);
+        format!("count {count}, live size {live_size}")
     }
 
     pub fn wait_for(&self, condition: impl Fn() -> bool) -> bool {
