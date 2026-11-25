@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use super::delete_impact::{DeleteConfirmation, DeleteImpact};
+use super::delete_confirmation::DeleteConfirmation;
+use super::delete_impact::DeleteImpact;
 use super::delete_outcome::DeleteOutcome;
 use super::deletion_guards::{DeletionGuards, Measurement};
 use super::main_checkout_deletion::MainCheckoutDeletion;

@@ -36,7 +36,8 @@ pub mod usage_catalog;
 pub mod usage_reading;
 
 pub use batch_report::BatchReport;
-pub use deletion::delete_impact::{DeleteConfirmation, DeleteImpact};
+pub use deletion::delete_confirmation::DeleteConfirmation;
+pub use deletion::delete_impact::DeleteImpact;
 pub use deletion::delete_outcome::DeleteOutcome;
 pub use diagnostics::diagnostic_paths::DiagnosticPaths;
 pub use failure_kind::FailureKind;

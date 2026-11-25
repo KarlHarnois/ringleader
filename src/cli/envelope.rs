@@ -1,6 +1,7 @@
 use serde::Serialize;
 use thiserror::Error;
 
+use super::impact_json::ImpactJson;
 use crate::application::{FailureKind, ServiceError};
 use crate::domain::{BuildVersion, ContractVersion};
 
@@ -18,7 +19,9 @@ impl<'a, T: Serialize> Envelope<'a, T> {
     pub fn text(&self) -> Result<String, EnvelopeError> {
         let (result, error) = match &self.outcome {
             Outcome::Result(result) => (Some(*result), None),
-            Outcome::Error { kind, message } => (None, Some(ErrorBody::of_parts(*kind, message))),
+            Outcome::Error { kind, message } => {
+                (None, Some(ErrorBody::of_parts(*kind, message, None)))
+            }
         };
         serde_json::to_string(&Body {
             schema_version: ContractVersion::CURRENT.number(),
@@ -67,17 +70,28 @@ struct Body<'a, T: Serialize> {
 pub struct ErrorBody {
     code: &'static str,
     message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    impact: Option<ImpactJson>,
 }
 
 impl ErrorBody {
     pub fn of(error: &ServiceError) -> Self {
-        Self::of_parts(error.failure_kind(), &error.to_string())
+        let impact = match error {
+            ServiceError::GuardsChanged { impact, .. } => Some(ImpactJson::of(impact)),
+            _ => None,
+        };
+        Self::of_parts(error.failure_kind(), &error.to_string(), impact)
     }
 
-    fn of_parts(kind: FailureKind, message: &str) -> Self {
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    fn of_parts(kind: FailureKind, message: &str, impact: Option<ImpactJson>) -> Self {
         Self {
             code: kind.code(),
             message: message.to_string(),
+            impact,
         }
     }
 }

@@ -84,6 +84,13 @@ impl DeleteOutcome {
         &self.impact
     }
 
+    pub fn losses(&self) -> Vec<String> {
+        match &self.kept {
+            Kept::Nothing => self.impact.warnings(),
+            Kept::Forgotten(..) | Kept::MainCheckout(..) => Vec::new(),
+        }
+    }
+
     #[cfg(test)]
     pub fn branch(&self) -> BranchPresence {
         self.branch

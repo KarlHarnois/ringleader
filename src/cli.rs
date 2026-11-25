@@ -5,9 +5,11 @@ mod cli_input;
 mod cli_output;
 mod cli_session;
 mod create_reply;
-mod delete_report;
+mod delete_reply;
 mod entry_points;
 mod envelope;
+mod failed_entry;
+mod impact_json;
 mod list_report;
 mod prompt_argument;
 mod rename_reply;
@@ -46,7 +48,7 @@ pub use version_reply::VersionReply;
 use crate::application::diagnostics::doctor_report::DoctorReport;
 use crate::application::ports::lock::LockPatience;
 use crate::application::ports::{Lock, LockError};
-use crate::application::{CorruptRegistry, FailureKind, SessionService};
+use crate::application::{CorruptRegistry, DeleteImpact, FailureKind, SessionService};
 use crate::domain::BuildVersion;
 
 #[derive(Debug, Parser)]
@@ -208,10 +210,19 @@ struct DeleteArgs {
     names: Vec<String>,
     #[arg(long)]
     force: bool,
+    #[arg(
+        long,
+        conflicts_with = "force",
+        value_name = "JSON",
+        value_parser = impact_json::ImpactJson::parse
+    )]
+    if_impact: Option<DeleteImpact>,
     #[arg(long)]
     forget: bool,
     #[command(flatten)]
     lock: LockArgs,
+    #[command(flatten)]
+    json: JsonArgs,
 }
 
 #[derive(Debug, Args)]
@@ -291,16 +302,39 @@ impl Cli {
     const FIND_SESSION: &'static str = "__find-session";
     const SESSION_MENU: &'static str = "__session-menu";
     const CLIENT_OPTION: &'static str = "client";
+    const SEVERAL_IMPACT_NAMES: &'static str = "--if-impact takes one name";
 
     pub fn parse_arguments<I, A>(arguments: I) -> Result<Self, ExitCode>
     where
         I: IntoIterator<Item = A>,
         A: Into<OsString> + Clone,
     {
-        Self::try_parse_from(arguments).map_err(|error| {
-            let _ = error.print();
-            ExitCode::from(Self::exit_code_for(&error))
-        })
+        Self::try_parse_from(arguments)
+            .map_err(|error| {
+                let _ = error.print();
+                ExitCode::from(Self::exit_code_for(&error))
+            })
+            .and_then(Self::accepting_valid_cli)
+    }
+
+    fn accepting_valid_cli(self) -> Result<Self, ExitCode> {
+        self.accept_if_valid()
+            .map_err(|exit| ExitCode::from(exit.code()))
+    }
+
+    pub(crate) fn accept_if_valid(self) -> Result<Self, CliExit> {
+        let Some(message) = self.several_impact_names() else {
+            return Ok(self);
+        };
+        let mut output = CliOutput::standard(self.output_mode());
+        output.print_failure(FailureKind::Invalid, &message);
+        Err(CliExit::Code(CliExit::exit_code(FailureKind::Invalid)))
+    }
+
+    fn several_impact_names(&self) -> Option<String> {
+        let args = self.delete_args()?;
+        (args.if_impact.is_some() && args.names.len() > 1)
+            .then(|| Self::SEVERAL_IMPACT_NAMES.to_string())
     }
 
     pub fn finder_arguments() -> [OsString; 2] {
@@ -413,6 +447,7 @@ impl Cli {
                 action: AgentAction::List(args),
             }) => Some(args),
             Some(CliCommand::New(args)) => Some(&args.json),
+            Some(CliCommand::Delete(args)) => Some(&args.json),
             Some(CliCommand::Send(args)) => Some(&args.json),
             Some(CliCommand::Rename(args)) => Some(&args.json),
             Some(CliCommand::Restart(args)) => Some(&args.json),
@@ -465,6 +500,13 @@ impl Cli {
                     .print_failure(FailureKind::Failed, &error.to_string());
                 Err(CliExit::Code(CliExit::exit_code(FailureKind::Failed)))
             }
+        }
+    }
+
+    fn delete_args(&self) -> Option<&DeleteArgs> {
+        match &self.command {
+            Some(CliCommand::Delete(args)) => Some(args),
+            _ => None,
         }
     }
 
@@ -1230,9 +1272,16 @@ mod tests {
     }
 
     #[test]
-    fn delete_does_not_parse_the_json_flag() {
+    fn delete_parses_the_json_flag() {
+        let cli = Cli::try_parse_from(["ringleader", "delete", "a", "--json"]).unwrap();
+
+        assert_eq!(cli.output_mode(), OutputMode::Json);
+    }
+
+    #[test]
+    fn delete_with_both_a_forced_and_a_seen_impact_exits_one() {
         assert_eq!(
-            ParseFixture::exit_code(&["ringleader", "delete", "a", "--json"]),
+            ParseFixture::exit_code(&["ringleader", "delete", "a", "--force", "--if-impact", "{}"]),
             1
         );
     }

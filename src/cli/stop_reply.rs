@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use super::envelope::ErrorBody;
+use super::failed_entry::FailedEntry;
 use super::{Remark, Reply};
 use crate::application::{BatchReport, ServiceError, StopReport};
 use crate::domain::StopSkip;
@@ -63,7 +63,7 @@ impl StopReply {
         self.outcomes()
             .filter_map(|(name, outcome)| match outcome {
                 Ok(()) => None,
-                Err(error) => Some(Remark::Problem(format!("{name}: {error}"))),
+                Err(error) => Some(FailedEntry::of(name, error).remark()),
             })
             .collect()
     }
@@ -121,7 +121,7 @@ struct StopResult {
 #[serde(untagged)]
 enum StopEntry {
     Stopped { name: String, result: &'static str },
-    Failed { name: String, error: ErrorBody },
+    Failed(FailedEntry),
 }
 
 impl StopEntry {
@@ -131,10 +131,7 @@ impl StopEntry {
                 name: name.to_string(),
                 result: StopReply::STOPPED,
             },
-            Err(error) => Self::Failed {
-                name: name.to_string(),
-                error: ErrorBody::of(error),
-            },
+            Err(error) => Self::Failed(FailedEntry::of(name, error)),
         }
     }
 }

@@ -1,3 +1,4 @@
+pub mod delete_confirmation;
 pub mod delete_impact;
 pub mod delete_outcome;
 pub mod deletion_guards;

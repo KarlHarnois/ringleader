@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use super::envelope::ErrorBody;
+use super::failed_entry::FailedEntry;
 use super::{Remark, Reply};
 use crate::application::{RestartReport, ServiceError, StartOutcome};
 
@@ -56,7 +56,7 @@ impl Reply for RestartReply {
         for (name, outcome) in self.report.outcomes() {
             match outcome {
                 Ok(outcome) => remarks.extend(Self::outcome_remarks(outcome)),
-                Err(error) => remarks.push(Remark::Problem(format!("{name}: {error}"))),
+                Err(error) => remarks.push(FailedEntry::of(name, error).remark()),
             }
         }
         remarks
@@ -83,10 +83,7 @@ enum RestartEntry {
         recovery: Option<String>,
         warning: Option<String>,
     },
-    Failed {
-        name: String,
-        error: ErrorBody,
-    },
+    Failed(FailedEntry),
 }
 
 impl RestartEntry {
@@ -98,10 +95,7 @@ impl RestartEntry {
                 recovery: outcome.recovery().map(str::to_string),
                 warning: outcome.warning().map(str::to_string),
             },
-            Err(error) => Self::Failed {
-                name: name.to_string(),
-                error: ErrorBody::of(error),
-            },
+            Err(error) => Self::Failed(FailedEntry::of(name, error)),
         }
     }
 }
