@@ -1,3 +1,5 @@
+mod agent_commands;
+mod agent_list_report;
 mod cli_exit;
 mod cli_input;
 mod cli_output;
@@ -10,6 +12,7 @@ mod prompt_argument;
 mod reply;
 mod repo_argument;
 mod repo_commands;
+mod repo_list_report;
 mod session_commands;
 mod version_reply;
 
@@ -21,6 +24,7 @@ use std::time::Duration;
 use clap::{Args, Parser, Subcommand};
 use serde::Serialize;
 
+use agent_commands::AgentCommands;
 pub use cli_exit::CliExit;
 pub use cli_input::CliInput;
 pub use cli_output::{CliOutput, OutputMode};
@@ -85,6 +89,11 @@ enum CliCommand {
         #[command(subcommand)]
         action: RepoAction,
     },
+    #[command(about = "List the configured agents")]
+    Agent {
+        #[command(subcommand)]
+        action: AgentAction,
+    },
     #[command(about = "Check tmux, git, the config, and every session")]
     Doctor(JsonArgs),
     #[command(about = "Print the version")]
@@ -113,7 +122,13 @@ enum RepoAction {
     #[command(about = "Remove a [[repos]] entry")]
     Remove(RepoRemoveArgs),
     #[command(about = "List the repos the picker shows")]
-    List,
+    List(JsonArgs),
+}
+
+#[derive(Debug, Subcommand)]
+enum AgentAction {
+    #[command(about = "List the configured agents")]
+    List(JsonArgs),
 }
 
 #[derive(Debug, Args)]
@@ -365,11 +380,24 @@ impl Cli {
     }
 
     pub fn output_mode(&self) -> OutputMode {
-        match &self.command {
-            Some(CliCommand::List(args)) if args.json => OutputMode::Json,
-            Some(CliCommand::Doctor(args)) if args.json => OutputMode::Json,
-            Some(CliCommand::Version(args)) if args.json => OutputMode::Json,
+        match self.json_args() {
+            Some(args) if args.json => OutputMode::Json,
             _ => OutputMode::Text,
+        }
+    }
+
+    fn json_args(&self) -> Option<&JsonArgs> {
+        match &self.command {
+            Some(CliCommand::List(args))
+            | Some(CliCommand::Doctor(args))
+            | Some(CliCommand::Version(args))
+            | Some(CliCommand::Repo {
+                action: RepoAction::List(args),
+            })
+            | Some(CliCommand::Agent {
+                action: AgentAction::List(args),
+            }) => Some(args),
+            _ => None,
         }
     }
 
@@ -540,6 +568,7 @@ impl Cli {
     ) -> Result<u8, CommandStop> {
         match &self.command {
             Some(CliCommand::Repo { action }) => Self::dispatch_repo(action, service, session),
+            Some(CliCommand::Agent { action }) => Self::dispatch_agent(action, service, session),
             Some(CliCommand::Send(args)) => SessionCommands::new(service, session).send(args),
             Some(command) => Self::dispatch_session(command, service, session),
             None => Ok(0),
@@ -561,6 +590,7 @@ impl Cli {
             CliCommand::Restart(args) => commands.restart_named_or_all(args),
             CliCommand::Stop(args) => commands.stop_named_or_repo(args),
             CliCommand::Repo { .. }
+            | CliCommand::Agent { .. }
             | CliCommand::Send(_)
             | CliCommand::Doctor(_)
             | CliCommand::Version(_)
@@ -579,7 +609,18 @@ impl Cli {
         match action {
             RepoAction::Add(args) => repos.add(args),
             RepoAction::Remove(args) => repos.remove(&args.name),
-            RepoAction::List => repos.list(),
+            RepoAction::List(_) => repos.list(),
+        }
+    }
+
+    fn dispatch_agent(
+        action: &AgentAction,
+        service: &SessionService,
+        session: &mut CliSession,
+    ) -> Result<u8, CommandStop> {
+        let mut agents = AgentCommands::new(service, session);
+        match action {
+            AgentAction::List(_) => agents.list(),
         }
     }
 

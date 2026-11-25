@@ -52,7 +52,8 @@ ringleader restart (<name>... | --all) [--lock-timeout <seconds>]
 ringleader stop (<name>... | --repo <r>) [--lock-timeout <seconds>]
 ringleader repo add <path> [--name <n>] [--base-branch <b>] [--lock-timeout <seconds>]
 ringleader repo remove <name> [--lock-timeout <seconds>]
-ringleader repo list
+ringleader repo list [--json]
+ringleader agent list [--json]
 ringleader doctor [--json]
 ringleader version [--json]
 ```
