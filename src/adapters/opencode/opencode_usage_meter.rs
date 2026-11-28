@@ -1,50 +1,29 @@
 use std::sync::Arc;
 
 use super::opencode_activity::OpencodeActivity;
-use super::opencode_database::OpencodeDatabase;
+use super::opencode_gateway::OpencodeGateway;
 use super::provider_quota::ProviderQuota;
-use crate::adapters::agent_launch::agent_probe::AgentProbe;
 use crate::application::failure_streaks::FailureStreaks;
 use crate::application::ports::{UsageError, UsageMeter};
 use crate::domain::{Agent, AgentUsage, UsageRow};
 
 pub struct OpencodeUsageMeter {
-    probe: Arc<AgentProbe>,
-    database: Arc<dyn OpencodeDatabase>,
+    gateway: Arc<OpencodeGateway>,
     quotas: Vec<Arc<dyn ProviderQuota>>,
     failures: FailureStreaks,
 }
 
 impl OpencodeUsageMeter {
-    const PROGRAM: &'static str = "opencode";
-    const DATABASE_ARGUMENTS: [&'static str; 5] =
-        ["--pure", "db", "--format", "json", OpencodeActivity::QUERY];
-
-    pub fn new(
-        probe: Arc<AgentProbe>,
-        database: Arc<dyn OpencodeDatabase>,
-        quotas: Vec<Arc<dyn ProviderQuota>>,
-    ) -> Self {
+    pub fn new(gateway: Arc<OpencodeGateway>, quotas: Vec<Arc<dyn ProviderQuota>>) -> Self {
         Self {
-            probe,
-            database,
+            gateway,
             quotas,
             failures: FailureStreaks::default(),
         }
     }
 
     fn activity_output(&self, agent: &Agent) -> Result<String, UsageError> {
-        let direct = self
-            .database
-            .read(agent, OpencodeActivity::QUERY)
-            .unwrap_or_else(|error| {
-                log::info!("{error}, asking opencode instead");
-                None
-            });
-        match direct {
-            Some(output) => Ok(output),
-            None => self.probe.run(agent, &Self::DATABASE_ARGUMENTS),
-        }
+        self.gateway.query(agent, OpencodeActivity::QUERY)
     }
 
     fn usage(&self, agent: &Agent, activity: &OpencodeActivity) -> AgentUsage {
@@ -82,7 +61,7 @@ impl OpencodeUsageMeter {
 
 impl UsageMeter for OpencodeUsageMeter {
     fn measure(&self, agent: &Agent) -> Result<Option<AgentUsage>, UsageError> {
-        if agent.command_name() != Self::PROGRAM {
+        if !OpencodeGateway::serves(agent) {
             return Ok(None);
         }
         let output = self.activity_output(agent)?;
@@ -103,7 +82,10 @@ mod tests {
     use std::sync::Mutex;
 
     use super::*;
+    use crate::adapters::agent_launch::agent_probe::AgentProbe;
     use crate::adapters::host::process_environment::ProcessEnvironment;
+    use crate::adapters::opencode::fake_opencode_database::FakeOpencodeDatabase;
+    use crate::adapters::opencode::opencode_database::OpencodeDatabase;
     use crate::adapters::opencode::opencode_database::OpencodeDatabaseError;
     use crate::adapters::opencode::provider_quota::QuotaError;
     use crate::adapters::sqlite::null_opencode_database::NullOpencodeDatabase;
@@ -152,20 +134,6 @@ mod tests {
                 return Err(QuotaError::Refused);
             }
             Ok(Some(MeterFixture::credits()))
-        }
-    }
-
-    struct FakeOpencodeDatabase {
-        answer: Result<Option<String>, OpencodeDatabaseError>,
-    }
-
-    impl OpencodeDatabase for FakeOpencodeDatabase {
-        fn read(
-            &self,
-            _agent: &Agent,
-            _query: &str,
-        ) -> Result<Option<String>, OpencodeDatabaseError> {
-            self.answer.clone()
         }
     }
 
@@ -237,7 +205,7 @@ mod tests {
                 &self.directory.path().join("usage"),
                 BoundedCommand::new(Deadlines::standard()),
             ));
-            OpencodeUsageMeter::new(probe, database, quotas)
+            OpencodeUsageMeter::new(Arc::new(OpencodeGateway::new(probe, database)), quotas)
         }
 
         fn measured_with(&self, quotas: Vec<Arc<dyn ProviderQuota>>) -> AgentUsage {
@@ -285,9 +253,9 @@ mod tests {
     #[test]
     fn a_direct_read_of_the_database_skips_the_opencode_command() {
         let fixture = MeterFixture::new();
-        let database = Arc::new(FakeOpencodeDatabase {
-            answer: Ok(Some(MeterFixture::RECORDED.to_string())),
-        });
+        let database = Arc::new(FakeOpencodeDatabase::answering(Ok(Some(
+            MeterFixture::RECORDED.to_string(),
+        ))));
 
         let usage = fixture
             .meter_reading(database, Vec::new())
@@ -302,9 +270,9 @@ mod tests {
     #[test]
     fn a_failed_direct_read_asks_the_opencode_command_instead() {
         let fixture = MeterFixture::new();
-        let database = Arc::new(FakeOpencodeDatabase {
-            answer: Err(OpencodeDatabaseError::new("database is locked")),
-        });
+        let database = Arc::new(FakeOpencodeDatabase::answering(Err(
+            OpencodeDatabaseError::new("database is locked"),
+        )));
 
         let usage = fixture
             .meter_reading(database, Vec::new())

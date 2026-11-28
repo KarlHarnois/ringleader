@@ -1,6 +1,8 @@
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use crate::application::ports::{ConversationLookup, ConversationLookupError, ConversationQuery};
+use crate::application::ports::{ConversationLookup, ConversationLookupError};
+use crate::domain::Agent;
 
 #[derive(Default)]
 pub struct FakeConversationLookup {
@@ -10,7 +12,7 @@ pub struct FakeConversationLookup {
 #[derive(Default)]
 struct FakeState {
     answer: Option<Result<String, ConversationLookupError>>,
-    queries: Vec<ConversationQuery>,
+    worktrees: Vec<PathBuf>,
 }
 
 impl FakeConversationLookup {
@@ -31,15 +33,19 @@ impl FakeConversationLookup {
         self
     }
 
-    pub fn queries(&self) -> Vec<ConversationQuery> {
-        self.state.lock().unwrap().queries.clone()
+    pub fn worktrees(&self) -> Vec<PathBuf> {
+        self.state.lock().unwrap().worktrees.clone()
     }
 }
 
 impl ConversationLookup for FakeConversationLookup {
-    fn find(&self, query: &ConversationQuery) -> Result<Option<String>, ConversationLookupError> {
+    fn find(
+        &self,
+        _agent: &Agent,
+        worktree: &Path,
+    ) -> Result<Option<String>, ConversationLookupError> {
         let mut state = self.state.lock().unwrap();
-        state.queries.push(query.clone());
+        state.worktrees.push(worktree.to_path_buf());
         state.answer.clone().transpose()
     }
 }

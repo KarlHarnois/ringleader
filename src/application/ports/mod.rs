@@ -27,7 +27,7 @@ pub mod workspace;
 pub use agent_launch::AgentLaunch;
 pub use clock::Clock;
 pub use config_source::{ConfigError, ConfigSource};
-pub use conversation_lookup::{ConversationLookup, ConversationLookupError, ConversationQuery};
+pub use conversation_lookup::{ConversationLookup, ConversationLookupError};
 pub use directory_environment::{DirectoryEnvironment, DirectoryEnvironmentError, Envrc};
 pub use dirty_state::DirtyState;
 pub use fold_store::{FoldStore, FoldStoreError};

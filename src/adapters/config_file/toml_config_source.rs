@@ -115,15 +115,9 @@ env = ["OPENAI_API_KEY"]
 prompt_args = ["--prompt={prompt}"]
 plan_args = ["--agent", "plan"]
 # opencode's --continue resumes the newest conversation of any worktree of the
-# repo, so opencode resumes by id. {conversation} in resume_args is the first
-# line conversation_lookup prints. The lookup runs in the session's worktree
-# with the agent's variables, without the worktree's .envrc. When it prints
-# nothing or fails, the agent starts without resume_args. This lookup needs jq.
+# repo. Ringleader fills {conversation} with the worktree's own conversation,
+# and starts opencode without resume_args when it has none.
 resume_args = ["--session", "{conversation}"]
-conversation_lookup = [
-  "sh", "-c",
-  "list=$(opencode session list --format json --max-count 100000) && printf '%s' \"$list\" | jq -r --arg dir \"$PWD\" 'map(select(.directory == $dir)) | max_by(.updated) | .id // empty'",
-]
 "#;
     const REPOS_KEY: &'static str = "repos";
 
@@ -669,25 +663,6 @@ mod tests {
     }
 
     #[test]
-    fn agent_conversation_lookup_loads_with_the_session_name() {
-        let fixture = SourceFixture::with_text(concat!(
-            "[[agents]]\nname = \"a\"\ncommand = \"a\"\n",
-            "resume_args = [\"--session\", \"{conversation}\"]\n",
-            "conversation_lookup = [\"find-conversation\", \"{name}\"]\n",
-        ));
-
-        let config = fixture.source().load().unwrap();
-
-        let session = SessionName::new("fix-auth").unwrap();
-        assert_eq!(
-            config.agents()[0]
-                .conversation_lookup_argv(&session)
-                .unwrap(),
-            ["find-conversation", "fix-auth"]
-        );
-    }
-
-    #[test]
     fn an_agent_without_resume_args_loads_to_resume_as_a_plain_restart() {
         let fixture = SourceFixture::with_text("[[agents]]\nname = \"a\"\ncommand = \"a\"\n");
 
@@ -872,7 +847,7 @@ mod tests {
             opencode.conversation_resume_argv(&session, "conversation-7"),
             ["opencode", "--session", "conversation-7"]
         );
-        assert_eq!(opencode.conversation_lookup()[..2], ["sh", "-c"]);
+        assert!(opencode.resumes_by_conversation());
     }
 
     #[test]
