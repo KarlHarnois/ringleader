@@ -95,15 +95,24 @@ impl SessionRestart {
     }
 
     fn own_conversation(&self, agent: &Agent, session: &Session) -> Option<String> {
-        self.conversations
-            .find(agent, session.worktree_path())
-            .unwrap_or_else(|error| {
+        match self.conversations.find(agent, session.worktree_path()) {
+            Ok(Some(conversation)) => Some(conversation),
+            Ok(None) => {
+                log::info!(
+                    "agent {} has no conversation for session {}, restarting it fresh",
+                    agent.name(),
+                    session.name()
+                );
+                None
+            }
+            Err(error) => {
                 log::warn!(
                     "restarting session {} without its conversation: {error}",
                     session.name()
                 );
                 None
-            })
+            }
+        }
     }
 
     fn resumes(row: &ManagedRow) -> bool {
