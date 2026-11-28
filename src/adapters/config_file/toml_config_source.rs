@@ -117,8 +117,8 @@ plan_args = ["--agent", "plan"]
 # opencode's --continue resumes the newest conversation of any worktree of the
 # repo, so opencode resumes by id. {conversation} in resume_args is the first
 # line conversation_lookup prints. The lookup runs in the session's worktree
-# with the agent's variables. When it prints nothing or fails, the agent starts
-# without resume_args.
+# with the agent's variables, without the worktree's .envrc. When it prints
+# nothing or fails, the agent starts without resume_args.
 resume_args = ["--session", "{conversation}"]
 conversation_lookup = [
   "sh", "-c",
