@@ -25,6 +25,7 @@ use adapters::agent_launch::agent_handoff::AgentHandoff;
 use adapters::agent_launch::agent_launcher::{AgentLauncher, ProcessExec};
 use adapters::agent_launch::agent_probe::AgentProbe;
 use adapters::agent_launch::built_in_skill::BuiltInSkill;
+use adapters::agent_launch::command_conversation_lookup::CommandConversationLookup;
 use adapters::agent_launch::launcher_command::LauncherCommand;
 use adapters::agent_launch::ringleader_shim::RingleaderShim;
 use adapters::claude::claude_usage_meter::ClaudeUsageMeter;
@@ -435,7 +436,10 @@ impl CompositionRoot {
                 repos,
                 tmux_ports,
                 desktop,
-                AgentPorts::new(usage_meters),
+                AgentPorts::new(
+                    usage_meters,
+                    Arc::new(CommandConversationLookup::new(&self.environment, bounded)),
+                ),
             ),
             context,
         )

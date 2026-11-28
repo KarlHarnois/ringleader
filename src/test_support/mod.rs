@@ -24,6 +24,7 @@ pub use executable_script::ExecutableScript;
 pub use fakes::fake_cli_input::FakeCliInput;
 pub use fakes::fake_clock::FakeClock;
 pub use fakes::fake_config_source::FakeConfigSource;
+pub use fakes::fake_conversation_lookup::FakeConversationLookup;
 pub use fakes::fake_directory_environment::FakeDirectoryEnvironment;
 pub use fakes::fake_fold_store::FakeFoldStore;
 pub use fakes::fake_host_probe::FakeHostProbe;

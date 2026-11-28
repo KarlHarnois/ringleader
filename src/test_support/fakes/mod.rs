@@ -1,6 +1,7 @@
 pub mod fake_cli_input;
 pub mod fake_clock;
 pub mod fake_config_source;
+pub mod fake_conversation_lookup;
 pub mod fake_directory_environment;
 pub mod fake_fold_store;
 pub mod fake_host_probe;

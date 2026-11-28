@@ -1,6 +1,7 @@
 pub mod agent_launch;
 pub mod clock;
 pub mod config_source;
+pub mod conversation_lookup;
 pub mod directory_environment;
 pub mod dirty_state;
 pub mod fold_store;
@@ -26,6 +27,7 @@ pub mod workspace;
 pub use agent_launch::AgentLaunch;
 pub use clock::Clock;
 pub use config_source::{ConfigError, ConfigSource};
+pub use conversation_lookup::{ConversationLookup, ConversationLookupError, ConversationQuery};
 pub use directory_environment::{DirectoryEnvironment, DirectoryEnvironmentError, Envrc};
 pub use dirty_state::DirtyState;
 pub use fold_store::{FoldStore, FoldStoreError};
