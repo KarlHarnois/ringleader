@@ -9,8 +9,7 @@ use crate::application::agent_hooks::AgentHooks;
 use crate::application::checks::use_checks::UseChecks;
 use crate::application::checks::worktree_inspection::WorktreeInspection;
 use crate::application::ports::{
-    AgentLaunch, ConversationLookup, ConversationQuery, HostProbe, Multiplexer, SessionRegistry,
-    SessionSpec,
+    AgentLaunch, ConversationLookup, HostProbe, Multiplexer, SessionRegistry, SessionSpec,
 };
 use crate::application::reconciliation::{ManagedRow, Reconciliation};
 use crate::application::session_scratch::SessionScratch;
@@ -96,15 +95,15 @@ impl SessionRestart {
     }
 
     fn own_conversation(&self, agent: &Agent, session: &Session) -> Option<String> {
-        let argv = agent.conversation_lookup_argv(session.name())?;
-        let query = ConversationQuery::new(agent, argv, session.worktree_path());
-        self.conversations.find(&query).unwrap_or_else(|error| {
-            log::warn!(
-                "restarting session {} without its conversation: {error}",
-                session.name()
-            );
-            None
-        })
+        self.conversations
+            .find(agent, session.worktree_path())
+            .unwrap_or_else(|error| {
+                log::warn!(
+                    "restarting session {} without its conversation: {error}",
+                    session.name()
+                );
+                None
+            })
     }
 
     fn resumes(row: &ManagedRow) -> bool {
@@ -229,8 +228,7 @@ mod tests {
 
         fn conversation_resuming_config() -> Config {
             let agent = ServiceFixture::agent()
-                .with_resume_args(&["--session".to_string(), "{conversation}".to_string()])
-                .with_conversation_lookup(&["find-conversation".to_string(), "{name}".to_string()]);
+                .with_resume_args(&["--session".to_string(), "{conversation}".to_string()]);
             ServiceFixture::config().with_agents(vec![agent])
         }
 
@@ -552,9 +550,10 @@ mod tests {
 
         RestartFixture::restart(&fixture).unwrap();
 
-        let query = fixture.conversation_lookup().queries().pop().unwrap();
-        assert_eq!(query.worktree(), RestartFixture::session().worktree_path());
-        assert_eq!(query.argv(), ["find-conversation", "fix-auth"]);
+        assert_eq!(
+            fixture.conversation_lookup().worktrees(),
+            [RestartFixture::session().worktree_path()]
+        );
     }
 
     #[test]
@@ -582,7 +581,7 @@ mod tests {
 
         RestartFixture::restart(&fixture).unwrap();
 
-        assert!(fixture.conversation_lookup().queries().is_empty());
+        assert!(fixture.conversation_lookup().worktrees().is_empty());
     }
 
     #[test]
@@ -593,7 +592,7 @@ mod tests {
 
         RestartFixture::restart(&fixture).unwrap();
 
-        assert!(fixture.conversation_lookup().queries().is_empty());
+        assert!(fixture.conversation_lookup().worktrees().is_empty());
         let launch = fixture.multiplexer().launches().pop().unwrap();
         assert_eq!(launch.argv(), ["claude"]);
     }

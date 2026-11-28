@@ -104,6 +104,7 @@ mod tests {
 
     use super::*;
     use crate::adapters::host::process_environment::ProcessEnvironment;
+    use crate::adapters::opencode::fake_opencode_database::FakeOpencodeDatabase;
     use crate::adapters::opencode::opencode_database::OpencodeDatabaseError;
     use crate::adapters::opencode::provider_quota::QuotaError;
     use crate::adapters::sqlite::null_opencode_database::NullOpencodeDatabase;
@@ -152,20 +153,6 @@ mod tests {
                 return Err(QuotaError::Refused);
             }
             Ok(Some(MeterFixture::credits()))
-        }
-    }
-
-    struct FakeOpencodeDatabase {
-        answer: Result<Option<String>, OpencodeDatabaseError>,
-    }
-
-    impl OpencodeDatabase for FakeOpencodeDatabase {
-        fn read(
-            &self,
-            _agent: &Agent,
-            _query: &str,
-        ) -> Result<Option<String>, OpencodeDatabaseError> {
-            self.answer.clone()
         }
     }
 
@@ -285,9 +272,9 @@ mod tests {
     #[test]
     fn a_direct_read_of_the_database_skips_the_opencode_command() {
         let fixture = MeterFixture::new();
-        let database = Arc::new(FakeOpencodeDatabase {
-            answer: Ok(Some(MeterFixture::RECORDED.to_string())),
-        });
+        let database = Arc::new(FakeOpencodeDatabase::answering(Ok(Some(
+            MeterFixture::RECORDED.to_string(),
+        ))));
 
         let usage = fixture
             .meter_reading(database, Vec::new())
@@ -302,9 +289,9 @@ mod tests {
     #[test]
     fn a_failed_direct_read_asks_the_opencode_command_instead() {
         let fixture = MeterFixture::new();
-        let database = Arc::new(FakeOpencodeDatabase {
-            answer: Err(OpencodeDatabaseError::new("database is locked")),
-        });
+        let database = Arc::new(FakeOpencodeDatabase::answering(Err(
+            OpencodeDatabaseError::new("database is locked"),
+        )));
 
         let usage = fixture
             .meter_reading(database, Vec::new())

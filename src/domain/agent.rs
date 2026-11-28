@@ -11,7 +11,6 @@ pub struct Agent {
     prompt_args: Vec<String>,
     plan_args: Vec<String>,
     resume_args: Vec<String>,
-    conversation_lookup: Vec<String>,
     startup_input: Vec<String>,
     rename_input: Vec<String>,
     built_in_skills: bool,
@@ -85,7 +84,6 @@ impl Agent {
             prompt_args: Vec::new(),
             plan_args: Vec::new(),
             resume_args: Vec::new(),
-            conversation_lookup: Vec::new(),
             startup_input: Vec::new(),
             rename_input: Vec::new(),
             built_in_skills: true,
@@ -137,13 +135,6 @@ impl Agent {
         }
     }
 
-    pub fn with_conversation_lookup(self, argv: &[String]) -> Self {
-        Self {
-            conversation_lookup: argv.to_vec(),
-            ..self
-        }
-    }
-
     pub fn with_startup_input(self, lines: &[String]) -> Self {
         Self {
             startup_input: lines.to_vec(),
@@ -187,10 +178,6 @@ impl Agent {
 
     pub fn env_assignments(&self) -> &[(String, String)] {
         &self.env_assignments
-    }
-
-    pub fn conversation_lookup(&self) -> &[String] {
-        &self.conversation_lookup
     }
 
     pub fn prompt_args(&self) -> &[String] {
@@ -255,13 +242,6 @@ impl Agent {
         self.resume_args
             .iter()
             .any(|element| element.contains(Self::CONVERSATION_PLACEHOLDER))
-    }
-
-    pub fn conversation_lookup_argv(&self, session: &SessionName) -> Option<Vec<String>> {
-        if self.conversation_lookup.is_empty() {
-            return None;
-        }
-        Some(Self::named(&self.conversation_lookup, session))
     }
 
     pub fn conversation_resume_argv(
@@ -345,9 +325,7 @@ mod tests {
         }
 
         fn resuming_by_conversation() -> Agent {
-            Self::named()
-                .with_resume_args(&Self::words(&["--session", "{conversation}"]))
-                .with_conversation_lookup(&Self::words(&["find-conversation", "{name}"]))
+            Self::named().with_resume_args(&Self::words(&["--session", "{conversation}"]))
         }
 
         fn session() -> SessionName {
@@ -597,21 +575,6 @@ mod tests {
             .conversation_resume_argv(&AgentFixture::session(), "{name}");
 
         assert_eq!(argv.last().unwrap(), "{name}");
-    }
-
-    #[test]
-    fn the_conversation_lookup_carries_the_session_name() {
-        let argv = AgentFixture::resuming_by_conversation()
-            .conversation_lookup_argv(&AgentFixture::session());
-
-        assert_eq!(argv.unwrap(), ["find-conversation", "fix-auth"]);
-    }
-
-    #[test]
-    fn an_agent_without_a_conversation_lookup_has_no_lookup_argv() {
-        let argv = AgentFixture::named().conversation_lookup_argv(&AgentFixture::session());
-
-        assert_eq!(argv, None);
     }
 
     #[test]

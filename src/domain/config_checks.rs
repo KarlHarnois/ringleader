@@ -185,7 +185,6 @@ impl<'a> ConfigChecks<'a> {
             }
             names.record(agent.name());
             self.check_command(agent);
-            self.check_conversation_resume(agent);
             for name in agent.env_names() {
                 self.check_env_name(agent, name);
             }
@@ -219,23 +218,6 @@ impl<'a> ConfigChecks<'a> {
             self.fail(format!(
                 "agents.command: agent `{}` command `{command}` contains / but is not an absolute path",
                 agent.name()
-            ));
-        }
-    }
-
-    fn check_conversation_resume(&mut self, agent: &Agent) {
-        let has_lookup = !agent.conversation_lookup().is_empty();
-        if agent.resumes_by_conversation() && !has_lookup {
-            self.fail(format!(
-                "agents.resume_args: agent `{}` uses {} but has no conversation_lookup to fill it",
-                agent.name(),
-                Agent::CONVERSATION_PLACEHOLDER
-            ));
-        } else if has_lookup && !agent.resumes_by_conversation() {
-            self.fail(format!(
-                "agents.conversation_lookup: agent `{}` has a conversation_lookup but its resume_args has no {}",
-                agent.name(),
-                Agent::CONVERSATION_PLACEHOLDER
             ));
         }
     }
@@ -367,18 +349,6 @@ mod tests {
 
         fn agent_setting(name: &str, value: &str) -> ConfigDraft {
             Self::draft().agent(Self::example_agent_setting(name, value))
-        }
-
-        fn agent_resuming(resume_args: &[&str], conversation_lookup: &[&str]) -> ConfigDraft {
-            Self::draft().agent(
-                Agent::new("example-agent", "example-agent")
-                    .with_resume_args(&Self::words(resume_args))
-                    .with_conversation_lookup(&Self::words(conversation_lookup)),
-            )
-        }
-
-        fn words(parts: &[&str]) -> Vec<String> {
-            parts.iter().map(|part| part.to_string()).collect()
         }
 
         fn example_agent_setting(name: &str, value: &str) -> Agent {
@@ -760,28 +730,6 @@ mod tests {
                 "agents.set_env",
             );
         }
-    }
-
-    #[test]
-    fn resume_args_with_the_conversation_placeholder_and_a_lookup_pass() {
-        let draft =
-            ChecksFixture::agent_resuming(&["--session", "{conversation}"], &["find-conversation"]);
-
-        assert!(ChecksFixture::failures(&draft).is_empty());
-    }
-
-    #[test]
-    fn the_conversation_placeholder_without_a_lookup_fails() {
-        let draft = ChecksFixture::agent_resuming(&["--session", "{conversation}"], &[]);
-
-        ChecksFixture::fails_on(draft, "agents.resume_args");
-    }
-
-    #[test]
-    fn a_lookup_without_the_conversation_placeholder_fails() {
-        let draft = ChecksFixture::agent_resuming(&["--continue"], &["find-conversation"]);
-
-        ChecksFixture::fails_on(draft, "agents.conversation_lookup");
     }
 
     #[test]

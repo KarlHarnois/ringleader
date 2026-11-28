@@ -25,7 +25,6 @@ use adapters::agent_launch::agent_handoff::AgentHandoff;
 use adapters::agent_launch::agent_launcher::{AgentLauncher, ProcessExec};
 use adapters::agent_launch::agent_probe::AgentProbe;
 use adapters::agent_launch::built_in_skill::BuiltInSkill;
-use adapters::agent_launch::command_conversation_lookup::CommandConversationLookup;
 use adapters::agent_launch::launcher_command::LauncherCommand;
 use adapters::agent_launch::ringleader_shim::RingleaderShim;
 use adapters::claude::claude_usage_meter::ClaudeUsageMeter;
@@ -52,7 +51,10 @@ use adapters::host::system_clock::SystemClock;
 use adapters::host::system_host_probe::SystemHostProbe;
 use adapters::host::xdg_paths::XdgPaths;
 use adapters::ollama::ollama_cloud_quota::OllamaCloudQuota;
+use adapters::opencode::opencode_conversation_lookup::OpencodeConversationLookup;
+use adapters::opencode::opencode_database::OpencodeDatabase;
 use adapters::opencode::opencode_usage_meter::OpencodeUsageMeter;
+use adapters::opencode::provider_quota::ProviderQuota;
 use adapters::sqlite::sqlite_opencode_database::SqliteOpencodeDatabase;
 use adapters::terminal_emulator::system_terminal_emulator::SystemTerminalEmulator;
 use adapters::tmux::server_files::ServerFiles;
@@ -401,7 +403,7 @@ impl CompositionRoot {
             self.processes.clone(),
         ));
         let (pull_requests, repo_pages) = Self::github_ports(&host, bounded);
-        let usage_meters = self.usage_meters(host.as_ref(), bounded);
+        let agents = self.agent_ports(host.as_ref(), bounded);
         let directory_environment =
             DirenvDirectoryEnvironment::when_installed(host.as_ref(), &self.environment, bounded);
         let desktop = self.desktop_ports(host.as_ref(), bounded);
@@ -431,16 +433,7 @@ impl CompositionRoot {
             .with_diagnostics(self.diagnostics())
             .with_shell(&self.environment.shell());
         SessionService::new(
-            ServicePorts::new(
-                state,
-                repos,
-                tmux_ports,
-                desktop,
-                AgentPorts::new(
-                    usage_meters,
-                    Arc::new(CommandConversationLookup::new(&self.environment, bounded)),
-                ),
-            ),
+            ServicePorts::new(state, repos, tmux_ports, desktop, agents),
             context,
         )
     }
@@ -464,22 +457,33 @@ impl CompositionRoot {
         )
     }
 
-    fn usage_meters(
-        &self,
-        host: &SystemHostProbe,
-        bounded: BoundedCommand,
-    ) -> Vec<Arc<dyn UsageMeter>> {
+    fn agent_ports(&self, host: &SystemHostProbe, bounded: BoundedCommand) -> AgentPorts {
         let probe = Arc::new(AgentProbe::new(
             &self.environment,
             &self.paths.usage_directory(),
             bounded,
+        ));
+        let database = SqliteOpencodeDatabase::when_installed(host, &self.environment, bounded);
+        let conversation_lookup = Arc::new(OpencodeConversationLookup::new(
+            probe.clone(),
+            database.clone(),
         ));
         let quotas = vec![OllamaCloudQuota::when_installed(
             host,
             &self.environment,
             bounded,
         )];
-        let database = SqliteOpencodeDatabase::when_installed(host, &self.environment, bounded);
+        AgentPorts::new(
+            Self::usage_meters(probe, database, quotas),
+            conversation_lookup,
+        )
+    }
+
+    fn usage_meters(
+        probe: Arc<AgentProbe>,
+        database: Arc<dyn OpencodeDatabase>,
+        quotas: Vec<Arc<dyn ProviderQuota>>,
+    ) -> Vec<Arc<dyn UsageMeter>> {
         vec![
             Arc::new(ClaudeUsageMeter::new(probe.clone())),
             Arc::new(OpencodeUsageMeter::new(probe, database, quotas)),
