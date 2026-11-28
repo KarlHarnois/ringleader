@@ -118,7 +118,7 @@ plan_args = ["--agent", "plan"]
 # repo, so opencode resumes by id. {conversation} in resume_args is the first
 # line conversation_lookup prints. The lookup runs in the session's worktree
 # with the agent's variables, without the worktree's .envrc. When it prints
-# nothing or fails, the agent starts without resume_args.
+# nothing or fails, the agent starts without resume_args. This lookup needs jq.
 resume_args = ["--session", "{conversation}"]
 conversation_lookup = [
   "sh", "-c",
