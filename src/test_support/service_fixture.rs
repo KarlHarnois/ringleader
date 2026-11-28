@@ -2,9 +2,10 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use super::{
-    FakeClock, FakeConfigSource, FakeDirectoryEnvironment, FakeHostProbe, FakeMultiplexer,
-    FakePullRequests, FakeRepoPages, FakeRepoScanner, FakeScratchSpace, FakeSessionRegistry,
-    FakeTerminalEmulator, FakeThemeSource, FakeUsageMeter, FakeWebBrowser, FakeWorkspace,
+    FakeClock, FakeConfigSource, FakeConversationLookup, FakeDirectoryEnvironment, FakeHostProbe,
+    FakeMultiplexer, FakePullRequests, FakeRepoPages, FakeRepoScanner, FakeScratchSpace,
+    FakeSessionRegistry, FakeTerminalEmulator, FakeThemeSource, FakeUsageMeter, FakeWebBrowser,
+    FakeWorkspace,
 };
 use crate::application::ports::{
     ConfigError, MergeOutcome, MultiplexerError, ScratchSpace, WorktreeEntry,
@@ -37,6 +38,7 @@ pub struct ServiceFixture {
     terminal_emulator: Arc<FakeTerminalEmulator>,
     web_browser: Arc<FakeWebBrowser>,
     usage_meter: Arc<FakeUsageMeter>,
+    conversation_lookup: Arc<FakeConversationLookup>,
     config_error: Option<ConfigError>,
     launch_directory: PathBuf,
     diagnostics: DiagnosticPaths,
@@ -81,6 +83,7 @@ impl ServiceFixture {
             terminal_emulator: Arc::new(FakeTerminalEmulator::default()),
             web_browser: Arc::new(FakeWebBrowser::default()),
             usage_meter: Arc::new(FakeUsageMeter::new()),
+            conversation_lookup: Arc::new(FakeConversationLookup::new()),
             config_error: None,
             launch_directory: PathBuf::from(Self::REPO),
             diagnostics: Self::diagnostics(),
@@ -202,6 +205,13 @@ impl ServiceFixture {
         }
     }
 
+    pub fn with_conversation_lookup(self, conversation_lookup: FakeConversationLookup) -> Self {
+        Self {
+            conversation_lookup: Arc::new(conversation_lookup),
+            ..self
+        }
+    }
+
     pub fn without_home(self) -> Self {
         Self { home: None, ..self }
     }
@@ -311,6 +321,10 @@ impl ServiceFixture {
 
     pub fn usage_meter(&self) -> &FakeUsageMeter {
         &self.usage_meter
+    }
+
+    pub fn conversation_lookup(&self) -> &FakeConversationLookup {
+        &self.conversation_lookup
     }
 
     pub fn clock(&self) -> &FakeClock {
@@ -587,7 +601,10 @@ impl ServiceFixture {
             .with_diff_workspace(self.measuring_workspace()),
             TmuxPorts::new(self.multiplexer.clone()),
             DesktopPorts::new(self.terminal_emulator.clone(), self.web_browser.clone()),
-            AgentPorts::new(vec![self.usage_meter.clone()]),
+            AgentPorts::new(
+                vec![self.usage_meter.clone()],
+                self.conversation_lookup.clone(),
+            ),
         )
     }
 

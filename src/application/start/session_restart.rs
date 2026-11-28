@@ -9,7 +9,8 @@ use crate::application::agent_hooks::AgentHooks;
 use crate::application::checks::use_checks::UseChecks;
 use crate::application::checks::worktree_inspection::WorktreeInspection;
 use crate::application::ports::{
-    AgentLaunch, HostProbe, Multiplexer, SessionRegistry, SessionSpec,
+    AgentLaunch, ConversationLookup, ConversationQuery, HostProbe, Multiplexer, SessionRegistry,
+    SessionSpec,
 };
 use crate::application::reconciliation::{ManagedRow, Reconciliation};
 use crate::application::session_scratch::SessionScratch;
@@ -20,6 +21,7 @@ pub struct SessionRestart {
     multiplexer: Arc<dyn Multiplexer>,
     host: Arc<dyn HostProbe>,
     registry: Arc<dyn SessionRegistry>,
+    conversations: Arc<dyn ConversationLookup>,
     scratch: SessionScratch,
     envrc: SessionEnvrc,
     hooks: Arc<AgentHooks>,
@@ -32,6 +34,7 @@ impl SessionRestart {
             multiplexer: ports.tmux().multiplexer(),
             host: ports.repos().host(),
             registry: ports.state().registry(),
+            conversations: ports.agents().conversation_lookup(),
             scratch: SessionScratch::new(ports),
             envrc: SessionEnvrc::new(ports),
             hooks,
@@ -53,7 +56,7 @@ impl SessionRestart {
         let envrc = self
             .envrc
             .choose(session.worktree_path(), session.repo_path());
-        let launch = envrc.applied_to(self.scratch.prepare(Self::launch(agent, row)));
+        let launch = envrc.applied_to(self.scratch.prepare(self.launch(agent, row)));
         let restarted = self.revive(row, launch, reconciliation, config)?;
         self.hooks.after_start(&restarted, agent);
         Ok(StartOutcome::new(restarted, envrc.warning()))
@@ -69,18 +72,39 @@ impl SessionRestart {
         Ok(())
     }
 
-    fn launch(agent: &Agent, row: &ManagedRow) -> AgentLaunch {
-        let argv = Self::argv(agent, row);
+    fn launch(&self, agent: &Agent, row: &ManagedRow) -> AgentLaunch {
+        let argv = self.argv(agent, row);
         AgentLaunch::for_agent(agent, argv, row.session().worktree_path())
     }
 
-    fn argv(agent: &Agent, row: &ManagedRow) -> Vec<String> {
+    fn argv(&self, agent: &Agent, row: &ManagedRow) -> Vec<String> {
         let name = row.session().name();
-        if Self::resumes(row) {
-            agent.resume_argv(name)
-        } else {
+        if !Self::resumes(row) {
             agent.restart_argv(name)
+        } else if agent.resumes_by_conversation() {
+            self.conversation_argv(agent, row.session())
+        } else {
+            agent.resume_argv(name)
         }
+    }
+
+    fn conversation_argv(&self, agent: &Agent, session: &Session) -> Vec<String> {
+        match self.own_conversation(agent, session) {
+            Some(conversation) => agent.conversation_resume_argv(session.name(), &conversation),
+            None => agent.restart_argv(session.name()),
+        }
+    }
+
+    fn own_conversation(&self, agent: &Agent, session: &Session) -> Option<String> {
+        let argv = agent.conversation_lookup_argv(session.name())?;
+        let query = ConversationQuery::new(agent, argv, session.worktree_path());
+        self.conversations.find(&query).unwrap_or_else(|error| {
+            log::warn!(
+                "restarting session {} without its conversation: {error}",
+                session.name()
+            );
+            None
+        })
     }
 
     fn resumes(row: &ManagedRow) -> bool {
@@ -146,9 +170,12 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use super::*;
+    use crate::application::ports::ConversationLookupError;
     use crate::application::ports::MultiplexerError;
     use crate::domain::AgentPane;
-    use crate::test_support::{FakeMultiplexer, FakeSessionRegistry, ServiceFixture};
+    use crate::test_support::{
+        FakeConversationLookup, FakeMultiplexer, FakeSessionRegistry, ServiceFixture,
+    };
 
     struct RestartFixture;
 
@@ -198,6 +225,19 @@ mod tests {
         fn resuming_config() -> Config {
             let agent = ServiceFixture::agent().with_resume_args(&["--continue".to_string()]);
             ServiceFixture::config().with_agents(vec![agent])
+        }
+
+        fn conversation_resuming_config() -> Config {
+            let agent = ServiceFixture::agent()
+                .with_resume_args(&["--session".to_string(), "{conversation}".to_string()])
+                .with_conversation_lookup(&["find-conversation".to_string(), "{name}".to_string()]);
+            ServiceFixture::config().with_agents(vec![agent])
+        }
+
+        fn stopped_finding(lookup: FakeConversationLookup) -> ServiceFixture {
+            Self::stopped()
+                .with_config(Self::conversation_resuming_config())
+                .with_conversation_lookup(lookup)
         }
 
         fn recreated_argv(fixture: &ServiceFixture) -> Vec<String> {
@@ -488,6 +528,74 @@ mod tests {
             RestartFixture::recreated_argv(&fixture),
             ["claude", "--continue"]
         );
+    }
+
+    #[test]
+    fn a_stopped_session_resumes_the_conversation_its_lookup_finds() {
+        let fixture = RestartFixture::stopped_finding(
+            FakeConversationLookup::new().finding("conversation-7"),
+        );
+
+        RestartFixture::restart(&fixture).unwrap();
+
+        assert_eq!(
+            RestartFixture::recreated_argv(&fixture),
+            ["claude", "--session", "conversation-7"]
+        );
+    }
+
+    #[test]
+    fn the_conversation_lookup_runs_in_the_sessions_own_worktree() {
+        let fixture = RestartFixture::stopped_finding(
+            FakeConversationLookup::new().finding("conversation-7"),
+        );
+
+        RestartFixture::restart(&fixture).unwrap();
+
+        let query = fixture.conversation_lookup().queries().pop().unwrap();
+        assert_eq!(query.worktree(), RestartFixture::session().worktree_path());
+        assert_eq!(query.argv(), ["find-conversation", "fix-auth"]);
+    }
+
+    #[test]
+    fn a_stopped_session_without_its_own_conversation_starts_plainly_instead_of_resuming_another() {
+        let fixture = RestartFixture::stopped_finding(FakeConversationLookup::new());
+
+        RestartFixture::restart(&fixture).unwrap();
+
+        assert_eq!(RestartFixture::recreated_argv(&fixture), ["claude"]);
+    }
+
+    #[test]
+    fn a_failed_conversation_lookup_starts_the_agent_plainly() {
+        let lookup = FakeConversationLookup::new().failing(ConversationLookupError::TimedOut);
+        let fixture = RestartFixture::stopped_finding(lookup);
+
+        RestartFixture::restart(&fixture).unwrap();
+
+        assert_eq!(RestartFixture::recreated_argv(&fixture), ["claude"]);
+    }
+
+    #[test]
+    fn an_agent_whose_resume_args_need_no_conversation_never_runs_a_lookup() {
+        let fixture = RestartFixture::stopped().with_config(RestartFixture::resuming_config());
+
+        RestartFixture::restart(&fixture).unwrap();
+
+        assert!(fixture.conversation_lookup().queries().is_empty());
+    }
+
+    #[test]
+    fn an_exited_session_never_runs_a_conversation_lookup() {
+        let fixture = RestartFixture::exited()
+            .with_config(RestartFixture::conversation_resuming_config())
+            .with_conversation_lookup(FakeConversationLookup::new().finding("conversation-7"));
+
+        RestartFixture::restart(&fixture).unwrap();
+
+        assert!(fixture.conversation_lookup().queries().is_empty());
+        let launch = fixture.multiplexer().launches().pop().unwrap();
+        assert_eq!(launch.argv(), ["claude"]);
     }
 
     #[test]

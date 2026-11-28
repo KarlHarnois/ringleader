@@ -95,7 +95,8 @@ plan_args = ["--permission-mode", "plan"]
 # reboot, to resume its conversation. An exited agent restarts without them,
 # so a resume that finds no conversation and exits restarts fresh. A session
 # in a repo's main checkout always restarts without them, since your own
-# conversations share that directory.
+# conversations share that directory. claude's --continue resumes the newest
+# conversation of the session's own worktree.
 resume_args = ["--continue"]
 # Lines typed into the agent once its prompt is ready, each followed by Enter.
 # startup_input is typed at every start, rename_input after a rename.
@@ -113,7 +114,16 @@ command = "opencode"
 env = ["OPENAI_API_KEY"]
 prompt_args = ["--prompt={prompt}"]
 plan_args = ["--agent", "plan"]
-resume_args = ["--continue"]
+# opencode's --continue resumes the newest conversation of any worktree of the
+# repo, so opencode resumes by id. {conversation} in resume_args is the first
+# line conversation_lookup prints. The lookup runs in the session's worktree
+# with the agent's variables. When it prints nothing or fails, the agent starts
+# without resume_args.
+resume_args = ["--session", "{conversation}"]
+conversation_lookup = [
+  "sh", "-c",
+  "opencode session list --format json | jq -r --arg dir \"$PWD\" 'map(select(.directory == $dir)) | max_by(.updated) | .id // empty'",
+]
 "#;
     const REPOS_KEY: &'static str = "repos";
 
@@ -623,6 +633,25 @@ mod tests {
     }
 
     #[test]
+    fn agent_conversation_lookup_loads_with_the_session_name() {
+        let fixture = SourceFixture::with_text(concat!(
+            "[[agents]]\nname = \"a\"\ncommand = \"a\"\n",
+            "resume_args = [\"--session\", \"{conversation}\"]\n",
+            "conversation_lookup = [\"find-conversation\", \"{name}\"]\n",
+        ));
+
+        let config = fixture.source().load().unwrap();
+
+        let session = SessionName::new("fix-auth").unwrap();
+        assert_eq!(
+            config.agents()[0]
+                .conversation_lookup_argv(&session)
+                .unwrap(),
+            ["find-conversation", "fix-auth"]
+        );
+    }
+
+    #[test]
     fn an_agent_without_resume_args_loads_to_resume_as_a_plain_restart() {
         let fixture = SourceFixture::with_text("[[agents]]\nname = \"a\"\ncommand = \"a\"\n");
 
@@ -795,17 +824,19 @@ mod tests {
     }
 
     #[test]
-    fn the_first_run_template_resumes_opencode_with_continue() {
+    fn the_first_run_template_resumes_opencode_by_the_conversation_of_its_worktree() {
         let fixture = SourceFixture::new();
         fixture.source().write_first_run_template().unwrap();
 
         let config = fixture.source().load().unwrap();
 
         let session = SessionName::new("fix-auth").unwrap();
+        let opencode = config.agent("opencode").unwrap();
         assert_eq!(
-            config.agent("opencode").unwrap().resume_argv(&session),
-            ["opencode", "--continue"]
+            opencode.conversation_resume_argv(&session, "conversation-7"),
+            ["opencode", "--session", "conversation-7"]
         );
+        assert_eq!(opencode.conversation_lookup()[..2], ["sh", "-c"]);
     }
 
     #[test]
