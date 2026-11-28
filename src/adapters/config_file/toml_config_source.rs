@@ -122,7 +122,7 @@ plan_args = ["--agent", "plan"]
 resume_args = ["--session", "{conversation}"]
 conversation_lookup = [
   "sh", "-c",
-  "opencode session list --format json | jq -r --arg dir \"$PWD\" 'map(select(.directory == $dir)) | max_by(.updated) | .id // empty'",
+  "opencode session list --format json --max-count 100000 | jq -r --arg dir \"$PWD\" 'map(select(.directory == $dir)) | max_by(.updated) | .id // empty'",
 ]
 "#;
     const REPOS_KEY: &'static str = "repos";
