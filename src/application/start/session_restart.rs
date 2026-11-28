@@ -552,7 +552,7 @@ mod tests {
     }
 
     #[test]
-    fn the_conversation_lookup_runs_in_the_sessions_own_worktree() {
+    fn the_conversation_lookup_asks_for_the_sessions_own_worktree() {
         let fixture = RestartFixture::stopped_finding(
             FakeConversationLookup::new().finding("conversation-7"),
         );
