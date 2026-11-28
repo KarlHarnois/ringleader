@@ -52,7 +52,7 @@ use adapters::host::system_host_probe::SystemHostProbe;
 use adapters::host::xdg_paths::XdgPaths;
 use adapters::ollama::ollama_cloud_quota::OllamaCloudQuota;
 use adapters::opencode::opencode_conversation_lookup::OpencodeConversationLookup;
-use adapters::opencode::opencode_database::OpencodeDatabase;
+use adapters::opencode::opencode_gateway::OpencodeGateway;
 use adapters::opencode::opencode_usage_meter::OpencodeUsageMeter;
 use adapters::opencode::provider_quota::ProviderQuota;
 use adapters::sqlite::sqlite_opencode_database::SqliteOpencodeDatabase;
@@ -464,29 +464,27 @@ impl CompositionRoot {
             bounded,
         ));
         let database = SqliteOpencodeDatabase::when_installed(host, &self.environment, bounded);
-        let conversation_lookup = Arc::new(OpencodeConversationLookup::new(
-            probe.clone(),
-            database.clone(),
-        ));
+        let opencode = Arc::new(OpencodeGateway::new(probe.clone(), database));
+        let conversation_lookup = Arc::new(OpencodeConversationLookup::new(opencode.clone()));
         let quotas = vec![OllamaCloudQuota::when_installed(
             host,
             &self.environment,
             bounded,
         )];
         AgentPorts::new(
-            Self::usage_meters(probe, database, quotas),
+            Self::usage_meters(probe, opencode, quotas),
             conversation_lookup,
         )
     }
 
     fn usage_meters(
         probe: Arc<AgentProbe>,
-        database: Arc<dyn OpencodeDatabase>,
+        opencode: Arc<OpencodeGateway>,
         quotas: Vec<Arc<dyn ProviderQuota>>,
     ) -> Vec<Arc<dyn UsageMeter>> {
         vec![
             Arc::new(ClaudeUsageMeter::new(probe.clone())),
-            Arc::new(OpencodeUsageMeter::new(probe, database, quotas)),
+            Arc::new(OpencodeUsageMeter::new(opencode, quotas)),
         ]
     }
 

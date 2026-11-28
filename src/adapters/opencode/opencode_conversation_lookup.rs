@@ -3,39 +3,17 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use super::opencode_database::OpencodeDatabase;
-use crate::adapters::agent_launch::agent_probe::AgentProbe;
+use super::opencode_gateway::OpencodeGateway;
 use crate::application::ports::{ConversationLookup, ConversationLookupError, UsageError};
 use crate::domain::Agent;
 
 pub struct OpencodeConversationLookup {
-    probe: Arc<AgentProbe>,
-    database: Arc<dyn OpencodeDatabase>,
+    gateway: Arc<OpencodeGateway>,
 }
 
 impl OpencodeConversationLookup {
-    const PROGRAM: &'static str = "opencode";
-    const DATABASE_ARGUMENTS: [&'static str; 4] = ["--pure", "db", "--format", "json"];
-
-    pub fn new(probe: Arc<AgentProbe>, database: Arc<dyn OpencodeDatabase>) -> Self {
-        Self { probe, database }
-    }
-
-    fn rows(&self, agent: &Agent, query: &str) -> Result<String, ConversationLookupError> {
-        let direct = self.database.read(agent, query).unwrap_or_else(|error| {
-            log::info!("{error}, asking opencode instead");
-            None
-        });
-        match direct {
-            Some(output) => Ok(output),
-            None => self.ask_opencode(agent, query),
-        }
-    }
-
-    fn ask_opencode(&self, agent: &Agent, query: &str) -> Result<String, ConversationLookupError> {
-        let mut arguments = Self::DATABASE_ARGUMENTS.to_vec();
-        arguments.push(query);
-        self.probe.run(agent, &arguments).map_err(Self::unanswered)
+    pub fn new(gateway: Arc<OpencodeGateway>) -> Self {
+        Self { gateway }
     }
 
     fn unanswered(error: UsageError) -> ConversationLookupError {
@@ -52,10 +30,13 @@ impl ConversationLookup for OpencodeConversationLookup {
         agent: &Agent,
         worktree: &Path,
     ) -> Result<Option<String>, ConversationLookupError> {
-        if agent.command_name() != Self::PROGRAM {
+        if !OpencodeGateway::serves(agent) {
             return Ok(None);
         }
-        let output = self.rows(agent, &OpencodeConversation::query(worktree))?;
+        let output = self
+            .gateway
+            .query(agent, &OpencodeConversation::query(worktree))
+            .map_err(Self::unanswered)?;
         OpencodeConversation::parse(&output)
     }
 }
@@ -94,8 +75,10 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+    use crate::adapters::agent_launch::agent_probe::AgentProbe;
     use crate::adapters::host::process_environment::ProcessEnvironment;
     use crate::adapters::opencode::fake_opencode_database::FakeOpencodeDatabase;
+    use crate::adapters::opencode::opencode_database::OpencodeDatabase;
     use crate::adapters::opencode::opencode_database::OpencodeDatabaseError;
     use crate::adapters::sqlite::null_opencode_database::NullOpencodeDatabase;
     use crate::adapters::{BoundedCommand, Deadlines};
@@ -147,7 +130,7 @@ mod tests {
                 &self.directory.path().join("usage"),
                 BoundedCommand::new(deadlines),
             ));
-            OpencodeConversationLookup::new(probe, database)
+            OpencodeConversationLookup::new(Arc::new(OpencodeGateway::new(probe, database)))
         }
 
         fn without_database(&self) -> OpencodeConversationLookup {
